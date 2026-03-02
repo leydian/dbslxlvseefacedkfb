@@ -236,6 +236,8 @@ Latest behavior notes (2026-03-02, VXA2 TLV section decode MVP):
   - `format_section_count`
   - `format_decoded_section_count`
   - `format_unknown_section_count`
+- Detailed report:
+  - `docs/reports/vxa2_tlv_update_2026-03-02.md`
 
 ## Repository layout
 

@@ -2,6 +2,25 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - Docs: add detailed VXA2 TLV update report
+
+### Summary
+
+Added a detailed implementation/verification report for the VXA2 TLV decode MVP pass.
+
+### Changed
+
+- Added report:
+  - `docs/reports/vxa2_tlv_update_2026-03-02.md`
+- Report includes:
+  - implemented loader/API/doc deltas
+  - build/run verification outcomes
+  - known limitations and next-step backlog
+
+### Verified
+
+- Report content is aligned with current `main` behavior and validation logs.
+
 ## 2026-03-02 - Documentation structure normalization (index + archive policy)
 
 ### Summary
