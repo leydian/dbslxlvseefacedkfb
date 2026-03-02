@@ -2,8 +2,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <sstream>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -16,12 +20,238 @@ static std::string ToLower(std::string s) {
     return s;
 }
 
+static std::string EscapeCmdArg(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 2U + 4U);
+    out.push_back('"');
+    for (const auto c : s) {
+        if (c == '"') {
+            out += "\"\"";
+        } else {
+            out.push_back(c);
+        }
+    }
+    out.push_back('"');
+    return out;
+}
+
+static core::Result<std::string> RunSidecar(const std::string& sidecar_path, const std::string& avatar_path) {
+#if defined(_WIN32)
+    SECURITY_ATTRIBUTES sa {};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = nullptr;
+
+    HANDLE read_pipe = nullptr;
+    HANDLE write_pipe = nullptr;
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) {
+        return core::Result<std::string>::Fail("CreatePipe failed");
+    }
+    if (!SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(read_pipe);
+        CloseHandle(write_pipe);
+        return core::Result<std::string>::Fail("SetHandleInformation failed");
+    }
+
+    STARTUPINFOA si {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = write_pipe;
+    si.hStdError = write_pipe;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    PROCESS_INFORMATION pi {};
+    std::string cmd = EscapeCmdArg(sidecar_path) + " " + EscapeCmdArg(avatar_path);
+    std::vector<char> cmd_mutable(cmd.begin(), cmd.end());
+    cmd_mutable.push_back('\0');
+
+    const BOOL created = CreateProcessA(
+        nullptr,
+        cmd_mutable.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &si,
+        &pi);
+
+    CloseHandle(write_pipe);
+    if (!created) {
+        CloseHandle(read_pipe);
+        return core::Result<std::string>::Fail("CreateProcess failed");
+    }
+
+    std::string output;
+    char buffer[1024];
+    DWORD read = 0;
+    while (ReadFile(read_pipe, buffer, static_cast<DWORD>(sizeof(buffer)), &read, nullptr) && read > 0) {
+        output.append(buffer, buffer + read);
+    }
+    CloseHandle(read_pipe);
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    if (exit_code != 0) {
+        return core::Result<std::string>::Fail(output.empty() ? "sidecar process failed" : output);
+    }
+    return core::Result<std::string>::Ok(output);
+#else
+    (void)sidecar_path;
+    (void)avatar_path;
+    return core::Result<std::string>::Fail("sidecar mode is only supported on Windows");
+#endif
+}
+
+static std::string GetJsonString(const std::string& json, const std::string& key) {
+    const auto needle = "\"" + key + "\"";
+    const auto key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return {};
+    }
+    const auto colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return {};
+    }
+    const auto quote_begin = json.find('"', colon + 1U);
+    if (quote_begin == std::string::npos) {
+        return {};
+    }
+    std::string out;
+    for (std::size_t i = quote_begin + 1U; i < json.size(); ++i) {
+        const auto c = json[i];
+        if (c == '\\') {
+            if (i + 1U < json.size()) {
+                out.push_back(json[i + 1U]);
+                ++i;
+                continue;
+            }
+            break;
+        }
+        if (c == '"') {
+            return out;
+        }
+        out.push_back(c);
+    }
+    return {};
+}
+
+static std::uint32_t GetJsonU32(const std::string& json, const std::string& key, std::uint32_t fallback = 0U) {
+    const auto needle = "\"" + key + "\"";
+    const auto key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return fallback;
+    }
+    const auto colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return fallback;
+    }
+    std::size_t i = colon + 1U;
+    while (i < json.size() && std::isspace(static_cast<unsigned char>(json[i])) != 0) {
+        ++i;
+    }
+    std::size_t end = i;
+    while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end])) != 0) {
+        ++end;
+    }
+    if (end == i) {
+        return fallback;
+    }
+    return static_cast<std::uint32_t>(std::strtoul(json.substr(i, end - i).c_str(), nullptr, 10));
+}
+
 bool VsfAvatarLoader::CanLoadPath(const std::string& path) const {
     const auto ext = ToLower(fs::path(path).extension().string());
     return ext == ".vsfavatar";
 }
 
 core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const {
+    std::string mode = "sidecar";
+    if (const char* env = std::getenv("VSF_PARSER_MODE")) {
+        mode = ToLower(env);
+    }
+
+    if (mode == "inhouse") {
+        return LoadInHouse(path);
+    }
+
+    auto sidecar = LoadViaSidecar(path);
+    if (sidecar.ok) {
+        return sidecar;
+    }
+
+    if (mode == "sidecar-strict") {
+        return sidecar;
+    }
+
+    auto fallback = LoadInHouse(path);
+    if (!fallback.ok) {
+        return fallback;
+    }
+    fallback.value.warnings.push_back("sidecar fallback: " + sidecar.error);
+    fallback.value.warnings.push_back("parser mode=inhouse (fallback)");
+    return fallback;
+}
+
+core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& path) const {
+    std::string sidecar_path = ".\\build\\Release\\vsfavatar_sidecar.exe";
+    if (const char* env = std::getenv("VSF_SIDECAR_PATH")) {
+        sidecar_path = env;
+    }
+
+    const auto ran = RunSidecar(sidecar_path, path);
+    if (!ran.ok) {
+        return core::Result<AvatarPackage>::Fail("sidecar failed: " + ran.error);
+    }
+    const std::string output = ran.value;
+
+    const auto status = GetJsonString(output, "status");
+    if (status != "ok") {
+        const auto err = GetJsonString(output, "error");
+        return core::Result<AvatarPackage>::Fail(err.empty() ? "sidecar returned non-ok status" : err);
+    }
+
+    AvatarPackage pkg;
+    pkg.source_type = AvatarSourceType::VsfAvatar;
+    pkg.compat_level = AvatarCompatLevel::Partial;
+    pkg.source_path = path;
+    pkg.display_name = GetJsonString(output, "display_name");
+    if (pkg.display_name.empty()) {
+        pkg.display_name = fs::path(path).stem().string();
+    }
+
+    const auto mesh_count = GetJsonU32(output, "mesh_count");
+    const auto material_count = GetJsonU32(output, "material_count");
+    for (std::uint32_t i = 0; i < mesh_count; ++i) {
+        pkg.meshes.push_back({"Mesh_" + std::to_string(i), 0, 0});
+    }
+    for (std::uint32_t i = 0; i < material_count; ++i) {
+        pkg.materials.push_back({"Material_" + std::to_string(i), "UnityShader (sidecar)"}); 
+    }
+    if (pkg.materials.empty()) {
+        pkg.materials.push_back({"Default", "MToon (placeholder)"});
+    }
+
+    const auto last_warning = GetJsonString(output, "last_warning");
+    const auto last_missing = GetJsonString(output, "last_missing_feature");
+    pkg.warnings.push_back("parser mode=sidecar");
+    if (!last_warning.empty()) {
+        pkg.warnings.push_back(last_warning);
+    }
+    if (!last_missing.empty()) {
+        pkg.missing_features.push_back(last_missing);
+    }
+    if (mesh_count == 0U && material_count == 0U) {
+        pkg.missing_features.push_back("mesh/material object discovery");
+    }
+    return core::Result<AvatarPackage>::Ok(pkg);
+}
+
+core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path) const {
     auto probe = reader_.Probe(path);
     if (!probe.ok) {
         return core::Result<AvatarPackage>::Fail(probe.error);
@@ -126,6 +356,7 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
     } else {
         pkg.missing_features.push_back("mesh/material payload extraction");
     }
+    pkg.warnings.push_back("parser mode=inhouse");
 
     return core::Result<AvatarPackage>::Ok(pkg);
 }

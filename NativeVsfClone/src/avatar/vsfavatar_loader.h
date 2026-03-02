@@ -11,8 +11,9 @@ class VsfAvatarLoader final : public IAvatarLoader {
     core::Result<AvatarPackage> Load(const std::string& path) const override;
 
   private:
+    core::Result<AvatarPackage> LoadInHouse(const std::string& path) const;
+    core::Result<AvatarPackage> LoadViaSidecar(const std::string& path) const;
     vsf::UnityFsReader reader_ {};
 };
 
 }  // namespace vsfclone::avatar
-

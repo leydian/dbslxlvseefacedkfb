@@ -8,6 +8,20 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - `nativecore.dll` C ABI for host/UI integration
 - streaming and OSC interfaces (`Spout2`, `OSC`) as stubs for wiring
 
+## VSFAvatar parser mode (current default)
+
+`.vsfavatar` loading is now sidecar-first.
+
+- Default mode: `VSF_PARSER_MODE=sidecar`
+- In-house only mode: `VSF_PARSER_MODE=inhouse`
+- Strict sidecar mode (no fallback): `VSF_PARSER_MODE=sidecar-strict`
+- Sidecar binary override: `VSF_SIDECAR_PATH=...`
+
+If `sidecar` mode fails to execute:
+
+- `sidecar`: fallback to in-house parser and append fallback warnings.
+- `sidecar-strict`: return failure directly.
+
 ## What is implemented now
 
 - `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vsfavatar`).
@@ -23,6 +37,7 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
   - Spout/OSC start-stop stubs
   - last error retrieval
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
+- `vsfavatar_sidecar` is built as an external parser process.
 
 ## What is not implemented yet
 
@@ -50,8 +65,18 @@ cmake --build build --config Release
 Run:
 
 ```powershell
-.\build\Release\vsfclone_cli.exe "D:\dbslxlvseefacedkfb\개인작11-3.vsfavatar"
+.\build\Release\vsfclone_cli.exe "D:\dbslxlvseefacedkfb\개인??1-3.vsfavatar"
 .\build\Release\avatar_tool.exe "D:\path\to\avatar.vxavatar"
+.\build\Release\vsfavatar_sidecar.exe "D:\path\to\avatar.vsfavatar"
+```
+
+Optional parser mode controls:
+
+```powershell
+$env:VSF_PARSER_MODE = "sidecar"        # default
+$env:VSF_PARSER_MODE = "inhouse"        # bypass sidecar
+$env:VSF_PARSER_MODE = "sidecar-strict" # no fallback
+$env:VSF_SIDECAR_PATH = "D:\custom\vsfavatar_sidecar.exe"
 ```
 
 ## Repository layout
@@ -377,3 +402,4 @@ From `build/reports/vsfavatar_probe_latest.txt`:
   - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=1, expected=125513796, code=DATA_BLOCK_READ_FAILED`
 - `VRM dkdlrh.vsfavatar`
   - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=1, expected=402596, code=DATA_BLOCK_READ_FAILED`
+

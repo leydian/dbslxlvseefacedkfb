@@ -2,6 +2,50 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar parser pivot: sidecar-first loading path
+
+### Summary
+
+Shifted `.vsfavatar` loading from in-process parser-first to a sidecar-first execution model, while keeping in-house parsing as fallback.
+
+### Changed
+
+- `src/avatar/vsfavatar_loader.h`
+  - Added explicit split of loader paths:
+    - `LoadViaSidecar`
+    - `LoadInHouse`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added parser mode switch via env var:
+    - `VSF_PARSER_MODE=sidecar|inhouse|sidecar-strict`
+  - Default mode is now `sidecar`.
+  - Added sidecar path override via env var:
+    - `VSF_SIDECAR_PATH`
+  - Added Windows `CreateProcess`-based sidecar execution and JSON response parsing.
+  - Added fallback behavior:
+    - `sidecar` -> in-house fallback on sidecar failure
+    - `sidecar-strict` -> fail without fallback
+  - Added explicit parser-path warnings (`parser mode=sidecar` / fallback warnings).
+
+- `tools/vsfavatar_sidecar.cpp` (new)
+  - Added standalone sidecar executable that outputs structured JSON:
+    - status/error
+    - display name
+    - mesh/material counts
+    - object table status
+    - last warning / last missing feature
+
+- `CMakeLists.txt`
+  - Added `vsfavatar_sidecar` console target.
+
+### Verified
+
+- `Release` build succeeded and now emits:
+  - `build/Release/vsfavatar_sidecar.exe`
+- `VSF_PARSER_MODE=sidecar` path works in both `vsfclone_cli` and `avatar_tool`.
+- Sidecar-mode fixed sample report generated (`build/reports/vsfavatar_probe_sidecar.txt`).
+- Compatibility remains `partial` on baseline samples (block-0 reconstruction blocker still active in in-house decode internals used by current sidecar output path).
+
 ## 2026-03-02 - VSFAvatar reconstruction summary-code pass and count-endian probing
 
 ### Summary

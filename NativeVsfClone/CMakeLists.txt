@@ -39,4 +39,7 @@ if(VSFCLONE_BUILD_CONSOLE)
 
     add_executable(avatar_tool tools/avatar_tool.cpp)
     target_link_libraries(avatar_tool PRIVATE nativecore)
+
+    add_executable(vsfavatar_sidecar tools/vsfavatar_sidecar.cpp)
+    target_link_libraries(vsfavatar_sidecar PRIVATE vsfclone_core)
 endif()
