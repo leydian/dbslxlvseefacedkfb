@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Windows;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HostCore;
@@ -20,7 +19,6 @@ public partial class MainWindow : Window
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private bool _isSyncingRenderUi;
     private bool _isSyncingPresetUi;
-    private IntPtr _hwnd = IntPtr.Zero;
 
     public MainWindow()
     {
@@ -44,13 +42,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
-        _hwnd = new WindowInteropHelper(this).Handle;
         UpdateRenderMetricsFromHost();
     }
 
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (_hwnd == IntPtr.Zero)
+        if (RenderHost.Hwnd == IntPtr.Zero)
         {
             return;
         }
@@ -90,12 +87,13 @@ public partial class MainWindow : Window
         }
 
         var initRc = _controller.Initialize();
-        if (initRc == NcResultCode.Ok && _hwnd != IntPtr.Zero)
+        var renderHwnd = RenderHost.Hwnd;
+        if (initRc == NcResultCode.Ok && renderHwnd != IntPtr.Zero)
         {
             var metrics = GetRenderMetrics();
             _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
             _ = PushRenderUiState();
-            var attachRc = _controller.AttachWindow(_hwnd, metrics.pixelWidth, metrics.pixelHeight);
+            var attachRc = _controller.AttachWindow(renderHwnd, metrics.pixelWidth, metrics.pixelHeight);
             if (attachRc == NcResultCode.Ok)
             {
                 _timer.Start();
@@ -389,6 +387,11 @@ public partial class MainWindow : Window
         var elapsed = _frameTimer.Elapsed;
         _frameTimer.Restart();
         _ = _controller.Tick((float)elapsed.TotalSeconds);
+
+        // Native rendering currently targets the window HWND, so WPF controls
+        // need explicit invalidation to keep visual layering stable.
+        RenderHost.InvalidateVisual();
+        InvalidateVisual();
     }
 
     private void ResizeTimer_Tick(object? sender, EventArgs e)
