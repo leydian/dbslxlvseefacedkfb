@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -236,6 +237,20 @@ bool Lz4DecompressRawExact(const std::vector<unsigned char>& src, std::size_t ex
     return dst.size() == expected_size;
 }
 
+std::uint32_t ReadU32LE(const std::vector<unsigned char>& buf, std::size_t at);
+
+bool Lz4DecompressSizePrefixed(const std::vector<unsigned char>& src, std::size_t expected_size, std::vector<unsigned char>& dst) {
+    if (src.size() <= 4U) {
+        return false;
+    }
+    const std::uint32_t prefixed = ReadU32LE(src, 0U);
+    if (prefixed != expected_size) {
+        return false;
+    }
+    std::vector<unsigned char> payload(src.begin() + 4, src.end());
+    return Lz4DecompressRawExact(payload, expected_size, dst);
+}
+
 std::uint32_t ReadU32LE(const std::vector<unsigned char>& buf, std::size_t at) {
     return static_cast<std::uint32_t>(buf[at]) |
            (static_cast<std::uint32_t>(buf[at + 1U]) << 8U) |
@@ -420,7 +435,8 @@ bool DecompressByMode(const std::vector<unsigned char>& src, std::size_t expecte
         case 2:
         case 3:
             if (!Lz4DecompressRawExact(src, expected_size, dst)) {
-                if (!Lz4DecompressFrame(src, expected_size, dst)) {
+                if (!Lz4DecompressFrame(src, expected_size, dst) &&
+                    !Lz4DecompressSizePrefixed(src, expected_size, dst)) {
                     error = "LZ4 decompression failed";
                     return false;
                 }
@@ -448,6 +464,33 @@ std::vector<std::uint8_t> BuildModeCandidates(std::uint8_t primary, std::uint8_t
     add_unique(3U);
     add_unique(0U);
     return out;
+}
+
+std::vector<std::uint64_t> BuildMetadataOffsetCandidates(std::uint64_t primary_offset, std::uint64_t bundle_size, std::uint32_t compressed_metadata_size) {
+    std::set<std::uint64_t> unique;
+    const auto add = [&](std::uint64_t v) {
+        if (v < bundle_size && v + compressed_metadata_size <= bundle_size) {
+            unique.insert(v);
+        }
+    };
+
+    add(primary_offset);
+    add(primary_offset >= 16ULL ? primary_offset - 16ULL : primary_offset);
+    add(primary_offset + 16ULL);
+    add(primary_offset >= 32ULL ? primary_offset - 32ULL : primary_offset);
+    add(primary_offset + 32ULL);
+    add(primary_offset & ~15ULL);
+    add((primary_offset + 15ULL) & ~15ULL);
+
+    // Tail-window scan for bundles where metadata-at-end offset is shifted by padding.
+    const std::uint64_t nominal = (bundle_size >= compressed_metadata_size) ? (bundle_size - compressed_metadata_size) : 0ULL;
+    const std::uint64_t start = (nominal > 4096ULL) ? (nominal - 4096ULL) : 0ULL;
+    const std::uint64_t end = std::min<std::uint64_t>(bundle_size, nominal + 4096ULL);
+    for (std::uint64_t off = start; off + compressed_metadata_size <= end; off += 16ULL) {
+        add(off);
+    }
+
+    return std::vector<std::uint64_t>(unique.begin(), unique.end());
 }
 
 bool ParseMetadataBlock(std::ifstream& in,
@@ -479,7 +522,7 @@ bool ParseMetadataBlock(std::ifstream& in,
     std::string errs;
     const auto mode_candidates = BuildModeCandidates(mode, mode);
 
-    auto TryDecoded = [&](const std::vector<unsigned char>& decoded, const char* label) -> bool {
+    auto TryDecoded = [&](const std::vector<unsigned char>& decoded, const char* label, std::uint8_t mode_used) -> bool {
         if (decoded.size() != header.uncompressed_metadata_size) {
             errs += std::string(label) + ": metadata size mismatch; ";
             return false;
@@ -491,6 +534,9 @@ bool ParseMetadataBlock(std::ifstream& in,
             return false;
         }
         metadata = std::move(parsed);
+        probe.metadata_decode_strategy = label;
+        probe.metadata_decode_mode = static_cast<std::uint32_t>(mode_used);
+        probe.metadata_decode_error_code.clear();
         return true;
     };
 
@@ -500,8 +546,7 @@ bool ParseMetadataBlock(std::ifstream& in,
             std::vector<unsigned char> decoded;
             std::string dec_err;
             if (DecompressByMode(compressed, header.uncompressed_metadata_size, m, decoded, dec_err)) {
-                if (TryDecoded(decoded, "whole")) {
-                    probe.metadata_parsed = true;
+                if (TryDecoded(decoded, "whole", m)) {
                     break;
                 }
             } else {
@@ -531,8 +576,7 @@ bool ParseMetadataBlock(std::ifstream& in,
                     decoded.reserve(header.uncompressed_metadata_size);
                     decoded.insert(decoded.end(), compressed.begin(), compressed.begin() + static_cast<std::ptrdiff_t>(kHashPrefix));
                     decoded.insert(decoded.end(), tail_decoded.begin(), tail_decoded.end());
-                    if (TryDecoded(decoded, "hash-prefix")) {
-                        probe.metadata_parsed = true;
+                    if (TryDecoded(decoded, "hash-prefix", m)) {
                         break;
                     }
                 } else {
@@ -542,12 +586,25 @@ bool ParseMetadataBlock(std::ifstream& in,
         }
     }
 
-    if (!probe.metadata_parsed && metadata.blocks.empty() && metadata.nodes.empty()) {
+    if (metadata.blocks.empty() && metadata.nodes.empty()) {
+        ParsedMetadata raw_parsed {};
+        std::string raw_err;
+        if (ParseMetadataTables(compressed, raw_parsed, raw_err)) {
+            metadata = std::move(raw_parsed);
+            probe.metadata_decode_strategy = "raw-direct";
+            probe.metadata_decode_mode = static_cast<std::uint32_t>(mode);
+            probe.metadata_decode_error_code = "META_HEADER_SIZE_MISMATCH_RECOVERED";
+        }
+    }
+
+    if (metadata.blocks.empty() && metadata.nodes.empty()) {
+        probe.metadata_decode_error_code = "META_DECODE_FAILED";
         error = errs.empty() ? "metadata decompression failed" : errs;
         return false;
     }
 
     probe.metadata_parsed = true;
+    probe.metadata_offset = metadata_offset;
     probe.block_count = static_cast<std::uint32_t>(metadata.blocks.size());
     probe.node_count = static_cast<std::uint32_t>(metadata.nodes.size());
     if (!metadata.nodes.empty()) {
@@ -690,6 +747,9 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     }
 
     if (!probe.object_table_parsed) {
+        if (probe.serialized_parse_error_code.empty()) {
+            probe.serialized_parse_error_code = found_candidate ? "SF_NO_VALID_NODE_PARSED" : "SF_NO_CANDIDATE_NODE";
+        }
         error = found_candidate ? "no candidate node could be parsed as SerializedFile" : "no serialized candidate nodes found";
         return false;
     }
@@ -740,13 +800,36 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
 
     ParsedMetadata metadata;
     std::string meta_err;
-    if (!ParseMetadataBlock(in, primary_metadata_offset, probe.header, probe, metadata, meta_err) && !metadata_at_end) {
+    bool metadata_ok = false;
+    const auto metadata_candidates = BuildMetadataOffsetCandidates(
+        primary_metadata_offset,
+        probe.header.bundle_file_size,
+        probe.header.compressed_metadata_size);
+    std::size_t err_count = 0U;
+    for (const auto candidate : metadata_candidates) {
+        std::string candidate_err;
+        if (ParseMetadataBlock(in, candidate, probe.header, probe, metadata, candidate_err)) {
+            metadata_ok = true;
+            meta_err.clear();
+            break;
+        }
+        if (err_count < 8U) {
+            meta_err += "offset=" + std::to_string(candidate) + ": " + candidate_err + "; ";
+        }
+        ++err_count;
+    }
+    if (!metadata_ok && err_count > 8U) {
+        meta_err += "(+ " + std::to_string(err_count - 8U) + " more offsets)";
+    }
+
+    if (!metadata_ok && !metadata_at_end) {
         const std::uint64_t aligned = (after_header + 15ULL) & ~15ULL;
         std::string aligned_err;
-        if (!ParseMetadataBlock(in, aligned, probe.header, probe, metadata, aligned_err)) {
-            meta_err += "; aligned parse failed: " + aligned_err;
-        } else {
+        if (ParseMetadataBlock(in, aligned, probe.header, probe, metadata, aligned_err)) {
+            metadata_ok = true;
             meta_err.clear();
+        } else {
+            meta_err += "aligned-fallback=" + std::to_string(aligned) + ": " + aligned_err + "; ";
         }
     }
     probe.metadata_error = meta_err;

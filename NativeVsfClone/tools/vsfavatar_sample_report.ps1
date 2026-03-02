@@ -2,7 +2,14 @@ param(
     [string]$SampleDir = "..\\sample",
     [string]$AvatarToolPath = ".\\build\\Release\\avatar_tool.exe",
     [string]$OutputPath = ".\\build\\reports\\vsfavatar_probe.txt",
-    [int]$MaxFiles = 20
+    [int]$MaxFiles = 20,
+    [switch]$UseFixedSet,
+    [string[]]$FixedSamples = @(
+        "NewOnYou.vsfavatar",
+        "Character vywjd.vsfavatar",
+        "PPU (2).vsfavatar",
+        "VRM dkdlrh.vsfavatar"
+    )
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +27,19 @@ if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir | Out-Null
 }
 
-$files = Get-ChildItem -Path $SampleDir -Filter *.vsfavatar | Select-Object -First $MaxFiles
+$files = @()
+if ($UseFixedSet) {
+    foreach ($name in $FixedSamples) {
+        $p = Join-Path $SampleDir $name
+        if (Test-Path $p) {
+            $files += Get-Item $p
+        }
+    }
+}
+
+if ($files.Count -eq 0) {
+    $files = Get-ChildItem -Path $SampleDir -Filter *.vsfavatar | Select-Object -First $MaxFiles
+}
 if ($files.Count -eq 0) {
     throw "no .vsfavatar files found under $SampleDir"
 }
@@ -28,6 +47,7 @@ if ($files.Count -eq 0) {
 "VSFAvatar probe report" | Set-Content -Path $OutputPath
 "Generated: $(Get-Date -Format s)" | Add-Content -Path $OutputPath
 "SampleDir: $(Resolve-Path $SampleDir)" | Add-Content -Path $OutputPath
+"UseFixedSet: $UseFixedSet" | Add-Content -Path $OutputPath
 "FileCount: $($files.Count)" | Add-Content -Path $OutputPath
 "" | Add-Content -Path $OutputPath
 

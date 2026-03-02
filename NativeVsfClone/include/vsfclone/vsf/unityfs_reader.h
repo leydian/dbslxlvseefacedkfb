@@ -47,6 +47,10 @@ struct UnityFsProbe {
     std::uint32_t reconstruction_attempts = 0;
     std::uint64_t reconstruction_success_offset = 0;
     std::string serialized_parse_error_code;
+    std::uint64_t metadata_offset = 0;
+    std::string metadata_decode_strategy;
+    std::uint32_t metadata_decode_mode = 0;
+    std::string metadata_decode_error_code;
     std::string metadata_error;
 };
 

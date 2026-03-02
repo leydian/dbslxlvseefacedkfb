@@ -136,6 +136,62 @@ Hardened UnityFS metadata/data decompression and expanded diagnostics to acceler
 - Sample probe report regenerated successfully (`build/reports/vsfavatar_probe.txt`).
 - Current sample set still fails metadata decompression under in-house LZ4 logic, with improved explicit diagnostics.
 
+## 2026-03-02 - VSFAvatar phase 2 diagnostics expansion (offset/strategy probing)
+
+### Summary
+
+Expanded metadata decode instrumentation and probing strategies to better isolate why sample bundles still fail metadata reconstruction.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added metadata decode diagnostics:
+    - `metadata_offset`
+    - `metadata_decode_strategy`
+    - `metadata_decode_mode`
+    - `metadata_decode_error_code`
+
+- `include/vsfclone/vsf/serialized_file_reader.h`
+  - Added parser metadata fields:
+    - `parse_path`
+    - `error_code`
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Populated summary parse path metadata (`metadata-endian-little` / `metadata-endian-big`).
+  - Improved combined parse failure string for dual-endian attempts.
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added metadata offset candidate scan around file tail (16-byte aligned window).
+  - Added metadata decode strategy attempts:
+    - whole compressed decode
+    - hash-prefix + compressed tail decode
+    - raw-direct metadata parse fallback
+  - Added mode candidate fallback and extended LZ4 fallback variants:
+    - raw decode
+    - frame decode
+    - size-prefixed raw decode
+  - Added bounded candidate error aggregation to keep diagnostics readable.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added warning fields for decode strategy/mode/offset and decode error code.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added fixed baseline support:
+    - `-UseFixedSet`
+    - `-FixedSamples`
+
+### Verified
+
+- Release build succeeded after integration.
+- Fixed sample report generation succeeded:
+  - `build/reports/vsfavatar_probe_fixed.txt`
+- Baseline sample set currently still reports metadata decode failure (`META_DECODE_FAILED`).
+
+### Current blocker
+
+- Despite broader probing and fallback paths, metadata decode for current `.vsfavatar` samples still fails in the in-house decoder path.
+- This continues to block `object_table_parsed` on baseline samples.
+
 ## 2026-03-02 - NativeCore foundation + avatar pipeline extension
 
 ### Summary

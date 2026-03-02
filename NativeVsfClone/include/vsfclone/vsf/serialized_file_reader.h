@@ -16,6 +16,8 @@ struct SerializedFileSummary {
     std::uint32_t game_object_count = 0;
     std::uint32_t skinned_mesh_renderer_count = 0;
     std::string major_types_found;
+    std::string parse_path;
+    std::string error_code;
 };
 
 class SerializedFileReader {

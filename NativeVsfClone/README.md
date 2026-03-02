@@ -178,3 +178,33 @@ Current blocker after hardening:
 
 - Metadata decompression for current `.vsfavatar` samples still fails under current in-house LZ4 decoder logic.
 - This blocks downstream `object_table_parsed` from turning true on those samples.
+
+## Recent implementation summary (2026-03-02, phase 2 diagnostics expansion)
+
+Implemented another parser iteration focused on metadata decode observability and offset/strategy exploration:
+
+- Extended `UnityFsProbe` with metadata-level diagnostics:
+  - `metadata_offset`
+  - `metadata_decode_strategy`
+  - `metadata_decode_mode`
+  - `metadata_decode_error_code`
+- Extended `SerializedFileSummary` with parser metadata:
+  - `parse_path`
+  - `error_code`
+- Extended metadata decode attempts in `UnityFsReader`:
+  - metadata offset candidate generation around tail-window with 16-byte alignment scan
+  - multiple metadata decode strategies (`whole`, `hash-prefix`, `raw-direct`)
+  - decode mode fallback candidates (`block/header/LZ4/LZ4HC/raw`)
+  - LZ4 raw/frame/size-prefixed fallback attempts
+- Added bounded diagnostics aggregation:
+  - retains representative offset failures and truncates excessive candidate error spam.
+- Updated loader warnings:
+  - includes metadata decode strategy/mode/offset and decode error code.
+- Updated sample report script:
+  - added `-UseFixedSet` and fixed 4-sample baseline set for repeatable checks.
+
+Current status after this iteration:
+
+- Build remains stable.
+- Fixed sample report execution is stable.
+- Current sample baseline still reports `META_DECODE_FAILED`, so object table extraction remains blocked.

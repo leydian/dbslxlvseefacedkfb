@@ -52,6 +52,13 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
         meta << "metadata parsed: blocks=" << probe.value.block_count
              << ", nodes=" << probe.value.node_count
              << ", reconstruct attempts=" << probe.value.reconstruction_attempts;
+        if (!probe.value.metadata_decode_strategy.empty()) {
+            meta << ", decode strategy=" << probe.value.metadata_decode_strategy
+                 << ", decode mode=" << probe.value.metadata_decode_mode;
+        }
+        if (probe.value.metadata_offset > 0U) {
+            meta << ", metadata offset=" << probe.value.metadata_offset;
+        }
         if (probe.value.reconstruction_success_offset > 0U) {
             meta << ", reconstruct success offset=" << probe.value.reconstruction_success_offset;
         }
@@ -65,6 +72,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
             pkg.warnings.push_back("metadata/serialized diagnostic: " + probe.value.metadata_error);
         } else {
             pkg.warnings.push_back("metadata parse failed: " + probe.value.metadata_error);
+        }
+        if (!probe.value.metadata_decode_error_code.empty()) {
+            pkg.warnings.push_back("metadata decode code: " + probe.value.metadata_decode_error_code);
         }
     }
     if (probe.value.object_table_parsed) {

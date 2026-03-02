@@ -281,6 +281,7 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
 
     SerializedFileSummary summary;
     summary.object_count = static_cast<std::uint32_t>(object_count);
+    summary.parse_path = metadata_endian == Endian::Little ? "metadata-endian-little" : "metadata-endian-big";
 
     for (std::int32_t i = 0; i < object_count; ++i) {
         if (version_be >= 14U && !c.Align(4U)) {
@@ -364,6 +365,7 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
     }
 
     summary.major_types_found = ComposeMajorTypes(summary);
+    summary.error_code.clear();
     return core::Result<SerializedFileSummary>::Ok(summary);
 }
 
@@ -387,7 +389,8 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
     if (big.ok) {
         return big;
     }
-    return core::Result<SerializedFileSummary>::Fail("failed to parse serialized file object summary");
+    return core::Result<SerializedFileSummary>::Fail(
+        "SF_PARSE_BOTH_ENDIAN_FAILED: little={" + little.error + "}, big={" + big.error + "}");
 }
 
 }  // namespace vsfclone::vsf
