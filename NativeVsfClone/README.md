@@ -283,3 +283,31 @@ cmake --build build --config Release
 powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_sample_report.ps1 -SampleDir ..\sample -OutputPath .\build\reports\vsfavatar_probe_latest.txt -UseFixedSet
 Get-Content .\build\reports\vsfavatar_probe_latest.txt
 ```
+
+## Recent implementation summary (2026-03-02, block-layout candidate expansion)
+
+Implemented an additional decode pass focused on block-table interpretation variability:
+
+- Added `selected_block_layout` to `UnityFsProbe` and surfaced it in loader warnings.
+- Expanded metadata block-table candidate parsing to cover BE/LE + size-order + flag-byte variants.
+- Added candidate scoring and node-range consistency checks before layout selection.
+- Added reconstruction partial-progress diagnostics (`best partial decoded blocks`) and block-level variant decode attempts.
+
+Current status after this pass:
+
+- Metadata stage remains stable on fixed samples and now reports selected block layout.
+- Fixed sample set still reports `Compat: partial`, `Meshes: 0`.
+- Remaining blocker is still block 0 reconstruction/decode mismatch on baseline `.vsfavatar` files.
+
+### Fixed-sample snapshot (2026-03-02T23:24:05)
+
+From `build/reports/vsfavatar_probe_latest.txt`:
+
+- `NewOnYou.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=74890067, code=DATA_BLOCK_READ_FAILED`
+- `Character vywjd.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=88135067, code=DATA_BLOCK_READ_FAILED`
+- `PPU (2).vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=125513796, code=DATA_BLOCK_READ_FAILED`
+- `VRM dkdlrh.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=402596, code=DATA_BLOCK_READ_FAILED`

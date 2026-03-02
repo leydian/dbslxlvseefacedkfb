@@ -37,6 +37,8 @@ struct ParsedMetadata {
     std::vector<NodeInfo> nodes;
 };
 
+bool HasLikelySerializedNode(const ParsedMetadata& metadata);
+
 std::uint16_t ReadU16BE(std::istream& in) {
     std::array<unsigned char, 2> b {};
     in.read(reinterpret_cast<char*>(b.data()), static_cast<std::streamsize>(b.size()));
@@ -100,6 +102,18 @@ bool ReadU32BE(const std::vector<unsigned char>& buf, std::size_t& at, std::uint
           (static_cast<std::uint32_t>(buf[at + 1U]) << 16U) |
           (static_cast<std::uint32_t>(buf[at + 2U]) << 8U) |
           static_cast<std::uint32_t>(buf[at + 3U]);
+    at += 4U;
+    return true;
+}
+
+bool ReadU32LESafe(const std::vector<unsigned char>& buf, std::size_t& at, std::uint32_t& out) {
+    if (at + 4U > buf.size()) {
+        return false;
+    }
+    out = static_cast<std::uint32_t>(buf[at]) |
+          (static_cast<std::uint32_t>(buf[at + 1U]) << 8U) |
+          (static_cast<std::uint32_t>(buf[at + 2U]) << 16U) |
+          (static_cast<std::uint32_t>(buf[at + 3U]) << 24U);
     at += 4U;
     return true;
 }
@@ -373,7 +387,46 @@ bool Lz4DecompressFrame(const std::vector<unsigned char>& src, std::size_t expec
     return dst.size() == expected_size;
 }
 
-bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetadata& out, std::string& error) {
+std::int64_t ScoreBlockLayout(const std::vector<BlockInfo>& blocks) {
+    if (blocks.empty()) {
+        return std::numeric_limits<std::int64_t>::min() / 2;
+    }
+    std::int64_t score = 0;
+    std::uint64_t total_compressed = 0U;
+    std::uint64_t total_uncompressed = 0U;
+    for (const auto& b : blocks) {
+        if (b.compressed_size == 0U || b.uncompressed_size == 0U) {
+            return std::numeric_limits<std::int64_t>::min() / 2;
+        }
+        total_compressed += b.compressed_size;
+        total_uncompressed += b.uncompressed_size;
+        const auto mode = static_cast<std::uint8_t>(b.flags & 0x3FU);
+        if (mode == 2U || mode == 3U) {
+            score += 6;
+        } else if (mode == 0U) {
+            score += 2;
+        } else if (mode == 1U) {
+            score -= 2;
+        } else {
+            score -= 8;
+        }
+        if (b.uncompressed_size >= b.compressed_size) {
+            score += 1;
+        }
+        if (b.uncompressed_size > (64U * 1024U * 1024U)) {
+            score -= 4;
+        }
+    }
+    if (total_compressed > (1024ULL * 1024ULL * 1024ULL)) {
+        score -= 16;
+    }
+    if (total_uncompressed > (1024ULL * 1024ULL * 1024ULL)) {
+        score -= 16;
+    }
+    return score;
+}
+
+bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetadata& out, std::string& selected_layout, std::string& error) {
     constexpr std::size_t kExpectedHashBytes = 16U;
     if (metadata.size() < kExpectedHashBytes + 8U) {
         error = "metadata buffer too small";
@@ -382,56 +435,134 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
 
     out.blocks.clear();
     out.nodes.clear();
-
-    std::size_t at = kExpectedHashBytes;
+    selected_layout.clear();
+    std::size_t header_at = kExpectedHashBytes;
     std::uint32_t block_count = 0;
-    if (!ReadU32BE(metadata, at, block_count)) {
+    if (!ReadU32BE(metadata, header_at, block_count)) {
         error = "failed to read block count";
         return false;
     }
-
-    out.blocks.reserve(block_count);
-    for (std::uint32_t i = 0; i < block_count; ++i) {
-        BlockInfo b;
-        std::uint16_t flags_be = 0;
-        if (!ReadU32BE(metadata, at, b.uncompressed_size) ||
-            !ReadU32BE(metadata, at, b.compressed_size) ||
-            !ReadU16BE(metadata, at, flags_be)) {
-            error = "failed to read block info table";
-            return false;
-        }
-        // Some bundles encode block flags with opposite byte order in metadata.
-        // Prefer the variant that yields a plausible compression mode.
-        const auto flags_le = static_cast<std::uint16_t>((flags_be >> 8U) | (flags_be << 8U));
-        const auto mode_be = static_cast<std::uint8_t>(flags_be & 0x3FU);
-        const auto mode_le = static_cast<std::uint8_t>(flags_le & 0x3FU);
-        if ((mode_be == 0U && (mode_le == 2U || mode_le == 3U)) ||
-            (mode_be > 3U && mode_le <= 3U)) {
-            b.flags = flags_le;
-        } else {
-            b.flags = flags_be;
-        }
-        out.blocks.push_back(b);
-    }
-
-    std::uint32_t node_count = 0;
-    if (!ReadU32BE(metadata, at, node_count)) {
-        error = "failed to read node count";
+    if (block_count == 0U || block_count > 16384U) {
+        error = "invalid block count";
         return false;
     }
 
-    out.nodes.reserve(node_count);
-    for (std::uint32_t i = 0; i < node_count; ++i) {
-        NodeInfo n;
-        if (!ReadU64BE(metadata, at, n.offset) ||
-            !ReadU64BE(metadata, at, n.size) ||
-            !ReadU32BE(metadata, at, n.flags) ||
-            !ReadCString(metadata, at, n.path)) {
-            error = "failed to read node table";
-            return false;
+    struct BlockLayoutVariant {
+        const char* label;
+        bool size_little_endian;
+        bool swap_size_order;
+        bool swap_flag_bytes;
+    };
+    constexpr std::array<BlockLayoutVariant, 8> kLayouts {{
+        {"be", false, false, false},
+        {"be-swap-size", false, true, false},
+        {"be-swap-flags", false, false, true},
+        {"be-swap-size-flags", false, true, true},
+        {"le", true, false, false},
+        {"le-swap-size", true, true, false},
+        {"le-swap-flags", true, false, true},
+        {"le-swap-size-flags", true, true, true},
+    }};
+
+    ParsedMetadata best_candidate {};
+    std::int64_t best_score = std::numeric_limits<std::int64_t>::min();
+    bool found = false;
+    std::string last_layout_err;
+
+    for (const auto& layout : kLayouts) {
+        ParsedMetadata candidate {};
+        std::size_t at = header_at;
+        bool ok = true;
+        candidate.blocks.reserve(block_count);
+        for (std::uint32_t i = 0; i < block_count; ++i) {
+            std::uint32_t a = 0U;
+            std::uint32_t b = 0U;
+            std::uint16_t flags_raw = 0U;
+            if (layout.size_little_endian) {
+                ok = ReadU32LESafe(metadata, at, a) && ReadU32LESafe(metadata, at, b) && ReadU16BE(metadata, at, flags_raw);
+            } else {
+                ok = ReadU32BE(metadata, at, a) && ReadU32BE(metadata, at, b) && ReadU16BE(metadata, at, flags_raw);
+            }
+            if (!ok) {
+                last_layout_err = std::string(layout.label) + ": failed to read block info table";
+                break;
+            }
+            BlockInfo bi;
+            if (layout.swap_size_order) {
+                bi.uncompressed_size = b;
+                bi.compressed_size = a;
+            } else {
+                bi.uncompressed_size = a;
+                bi.compressed_size = b;
+            }
+            bi.flags = layout.swap_flag_bytes
+                           ? static_cast<std::uint16_t>((flags_raw >> 8U) | (flags_raw << 8U))
+                           : flags_raw;
+            candidate.blocks.push_back(bi);
         }
-        out.nodes.push_back(std::move(n));
+        if (!ok) {
+            continue;
+        }
+
+        std::uint32_t node_count = 0;
+        if (!ReadU32BE(metadata, at, node_count)) {
+            last_layout_err = std::string(layout.label) + ": failed to read node count";
+            continue;
+        }
+        if (node_count == 0U || node_count > 262144U) {
+            last_layout_err = std::string(layout.label) + ": invalid node count";
+            continue;
+        }
+        candidate.nodes.reserve(node_count);
+        for (std::uint32_t i = 0; i < node_count; ++i) {
+            NodeInfo n;
+            if (!ReadU64BE(metadata, at, n.offset) ||
+                !ReadU64BE(metadata, at, n.size) ||
+                !ReadU32BE(metadata, at, n.flags) ||
+                !ReadCString(metadata, at, n.path)) {
+                ok = false;
+                last_layout_err = std::string(layout.label) + ": failed to read node table";
+                break;
+            }
+            candidate.nodes.push_back(std::move(n));
+        }
+        if (!ok) {
+            continue;
+        }
+
+        std::uint64_t total_uncompressed = 0U;
+        for (const auto& b : candidate.blocks) {
+            total_uncompressed += b.uncompressed_size;
+        }
+        std::uint64_t max_node_end = 0U;
+        for (const auto& n : candidate.nodes) {
+            max_node_end = std::max<std::uint64_t>(max_node_end, n.offset + n.size);
+        }
+        if (max_node_end > total_uncompressed) {
+            last_layout_err = std::string(layout.label) + ": node range exceeds block total";
+            continue;
+        }
+
+        auto score = ScoreBlockLayout(candidate.blocks);
+        if (!candidate.nodes.empty() && candidate.nodes.front().path.rfind("CAB-", 0U) == 0U) {
+            score += 4;
+        }
+        if (HasLikelySerializedNode(candidate)) {
+            score += 6;
+        }
+        if (!found || score > best_score) {
+            best_candidate = std::move(candidate);
+            selected_layout = layout.label;
+            best_score = score;
+            found = true;
+        }
     }
+
+    if (!found) {
+        error = last_layout_err.empty() ? "failed to parse metadata tables" : last_layout_err;
+        return false;
+    }
+    out = std::move(best_candidate);
     return true;
 }
 
@@ -549,13 +680,15 @@ bool ParseMetadataBlock(std::ifstream& in,
         }
         std::string parse_err;
         ParsedMetadata parsed {};
-        if (!ParseMetadataTables(decoded, parsed, parse_err)) {
+        std::string block_layout;
+        if (!ParseMetadataTables(decoded, parsed, block_layout, parse_err)) {
             errs += std::string(label) + ": " + parse_err + "; ";
             return false;
         }
         metadata = std::move(parsed);
         probe.metadata_decode_strategy = label;
         probe.metadata_decode_mode = static_cast<std::uint32_t>(mode_used);
+        probe.selected_block_layout = block_layout;
         probe.metadata_decode_error_code.clear();
         return true;
     };
@@ -615,10 +748,12 @@ bool ParseMetadataBlock(std::ifstream& in,
     if (metadata.blocks.empty() && metadata.nodes.empty()) {
         ParsedMetadata raw_parsed {};
         std::string raw_err;
-        if (ParseMetadataTables(compressed, raw_parsed, raw_err)) {
+        std::string block_layout;
+        if (ParseMetadataTables(compressed, raw_parsed, block_layout, raw_err)) {
             metadata = std::move(raw_parsed);
             probe.metadata_decode_strategy = "raw-direct";
             probe.metadata_decode_mode = static_cast<std::uint32_t>(mode);
+            probe.selected_block_layout = block_layout;
             probe.metadata_decode_error_code = "META_HEADER_SIZE_MISMATCH_RECOVERED";
         }
     }
@@ -678,10 +813,6 @@ bool ValidateParsedMetadataCandidate(const UnityFsHeader& header,
     const std::uint64_t data_start_after_metadata = metadata_offset + header.compressed_metadata_size;
     if (data_start_after_metadata > header.bundle_file_size) {
         error = "metadata range exceeds bundle size";
-        return false;
-    }
-    if (total_compressed > header.bundle_file_size) {
-        error = "metadata compressed total exceeds bundle size";
         return false;
     }
 
@@ -744,8 +875,10 @@ bool ReconstructStreamAt(std::ifstream& in,
                          std::uint64_t data_start,
                          UnityFsProbe& probe,
                          std::vector<unsigned char>& out_stream,
+                         std::uint32_t& decoded_block_count,
                          std::string& error) {
     out_stream.clear();
+    decoded_block_count = 0U;
     probe.failed_block_index = 0U;
     probe.failed_block_mode = 0U;
     probe.failed_block_expected_size = 0U;
@@ -753,44 +886,81 @@ bool ReconstructStreamAt(std::ifstream& in,
     std::uint32_t block_index = 0U;
     std::uint64_t offset = data_start;
     for (const auto& b : metadata.blocks) {
-        in.clear();
-        in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-        if (!in.good()) {
-            error = "failed to seek data block";
-            return false;
-        }
+        struct BlockVariant {
+            std::uint32_t uncompressed_size = 0U;
+            std::uint32_t compressed_size = 0U;
+            std::uint16_t flags = 0U;
+            const char* label = "";
+            std::int32_t score = 0;
+        };
+        std::vector<BlockVariant> variants;
+        variants.reserve(4);
+        const auto swapped_flags = static_cast<std::uint16_t>((b.flags >> 8U) | (b.flags << 8U));
+        variants.push_back({b.uncompressed_size, b.compressed_size, b.flags, "orig", 0});
+        variants.push_back({b.compressed_size, b.uncompressed_size, b.flags, "swap-size", -1});
+        variants.push_back({b.uncompressed_size, b.compressed_size, swapped_flags, "swap-flags", -2});
+        variants.push_back({b.compressed_size, b.uncompressed_size, swapped_flags, "swap-size-flags", -3});
+        std::stable_sort(variants.begin(), variants.end(), [](const BlockVariant& lhs, const BlockVariant& rhs) {
+            return lhs.score > rhs.score;
+        });
 
-        std::vector<unsigned char> compressed(b.compressed_size, 0U);
-        in.read(reinterpret_cast<char*>(compressed.data()), static_cast<std::streamsize>(compressed.size()));
-        if (static_cast<std::size_t>(in.gcount()) != compressed.size()) {
-            probe.failed_block_index = block_index;
-            probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
-            probe.failed_block_expected_size = b.uncompressed_size;
-            probe.failed_block_error_code = "DATA_BLOCK_READ_FAILED";
-            error = "failed to read data block";
-            return false;
-        }
-        offset += b.compressed_size;
-
-        std::vector<unsigned char> decoded;
-        const auto mode = static_cast<std::uint8_t>(b.flags & 0x3FU);
-        const auto header_mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
-        const auto candidates = BuildModeCandidates(mode, header_mode);
         bool decoded_ok = false;
         std::string last_err;
-        for (const auto m : candidates) {
-            std::string local_err;
-            if (DecompressByMode(compressed, b.uncompressed_size, m, decoded, local_err)) {
-                decoded_ok = true;
+        std::vector<unsigned char> decoded;
+        std::uint64_t next_offset = offset;
+        for (const auto& v : variants) {
+            if (v.compressed_size == 0U || v.uncompressed_size == 0U) {
+                continue;
+            }
+            if (offset + v.compressed_size > header.bundle_file_size) {
+                last_err = std::string(v.label) + ": compressed size out of bundle range";
+                continue;
+            }
+
+            in.clear();
+            in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+            if (!in.good()) {
+                probe.failed_block_index = block_index;
+                probe.failed_block_mode = static_cast<std::uint32_t>(v.flags & 0x3FU);
+                probe.failed_block_expected_size = v.uncompressed_size;
+                probe.failed_block_error_code = "DATA_BLOCK_SEEK_FAILED";
+                error = "failed to seek data block";
+                return false;
+            }
+
+            std::vector<unsigned char> compressed(v.compressed_size, 0U);
+            in.read(reinterpret_cast<char*>(compressed.data()), static_cast<std::streamsize>(compressed.size()));
+            if (static_cast<std::size_t>(in.gcount()) != compressed.size()) {
+                last_err = std::string(v.label) + ": failed to read data block";
+                continue;
+            }
+
+            const auto mode = static_cast<std::uint8_t>(v.flags & 0x3FU);
+            const auto header_mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
+            const auto candidates = BuildModeCandidates(mode, header_mode);
+            for (const auto m : candidates) {
+                std::string local_err;
+                if (DecompressByMode(compressed, v.uncompressed_size, m, decoded, local_err)) {
+                    probe.failed_block_mode = static_cast<std::uint32_t>(mode);
+                    probe.failed_block_expected_size = v.uncompressed_size;
+                    decoded_ok = true;
+                    next_offset = offset + v.compressed_size;
+                    break;
+                }
+                last_err = std::string(v.label) + ": " + local_err;
+            }
+            if (decoded_ok) {
                 break;
             }
-            last_err = local_err;
         }
         if (!decoded_ok) {
             probe.failed_block_index = block_index;
             probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
             probe.failed_block_expected_size = b.uncompressed_size;
-            if (last_err.find("raw block size mismatch") != std::string::npos) {
+            if (last_err.find("failed to read data block") != std::string::npos ||
+                last_err.find("out of bundle range") != std::string::npos) {
+                probe.failed_block_error_code = "DATA_BLOCK_READ_FAILED";
+            } else if (last_err.find("raw block size mismatch") != std::string::npos) {
                 probe.failed_block_error_code = "DATA_BLOCK_RAW_MISMATCH";
             } else if (last_err.find("LZ4 decompression failed") != std::string::npos) {
                 probe.failed_block_error_code = "DATA_BLOCK_LZ4_FAIL";
@@ -806,8 +976,10 @@ bool ReconstructStreamAt(std::ifstream& in,
                     ", detail=" + last_err;
             return false;
         }
+        offset = next_offset;
         out_stream.insert(out_stream.end(), decoded.begin(), decoded.end());
         ++block_index;
+        decoded_block_count = block_index;
     }
     return true;
 }
@@ -857,16 +1029,27 @@ bool TryReconstructDataStream(std::ifstream& in,
     std::vector<std::uint64_t> candidates(candidate_set.begin(), candidate_set.end());
 
     std::string attempt_errors;
+    std::uint32_t best_partial_blocks = 0U;
+    std::uint64_t best_partial_start = 0U;
     probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
     for (const auto start : candidates) {
         std::vector<unsigned char> reconstructed;
+        std::uint32_t decoded_block_count = 0U;
         std::string local_err;
-        if (!ReconstructStreamAt(in, header, metadata, start, probe, reconstructed, local_err)) {
-            attempt_errors += "start=" + std::to_string(start) + ": " + local_err + "; ";
+        if (!ReconstructStreamAt(in, header, metadata, start, probe, reconstructed, decoded_block_count, local_err)) {
+            if (decoded_block_count > best_partial_blocks) {
+                best_partial_blocks = decoded_block_count;
+                best_partial_start = start;
+            }
+            if (attempt_errors.size() < 4096U) {
+                attempt_errors += "start=" + std::to_string(start) + ": " + local_err + "; ";
+            }
             continue;
         }
         if (!StreamMatchesNodes(metadata, reconstructed)) {
-            attempt_errors += "start=" + std::to_string(start) + ": node range mismatch; ";
+            if (attempt_errors.size() < 4096U) {
+                attempt_errors += "start=" + std::to_string(start) + ": node range mismatch; ";
+            }
             continue;
         }
         out_stream = std::move(reconstructed);
@@ -875,6 +1058,11 @@ bool TryReconstructDataStream(std::ifstream& in,
     }
 
     error = "failed to reconstruct uncompressed bundle data stream. " + attempt_errors;
+    if (best_partial_blocks > 0U) {
+        error += "best partial: start=" + std::to_string(best_partial_start) +
+                 ", decoded_blocks=" + std::to_string(best_partial_blocks) +
+                 "/" + std::to_string(metadata.blocks.size()) + "; ";
+    }
     return false;
 }
 
@@ -885,13 +1073,41 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     SerializedFileReader serialized;
     bool found_candidate = false;
     SerializedFileSummary best {};
-    for (const auto& node : metadata.nodes) {
+    struct CandidateRef {
+        std::size_t index = 0U;
+        std::int64_t score = 0;
+    };
+    std::vector<CandidateRef> candidates;
+    candidates.reserve(metadata.nodes.size());
+    for (std::size_t i = 0; i < metadata.nodes.size(); ++i) {
+        const auto& node = metadata.nodes[i];
         if (!(node.path.rfind("CAB-", 0U) == 0U || node.path.find(".assets") != std::string::npos)) {
             continue;
         }
         if (node.size == 0U || node.offset + node.size > stream.size()) {
             continue;
         }
+        std::int64_t score = 0;
+        if (node.path.rfind("CAB-", 0U) == 0U) {
+            score += 10;
+        }
+        if (node.path.find(".assets") != std::string::npos) {
+            score += 8;
+        }
+        if (node.size >= 1024U) {
+            score += 2;
+        }
+        if (node.size > (64U * 1024U * 1024U)) {
+            score -= 4;
+        }
+        candidates.push_back({i, score});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const CandidateRef& a, const CandidateRef& b) {
+        return a.score > b.score;
+    });
+
+    for (const auto& candidate : candidates) {
+        const auto& node = metadata.nodes[candidate.index];
         found_candidate = true;
         const auto begin = stream.begin() + static_cast<std::ptrdiff_t>(node.offset);
         const auto end = begin + static_cast<std::ptrdiff_t>(node.size);

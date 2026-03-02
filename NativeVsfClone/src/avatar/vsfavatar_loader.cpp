@@ -56,6 +56,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
             meta << ", decode strategy=" << probe.value.metadata_decode_strategy
                  << ", decode mode=" << probe.value.metadata_decode_mode;
         }
+        if (!probe.value.selected_block_layout.empty()) {
+            meta << ", block layout=" << probe.value.selected_block_layout;
+        }
         if (probe.value.metadata_offset > 0U) {
             meta << ", metadata offset=" << probe.value.metadata_offset;
         }

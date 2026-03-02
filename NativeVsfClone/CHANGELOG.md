@@ -2,6 +2,42 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar block-layout candidate expansion and reconstruction scoring
+
+### Summary
+
+Implemented another decode-focused pass to reduce hardcoded block-table assumptions and improve reconstruction candidate diagnostics.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added `selected_block_layout` to expose which block-table variant was selected.
+
+- `src/vsf/unityfs_reader.cpp`
+  - Reworked metadata table parse to evaluate multiple block layouts:
+    - `be`, `be-swap-size`, `be-swap-flags`, `be-swap-size-flags`
+    - `le`, `le-swap-size`, `le-swap-flags`, `le-swap-size-flags`
+  - Added block-layout scoring heuristics and node-range consistency checks before selecting a layout.
+  - Extended reconstruction attempts to track partial progress (`decoded_blocks`) and report best partial attempt.
+  - Added per-block decode variants during reconstruction:
+    - original
+    - swapped size
+    - swapped flag bytes
+    - swapped size + swapped flag bytes
+  - Enhanced block decode failure detail to include variant-level failure reasons.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Included selected block layout in metadata warning output.
+
+### Verified
+
+- `Release` build succeeded.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`).
+- Pipeline remains at `Compat: partial` / `Meshes: 0`; metadata stage is stable and now reports `block layout=...`, while reconstruction blocker is still concentrated at block 0.
+- Latest fixed-set snapshot (`2026-03-02T23:24:05`) shows block-0 failures converged to:
+  - `mode=0`, `code=DATA_BLOCK_READ_FAILED`
+  - expected sizes observed: `74890067`, `88135067`, `125513796`, `402596`
+
 ## 2026-03-02 - VSFAvatar diagnostics hardening + NativeCore render-resource API extension
 
 ### Summary
