@@ -151,6 +151,12 @@ public sealed class HostController
 
         var rc = _sessionService.LoadAvatar(path);
         TrackResult("LoadAvatar", rc);
+        if (rc == NcResultCode.Ok)
+        {
+            // Re-apply host-side render controls after avatar load in case
+            // the native side resets camera/quality state during load.
+            ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
+        }
         RefreshState();
         return rc;
     }
@@ -329,6 +335,16 @@ public sealed class HostController
 
     public NcResultCode Tick(float deltaTimeSeconds)
     {
+        if (_sessionService.ActiveAvatarHandle.HasValue)
+        {
+            if (NativeCoreInterop.nc_get_runtime_stats(out var statsRc) == NcResultCode.Ok &&
+                statsRc.RenderReadyAvatarCount == 0U)
+            {
+                var recoverRc = NativeCoreInterop.nc_create_render_resources(_sessionService.ActiveAvatarHandle.Value);
+                TrackResult("RecoverRenderResources", recoverRc);
+            }
+        }
+
         var rc = _renderLoopService.Tick(deltaTimeSeconds);
         SessionState = SessionState with { LastRenderRc = rc };
         if (rc != NcResultCode.Ok)

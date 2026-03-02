@@ -1186,7 +1186,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
                 ? (avatar_bmin.y + extent_y * (0.68f + quality.headroom * 0.2f))
                 : cy;
-        const float x_offset = static_cast<float>(avatar_slot) * 1.8f;
+        // Keep preview centered even if multiple handles are present.
+        // Host UI currently operates in single-avatar mode, and slot offsets
+        // can push the visible avatar out of frame after reload/recovery paths.
+        const float x_offset = 0.0f;
         const float preview_yaw = DirectX::XM_PI;
         const auto world =
             DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *

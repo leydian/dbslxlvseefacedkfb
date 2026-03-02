@@ -228,7 +228,10 @@ public sealed partial class MainWindow : Window
 
     private void FramingSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        FramingValueText.Text = FramingSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        if (FramingValueText is not null && FramingSlider is not null)
+        {
+            FramingValueText.Text = FramingSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
         if (_isSyncingRenderUi)
         {
             return;
@@ -238,7 +241,10 @@ public sealed partial class MainWindow : Window
 
     private void HeadroomSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        HeadroomValueText.Text = HeadroomSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        if (HeadroomValueText is not null && HeadroomSlider is not null)
+        {
+            HeadroomValueText.Text = HeadroomSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
         if (_isSyncingRenderUi)
         {
             return;
@@ -248,7 +254,10 @@ public sealed partial class MainWindow : Window
 
     private void YawSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        YawValueText.Text = YawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        if (YawValueText is not null && YawSlider is not null)
+        {
+            YawValueText.Text = YawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
         if (_isSyncingRenderUi)
         {
             return;
@@ -258,7 +267,10 @@ public sealed partial class MainWindow : Window
 
     private void FovSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        FovValueText.Text = FovSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        if (FovValueText is not null && FovSlider is not null)
+        {
+            FovValueText.Text = FovSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
         if (_isSyncingRenderUi)
         {
             return;
