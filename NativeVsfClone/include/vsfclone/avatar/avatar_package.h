@@ -64,6 +64,9 @@ struct AvatarPackage {
     std::vector<MeshRenderPayload> mesh_payloads;
     std::vector<MaterialRenderPayload> material_payloads;
     std::vector<TextureRenderPayload> texture_payloads;
+    std::uint32_t format_section_count = 0;
+    std::uint32_t format_decoded_section_count = 0;
+    std::uint32_t format_unknown_section_count = 0;
     std::vector<std::string> warnings;
     std::vector<std::string> missing_features;
 };

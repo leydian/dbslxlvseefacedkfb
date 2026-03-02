@@ -62,12 +62,17 @@ struct UnityFsProbe {
     std::string block0_selected_mode_source;
     std::string selected_offset_family;
     std::string reconstruction_failure_summary_code;
+    std::uint32_t reconstruction_candidate_count = 0;
+    std::int32_t best_candidate_score = 0;
     std::uint64_t total_block_compressed_size = 0;
     std::uint64_t total_block_uncompressed_size = 0;
     std::uint32_t reconstruction_best_partial_blocks = 0;
     std::uint32_t failed_block_index = 0;
     std::uint32_t failed_block_mode = 0;
     std::uint32_t failed_block_expected_size = 0;
+    std::uint64_t failed_block_read_offset = 0;
+    std::uint32_t failed_block_compressed_size = 0;
+    std::uint32_t failed_block_uncompressed_size = 0;
     std::string failed_block_error_code;
     std::string metadata_error;
 };

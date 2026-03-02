@@ -117,10 +117,15 @@ int main(int argc, char** argv) {
         std::ostringstream block;
         block << "block=" << p.failed_block_index
               << ", mode=" << p.failed_block_mode
+              << ", read_offset=" << p.failed_block_read_offset
+              << ", csize=" << p.failed_block_compressed_size
+              << ", usize=" << p.failed_block_uncompressed_size
               << ", expected=" << p.failed_block_expected_size
               << ", code=" << p.failed_block_error_code;
         warnings.push_back("W_RECON: " + block.str());
     }
+    warnings.push_back("W_RECON_META: candidates=" + std::to_string(p.reconstruction_candidate_count) +
+                       ", best-score=" + std::to_string(p.best_candidate_score));
     if (!p.selected_block0_hypothesis.empty()) {
         warnings.push_back("W_BLOCK0: hypothesis=" + p.selected_block0_hypothesis +
                            ", attempts=" + std::to_string(p.block0_attempt_count));
@@ -162,6 +167,11 @@ int main(int argc, char** argv) {
               << "\"block0_selected_mode_source\":\"" << EscapeJson(p.block0_selected_mode_source) << "\","
               << "\"selected_offset_family\":\"" << EscapeJson(p.selected_offset_family) << "\","
               << "\"reconstruction_summary\":\"" << EscapeJson(p.reconstruction_failure_summary_code) << "\","
+              << "\"reconstruction_candidate_count\":" << p.reconstruction_candidate_count << ","
+              << "\"best_candidate_score\":" << p.best_candidate_score << ","
+              << "\"failed_block_read_offset\":" << p.failed_block_read_offset << ","
+              << "\"failed_block_compressed_size\":" << p.failed_block_compressed_size << ","
+              << "\"failed_block_uncompressed_size\":" << p.failed_block_uncompressed_size << ","
               << "\"warnings\":" << JoinJsonStringArray(warnings) << ","
               << "\"missing_features\":" << JoinJsonStringArray(missing_features)
               << "}\n";

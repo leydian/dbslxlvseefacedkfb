@@ -4,7 +4,7 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 
 - `.vrm` input path handling (scaffold)
 - `.vxavatar` input path handling (MVP parser + payload)
-- `.vxa2` input path handling (header+manifest MVP)
+- `.vxa2` input path handling (manifest + TLV section decode MVP)
 - `.vsfavatar` probing via UnityFS header parser (implemented)
 - `nativecore.dll` C ABI for host/UI integration
 - streaming and OSC interfaces (`Spout2`, `OSC`) as stubs for wiring
@@ -47,7 +47,7 @@ If `sidecar` mode fails to execute:
 - SerializedFile class parsing (`GameObject`, `Mesh`, `Material`, etc.)
 - Real VRM import pipeline (glTF/VRM decode and MToon binding)
 - `.vxavatar` manifest/material override parse/apply
-- `.vxa2` binary asset section decode/streaming payload unpack
+- `.vxa2` streaming payload unpack optimization
 - DirectX11 renderer and WinUI/WPF host integration
 - Real Spout2 and OSC runtime bindings
 
@@ -87,7 +87,7 @@ Sidecar JSON contract:
 
 - loader accepts `schema_version=2|3` (current output: `3`)
 - required fields: `status`, `display_name`, `extractor_version`, `object_table_parsed`, `primary_error_code`
-- diagnostic fields: `probe_stage`, `selected_block_layout`, `selected_offset_family`, `reconstruction_summary`
+- diagnostic fields: `probe_stage`, `selected_block_layout`, `selected_offset_family`, `reconstruction_summary`, `reconstruction_candidate_count`, `best_candidate_score`
 - expected arrays: `warnings[]`, `missing_features[]`
 - sidecar errors are surfaced with codes such as:
   - `SIDECAR_TIMEOUT`
@@ -111,7 +111,7 @@ Sidecar diagnostics semantics (schema v3):
   - examples: `META_DECODE_FAILED`, `DATA_BLOCK_READ_FAILED`, `SF_NO_VALID_NODE_PARSED`
 - `selected_offset_family`:
   - indicates which reconstruction offset candidate family won (or best-partial family on failure)
-  - examples: `tail-packed`, `window-after-header`
+  - examples: `after-metadata`, `aligned-after-metadata`, `tail-packed`, `header-window`, `tail-window`
 - `selected_block0_hypothesis` / `block0_attempt_count`:
   - records which block-0 hypothesis variant was selected (or last/best-partial failed hypothesis)
   - reports how many block-0 hypothesis attempts were executed
@@ -121,6 +121,10 @@ Sidecar diagnostics semantics (schema v3):
 - `reconstruction_summary`:
   - dominant failure class aggregated across reconstruction attempts
   - currently converges to `DATA_BLOCK_READ_FAILED` on fixed baseline samples
+- `reconstruction_candidate_count` / `best_candidate_score`:
+  - exposes how many reconstruction offsets were tried and which candidate quality score won
+- `failed_block_read_offset` / `failed_block_compressed_size` / `failed_block_uncompressed_size`:
+  - pinpoints the block read location and size tuple tied to the dominant block-level failure
 
 Latest behavior notes (2026-03-02):
 
@@ -189,6 +193,49 @@ Latest behavior notes (2026-03-03, VXAvatar MVP parse/payload pass):
 - NativeCore/CLI diagnostics expanded:
   - `NcAvatarInfo` now reports payload counts (`mesh/material/texture`)
   - `parser_stage`, `primary_error_code` are surfaced in `avatar_tool`
+
+Latest behavior notes (2026-03-03, VSFAvatar reconstruction scoring + failure offsets):
+
+- Reconstruction candidate families were normalized:
+  - `after-metadata`, `aligned-after-metadata`, `tail-packed`, `header-window`, `tail-window`
+- Candidate windows were expanded to `+/-4096` bytes (`16`-byte step).
+- Block-0 decode hypotheses now include:
+  - `prefix-skip-16`, `prefix-skip-32`
+- New diagnostics were added for observability:
+  - `reconstruction_candidate_count`
+  - `best_candidate_score`
+  - `failed_block_read_offset`
+  - `failed_block_compressed_size`
+  - `failed_block_uncompressed_size`
+- Implausible-size failures now map to:
+  - `DATA_BLOCK_SIZE_IMPLAUSIBLE`
+- Fixed-set report after this pass:
+  - `build/reports/vsfavatar_probe_latest_after_scoring.txt`
+- Fixed baseline result remains reconstruction-blocked:
+  - all fixed samples: `SidecarProbeStage=failed-reconstruction`
+  - dominant code: `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - dominant family: `SidecarOffsetFamily=aligned-after-metadata`
+  - candidate count range observed: `791..1057`
+  - best score observed: `10`
+  - representative failure tuple:
+    - `SidecarFailedReadOffset=4250`
+    - `SidecarFailedCompressedSize=14778976`
+    - `SidecarFailedUncompressedSize=74890067`
+
+Latest behavior notes (2026-03-02, VXA2 TLV section decode MVP):
+
+- `.vxa2` loader now decodes section table entries after manifest:
+  - section header: `type(u16)`, `flags(u16)`, `size(u32)`
+  - known types: mesh blob (`0x0001`), texture blob (`0x0002`), material override (`0x0003`)
+- Added strict section boundary validation:
+  - truncated section headers/payloads now map to `VXA2_SECTION_TRUNCATED`
+- Added payload/reference gap classification:
+  - missing mesh/texture payloads now map to `VXA2_ASSET_MISSING`
+  - loader keeps `Compat: partial` when parse succeeds but coverage is incomplete
+- Added format-level diagnostics in NativeCore/CLI:
+  - `format_section_count`
+  - `format_decoded_section_count`
+  - `format_unknown_section_count`
 
 ## Repository layout
 

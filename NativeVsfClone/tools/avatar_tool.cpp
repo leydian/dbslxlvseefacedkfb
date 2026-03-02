@@ -87,6 +87,9 @@ int main(int argc, char** argv) {
     std::cout << "  MeshPayloads: " << info.mesh_payload_count << "\n";
     std::cout << "  MaterialPayloads: " << info.material_payload_count << "\n";
     std::cout << "  TexturePayloads: " << info.texture_payload_count << "\n";
+    std::cout << "  FormatSections: " << info.format_section_count << "\n";
+    std::cout << "  FormatDecodedSections: " << info.format_decoded_section_count << "\n";
+    std::cout << "  FormatUnknownSections: " << info.format_unknown_section_count << "\n";
     std::cout << "  Warnings: " << info.warning_count << "\n";
     if (info.last_warning[0] != '\0') {
         std::cout << "  LastWarning: " << info.last_warning << "\n";

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <unordered_map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,11 +17,24 @@ namespace vsfclone::avatar {
 
 namespace {
 
+constexpr std::uint16_t kSectionMeshBlob = 0x0001U;
+constexpr std::uint16_t kSectionTextureBlob = 0x0002U;
+constexpr std::uint16_t kSectionMaterialOverride = 0x0003U;
+
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
     });
     return s;
+}
+
+std::string NormalizeRefKey(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (char c : raw) {
+        out.push_back(c == '\\' ? '/' : c);
+    }
+    return ToLower(out);
 }
 
 bool ReadFileBytes(const std::string& path, std::vector<std::uint8_t>* out) {
@@ -167,6 +181,88 @@ bool ParseStringArray(const std::string& json, const std::string& key, std::vect
     return false;
 }
 
+bool ReadSizedString(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t* inout_offset,
+    std::size_t end,
+    std::string* out_value) {
+    if (inout_offset == nullptr || out_value == nullptr) {
+        return false;
+    }
+    const auto len = ReadU16Le(bytes, *inout_offset);
+    if (!len) {
+        return false;
+    }
+    *inout_offset += 2U;
+    const std::size_t name_len = static_cast<std::size_t>(*len);
+    if (*inout_offset + name_len > end) {
+        return false;
+    }
+    out_value->assign(reinterpret_cast<const char*>(bytes.data() + static_cast<std::ptrdiff_t>(*inout_offset)), name_len);
+    *inout_offset += name_len;
+    return true;
+}
+
+bool ParseBinaryPayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    std::string* out_name,
+    std::vector<std::uint8_t>* out_blob) {
+    if (out_name == nullptr || out_blob == nullptr) {
+        return false;
+    }
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, out_name)) {
+        return false;
+    }
+    if (out_name->empty()) {
+        return false;
+    }
+    const auto blob_size = ReadU32Le(bytes, cursor);
+    if (!blob_size) {
+        return false;
+    }
+    cursor += 4U;
+    const std::size_t data_size = static_cast<std::size_t>(*blob_size);
+    if (cursor + data_size != end) {
+        return false;
+    }
+    out_blob->assign(
+        bytes.begin() + static_cast<std::ptrdiff_t>(cursor),
+        bytes.begin() + static_cast<std::ptrdiff_t>(end));
+    return true;
+}
+
+bool ParseMaterialOverrideSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    MaterialRenderPayload* out_override) {
+    if (out_override == nullptr) {
+        return false;
+    }
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_override->name)) {
+        return false;
+    }
+    if (out_override->name.empty()) {
+        return false;
+    }
+    if (!ReadSizedString(bytes, &cursor, end, &out_override->shader_name)) {
+        return false;
+    }
+    if (out_override->shader_name.empty()) {
+        return false;
+    }
+    if (!ReadSizedString(bytes, &cursor, end, &out_override->base_color_texture_name)) {
+        return false;
+    }
+    return cursor == end;
+}
+
 }  // namespace
 
 bool Vxa2Loader::CanLoadPath(const std::string& path) const {
@@ -236,34 +332,148 @@ core::Result<AvatarPackage> Vxa2Loader::Load(const std::string& path) const {
     }
     pkg.warnings.push_back("W_STAGE: resolve");
 
-    pkg.parser_stage = "payload";
     for (const std::string& mesh_ref : mesh_refs) {
         pkg.meshes.push_back({mesh_ref, 0U, 0U});
-        pkg.mesh_payloads.push_back({mesh_ref, {}, {}});
     }
     for (const std::string& mat_ref : material_refs) {
         pkg.materials.push_back({mat_ref, "mtoon"});
+    }
+
+    std::unordered_map<std::string, std::vector<std::uint8_t>> mesh_sections;
+    std::unordered_map<std::string, std::vector<std::uint8_t>> texture_sections;
+    std::unordered_map<std::string, MaterialRenderPayload> material_sections;
+
+    std::size_t cursor = manifest_end;
+    while (cursor < bytes.size()) {
+        const auto type = ReadU16Le(bytes, cursor);
+        const auto flags = ReadU16Le(bytes, cursor + 2U);
+        const auto sec_size = ReadU32Le(bytes, cursor + 4U);
+        if (!type || !flags || !sec_size) {
+            pkg.primary_error_code = "VXA2_SECTION_TRUNCATED";
+            pkg.warnings.push_back("E_PARSE: VXA2_SECTION_TRUNCATED: section header is truncated.");
+            return core::Result<AvatarPackage>::Ok(pkg);
+        }
+
+        const std::size_t payload_offset = cursor + 8U;
+        const std::size_t payload_size = static_cast<std::size_t>(*sec_size);
+        const std::size_t section_end = payload_offset + payload_size;
+        if (payload_offset > bytes.size() || section_end > bytes.size()) {
+            pkg.primary_error_code = "VXA2_SECTION_TRUNCATED";
+            pkg.warnings.push_back("E_PARSE: VXA2_SECTION_TRUNCATED: section payload range out of file.");
+            return core::Result<AvatarPackage>::Ok(pkg);
+        }
+
+        ++pkg.format_section_count;
+        if (*flags != 0U) {
+            pkg.warnings.push_back("W_PARSE: VXA2_SECTION_FLAGS_NONZERO: type=" + std::to_string(*type));
+        }
+
+        if (*type == kSectionMeshBlob || *type == kSectionTextureBlob) {
+            std::string name;
+            std::vector<std::uint8_t> blob;
+            if (!ParseBinaryPayloadSection(bytes, payload_offset, payload_size, &name, &blob)) {
+                pkg.primary_error_code = "VXA2_SCHEMA_INVALID";
+                pkg.warnings.push_back("E_PARSE: VXA2_SCHEMA_INVALID: invalid binary payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            if (*type == kSectionMeshBlob) {
+                mesh_sections[NormalizeRefKey(name)] = std::move(blob);
+            } else {
+                texture_sections[NormalizeRefKey(name)] = std::move(blob);
+            }
+            ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionMaterialOverride) {
+            MaterialRenderPayload material_payload;
+            if (!ParseMaterialOverrideSection(bytes, payload_offset, payload_size, &material_payload)) {
+                pkg.primary_error_code = "VXA2_SCHEMA_INVALID";
+                pkg.warnings.push_back("E_PARSE: VXA2_SCHEMA_INVALID: invalid material override section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            material_sections[NormalizeRefKey(material_payload.name)] = std::move(material_payload);
+            ++pkg.format_decoded_section_count;
+        } else {
+            ++pkg.format_unknown_section_count;
+            pkg.warnings.push_back("W_PARSE: VXA2_UNKNOWN_SECTION: type=" + std::to_string(*type));
+        }
+
+        cursor = section_end;
+    }
+
+    pkg.parser_stage = "payload";
+    bool has_payload_gap = false;
+    std::size_t matched_mesh_payloads = 0U;
+    std::size_t matched_texture_payloads = 0U;
+    for (const std::string& mesh_ref : mesh_refs) {
+        MeshRenderPayload payload;
+        payload.name = mesh_ref;
+        const auto it = mesh_sections.find(NormalizeRefKey(mesh_ref));
+        if (it != mesh_sections.end()) {
+            payload.vertex_blob = it->second;
+            ++matched_mesh_payloads;
+        } else {
+            has_payload_gap = true;
+        }
+        pkg.mesh_payloads.push_back(std::move(payload));
+    }
+    for (const std::string& mat_ref : material_refs) {
         MaterialRenderPayload payload;
         payload.name = mat_ref;
         payload.shader_name = "mtoon";
+        const auto it = material_sections.find(NormalizeRefKey(mat_ref));
+        if (it != material_sections.end()) {
+            if (!it->second.shader_name.empty()) {
+                payload.shader_name = it->second.shader_name;
+            }
+            if (!it->second.base_color_texture_name.empty()) {
+                payload.base_color_texture_name = it->second.base_color_texture_name;
+            }
+        }
         if (!texture_refs.empty()) {
-            payload.base_color_texture_name = texture_refs.front();
+            if (payload.base_color_texture_name.empty()) {
+                payload.base_color_texture_name = texture_refs.front();
+            }
         }
         pkg.material_payloads.push_back(std::move(payload));
     }
     for (const std::string& tex_ref : texture_refs) {
         TextureRenderPayload payload;
         payload.name = tex_ref;
-        payload.format = "external";
+        payload.format = "binary";
+        const auto it = texture_sections.find(NormalizeRefKey(tex_ref));
+        if (it != texture_sections.end()) {
+            payload.bytes = it->second;
+            ++matched_texture_payloads;
+        } else {
+            has_payload_gap = true;
+        }
         pkg.texture_payloads.push_back(std::move(payload));
+    }
+    if (pkg.format_section_count == 0U) {
+        pkg.warnings.push_back("W_PAYLOAD: VXA2 has no section table entries.");
+    }
+    if (mesh_refs.size() != matched_mesh_payloads || texture_refs.size() != matched_texture_payloads) {
+        pkg.warnings.push_back(
+            "E_PAYLOAD: VXA2_ASSET_MISSING: ref/payload mismatch (mesh=" + std::to_string(matched_mesh_payloads) + "/" +
+            std::to_string(mesh_refs.size()) + ", texture=" + std::to_string(matched_texture_payloads) + "/" +
+            std::to_string(texture_refs.size()) + ").");
+    }
+    if (pkg.format_unknown_section_count > 0U) {
+        pkg.missing_features.push_back("VXA2 unknown section passthrough");
+    }
+    if (matched_mesh_payloads != mesh_refs.size()) {
+        pkg.missing_features.push_back("VXA2 mesh section payload decode coverage");
+    }
+    if (matched_texture_payloads != texture_refs.size()) {
+        pkg.missing_features.push_back("VXA2 texture section payload decode coverage");
     }
     pkg.warnings.push_back("W_STAGE: payload");
 
     pkg.parser_stage = "runtime-ready";
     pkg.warnings.push_back("W_STAGE: runtime-ready");
-    pkg.compat_level = AvatarCompatLevel::Partial;
-    pkg.primary_error_code = "NONE";
-    pkg.missing_features.push_back("VXA2 binary asset section decode");
+    const bool fully_matched =
+        mesh_refs.size() == matched_mesh_payloads && texture_refs.size() == matched_texture_payloads;
+    pkg.compat_level = fully_matched ? AvatarCompatLevel::Full : AvatarCompatLevel::Partial;
+    pkg.primary_error_code = has_payload_gap ? "VXA2_ASSET_MISSING" : "NONE";
     return core::Result<AvatarPackage>::Ok(pkg);
 }
 

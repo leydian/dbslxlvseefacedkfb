@@ -101,6 +101,9 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     out_info->mesh_payload_count = static_cast<std::uint32_t>(pkg.mesh_payloads.size());
     out_info->material_payload_count = static_cast<std::uint32_t>(pkg.material_payloads.size());
     out_info->texture_payload_count = static_cast<std::uint32_t>(pkg.texture_payloads.size());
+    out_info->format_section_count = pkg.format_section_count;
+    out_info->format_decoded_section_count = pkg.format_decoded_section_count;
+    out_info->format_unknown_section_count = pkg.format_unknown_section_count;
     out_info->warning_count = static_cast<std::uint32_t>(pkg.warnings.size());
     out_info->missing_feature_count = static_cast<std::uint32_t>(pkg.missing_features.size());
     CopyString(out_info->display_name, sizeof(out_info->display_name), pkg.display_name);

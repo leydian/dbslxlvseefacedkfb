@@ -176,6 +176,17 @@ Focused the VSFAvatar in-house reconstruction pass on reproducible candidate sco
     - `SidecarFailedCompressedSize`
     - `SidecarFailedUncompressedSize`
 
+### Verified
+
+- `Release` build succeeded after diagnostics/scoring updates.
+- Fixed-set report regenerated:
+  - `build/reports/vsfavatar_probe_latest_after_scoring.txt`
+- Current fixed baseline remains blocked at reconstruction:
+  - `SidecarProbeStage=failed-reconstruction`
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - dominant offset family observed: `aligned-after-metadata`
+  - candidate count range observed: `791..1057`
+
 ## 2026-03-03 - VXAvatar MVP parser/payload integration + NativeCore diagnostics expansion
 
 ### Summary

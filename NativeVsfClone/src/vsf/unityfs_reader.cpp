@@ -999,6 +999,9 @@ std::string ExtractFailureCode(const std::string& message) {
 }
 
 std::string ClassifyFailureCode(const std::string& detail) {
+    if (detail.find("size implausible") != std::string::npos) {
+        return "DATA_BLOCK_SIZE_IMPLAUSIBLE";
+    }
     if (detail.find("failed to read data block") != std::string::npos ||
         detail.find("out of bundle range") != std::string::npos) {
         return "DATA_BLOCK_READ_FAILED";
@@ -1028,6 +1031,9 @@ bool ReconstructStreamAt(std::ifstream& in,
     probe.failed_block_index = 0U;
     probe.failed_block_mode = 0U;
     probe.failed_block_expected_size = 0U;
+    probe.failed_block_read_offset = 0U;
+    probe.failed_block_compressed_size = 0U;
+    probe.failed_block_uncompressed_size = 0U;
     probe.failed_block_error_code.clear();
     probe.selected_reconstruction_layout.clear();
     probe.selected_block0_hypothesis.clear();
@@ -1041,27 +1047,30 @@ bool ReconstructStreamAt(std::ifstream& in,
             std::uint32_t uncompressed_size = 0U;
             std::uint32_t compressed_size = 0U;
             std::uint16_t flags = 0U;
+            std::uint32_t offset_adjust = 0U;
             const char* label = "";
             std::int32_t score = 0;
         };
         std::vector<BlockVariant> variants;
         variants.reserve(8);
         const auto swapped_flags = static_cast<std::uint16_t>((b.flags >> 8U) | (b.flags << 8U));
-        variants.push_back({b.uncompressed_size, b.compressed_size, b.flags, "orig", 0});
-        variants.push_back({b.compressed_size, b.uncompressed_size, b.flags, "swap-size", -1});
-        variants.push_back({b.uncompressed_size, b.compressed_size, swapped_flags, "swap-flags", -2});
-        variants.push_back({b.compressed_size, b.uncompressed_size, swapped_flags, "swap-size-flags", -3});
+        variants.push_back({b.uncompressed_size, b.compressed_size, b.flags, 0U, "orig", 0});
+        variants.push_back({b.compressed_size, b.uncompressed_size, b.flags, 0U, "swap-size", -1});
+        variants.push_back({b.uncompressed_size, b.compressed_size, swapped_flags, 0U, "swap-flags", -2});
+        variants.push_back({b.compressed_size, b.uncompressed_size, swapped_flags, 0U, "swap-size-flags", -3});
         if (block_index == 0U) {
             if (b.compressed_size > 16U) {
-                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 16U), b.flags, "orig-trim16", 3});
+                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 16U), b.flags, 0U, "orig-trim16", 3});
+                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 16U), b.flags, 16U, "prefix-skip-16", 4});
             }
             if (b.compressed_size > 32U) {
-                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 32U), b.flags, "orig-trim32", 2});
+                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 32U), b.flags, 0U, "orig-trim32", 2});
+                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 32U), b.flags, 32U, "prefix-skip-32", 3});
             }
             if (offset < header.bundle_file_size) {
                 const auto remaining = header.bundle_file_size - offset;
                 if (remaining > 0U && remaining <= std::numeric_limits<std::uint32_t>::max()) {
-                    variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(remaining), b.flags, "orig-clamp-range", 1});
+                    variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(remaining), b.flags, 0U, "orig-clamp-range", 1});
                 }
             }
         }
@@ -1082,7 +1091,15 @@ bool ReconstructStreamAt(std::ifstream& in,
             if (v.compressed_size == 0U || v.uncompressed_size == 0U) {
                 continue;
             }
-            if (offset + v.compressed_size > header.bundle_file_size) {
+            const std::uint64_t read_offset = offset + v.offset_adjust;
+            if (v.uncompressed_size > (256U * 1024U * 1024U)) {
+                last_err = std::string(v.label) + ": uncompressed size implausible";
+                if (variant_errors.size() < 512U) {
+                    variant_errors += last_err + " | ";
+                }
+                continue;
+            }
+            if (read_offset + v.compressed_size > header.bundle_file_size) {
                 last_err = std::string(v.label) + ": compressed size out of bundle range";
                 if (variant_errors.size() < 512U) {
                     variant_errors += last_err + " | ";
@@ -1091,11 +1108,14 @@ bool ReconstructStreamAt(std::ifstream& in,
             }
 
             in.clear();
-            in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+            in.seekg(static_cast<std::streamoff>(read_offset), std::ios::beg);
             if (!in.good()) {
                 probe.failed_block_index = block_index;
                 probe.failed_block_mode = static_cast<std::uint32_t>(v.flags & 0x3FU);
                 probe.failed_block_expected_size = v.uncompressed_size;
+                probe.failed_block_read_offset = read_offset;
+                probe.failed_block_compressed_size = v.compressed_size;
+                probe.failed_block_uncompressed_size = v.uncompressed_size;
                 probe.failed_block_error_code = "DATA_BLOCK_SEEK_FAILED";
                 error = "failed to seek data block";
                 return false;
@@ -1122,8 +1142,11 @@ bool ReconstructStreamAt(std::ifstream& in,
                 if (DecompressByMode(compressed, v.uncompressed_size, m, decoded, local_err)) {
                     probe.failed_block_mode = static_cast<std::uint32_t>(mode);
                     probe.failed_block_expected_size = v.uncompressed_size;
+                    probe.failed_block_read_offset = read_offset;
+                    probe.failed_block_compressed_size = v.compressed_size;
+                    probe.failed_block_uncompressed_size = v.uncompressed_size;
                     decoded_ok = true;
-                    next_offset = offset + v.compressed_size;
+                    next_offset = read_offset + v.compressed_size;
                     chosen_variant = v.label;
                     chosen_mode = m;
                     if (m == header_mode) {
@@ -1149,6 +1172,9 @@ bool ReconstructStreamAt(std::ifstream& in,
             probe.failed_block_index = block_index;
             probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
             probe.failed_block_expected_size = b.uncompressed_size;
+            probe.failed_block_read_offset = offset;
+            probe.failed_block_compressed_size = b.compressed_size;
+            probe.failed_block_uncompressed_size = b.uncompressed_size;
             probe.failed_block_error_code = ClassifyFailureCode(last_err);
             if (block_index == 0U && probe.selected_block0_hypothesis.empty()) {
                 const auto at = last_err.find(':');
@@ -1217,7 +1243,7 @@ bool TryReconstructDataStream(std::ifstream& in,
         }
     };
     const auto add_window = [&](std::uint64_t anchor, const char* family) {
-        constexpr std::int64_t kWindow = 256;
+        constexpr std::int64_t kWindow = 4096;
         for (std::int64_t d = -kWindow; d <= kWindow; d += 16) {
             const auto value = static_cast<std::int64_t>(anchor) + d;
             if (value >= 0) {
@@ -1226,30 +1252,22 @@ bool TryReconstructDataStream(std::ifstream& in,
         }
     };
 
-    add_candidate(after_header, "after-header");
-    add_candidate((after_header + 15ULL) & ~15ULL, "after-header-aligned");
-    add_candidate(after_header + header.compressed_metadata_size, "header-plus-metadata");
-    add_candidate(((after_header + header.compressed_metadata_size) + 15ULL) & ~15ULL, "header-plus-metadata-aligned");
-    add_candidate(metadata_offset + header.compressed_metadata_size, "metadata-plus-metadata-size");
-    add_candidate(((metadata_offset + header.compressed_metadata_size) + 15ULL) & ~15ULL, "metadata-plus-metadata-size-aligned");
+    const std::uint64_t after_metadata = after_header + header.compressed_metadata_size;
+    const std::uint64_t aligned_after_metadata = (after_metadata + 15ULL) & ~15ULL;
+    add_candidate(after_metadata, "after-metadata");
+    add_candidate(aligned_after_metadata, "aligned-after-metadata");
+    add_candidate(metadata_offset + header.compressed_metadata_size, "after-metadata");
     if (total_compressed <= header.bundle_file_size) {
         add_candidate(header.bundle_file_size - total_compressed, "tail-packed");
-        add_candidate((header.bundle_file_size - total_compressed) & ~15ULL, "tail-packed-aligned");
     }
-    if (metadata_at_end) {
-        if (metadata_offset >= total_compressed) {
-            add_candidate(metadata_offset - total_compressed, "metadata-end-minus-total-compressed");
-            add_candidate((metadata_offset - total_compressed) & ~15ULL, "metadata-end-minus-total-compressed-aligned");
-        }
-    }
-    add_window(after_header, "window-after-header");
-    add_window(after_header + header.compressed_metadata_size, "window-header-plus-metadata");
-    add_window(metadata_offset + header.compressed_metadata_size, "window-metadata-plus-metadata-size");
+    add_window(after_metadata, "after-metadata");
+    add_window(aligned_after_metadata, "aligned-after-metadata");
+    add_window(after_header, "header-window");
     if (total_compressed <= header.bundle_file_size) {
-        add_window(header.bundle_file_size - total_compressed, "window-tail-packed");
+        add_window(header.bundle_file_size - total_compressed, "tail-window");
     }
-    if (metadata_offset >= total_compressed) {
-        add_window(metadata_offset - total_compressed, "window-metadata-end-minus-total-compressed");
+    if (metadata_at_end && metadata_offset >= total_compressed) {
+        add_window(metadata_offset - total_compressed, "tail-window");
     }
     std::vector<CandidateStart> candidates;
     candidates.reserve(candidate_map.size());
@@ -1276,17 +1294,56 @@ bool TryReconstructDataStream(std::ifstream& in,
     std::uint64_t best_success_block0_selected_offset = 0U;
     std::string best_success_block0_mode_source;
     std::int64_t best_success_score = std::numeric_limits<std::int64_t>::min();
+    std::uint32_t best_success_blocks = 0U;
     probe.reconstruction_best_partial_blocks = 0U;
     probe.reconstruction_failure_summary_code.clear();
     probe.selected_offset_family.clear();
     probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
+    probe.reconstruction_candidate_count = static_cast<std::uint32_t>(candidates.size());
+    probe.best_candidate_score = std::numeric_limits<std::int32_t>::min();
     std::unordered_map<std::string, std::uint32_t> failure_code_hits;
+    auto FamilyPriority = [](const std::string& family) -> std::int32_t {
+        if (family == "after-metadata") {
+            return 4;
+        }
+        if (family == "aligned-after-metadata") {
+            return 3;
+        }
+        if (family == "tail-packed") {
+            return 2;
+        }
+        if (family == "header-window") {
+            return 1;
+        }
+        if (family == "tail-window") {
+            return 0;
+        }
+        return -1;
+    };
+    const auto ComputeCandidateScore = [&](std::uint32_t decoded_blocks, bool nodes_ok, const std::string& mode_source) -> std::int32_t {
+        std::int32_t score = 0;
+        const auto total_blocks = static_cast<std::uint32_t>(metadata.blocks.size());
+        if (total_blocks > 0U) {
+            score += static_cast<std::int32_t>((40U * decoded_blocks) / total_blocks);
+        }
+        if (nodes_ok) {
+            score += 30;
+        }
+        if (mode_source == "header-derived" || mode_source == "block-flag") {
+            score += 30;
+        } else if (!mode_source.empty()) {
+            score += 10;
+        }
+        return score;
+    };
     for (const auto& candidate : candidates) {
         const auto start = candidate.offset;
         std::vector<unsigned char> reconstructed;
         std::uint32_t decoded_block_count = 0U;
         std::string local_err;
         if (!ReconstructStreamAt(in, header, metadata, start, probe, reconstructed, decoded_block_count, local_err)) {
+            const auto failed_score = ComputeCandidateScore(decoded_block_count, false, probe.block0_selected_mode_source);
+            probe.best_candidate_score = std::max(probe.best_candidate_score, failed_score);
             const auto code = ExtractFailureCode(local_err);
             if (!code.empty()) {
                 ++failure_code_hits[code];
@@ -1308,22 +1365,21 @@ bool TryReconstructDataStream(std::ifstream& in,
             continue;
         }
         if (!StreamMatchesNodes(metadata, reconstructed)) {
+            const auto mismatch_score = ComputeCandidateScore(decoded_block_count, false, probe.block0_selected_mode_source);
+            probe.best_candidate_score = std::max(probe.best_candidate_score, mismatch_score);
             if (attempt_errors.size() < 4096U) {
                 attempt_errors += "start=" + std::to_string(start) + " (" + candidate.family + "): node range mismatch; ";
             }
             continue;
         }
-        std::int64_t success_score = static_cast<std::int64_t>(reconstructed.size());
-        if (candidate.family.find("tail-packed") != std::string::npos) {
-            success_score += 1024;
-        } else if (candidate.family.find("after-header") != std::string::npos) {
-            success_score += 512;
-        }
-        if (!probe.selected_block0_hypothesis.empty()) {
-            success_score += 64;
-        }
-        if (success_score > best_success_score) {
+        const auto success_score = ComputeCandidateScore(decoded_block_count, true, probe.block0_selected_mode_source);
+        probe.best_candidate_score = std::max(probe.best_candidate_score, success_score);
+        const auto better_family = FamilyPriority(candidate.family) > FamilyPriority(best_success_family);
+        if (success_score > best_success_score ||
+            (success_score == best_success_score && decoded_block_count > best_success_blocks) ||
+            (success_score == best_success_score && decoded_block_count == best_success_blocks && better_family)) {
             best_success_score = success_score;
+            best_success_blocks = decoded_block_count;
             best_success_start = start;
             best_success_family = candidate.family;
             best_success_stream = std::move(reconstructed);
@@ -1336,6 +1392,7 @@ bool TryReconstructDataStream(std::ifstream& in,
 
     if (best_success_score != std::numeric_limits<std::int64_t>::min()) {
         out_stream = std::move(best_success_stream);
+        probe.best_candidate_score = static_cast<std::int32_t>(best_success_score);
         probe.reconstruction_success_offset = best_success_start;
         probe.selected_offset_family = best_success_family;
         probe.selected_block0_hypothesis = best_success_block0_hypothesis;
@@ -1355,6 +1412,9 @@ bool TryReconstructDataStream(std::ifstream& in,
     }
     if (!probe.reconstruction_failure_summary_code.empty()) {
         probe.probe_primary_error = probe.reconstruction_failure_summary_code;
+    }
+    if (probe.best_candidate_score == std::numeric_limits<std::int32_t>::min()) {
+        probe.best_candidate_score = 0;
     }
     if (!best_partial_family.empty()) {
         probe.selected_offset_family = best_partial_family;

@@ -63,6 +63,9 @@ typedef struct NcAvatarInfo {
     uint32_t mesh_payload_count;
     uint32_t material_payload_count;
     uint32_t texture_payload_count;
+    uint32_t format_section_count;
+    uint32_t format_decoded_section_count;
+    uint32_t format_unknown_section_count;
     uint32_t warning_count;
     uint32_t missing_feature_count;
     char display_name[128];

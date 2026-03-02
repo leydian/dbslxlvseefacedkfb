@@ -502,6 +502,20 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     if (!recon_summary.empty()) {
         pkg.warnings.push_back("W_RECON_SUMMARY: " + recon_summary);
     }
+    const auto recon_candidate_count = GetJsonU32(output, "reconstruction_candidate_count");
+    const auto best_candidate_score = GetJsonU32(output, "best_candidate_score");
+    if (recon_candidate_count > 0U) {
+        pkg.warnings.push_back("W_RECON_META: candidates=" + std::to_string(recon_candidate_count) +
+                               ", best-score=" + std::to_string(best_candidate_score));
+    }
+    const auto failed_read_offset = GetJsonU64(output, "failed_block_read_offset");
+    const auto failed_csize = GetJsonU32(output, "failed_block_compressed_size");
+    const auto failed_usize = GetJsonU32(output, "failed_block_uncompressed_size");
+    if (failed_read_offset > 0U || failed_csize > 0U || failed_usize > 0U) {
+        pkg.warnings.push_back("W_RECON_FAIL_META: read-offset=" + std::to_string(failed_read_offset) +
+                               ", csize=" + std::to_string(failed_csize) +
+                               ", usize=" + std::to_string(failed_usize));
+    }
     const auto block0_hypothesis = GetJsonString(output, "selected_block0_hypothesis");
     if (!block0_hypothesis.empty()) {
         const auto block0_attempt_count = GetJsonU32(output, "block0_attempt_count");
@@ -560,7 +574,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
              << ", nodes=" << probe.value.node_count
              << ", block compressed total=" << probe.value.total_block_compressed_size
              << ", block uncompressed total=" << probe.value.total_block_uncompressed_size
-             << ", reconstruct attempts=" << probe.value.reconstruction_attempts;
+             << ", reconstruct attempts=" << probe.value.reconstruction_attempts
+             << ", candidate count=" << probe.value.reconstruction_candidate_count
+             << ", best score=" << probe.value.best_candidate_score;
         if (probe.value.reconstruction_best_partial_blocks > 0U) {
             meta << ", best partial blocks=" << probe.value.reconstruction_best_partial_blocks;
         }
@@ -612,6 +628,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
             std::ostringstream block;
             block << "data block diagnostic: index=" << probe.value.failed_block_index
                   << ", mode=" << probe.value.failed_block_mode
+                  << ", read-offset=" << probe.value.failed_block_read_offset
+                  << ", csize=" << probe.value.failed_block_compressed_size
+                  << ", usize=" << probe.value.failed_block_uncompressed_size
                   << ", expected=" << probe.value.failed_block_expected_size
                   << ", code=" << probe.value.failed_block_error_code;
             pkg.warnings.push_back("E_RECON_BLOCK: " + block.str());

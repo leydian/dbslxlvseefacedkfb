@@ -12,7 +12,40 @@ VXA2 is the next-step avatar container format for gradual migration from `.vxava
 2. `version[2]`: little-endian unsigned integer (`1`)
 3. `manifest_size[4]`: little-endian unsigned integer
 4. `manifest_json[manifest_size]`: UTF-8 JSON
-5. `asset_sections[...]`: optional in v1 draft (runtime support pending)
+5. `asset_sections[...]`: zero or more TLV entries
+
+### Asset Section TLV (v1)
+
+Each section entry is appended immediately after the previous entry:
+
+1. `type[2]`: little-endian unsigned integer
+2. `flags[2]`: little-endian unsigned integer (currently `0` expected)
+3. `size[4]`: little-endian unsigned integer
+4. `payload[size]`
+
+Runtime validates section boundaries strictly. If any section header/payload crosses the file boundary, loading exits with `VXA2_SECTION_TRUNCATED`.
+
+### Section Types (v1)
+
+- `0x0001` Mesh blob section:
+  - `name_len[2]`
+  - `name[name_len]` (UTF-8)
+  - `blob_size[4]`
+  - `blob[blob_size]`
+- `0x0002` Texture blob section:
+  - `name_len[2]`
+  - `name[name_len]` (UTF-8)
+  - `blob_size[4]`
+  - `blob[blob_size]`
+- `0x0003` Material override section:
+  - `name_len[2]`
+  - `name[name_len]`
+  - `shader_len[2]`
+  - `shader[shader_len]`
+  - `base_color_texture_len[2]`
+  - `base_color_texture_name[base_color_texture_len]`
+
+Unknown section types are skipped for forward compatibility and surfaced as warnings.
 
 ## Manifest Required Keys
 
@@ -47,5 +80,6 @@ VXA2 is the next-step avatar container format for gradual migration from `.vxava
 
 - Loader recognizes `.vxa2` and validates header + manifest section.
 - Required manifest keys are validated.
-- Payload name mapping is created for mesh/material/texture references.
-- Binary asset section decode is not implemented yet and is reported via diagnostics.
+- TLV asset sections are decoded for mesh/texture/material override payloads (`type=0x0001/0x0002/0x0003`).
+- Unknown section types are skipped and reported.
+- Missing manifest-ref payloads are reported as `VXA2_ASSET_MISSING` with `Compat: partial`.

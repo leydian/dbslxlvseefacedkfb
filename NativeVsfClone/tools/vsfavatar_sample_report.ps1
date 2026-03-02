@@ -70,6 +70,11 @@ foreach ($f in $files) {
         "  SidecarBlock0Attempts: $($sidecar.block0_attempt_count)" | Add-Content -Path $OutputPath
         "  SidecarBlock0Offset: $($sidecar.block0_selected_offset)" | Add-Content -Path $OutputPath
         "  SidecarBlock0ModeSource: $($sidecar.block0_selected_mode_source)" | Add-Content -Path $OutputPath
+        "  SidecarReconCandidateCount: $($sidecar.reconstruction_candidate_count)" | Add-Content -Path $OutputPath
+        "  SidecarBestCandidateScore: $($sidecar.best_candidate_score)" | Add-Content -Path $OutputPath
+        "  SidecarFailedReadOffset: $($sidecar.failed_block_read_offset)" | Add-Content -Path $OutputPath
+        "  SidecarFailedCompressedSize: $($sidecar.failed_block_compressed_size)" | Add-Content -Path $OutputPath
+        "  SidecarFailedUncompressedSize: $($sidecar.failed_block_uncompressed_size)" | Add-Content -Path $OutputPath
     } catch {
         "  SidecarParseError: failed to parse JSON output" | Add-Content -Path $OutputPath
     }
