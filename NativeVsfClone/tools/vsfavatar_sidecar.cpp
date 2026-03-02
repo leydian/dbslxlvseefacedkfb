@@ -126,6 +126,12 @@ int main(int argc, char** argv) {
     }
     warnings.push_back("W_RECON_META: candidates=" + std::to_string(p.reconstruction_candidate_count) +
                        ", best-score=" + std::to_string(p.best_candidate_score));
+    warnings.push_back("W_SERIALIZED_META: candidates=" + std::to_string(p.serialized_candidate_count) +
+                       ", attempts=" + std::to_string(p.serialized_attempt_count) +
+                       ", best-score=" + std::to_string(p.serialized_best_candidate_score));
+    if (!p.serialized_best_candidate_path.empty()) {
+        warnings.push_back("W_SERIALIZED_PATH: " + p.serialized_best_candidate_path);
+    }
     if (!p.selected_block0_hypothesis.empty()) {
         warnings.push_back("W_BLOCK0: hypothesis=" + p.selected_block0_hypothesis +
                            ", attempts=" + std::to_string(p.block0_attempt_count));
@@ -169,6 +175,10 @@ int main(int argc, char** argv) {
               << "\"reconstruction_summary\":\"" << EscapeJson(p.reconstruction_failure_summary_code) << "\","
               << "\"reconstruction_candidate_count\":" << p.reconstruction_candidate_count << ","
               << "\"best_candidate_score\":" << p.best_candidate_score << ","
+              << "\"serialized_candidate_count\":" << p.serialized_candidate_count << ","
+              << "\"serialized_attempt_count\":" << p.serialized_attempt_count << ","
+              << "\"serialized_best_candidate_path\":\"" << EscapeJson(p.serialized_best_candidate_path) << "\","
+              << "\"serialized_best_candidate_score\":" << p.serialized_best_candidate_score << ","
               << "\"failed_block_read_offset\":" << p.failed_block_read_offset << ","
               << "\"failed_block_compressed_size\":" << p.failed_block_compressed_size << ","
               << "\"failed_block_uncompressed_size\":" << p.failed_block_uncompressed_size << ","

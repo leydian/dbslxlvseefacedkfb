@@ -17,8 +17,10 @@ Entry point for `NativeVsfClone` documentation.
 - [vxavatar_mvp_update_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vxavatar_mvp_update_2026-03-02.md): `.vxavatar` MVP update report
 - [vxa2_tlv_update_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vxa2_tlv_update_2026-03-02.md): `.vxa2` TLV decode MVP report
 - [vxavatar_gate_harness_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vxavatar_gate_harness_2026-03-02.md): VXAvatar/VXA2 quality gate harness report
+- [vxavatar_gate_ci_expansion_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vxavatar_gate_ci_expansion_2026-03-03.md): VXAvatar/VXA2 quick/full gate + CI expansion report
 - [vsfavatar_gate_harness_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_gate_harness_2026-03-03.md): VSFAvatar quality gate harness report
 - [vsfavatar_stage_lift_diff_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_stage_lift_diff_2026-03-03.md): VSFAvatar stage transition diff report
+- [vsfavatar_serialized_gateD_update_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_serialized_gateD_update_2026-03-03.md): VSFAvatar serialized candidate expansion + GateD strict update report
 
 ## Generated Reports
 

@@ -179,6 +179,31 @@ std::string ComposeMajorTypes(const SerializedFileSummary& s) {
     return out.str();
 }
 
+std::string ClassifySerializedParseError(const std::string& error) {
+    if (error.find("too small") != std::string::npos) {
+        return "SF_TOO_SMALL";
+    }
+    if (error.find("metadata size") != std::string::npos || error.find("metadata range") != std::string::npos) {
+        return "SF_METADATA_RANGE_INVALID";
+    }
+    if (error.find("unsupported serialized file version") != std::string::npos) {
+        return "SF_UNSUPPORTED_VERSION";
+    }
+    if (error.find("type count") != std::string::npos || error.find("class id") != std::string::npos ||
+        error.find("type tree") != std::string::npos) {
+        return "SF_TYPE_TABLE_INVALID";
+    }
+    if (error.find("object count") != std::string::npos || error.find("object") != std::string::npos) {
+        return "SF_OBJECT_TABLE_INVALID";
+    }
+    if (error.find("unity version string") != std::string::npos ||
+        error.find("target platform") != std::string::npos ||
+        error.find("type tree flag") != std::string::npos) {
+        return "SF_HEADER_INVALID";
+    }
+    return "SF_PARSE_INVALID";
+}
+
 core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<unsigned char>& bytes, Endian metadata_endian) {
     if (bytes.size() < 20U) {
         return core::Result<SerializedFileSummary>::Fail("serialized file too small");
@@ -365,7 +390,7 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
     }
 
     summary.major_types_found = ComposeMajorTypes(summary);
-    summary.error_code.clear();
+    summary.error_code = "NONE";
     return core::Result<SerializedFileSummary>::Ok(summary);
 }
 
@@ -389,8 +414,11 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
     if (big.ok) {
         return big;
     }
+    const auto little_code = ClassifySerializedParseError(little.error);
+    const auto big_code = ClassifySerializedParseError(big.error);
     return core::Result<SerializedFileSummary>::Fail(
-        "SF_PARSE_BOTH_ENDIAN_FAILED: little={" + little.error + "}, big={" + big.error + "}");
+        "SF_PARSE_BOTH_ENDIAN_FAILED[" + little_code + "|" + big_code + "]: little={" + little.error + "}, big={" +
+        big.error + "}");
 }
 
 }  // namespace vsfclone::vsf

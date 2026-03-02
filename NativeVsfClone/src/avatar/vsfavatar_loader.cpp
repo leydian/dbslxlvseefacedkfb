@@ -510,6 +510,18 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.warnings.push_back("W_RECON_META: candidates=" + std::to_string(recon_candidate_count) +
                                ", best-score=" + std::to_string(best_candidate_score));
     }
+    const auto serialized_candidate_count = GetJsonU32(output, "serialized_candidate_count");
+    const auto serialized_attempt_count = GetJsonU32(output, "serialized_attempt_count");
+    const auto serialized_best_candidate_score = GetJsonU32(output, "serialized_best_candidate_score");
+    if (serialized_candidate_count > 0U || serialized_attempt_count > 0U) {
+        pkg.warnings.push_back("W_SERIALIZED_META: candidates=" + std::to_string(serialized_candidate_count) +
+                               ", attempts=" + std::to_string(serialized_attempt_count) +
+                               ", best-score=" + std::to_string(serialized_best_candidate_score));
+    }
+    const auto serialized_best_candidate_path = GetJsonString(output, "serialized_best_candidate_path");
+    if (!serialized_best_candidate_path.empty()) {
+        pkg.warnings.push_back("W_SERIALIZED_PATH: " + serialized_best_candidate_path);
+    }
     const auto failed_read_offset = GetJsonU64(output, "failed_block_read_offset");
     const auto failed_csize = GetJsonU32(output, "failed_block_compressed_size");
     const auto failed_usize = GetJsonU32(output, "failed_block_uncompressed_size");
@@ -580,7 +592,10 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
              << ", block uncompressed total=" << probe.value.total_block_uncompressed_size
              << ", reconstruct attempts=" << probe.value.reconstruction_attempts
              << ", candidate count=" << probe.value.reconstruction_candidate_count
-             << ", best score=" << probe.value.best_candidate_score;
+             << ", best score=" << probe.value.best_candidate_score
+             << ", serialized candidates=" << probe.value.serialized_candidate_count
+             << ", serialized attempts=" << probe.value.serialized_attempt_count
+             << ", serialized best score=" << probe.value.serialized_best_candidate_score;
         if (probe.value.reconstruction_best_partial_blocks > 0U) {
             meta << ", best partial blocks=" << probe.value.reconstruction_best_partial_blocks;
         }
@@ -616,6 +631,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
         }
         if (!probe.value.first_node_path.empty()) {
             meta << ", first node=" << probe.value.first_node_path;
+        }
+        if (!probe.value.serialized_best_candidate_path.empty()) {
+            meta << ", serialized best path=" << probe.value.serialized_best_candidate_path;
         }
         pkg.warnings.push_back("W_META: " + meta.str());
     }

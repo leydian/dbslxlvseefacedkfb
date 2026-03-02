@@ -1,6 +1,6 @@
 VSFAvatar probe report
 GateInputVersion: 1
-Generated: 2026-03-03T00:55:06
+Generated: 2026-03-03T01:14:07
 SampleDir: D:\dbslxlvseefacedkfb\sample
 UseFixedSet: True
 FileCount: 4
@@ -28,6 +28,7 @@ Load succeeded
   LastMissingFeature: mesh/material object discovery
   SidecarProbeStage: failed-serialized
   SidecarPrimaryError: DATA_BLOCK_READ_FAILED
+  SidecarObjectTableParsed: False
   SidecarBlockLayout: be/bc-be/nc-be
   SidecarOffsetFamily: after-metadata
   SidecarBlock0Hypothesis: swap-size-flags
@@ -36,6 +37,9 @@ Load succeeded
   SidecarBlock0ModeSource: failed-candidate
   SidecarReconCandidateCount: 1057
   SidecarBestCandidateScore: 10
+  SidecarSerializedAttempts: 0
+  SidecarSerializedBestPath: 
+  SidecarSerializedBestScore: 0
   SidecarFailedReadOffset: 4250
   SidecarFailedCompressedSize: 14778976
   SidecarFailedUncompressedSize: 74890067
@@ -63,6 +67,7 @@ Load succeeded
   LastMissingFeature: mesh/material object discovery
   SidecarProbeStage: failed-serialized
   SidecarPrimaryError: DATA_BLOCK_READ_FAILED
+  SidecarObjectTableParsed: False
   SidecarBlockLayout: be/bc-be/nc-be
   SidecarOffsetFamily: after-metadata
   SidecarBlock0Hypothesis: swap-size-flags
@@ -71,6 +76,9 @@ Load succeeded
   SidecarBlock0ModeSource: failed-candidate
   SidecarReconCandidateCount: 1057
   SidecarBestCandidateScore: 10
+  SidecarSerializedAttempts: 0
+  SidecarSerializedBestPath: 
+  SidecarSerializedBestScore: 0
   SidecarFailedReadOffset: 4250
   SidecarFailedCompressedSize: 15039540
   SidecarFailedUncompressedSize: 88135067
@@ -98,6 +106,7 @@ Load succeeded
   LastMissingFeature: mesh/material object discovery
   SidecarProbeStage: failed-serialized
   SidecarPrimaryError: DATA_BLOCK_READ_FAILED
+  SidecarObjectTableParsed: False
   SidecarBlockLayout: be/bc-be/nc-be
   SidecarOffsetFamily: after-metadata
   SidecarBlock0Hypothesis: swap-size-flags
@@ -106,6 +115,9 @@ Load succeeded
   SidecarBlock0ModeSource: failed-candidate
   SidecarReconCandidateCount: 1057
   SidecarBestCandidateScore: 10
+  SidecarSerializedAttempts: 0
+  SidecarSerializedBestPath: 
+  SidecarSerializedBestScore: 0
   SidecarFailedReadOffset: 4250
   SidecarFailedCompressedSize: 37337919
   SidecarFailedUncompressedSize: 125513796
@@ -127,12 +139,13 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 15
+  Warnings: 16
   LastWarning: W_BLOCK0_META: offset=4240, mode-source=failed-candidate
   MissingFeatures: 1
   LastMissingFeature: mesh/material object discovery
   SidecarProbeStage: failed-serialized
   SidecarPrimaryError: DATA_BLOCK_READ_FAILED
+  SidecarObjectTableParsed: False
   SidecarBlockLayout: be/bc-be/nc-be
   SidecarOffsetFamily: after-metadata
   SidecarBlock0Hypothesis: swap-size-flags
@@ -141,6 +154,9 @@ Load succeeded
   SidecarBlock0ModeSource: failed-candidate
   SidecarReconCandidateCount: 791
   SidecarBestCandidateScore: 10
+  SidecarSerializedAttempts: 0
+  SidecarSerializedBestPath: 
+  SidecarSerializedBestScore: 0
   SidecarFailedReadOffset: 4240
   SidecarFailedCompressedSize: 64111
   SidecarFailedUncompressedSize: 402596
@@ -149,4 +165,5 @@ Load succeeded
 GateA_NoCrashAndDiagPresent: PASS
 GateB_AtLeastOneFailedSerializedOrComplete: PASS
 GateC_ReadFailureHasOffsetModeSizeEvidence: PASS
+GateD_AtLeastOneCompleteWithObjectTable: FAIL
 GateRows: 4

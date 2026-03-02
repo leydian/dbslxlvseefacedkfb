@@ -39,6 +39,9 @@ struct UnityFsProbe {
     std::uint32_t node_count = 0;
     std::string first_node_path;
     std::uint32_t serialized_candidate_count = 0;
+    std::uint32_t serialized_attempt_count = 0;
+    std::string serialized_best_candidate_path;
+    std::int32_t serialized_best_candidate_score = 0;
     bool object_table_parsed = false;
     std::uint32_t object_count = 0;
     std::uint32_t mesh_object_count = 0;

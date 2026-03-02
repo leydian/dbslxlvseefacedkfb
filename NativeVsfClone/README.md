@@ -100,11 +100,15 @@ Gate rules:
   - `SidecarFailedCompressedSize > 0`
   - `SidecarFailedUncompressedSize > 0`
   - `SidecarOffsetFamily` must be non-empty
+- Gate D: at least one sample must satisfy:
+  - `SidecarProbeStage=complete`
+  - `SidecarObjectTableParsed=True`
+  - `SidecarPrimaryError` is `NONE` or empty
 
 Exit code:
 
 - `0`: all gates pass
-- `1`: at least one gate fails (including Gate B strict fail)
+- `1`: at least one gate fails (including Gate D strict fail)
 
 Outputs:
 
@@ -114,10 +118,16 @@ Outputs:
 
 ## VXAvatar/VXA2 quality gate
 
-Run fixed-set probe + gate evaluation:
+Run quick profile (fixed + synthetic):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet
+powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick
+```
+
+Run full profile (fixed + discovered real samples + synthetic):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -Profile full
 ```
 
 Gate rules:
@@ -128,6 +138,8 @@ Gate rules:
   - fixed `.vxa2` must keep `Format=VXA2` and valid parser stage (`parse|resolve|payload|runtime-ready`)
   - corrupted `.vxa2` must classify as `VXA2_SECTION_TRUNCATED|VXA2_SCHEMA_INVALID`
 - Gate D: required output fields must exist for each sample (`InputKind`, `InputTag`, `Format`, `Compat`, `ParserStage`, `PrimaryError`).
+- Gate E (full profile): `real-full` sample rows must remain parseable.
+  - Optional strict mode: `-RequireRealFullSamples` to fail when no `real-full` rows are present.
 
 Exit code:
 
@@ -138,13 +150,21 @@ Outputs:
 
 - probe report: `build/reports/vxavatar_probe_latest.txt`
 - gate summary: `build/reports/vxavatar_gate_summary.txt`
+- gate summary JSON: `build/reports/vxavatar_gate_summary.json`
 - synthetic inputs: `build/tmp_vx/demo_mvp_truncated.vxavatar`, `build/tmp_vx/demo_mvp_cd_mismatch.vxavatar`, `build/tmp_vx/demo_tlv_truncated.vxa2`
+
+CI:
+
+- `.github/workflows/vxavatar-gate.yml`
+  - `quick-gate` job: strict PR gate (`-UseFixedSet -Profile quick`)
+  - `full-gate` job: strict PR gate (`-Profile full`)
+  - both jobs upload probe/summary artifacts for diagnosis
 
 Sidecar JSON contract:
 
 - loader accepts `schema_version=2|3` (current output: `3`)
 - required fields: `status`, `display_name`, `extractor_version`, `object_table_parsed`, `primary_error_code`
-- diagnostic fields: `probe_stage`, `selected_block_layout`, `selected_offset_family`, `reconstruction_summary`, `reconstruction_candidate_count`, `best_candidate_score`
+- diagnostic fields: `probe_stage`, `selected_block_layout`, `selected_offset_family`, `reconstruction_summary`, `reconstruction_candidate_count`, `best_candidate_score`, `serialized_candidate_count`, `serialized_attempt_count`, `serialized_best_candidate_path`, `serialized_best_candidate_score`
 - expected arrays: `warnings[]`, `missing_features[]`
 - sidecar errors are surfaced with codes such as:
   - `SIDECAR_TIMEOUT`
@@ -182,6 +202,10 @@ Sidecar diagnostics semantics (schema v3):
   - exposes how many reconstruction offsets were tried and which candidate quality score won
 - `failed_block_read_offset` / `failed_block_compressed_size` / `failed_block_uncompressed_size`:
   - pinpoints the block read location and size tuple tied to the dominant block-level failure
+- `serialized_candidate_count` / `serialized_attempt_count`:
+  - records how many serialized nodes were considered and how many offset-adjusted parse attempts were executed
+- `serialized_best_candidate_path` / `serialized_best_candidate_score`:
+  - records the highest scoring serialized candidate (node path + offset) and the candidate score used for tie-breaks
 
 Latest behavior notes (2026-03-02):
 
@@ -308,6 +332,19 @@ Latest behavior notes (2026-03-03, VSFAvatar stage-lift gate pass):
 - Current stage status:
   - all fixed samples now report `SidecarProbeStage=failed-serialized`
   - dominant offset family is `after-metadata`
+
+Latest behavior notes (2026-03-03, VSFAvatar serialized-candidate expansion + GateD):
+
+- Serialized candidate probing now includes bounded offset deltas per node:
+  - `0`, `+16`, `-16`, `+32`, `-32`, `+64`, `-64`
+- Added serialized-candidate diagnostics in sidecar/loader:
+  - `serialized_candidate_count`
+  - `serialized_attempt_count`
+  - `serialized_best_candidate_path`
+  - `serialized_best_candidate_score`
+- Fixed-set report generation now hard-fails on incomplete fixed sample set.
+- Sample report now emits `SidecarObjectTableParsed` and serialized diagnostics per sample.
+- Quality gate now enforces Gate D (`complete + object_table_parsed + no primary error`) as strict fail criteria.
 
 Latest behavior notes (2026-03-02, VXA2 TLV section decode MVP):
 

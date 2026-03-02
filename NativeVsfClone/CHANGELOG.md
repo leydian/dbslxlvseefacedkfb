@@ -2,6 +2,115 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VXAvatar/VXA2 gate profiles + CI strict enforcement
+
+### Summary
+
+Expanded the VXAvatar/VXA2 quality gate from fixed local checks to profile-based strict enforcement (`quick`/`full`) and added CI workflow integration with machine-readable gate output.
+
+### Changed
+
+- `tools/vxavatar_sample_report.ps1`
+  - Added profile control:
+    - `-Profile quick|full`
+  - `quick`: fixed baseline + synthetic corruption samples.
+  - `full`: fixed baseline + discovered real samples + synthetic corruption samples.
+  - Added report header field:
+    - `Profile`
+  - Gate input marker bumped:
+    - `GateInputVersion: 2`
+
+- `tools/vxavatar_quality_gate.ps1`
+  - Added profile control:
+    - `-Profile quick|full`
+  - Added JSON summary output:
+    - `build/reports/vxavatar_gate_summary.json`
+  - Added Gate E for full-profile real-sample coverage.
+  - Added `-RequireRealFullSamples` option for strict full-profile environments.
+  - Strict pass policy remains exit-code based (`0` pass, `1` fail).
+
+- `.github/workflows/vxavatar-gate.yml` (new)
+  - Added `quick-gate` job:
+    - build + `vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - Added `full-gate` job:
+    - build + `vxavatar_quality_gate.ps1 -Profile full`
+  - Added artifact upload for probe/summary outputs.
+
+- `README.md`
+  - Updated VXAvatar/VXA2 gate usage for quick/full profile commands.
+  - Added CI gate behavior and JSON summary output documentation.
+
+- `docs/INDEX.md`
+  - Added report link:
+    - `docs/reports/vxavatar_gate_ci_expansion_2026-03-03.md`
+
+- `docs/reports/vxavatar_gate_ci_expansion_2026-03-03.md` (new)
+  - Added implementation and CI rollout details for profile-based strict gating.
+
+## 2026-03-03 - VSFAvatar serialized-candidate expansion + strict GateD
+
+### Summary
+
+Expanded VSFAvatar serialized candidate probing with bounded offset deltas, added serialized-candidate diagnostics to sidecar/loader output, and tightened fixed-set gate strictness with a new Gate D milestone (`complete + object_table_parsed + no primary error`).
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added serialized probe observability fields:
+    - `serialized_attempt_count`
+    - `serialized_best_candidate_path`
+    - `serialized_best_candidate_score`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Extended serialized candidate parsing attempts with offset deltas:
+    - `0`, `+16`, `-16`, `+32`, `-32`, `+64`, `-64`
+  - Added score policy for candidate selection:
+    - prioritize parsed `object_count`
+    - tie-break using major-type diversity (`GameObject`, `Mesh`, `Material`, `Texture2D`, `SkinnedMeshRenderer`)
+  - Preserves highest-scored failure code/path when all candidates fail.
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added parse-error classification in final dual-endian failure string:
+    - `SF_PARSE_BOTH_ENDIAN_FAILED[<little_code>|<big_code>]`
+  - Normalized success summary error code to `NONE`.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added serialized diagnostics to JSON contract:
+    - `serialized_candidate_count`
+    - `serialized_attempt_count`
+    - `serialized_best_candidate_path`
+    - `serialized_best_candidate_score`
+  - Added matching warning summaries for serialized probing.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Sidecar path now maps serialized diagnostics into package warnings.
+  - In-house path metadata warning now includes serialized candidate/attempt/best-score/path.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Fixed-set mode now fails fast when any required fixed sample is missing.
+  - Sidecar `status=ok` is now required per sample.
+  - Added per-sample fields:
+    - `SidecarObjectTableParsed`
+    - `SidecarSerializedAttempts`
+    - `SidecarSerializedBestPath`
+    - `SidecarSerializedBestScore`
+  - Added strict report integrity check:
+    - `GateRows` must equal processed file count.
+  - Added Gate D summary line:
+    - `GateD_AtLeastOneCompleteWithObjectTable`
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Added Gate D:
+    - at least one sample must satisfy `complete + object_table_parsed=true + no primary error`.
+  - Gate A now validates report integrity:
+    - sample count, header `FileCount`, header `GateRows` alignment.
+  - Added `SidecarObjectTableParsed` to required-field set.
+  - Overall pass condition is now `GateA && GateB && GateC && GateD`.
+
+- `README.md`
+  - Updated VSFAvatar gate documentation to include Gate D strict criteria.
+  - Documented serialized probe diagnostics in sidecar JSON contract and behavior notes.
+
 ## 2026-03-03 - VSFAvatar reconstruction stage-lift gate pass (failed-reconstruction -> failed-serialized)
 
 ### Summary

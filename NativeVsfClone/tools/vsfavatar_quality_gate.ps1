@@ -143,6 +143,7 @@ $baseline = Parse-Report -Path $BaselinePath
 $requiredFields = @(
     "SidecarProbeStage",
     "SidecarPrimaryError",
+    "SidecarObjectTableParsed",
     "SidecarOffsetFamily",
     "SidecarReconCandidateCount",
     "SidecarBestCandidateScore",
@@ -155,11 +156,26 @@ $sampleNames = $current.Order
 $gateA = $true
 $gateB = $false
 $gateC = $true
+$gateD = $false
 $failReasons = @()
 
 if ($UseFixedSet -and $sampleNames.Count -ne $FixedSamples.Count) {
     $gateA = $false
     $failReasons += "GateA: fixed set sample count mismatch (expected=$($FixedSamples.Count), actual=$($sampleNames.Count))"
+}
+if ($current.Header.ContainsKey("FileCount")) {
+    $headerFileCount = [int](To-UInt64 $current.Header["FileCount"])
+    if ($headerFileCount -ne $sampleNames.Count) {
+        $gateA = $false
+        $failReasons += "GateA: header FileCount mismatch (expected=$headerFileCount, actual=$($sampleNames.Count))"
+    }
+}
+if ($current.Header.ContainsKey("GateRows")) {
+    $headerGateRows = [int](To-UInt64 $current.Header["GateRows"])
+    if ($headerGateRows -ne $sampleNames.Count) {
+        $gateA = $false
+        $failReasons += "GateA: header GateRows mismatch (rows=$headerGateRows, samples=$($sampleNames.Count))"
+    }
 }
 
 foreach ($name in $sampleNames) {
@@ -181,8 +197,14 @@ foreach ($name in $sampleNames) {
     if ($stage -eq "failed-serialized" -or $stage -eq "complete") {
         $gateB = $true
     }
+    $objectTableParsed = $sample["SidecarObjectTableParsed"]
+    $primary = $sample["SidecarPrimaryError"]
+    if ($stage -eq "complete" -and $objectTableParsed -eq "True" -and
+        ([string]::IsNullOrWhiteSpace($primary) -or $primary -eq "NONE")) {
+        $gateD = $true
+    }
 
-    if ($sample["SidecarPrimaryError"] -eq "DATA_BLOCK_READ_FAILED") {
+    if ($primary -eq "DATA_BLOCK_READ_FAILED") {
         $offset = To-UInt64 $sample["SidecarFailedReadOffset"]
         $csize = To-UInt64 $sample["SidecarFailedCompressedSize"]
         $usize = To-UInt64 $sample["SidecarFailedUncompressedSize"]
@@ -193,11 +215,15 @@ foreach ($name in $sampleNames) {
         }
     }
 }
+if (-not $gateD) {
+    $failReasons += "GateD: no sample reached complete with object_table_parsed=true and no primary error"
+}
 
 $gateAStatus = if ($gateA) { "PASS" } else { "FAIL" }
 $gateBStatus = if ($gateB) { "PASS" } else { "FAIL" }
 $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
-$overallPass = $gateA -and $gateB -and $gateC
+$gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
+$overallPass = $gateA -and $gateB -and $gateC -and $gateD
 
 $improved = 0
 $regressed = 0
@@ -235,6 +261,7 @@ $summary += "Gate Results"
 $summary += "- GateA (stability + required fields): $gateAStatus"
 $summary += "- GateB (>=1 sample reaches failed-serialized|complete): $gateBStatus"
 $summary += "- GateC (DATA_BLOCK_READ_FAILED tuple evidence): $gateCStatus"
+$summary += "- GateD (>=1 sample reaches complete + object_table_parsed=true + no primary error): $gateDStatus"
 $summary += "- Overall: $(if ($overallPass) { 'PASS' } else { 'FAIL' })"
 $summary += ""
 $summary += "Baseline Diff"

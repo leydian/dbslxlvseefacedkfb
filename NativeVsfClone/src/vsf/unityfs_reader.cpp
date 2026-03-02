@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "vsfclone/vsf/serialized_file_reader.h"
@@ -1454,6 +1455,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
                               std::string& error) {
     SerializedFileReader serialized;
     bool found_candidate = false;
+    bool attempted_candidate = false;
     SerializedFileSummary best {};
     struct CandidateRef {
         std::size_t index = 0U;
@@ -1488,33 +1490,113 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         return a.score > b.score;
     });
     probe.serialized_candidate_count = static_cast<std::uint32_t>(candidates.size());
+    probe.serialized_attempt_count = 0U;
+    probe.serialized_best_candidate_path.clear();
+    probe.serialized_best_candidate_score = std::numeric_limits<std::int32_t>::min();
+    std::string best_failure_error_code;
+    std::int32_t best_failure_score = std::numeric_limits<std::int32_t>::min();
+    auto CountMajorTypeGroups = [](const SerializedFileSummary& summary) -> std::int32_t {
+        std::int32_t groups = 0;
+        if (summary.game_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.mesh_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.material_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.texture_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.skinned_mesh_renderer_count > 0U) {
+            ++groups;
+        }
+        return groups;
+    };
+    auto ScoreParsedSummary = [&](const SerializedFileSummary& summary, std::int64_t candidate_score) -> std::int32_t {
+        std::int32_t score = static_cast<std::int32_t>(candidate_score);
+        score += static_cast<std::int32_t>(summary.object_count * 4U);
+        score += CountMajorTypeGroups(summary) * 15;
+        if (!summary.major_types_found.empty()) {
+            score += 5;
+        }
+        return score;
+    };
+    const std::array<std::int64_t, 7U> node_offset_deltas = {0, 16, -16, 32, -32, 64, -64};
+    std::unordered_set<std::uint64_t> tried_ranges;
+    tried_ranges.reserve(candidates.size() * node_offset_deltas.size());
 
     for (const auto& candidate : candidates) {
         const auto& node = metadata.nodes[candidate.index];
         found_candidate = true;
-        const auto begin = stream.begin() + static_cast<std::ptrdiff_t>(node.offset);
-        const auto end = begin + static_cast<std::ptrdiff_t>(node.size);
-        std::vector<unsigned char> file_bytes(begin, end);
-        auto parsed = serialized.ParseObjectSummary(file_bytes);
-        if (!parsed.ok) {
-            probe.serialized_parse_error_code = parsed.error;
-            continue;
-        }
-        if (!probe.object_table_parsed || parsed.value.object_count > best.object_count) {
-            best = parsed.value;
-            probe.object_table_parsed = true;
+        for (const auto delta : node_offset_deltas) {
+            if (delta < 0 && node.offset < static_cast<std::uint64_t>(-delta)) {
+                continue;
+            }
+            const auto adjusted_offset = static_cast<std::uint64_t>(static_cast<std::int64_t>(node.offset) + delta);
+            if (adjusted_offset + node.size > stream.size()) {
+                continue;
+            }
+            const std::uint64_t key = (adjusted_offset << 16U) ^ node.size;
+            if (!tried_ranges.insert(key).second) {
+                continue;
+            }
+
+            attempted_candidate = true;
+            ++probe.serialized_attempt_count;
+            const auto begin = stream.begin() + static_cast<std::ptrdiff_t>(adjusted_offset);
+            const auto end = begin + static_cast<std::ptrdiff_t>(node.size);
+            std::vector<unsigned char> file_bytes(begin, end);
+            auto parsed = serialized.ParseObjectSummary(file_bytes);
+            if (!parsed.ok) {
+                const auto fail_score = static_cast<std::int32_t>(candidate.score);
+                if (fail_score >= best_failure_score) {
+                    best_failure_score = fail_score;
+                    best_failure_error_code = parsed.error;
+                    probe.serialized_best_candidate_path =
+                        node.path + "@offset=" + std::to_string(adjusted_offset);
+                }
+                continue;
+            }
+
+            const auto parsed_score = ScoreParsedSummary(parsed.value, candidate.score);
+            if (!probe.object_table_parsed ||
+                parsed_score > probe.serialized_best_candidate_score ||
+                (parsed_score == probe.serialized_best_candidate_score &&
+                 CountMajorTypeGroups(parsed.value) > CountMajorTypeGroups(best))) {
+                best = parsed.value;
+                probe.object_table_parsed = true;
+                probe.serialized_best_candidate_score = parsed_score;
+                probe.serialized_best_candidate_path = node.path + "@offset=" + std::to_string(adjusted_offset);
+            }
         }
     }
 
     if (!probe.object_table_parsed) {
-        if (probe.serialized_parse_error_code.empty()) {
-            probe.serialized_parse_error_code = found_candidate ? "SF_NO_VALID_NODE_PARSED" : "SF_NO_CANDIDATE_NODE";
+        if (!best_failure_error_code.empty()) {
+            probe.serialized_parse_error_code = best_failure_error_code;
+        } else if (probe.serialized_parse_error_code.empty()) {
+            if (!found_candidate) {
+                probe.serialized_parse_error_code = "SF_NO_CANDIDATE_NODE";
+            } else if (!attempted_candidate) {
+                probe.serialized_parse_error_code = "SF_NO_VALID_OFFSET_WINDOW";
+            } else {
+                probe.serialized_parse_error_code = "SF_NO_VALID_NODE_PARSED";
+            }
         }
+        probe.serialized_best_candidate_score = std::max(probe.serialized_best_candidate_score, 0);
         probe.probe_primary_error = probe.serialized_parse_error_code;
-        error = found_candidate ? "no candidate node could be parsed as SerializedFile" : "no serialized candidate nodes found";
+        error = found_candidate
+                    ? "no candidate node could be parsed as SerializedFile"
+                    : "no serialized candidate nodes found";
         return false;
     }
 
+    if (probe.serialized_best_candidate_score == std::numeric_limits<std::int32_t>::min()) {
+        probe.serialized_best_candidate_score = 0;
+    }
+    probe.serialized_parse_error_code.clear();
     probe.object_count = best.object_count;
     probe.mesh_object_count = best.mesh_object_count;
     probe.material_object_count = best.material_object_count;
