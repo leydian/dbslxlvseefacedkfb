@@ -68,4 +68,20 @@ public sealed class AvatarSessionService
         ActiveAvatarInfo = null;
         return rc;
     }
+
+    public NcResultCode RefreshAvatarInfo()
+    {
+        if (!ActiveAvatarHandle.HasValue)
+        {
+            ActiveAvatarInfo = null;
+            return NcResultCode.Ok;
+        }
+
+        var rc = NativeCoreInterop.nc_get_avatar_info(ActiveAvatarHandle.Value, out var info);
+        if (rc == NcResultCode.Ok)
+        {
+            ActiveAvatarInfo = info;
+        }
+        return rc;
+    }
 }

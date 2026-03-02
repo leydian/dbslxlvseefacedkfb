@@ -2,6 +2,81 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VRM runtime draw-path activation + host diagnostics/publish hardening
+
+### Summary
+
+Upgraded VRM runtime rendering from clear-only validation to an actual D3D11 mesh/material draw path, fixed HostCore interop drift for new avatar diagnostics fields, and hardened host publish defaults for practical EXE delivery on locked-file environments.
+
+### Changed
+
+- `src/nativecore/native_core.cpp`
+  - Added D3D11 pipeline resources (VS/PS/input layout/constant buffer/depth/blend/sampler) and per-avatar GPU resource caches.
+  - Added mesh/index GPU upload and material SRV binding path.
+  - Added WIC-based texture decode/upload for VRM texture payloads.
+  - Added real frame draw-call counting and storage in `AvatarPackage.last_render_draw_calls`.
+  - Added runtime camera/world fit defaults for immediate on-screen avatar visibility.
+  - Added renderer resource cleanup on unload/destroy/shutdown to avoid stale GPU handles.
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Extended mesh payload metadata:
+    - `vertex_stride`
+    - `material_index`
+  - Extended material payload metadata:
+    - `alpha_mode`
+    - `alpha_cutoff`
+    - `double_sided`
+
+- `src/avatar/vrm_loader.cpp`
+  - Added `TEXCOORD_0` extraction and interleaved position/uv vertex payload generation.
+  - Added primitive-level material index mapping in mesh payloads.
+  - Propagated parsed material alpha/double-sided properties into runtime payloads.
+
+- `host/HostCore/NativeCoreInterop.cs`
+  - Aligned managed `NcAvatarInfo` with native struct tail fields:
+    - `ExpressionCount`
+    - `LastRenderDrawCalls`
+    - `LastExpressionSummary`
+  - Added `nc_get_avatar_info` P/Invoke entry.
+
+- `host/HostCore/AvatarSessionService.cs`
+  - Added `RefreshAvatarInfo()` to re-query live avatar diagnostics each frame.
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added render-loop result capture and live diagnostics output:
+    - `RenderRc`
+    - `DrawCalls`
+    - `Expressions`
+    - `ExpressionSummary`
+
+- `tools/publish_hosts.ps1`
+  - Switched to WPF-first default publish flow.
+  - Added optional WinUI publish switch: `-IncludeWinUi`.
+  - Added running-host process stop step before publish.
+  - Added native build fallback path (`build_hotfix`) for locked `nativecore.dll` cases.
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - Added publish compatibility settings used in current toolchain:
+    - `EnableMsixTooling=true`
+    - `Platforms/Platform/PlatformTarget=x64`
+    - `UseRidGraph=true`
+
+- `CMakeLists.txt`
+  - Added Windows nativecore link dependencies required by the upgraded renderer/texture path:
+    - `d3dcompiler`
+    - `ole32`
+    - `windowscodecs`
+
+### Verified
+
+- `nativecore` Release target builds successfully after renderer/pipeline changes.
+- Patched `nativecore.dll` was deployed to:
+  - `dist/wpf/nativecore.dll`
+  - `dist/wpf_full/nativecore.dll`
+- WPF host diagnostics now expose draw/render telemetry required to distinguish:
+  - "avatar loaded but not rendered"
+  - "draw calls executed but camera/material issue"
+
 ## 2026-03-03 - Host publish CI smoke workflow and artifact contract checks
 
 ### Summary

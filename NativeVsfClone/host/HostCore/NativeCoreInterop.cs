@@ -55,6 +55,8 @@ public struct NcAvatarInfo
     public uint FormatUnknownSectionCount;
     public uint WarningCount;
     public uint MissingFeatureCount;
+    public uint ExpressionCount;
+    public uint LastRenderDrawCalls;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
     public string DisplayName;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
@@ -63,6 +65,8 @@ public struct NcAvatarInfo
     public string ParserStage;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
     public string PrimaryErrorCode;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string LastExpressionSummary;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
     public string LastWarning;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
@@ -133,6 +137,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_unload_avatar(ulong handle);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_avatar_info(ulong handle, out NcAvatarInfo outInfo);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_create_render_resources(ulong handle);

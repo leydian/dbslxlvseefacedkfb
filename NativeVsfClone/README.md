@@ -36,7 +36,7 @@ If `sidecar` mode fails to execute:
   - init/shutdown
   - avatar load/query/unload
   - tracking frame submission
-  - render tick (D3D11 clear + window-target render path)
+  - render tick (D3D11 window-target mesh/material draw path)
   - Spout/OSC start-stop with runtime backends
   - runtime stats retrieval (`nc_get_runtime_stats`)
   - last error retrieval
@@ -46,6 +46,14 @@ If `sidecar` mode fails to execute:
   - `docs/reports/ui_host_runtime_integration_2026-03-02.md`
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
 - `vsfavatar_sidecar` is built as an external parser process.
+- VRM runtime payloads now include:
+  - interleaved position/uv vertex payload extraction
+  - material alpha mode/cutoff/double-sided metadata
+  - texture payload upload and shader resource binding
+- WPF diagnostics panel now shows:
+  - per-frame render return code
+  - per-avatar draw-call count
+  - expression summary text
 
 ## What is not implemented yet
 
@@ -54,7 +62,7 @@ If `sidecar` mode fails to execute:
 - Full VRM feature coverage (full MToon, SpringBone, expressions)
 - `.vxavatar` manifest/material override parse/apply
 - `.vxa2` streaming payload unpack optimization
-- Full mesh/material draw path (current render is clear-path + output hooks)
+- Full production renderer features (normal/tangent/skin pipeline, full MToon lighting, post process)
 - Full Spout2 SDK interop compatibility (current sender uses internal shared memory transport)
 
 ## Build (Windows)
@@ -90,7 +98,7 @@ $env:VSF_SIDECAR_PATH = "D:\custom\vsfavatar_sidecar.exe"
 $env:VSF_SIDECAR_TIMEOUT_MS = "15000"
 ```
 
-## GUI EXE Publish (WPF + WinUI)
+## GUI EXE Publish (WPF default, WinUI optional)
 
 Prerequisites:
 
@@ -98,17 +106,28 @@ Prerequisites:
 - Windows App SDK tooling (WinUI host publish)
 - `build/Release/nativecore.dll` available (native build)
 
-Run:
+Run (WPF only default):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1
 ```
 
+Run (WPF + WinUI):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi
+```
+
 Outputs:
 
 - `dist/wpf` (`WpfHost.exe` + `nativecore.dll`)
-- `dist/winui` (`WinUiHost.exe` + `nativecore.dll`)
+- `dist/winui` (`WinUiHost.exe` + `nativecore.dll`, only when `-IncludeWinUi` is set)
 - `build/reports/host_publish_latest.txt`
+
+Notes:
+
+- Script auto-kills running `WpfHost`/`WinUiHost` before publish.
+- If `build/Release/nativecore.dll` is locked, script falls back to `build_hotfix` and copies the fallback DLL.
 
 ## VSFAvatar quality gate
 

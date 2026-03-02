@@ -603,6 +603,44 @@ bool ExtractIndices(const std::vector<std::uint8_t>& bin,
     return true;
 }
 
+bool ExtractTexcoord0(const std::vector<std::uint8_t>& bin,
+                      const std::vector<AccessorMeta>& accessors,
+                      const std::vector<BufferViewMeta>& views,
+                      std::size_t accessor_index,
+                      std::vector<std::array<float, 2U>>* out_uvs,
+                      std::string* out_error) {
+    if (accessor_index >= accessors.size()) {
+        *out_error = "texcoord accessor index out of range";
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.component_type != 5126U || a.type != "VEC2") {
+        *out_error = "TEXCOORD_0 accessor must be FLOAT VEC2";
+        return false;
+    }
+    if (a.buffer_view >= views.size()) {
+        *out_error = "texcoord bufferView index out of range";
+        return false;
+    }
+    const auto& bv = views[a.buffer_view];
+    const std::size_t start = static_cast<std::size_t>(bv.byte_offset) + static_cast<std::size_t>(a.byte_offset);
+    const std::size_t stride = bv.byte_stride > 0U ? bv.byte_stride : 8U;
+    const std::size_t needed = start + (static_cast<std::size_t>(a.count) - 1U) * stride + 8U;
+    if (a.count == 0U || needed > bin.size()) {
+        *out_error = "texcoord accessor data out of range";
+        return false;
+    }
+    out_uvs->clear();
+    out_uvs->reserve(a.count);
+    for (std::uint32_t i = 0U; i < a.count; ++i) {
+        const std::size_t base = start + static_cast<std::size_t>(i) * stride;
+        const float u = ReadF32Le(bin, base);
+        const float v = ReadF32Le(bin, base + 4U);
+        out_uvs->push_back({u, v});
+    }
+    return true;
+}
+
 struct MaterialInfo {
     std::string name;
     std::string shader_name = "MToon (minimal)";
@@ -929,7 +967,14 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
     for (const auto& m : parsed_materials) {
         pkg.materials.push_back({m.name, m.shader_name});
-        pkg.material_payloads.push_back({m.name, m.shader_name, m.base_color_texture_name});
+        MaterialRenderPayload material_payload;
+        material_payload.name = m.name;
+        material_payload.shader_name = m.shader_name;
+        material_payload.base_color_texture_name = m.base_color_texture_name;
+        material_payload.alpha_mode = m.alpha_mode;
+        material_payload.alpha_cutoff = m.alpha_cutoff;
+        material_payload.double_sided = m.double_sided;
+        pkg.material_payloads.push_back(std::move(material_payload));
         std::ostringstream material_diag;
         material_diag << "W_MATERIAL: " << m.name
                       << ", alphaMode=" << m.alpha_mode
@@ -970,11 +1015,34 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             mesh_name = "Mesh" + std::to_string(mesh_added);
         }
         mesh_payload.name = mesh_name;
+        mesh_payload.vertex_stride = 12U;
         std::uint32_t vtx_count = 0U;
         std::string read_error;
         if (!ExtractPositions(bin_chunk.bytes, accessors, views, pos_accessor, &mesh_payload.vertex_blob, &vtx_count, &read_error)) {
             pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: " + read_error);
             continue;
+        }
+
+        const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
+        if (uv0_v != nullptr && uv0_v->type == JsonValue::Type::Number) {
+            const std::size_t uv_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(uv0_v->number_value));
+            std::vector<std::array<float, 2U>> uvs;
+            if (ExtractTexcoord0(bin_chunk.bytes, accessors, views, uv_accessor, &uvs, &read_error) &&
+                uvs.size() == static_cast<std::size_t>(vtx_count)) {
+                std::vector<std::uint8_t> interleaved;
+                interleaved.reserve(static_cast<std::size_t>(vtx_count) * 20U);
+                const auto* pos_bytes = mesh_payload.vertex_blob.data();
+                for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                    const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
+                    interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
+                    const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uvs[i].data());
+                    interleaved.insert(interleaved.end(), uv_bytes, uv_bytes + 8U);
+                }
+                mesh_payload.vertex_blob = std::move(interleaved);
+                mesh_payload.vertex_stride = 20U;
+            } else {
+                pkg.warnings.push_back("W_PAYLOAD: VRM_TEXCOORD0_READ_FAILED: " + read_error);
+            }
         }
 
         std::size_t idx_accessor = std::numeric_limits<std::size_t>::max();
@@ -984,6 +1052,11 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 mesh_payload.indices.clear();
             }
         }
+        std::size_t material_index = std::numeric_limits<std::size_t>::max();
+        if (TryGetIndex(prim, "material", &material_index)) {
+            mesh_payload.material_index = static_cast<std::int32_t>(material_index);
+        }
+
         if (mesh_payload.indices.empty()) {
             mesh_payload.indices.reserve(vtx_count);
             for (std::uint32_t i = 0U; i < vtx_count; ++i) {
@@ -1007,7 +1080,14 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
     if (pkg.materials.empty()) {
         pkg.materials.push_back({"Default", "MToon (minimal)"});
-        pkg.material_payloads.push_back({"Default", "MToon (minimal)", ""});
+        MaterialRenderPayload default_material;
+        default_material.name = "Default";
+        default_material.shader_name = "MToon (minimal)";
+        default_material.base_color_texture_name = "";
+        default_material.alpha_mode = "OPAQUE";
+        default_material.alpha_cutoff = 0.5f;
+        default_material.double_sided = false;
+        pkg.material_payloads.push_back(std::move(default_material));
         pkg.warnings.push_back("W_PARSE: VRM_MATERIAL_UNSUPPORTED: materials array missing or empty");
         ++unsupported_materials;
     }

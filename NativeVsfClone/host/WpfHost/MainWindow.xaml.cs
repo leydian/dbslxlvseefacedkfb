@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _timer = new();
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private IntPtr _hwnd = IntPtr.Zero;
+    private NcResultCode _lastRenderRc = NcResultCode.Ok;
 
     public MainWindow()
     {
@@ -113,7 +114,8 @@ public partial class MainWindow : Window
     {
         var elapsed = _frameTimer.Elapsed;
         _frameTimer.Restart();
-        _ = _renderLoop.Tick((float)elapsed.TotalSeconds);
+        _lastRenderRc = _renderLoop.Tick((float)elapsed.TotalSeconds);
+        _ = _session.RefreshAvatarInfo();
         RefreshDiagnostics();
     }
 
@@ -121,7 +123,7 @@ public partial class MainWindow : Window
     {
         var d = DiagnosticsModel.Capture();
         var sb = new StringBuilder();
-        sb.AppendLine($"AvatarHandle: {_session.ActiveAvatarHandle?.ToString() ?? \"none\"}");
+        sb.AppendLine($"AvatarHandle: {_session.ActiveAvatarHandle?.ToString() ?? "none"}");
         if (_session.ActiveAvatarInfo.HasValue)
         {
             var info = _session.ActiveAvatarInfo.Value;
@@ -130,7 +132,11 @@ public partial class MainWindow : Window
             sb.AppendLine($"MeshPayloads: {info.MeshPayloadCount}");
             sb.AppendLine($"MaterialPayloads: {info.MaterialPayloadCount}");
             sb.AppendLine($"TexturePayloads: {info.TexturePayloadCount}");
+            sb.AppendLine($"Expressions: {info.ExpressionCount}");
+            sb.AppendLine($"DrawCalls: {info.LastRenderDrawCalls}");
+            sb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
         }
+        sb.AppendLine($"RenderRc: {_lastRenderRc}");
         sb.AppendLine($"RenderReadyAvatars: {d.RenderReadyAvatarCount}");
         sb.AppendLine($"SpoutActive: {d.SpoutActive}");
         sb.AppendLine($"OscActive: {d.OscActive}");

@@ -36,12 +36,17 @@ struct MeshRenderPayload {
     std::string name;
     std::vector<std::uint8_t> vertex_blob;
     std::vector<std::uint32_t> indices;
+    std::uint32_t vertex_stride = 12;
+    std::int32_t material_index = -1;
 };
 
 struct MaterialRenderPayload {
     std::string name;
     std::string shader_name;
     std::string base_color_texture_name;
+    std::string alpha_mode = "OPAQUE";
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
 };
 
 struct TextureRenderPayload {

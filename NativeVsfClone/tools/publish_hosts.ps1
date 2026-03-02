@@ -1,7 +1,8 @@
 param(
     [string]$Configuration = "Release",
     [string]$RuntimeIdentifier = "win-x64",
-    [switch]$SkipNativeBuild
+    [switch]$SkipNativeBuild,
+    [switch]$IncludeWinUi
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,38 +14,69 @@ function Write-Step {
 
 function Assert-Command {
     param([string]$Name)
-    $cmd = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($null -eq $cmd) {
+    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required command not found: $Name"
+    }
+}
+
+function Stop-IfRunning {
+    param([string]$ProcessName)
+    try {
+        Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    } catch {
+        # ignore
     }
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repoRoot "build"
+$buildHotfixDir = Join-Path $repoRoot "build_hotfix"
 $reportDir = Join-Path $buildDir "reports"
 $distRoot = Join-Path $repoRoot "dist"
 $wpfDist = Join-Path $distRoot "wpf"
 $winUiDist = Join-Path $distRoot "winui"
 $nativeCoreDll = Join-Path $buildDir "Release\nativecore.dll"
+$nativeCoreDllHotfix = Join-Path $buildHotfixDir "Release\nativecore.dll"
 $logPath = Join-Path $reportDir "host_publish_latest.txt"
 
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
 
-$logLines = [System.Collections.Generic.List[string]]::new()
-$logLines.Add("Host publish run: $(Get-Date -Format o)")
-$logLines.Add("Configuration: $Configuration")
-$logLines.Add("RuntimeIdentifier: $RuntimeIdentifier")
+$log = [System.Collections.Generic.List[string]]::new()
+$log.Add("Host publish run: $(Get-Date -Format o)")
+$log.Add("Configuration: $Configuration")
+$log.Add("RuntimeIdentifier: $RuntimeIdentifier")
+$log.Add("IncludeWinUi: $IncludeWinUi")
 
 Assert-Command "cmake"
 Assert-Command "dotnet"
 
+Stop-IfRunning "WpfHost"
+Stop-IfRunning "WinUiHost"
+
 if (-not $SkipNativeBuild) {
-    Write-Step "Building native Release artifacts..."
-    cmake --build $buildDir --config Release | Out-Host
-    $logLines.Add("Native build: executed")
+    Write-Step "Building nativecore..."
+    $nativeBuildSucceeded = $false
+    try {
+        cmake --build $buildDir --config Release --target nativecore | Out-Host
+        $nativeBuildSucceeded = $true
+        $log.Add("Native build: build/nativecore success")
+    } catch {
+        $log.Add("Native build: build/nativecore failed, trying build_hotfix")
+    }
+
+    if (-not $nativeBuildSucceeded) {
+        Write-Step "Falling back to build_hotfix for locked-dll cases..."
+        cmake -S $repoRoot -B $buildHotfixDir -G "Visual Studio 17 2022" -A x64 | Out-Host
+        cmake --build $buildHotfixDir --config Release --target nativecore | Out-Host
+        if (-not (Test-Path $nativeCoreDllHotfix)) {
+            throw "nativecore.dll not found in fallback build output: $nativeCoreDllHotfix"
+        }
+        Copy-Item -Path $nativeCoreDllHotfix -Destination $nativeCoreDll -Force
+        $log.Add("Native build: fallback build_hotfix used")
+    }
 } else {
-    $logLines.Add("Native build: skipped")
+    $log.Add("Native build: skipped")
 }
 
 if (-not (Test-Path $nativeCoreDll)) {
@@ -54,46 +86,51 @@ if (-not (Test-Path $nativeCoreDll)) {
 $wpfProject = Join-Path $repoRoot "host\WpfHost\WpfHost.csproj"
 $winUiProject = Join-Path $repoRoot "host\WinUiHost\WinUiHost.csproj"
 
-Write-Step "Publishing WPF host..."
-dotnet publish $wpfProject -c $Configuration -r $RuntimeIdentifier --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false | Out-Host
+Write-Step "Publishing WPF host to dist/wpf..."
+dotnet publish $wpfProject `
+    -c $Configuration `
+    -r $RuntimeIdentifier `
+    --self-contained true `
+    /p:PublishSingleFile=true `
+    /p:PublishTrimmed=false `
+    -o $wpfDist | Out-Host
 
-Write-Step "Publishing WinUI host..."
-dotnet publish $winUiProject -c $Configuration -r $RuntimeIdentifier --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false /p:WindowsAppSDKSelfContained=true | Out-Host
-
-$wpfPublishDir = Join-Path $repoRoot "host\WpfHost\bin\$Configuration\net8.0-windows\$RuntimeIdentifier\publish"
-$winUiPublishDir = Join-Path $repoRoot "host\WinUiHost\bin\$Configuration\net8.0-windows10.0.19041.0\$RuntimeIdentifier\publish"
-
-if (-not (Test-Path $wpfPublishDir)) {
-    throw "WPF publish output not found: $wpfPublishDir"
+if (-not (Test-Path (Join-Path $wpfDist "WpfHost.exe"))) {
+    throw "WPF publish output not found: $wpfDist"
 }
-if (-not (Test-Path $winUiPublishDir)) {
-    throw "WinUI publish output not found: $winUiPublishDir"
-}
-
-Write-Step "Preparing dist output folders..."
-if (Test-Path $wpfDist) { Remove-Item -Recurse -Force $wpfDist }
-if (Test-Path $winUiDist) { Remove-Item -Recurse -Force $winUiDist }
-New-Item -ItemType Directory -Force -Path $wpfDist | Out-Null
-New-Item -ItemType Directory -Force -Path $winUiDist | Out-Null
-
-Copy-Item -Path (Join-Path $wpfPublishDir "*") -Destination $wpfDist -Recurse -Force
-Copy-Item -Path (Join-Path $winUiPublishDir "*") -Destination $winUiDist -Recurse -Force
 
 Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
-Copy-Item -Path $nativeCoreDll -Destination $winUiDist -Force
+$log.Add("WPF dist: $wpfDist")
+$log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
 
-$wpfExe = Get-ChildItem -Path $wpfDist -Filter "*.exe" -File | Select-Object -First 1
-$winUiExe = Get-ChildItem -Path $winUiDist -Filter "*.exe" -File | Select-Object -First 1
+if ($IncludeWinUi) {
+    Write-Step "Publishing WinUI host to dist/winui..."
+    dotnet publish $winUiProject `
+        -c $Configuration `
+        -r $RuntimeIdentifier `
+        --self-contained true `
+        -p:Platform=x64 `
+        /p:PublishSingleFile=false `
+        /p:PublishTrimmed=false `
+        /p:WindowsAppSDKSelfContained=true `
+        -o $winUiDist | Out-Host
 
-$logLines.Add("WPF dist: $wpfDist")
-$logLines.Add("WPF exe: $($wpfExe.FullName)")
-$logLines.Add("WinUI dist: $winUiDist")
-$logLines.Add("WinUI exe: $($winUiExe.FullName)")
-$logLines.Add("NativeCore copy: $nativeCoreDll -> dist/{wpf,winui}")
+    if (-not (Test-Path (Join-Path $winUiDist "WinUiHost.exe"))) {
+        throw "WinUI publish output not found: $winUiDist"
+    }
+    Copy-Item -Path $nativeCoreDll -Destination $winUiDist -Force
+    $log.Add("WinUI dist: $winUiDist")
+    $log.Add("WinUI exe: $(Join-Path $winUiDist 'WinUiHost.exe')")
+} else {
+    $log.Add("WinUI publish: skipped (use -IncludeWinUi)")
+}
 
-$logLines | Set-Content -Path $logPath -Encoding UTF8
+$log.Add("NativeCore copy: $nativeCoreDll")
+$log | Set-Content -Path $logPath -Encoding UTF8
 
 Write-Step "Done."
-Write-Step "WPF dist: $wpfDist"
-Write-Step "WinUI dist: $winUiDist"
+Write-Step "WPF EXE: $(Join-Path $wpfDist 'WpfHost.exe')"
+if ($IncludeWinUi) {
+    Write-Step "WinUI EXE: $(Join-Path $winUiDist 'WinUiHost.exe')"
+}
 Write-Step "Report: $logPath"

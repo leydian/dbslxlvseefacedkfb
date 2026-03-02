@@ -32,7 +32,7 @@ add_library(nativecore SHARED
 )
 target_link_libraries(nativecore PRIVATE vsfclone_core)
 if(WIN32)
-    target_link_libraries(nativecore PRIVATE d3d11 dxgi ws2_32)
+    target_link_libraries(nativecore PRIVATE d3d11 d3dcompiler dxgi ole32 windowscodecs ws2_32)
 endif()
 target_include_directories(nativecore
     PUBLIC

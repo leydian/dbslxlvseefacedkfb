@@ -1,9 +1,13 @@
 #include "vsfclone/nativecore/api.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -20,7 +24,10 @@
 #endif
 #include <Windows.h>
 #include <d3d11.h>
+#include <d3dcompiler.h>
+#include <DirectXMath.h>
 #include <dxgi.h>
+#include <wincodec.h>
 #endif
 
 namespace vsfclone::nativecore {
@@ -40,6 +47,46 @@ struct WindowRenderState {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
 };
+
+struct GpuMeshResource {
+    ID3D11Buffer* vertex_buffer = nullptr;
+    ID3D11Buffer* index_buffer = nullptr;
+    std::uint32_t vertex_count = 0;
+    std::uint32_t index_count = 0;
+    std::int32_t material_index = -1;
+    DirectX::XMFLOAT3 center = {0.0f, 0.0f, 0.0f};
+    std::uint32_t vertex_stride = 12;
+    DirectX::XMFLOAT3 bounds_min = {0.0f, 0.0f, 0.0f};
+    DirectX::XMFLOAT3 bounds_max = {0.0f, 0.0f, 0.0f};
+};
+
+struct GpuMaterialResource {
+    std::string alpha_mode = "OPAQUE";
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
+    ID3D11ShaderResourceView* base_color_srv = nullptr;
+};
+
+struct RendererResources {
+    ID3D11Device* device = nullptr;
+    ID3D11VertexShader* vertex_shader = nullptr;
+    ID3D11PixelShader* pixel_shader = nullptr;
+    ID3D11InputLayout* input_layout = nullptr;
+    ID3D11Buffer* constant_buffer = nullptr;
+    ID3D11RasterizerState* raster_cull_back = nullptr;
+    ID3D11RasterizerState* raster_cull_none = nullptr;
+    ID3D11DepthStencilState* depth_write = nullptr;
+    ID3D11DepthStencilState* depth_read = nullptr;
+    ID3D11BlendState* blend_opaque = nullptr;
+    ID3D11BlendState* blend_alpha = nullptr;
+    ID3D11SamplerState* linear_sampler = nullptr;
+    ID3D11Texture2D* depth_texture = nullptr;
+    ID3D11DepthStencilView* depth_dsv = nullptr;
+    std::uint32_t depth_width = 0;
+    std::uint32_t depth_height = 0;
+    std::unordered_map<std::uint64_t, std::vector<GpuMeshResource>> avatar_meshes;
+    std::unordered_map<std::uint64_t, std::vector<GpuMaterialResource>> avatar_materials;
+};
 #endif
 
 struct CoreState {
@@ -55,6 +102,7 @@ struct CoreState {
 
 #if defined(_WIN32)
     std::unordered_map<void*, WindowRenderState> window_targets;
+    RendererResources renderer;
 #endif
 
     NcResultCode last_error_code = NC_OK;
@@ -197,6 +245,674 @@ void ReleaseWindowState(WindowRenderState* state) {
     state->height = 0;
 }
 
+void ReleaseGpuMeshResource(GpuMeshResource* mesh) {
+    if (mesh == nullptr) {
+        return;
+    }
+    if (mesh->vertex_buffer != nullptr) {
+        mesh->vertex_buffer->Release();
+        mesh->vertex_buffer = nullptr;
+    }
+    if (mesh->index_buffer != nullptr) {
+        mesh->index_buffer->Release();
+        mesh->index_buffer = nullptr;
+    }
+    mesh->vertex_count = 0;
+    mesh->index_count = 0;
+    mesh->material_index = -1;
+    mesh->center = {0.0f, 0.0f, 0.0f};
+    mesh->bounds_min = {0.0f, 0.0f, 0.0f};
+    mesh->bounds_max = {0.0f, 0.0f, 0.0f};
+}
+
+void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
+    if (material == nullptr) {
+        return;
+    }
+    if (material->base_color_srv != nullptr) {
+        material->base_color_srv->Release();
+        material->base_color_srv = nullptr;
+    }
+    material->alpha_mode = "OPAQUE";
+    material->alpha_cutoff = 0.5f;
+    material->double_sided = false;
+}
+
+void ResetRendererResources(RendererResources* renderer) {
+    if (renderer == nullptr) {
+        return;
+    }
+    for (auto& [_, meshes] : renderer->avatar_meshes) {
+        for (auto& mesh : meshes) {
+            ReleaseGpuMeshResource(&mesh);
+        }
+    }
+    renderer->avatar_meshes.clear();
+    for (auto& [_, materials] : renderer->avatar_materials) {
+        for (auto& material : materials) {
+            ReleaseGpuMaterialResource(&material);
+        }
+    }
+    renderer->avatar_materials.clear();
+    if (renderer->depth_dsv != nullptr) {
+        renderer->depth_dsv->Release();
+        renderer->depth_dsv = nullptr;
+    }
+    if (renderer->depth_texture != nullptr) {
+        renderer->depth_texture->Release();
+        renderer->depth_texture = nullptr;
+    }
+    if (renderer->blend_alpha != nullptr) {
+        renderer->blend_alpha->Release();
+        renderer->blend_alpha = nullptr;
+    }
+    if (renderer->linear_sampler != nullptr) {
+        renderer->linear_sampler->Release();
+        renderer->linear_sampler = nullptr;
+    }
+    if (renderer->blend_opaque != nullptr) {
+        renderer->blend_opaque->Release();
+        renderer->blend_opaque = nullptr;
+    }
+    if (renderer->depth_read != nullptr) {
+        renderer->depth_read->Release();
+        renderer->depth_read = nullptr;
+    }
+    if (renderer->depth_write != nullptr) {
+        renderer->depth_write->Release();
+        renderer->depth_write = nullptr;
+    }
+    if (renderer->raster_cull_none != nullptr) {
+        renderer->raster_cull_none->Release();
+        renderer->raster_cull_none = nullptr;
+    }
+    if (renderer->raster_cull_back != nullptr) {
+        renderer->raster_cull_back->Release();
+        renderer->raster_cull_back = nullptr;
+    }
+    if (renderer->constant_buffer != nullptr) {
+        renderer->constant_buffer->Release();
+        renderer->constant_buffer = nullptr;
+    }
+    if (renderer->input_layout != nullptr) {
+        renderer->input_layout->Release();
+        renderer->input_layout = nullptr;
+    }
+    if (renderer->pixel_shader != nullptr) {
+        renderer->pixel_shader->Release();
+        renderer->pixel_shader = nullptr;
+    }
+    if (renderer->vertex_shader != nullptr) {
+        renderer->vertex_shader->Release();
+        renderer->vertex_shader = nullptr;
+    }
+    if (renderer->device != nullptr) {
+        renderer->device->Release();
+        renderer->device = nullptr;
+    }
+    renderer->depth_width = 0U;
+    renderer->depth_height = 0U;
+}
+
+bool EnsureDepthResources(RendererResources* renderer, ID3D11Device* device, std::uint32_t width, std::uint32_t height) {
+    if (renderer == nullptr || device == nullptr || width == 0U || height == 0U) {
+        return false;
+    }
+    if (renderer->depth_texture != nullptr && renderer->depth_dsv != nullptr &&
+        renderer->depth_width == width && renderer->depth_height == height) {
+        return true;
+    }
+    if (renderer->depth_dsv != nullptr) {
+        renderer->depth_dsv->Release();
+        renderer->depth_dsv = nullptr;
+    }
+    if (renderer->depth_texture != nullptr) {
+        renderer->depth_texture->Release();
+        renderer->depth_texture = nullptr;
+    }
+
+    D3D11_TEXTURE2D_DESC depth_desc {};
+    depth_desc.Width = width;
+    depth_desc.Height = height;
+    depth_desc.MipLevels = 1U;
+    depth_desc.ArraySize = 1U;
+    depth_desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    depth_desc.SampleDesc.Count = 1U;
+    depth_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    if (FAILED(device->CreateTexture2D(&depth_desc, nullptr, &renderer->depth_texture)) || renderer->depth_texture == nullptr) {
+        return false;
+    }
+    if (FAILED(device->CreateDepthStencilView(renderer->depth_texture, nullptr, &renderer->depth_dsv)) || renderer->depth_dsv == nullptr) {
+        return false;
+    }
+    renderer->depth_width = width;
+    renderer->depth_height = height;
+    return true;
+}
+
+bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) {
+    if (renderer == nullptr || device == nullptr) {
+        return false;
+    }
+    if (renderer->device != nullptr && renderer->device != device) {
+        ResetRendererResources(renderer);
+    }
+    if (renderer->device == nullptr) {
+        renderer->device = device;
+        renderer->device->AddRef();
+    }
+    if (renderer->vertex_shader != nullptr && renderer->pixel_shader != nullptr &&
+        renderer->input_layout != nullptr && renderer->constant_buffer != nullptr &&
+        renderer->raster_cull_back != nullptr && renderer->raster_cull_none != nullptr &&
+        renderer->depth_write != nullptr && renderer->depth_read != nullptr &&
+        renderer->blend_opaque != nullptr && renderer->blend_alpha != nullptr &&
+        renderer->linear_sampler != nullptr) {
+        return true;
+    }
+
+    constexpr char kVertexShaderSrc[] =
+        "cbuffer SceneCB : register(b0) {\n"
+        "  float4x4 world_view_proj;\n"
+        "  float4 base_color;\n"
+        "  float alpha_cutoff;\n"
+        "  float alpha_mode_mask;\n"
+        "  float has_texture;\n"
+        "  float _pad;\n"
+        "};\n"
+        "struct VSIn { float3 pos : POSITION; float2 uv : TEXCOORD0; };\n"
+        "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
+        "VSOut main(VSIn i) {\n"
+        "  VSOut o;\n"
+        "  o.pos = mul(float4(i.pos, 1.0), world_view_proj);\n"
+        "  o.color = base_color;\n"
+        "  o.uv = i.uv;\n"
+        "  return o;\n"
+        "}\n";
+    constexpr char kPixelShaderSrc[] =
+        "cbuffer SceneCB : register(b0) {\n"
+        "  float4x4 world_view_proj;\n"
+        "  float4 base_color;\n"
+        "  float alpha_cutoff;\n"
+        "  float alpha_mode_mask;\n"
+        "  float has_texture;\n"
+        "  float _pad;\n"
+        "};\n"
+        "Texture2D tex0 : register(t0);\n"
+        "SamplerState samp0 : register(s0);\n"
+        "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float2 uv : TEXCOORD0) : SV_TARGET {\n"
+        "  float4 out_color = color;\n"
+        "  if (has_texture > 0.5) {\n"
+        "    float4 texel = tex0.Sample(samp0, uv);\n"
+        "    out_color.rgb *= texel.rgb;\n"
+        "    if (alpha_mode_mask > 0.5) {\n"
+        "      out_color.a *= texel.a;\n"
+        "    }\n"
+        "  }\n"
+        "  if (alpha_mode_mask > 0.5 && out_color.a < alpha_cutoff) {\n"
+        "    clip(-1.0);\n"
+        "  }\n"
+        "  return out_color;\n"
+        "}\n";
+
+    ID3DBlob* vs_blob = nullptr;
+    ID3DBlob* ps_blob = nullptr;
+    ID3DBlob* err_blob = nullptr;
+    HRESULT hr = D3DCompile(
+        kVertexShaderSrc,
+        sizeof(kVertexShaderSrc) - 1U,
+        nullptr,
+        nullptr,
+        nullptr,
+        "main",
+        "vs_5_0",
+        0U,
+        0U,
+        &vs_blob,
+        &err_blob);
+    if (FAILED(hr) || vs_blob == nullptr) {
+        if (err_blob != nullptr) {
+            err_blob->Release();
+        }
+        return false;
+    }
+    if (err_blob != nullptr) {
+        err_blob->Release();
+        err_blob = nullptr;
+    }
+    hr = D3DCompile(
+        kPixelShaderSrc,
+        sizeof(kPixelShaderSrc) - 1U,
+        nullptr,
+        nullptr,
+        nullptr,
+        "main",
+        "ps_5_0",
+        0U,
+        0U,
+        &ps_blob,
+        &err_blob);
+    if (FAILED(hr) || ps_blob == nullptr) {
+        if (vs_blob != nullptr) {
+            vs_blob->Release();
+        }
+        if (err_blob != nullptr) {
+            err_blob->Release();
+        }
+        return false;
+    }
+    if (err_blob != nullptr) {
+        err_blob->Release();
+        err_blob = nullptr;
+    }
+
+    hr = device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nullptr, &renderer->vertex_shader);
+    if (FAILED(hr) || renderer->vertex_shader == nullptr) {
+        vs_blob->Release();
+        ps_blob->Release();
+        return false;
+    }
+    hr = device->CreatePixelShader(ps_blob->GetBufferPointer(), ps_blob->GetBufferSize(), nullptr, &renderer->pixel_shader);
+    if (FAILED(hr) || renderer->pixel_shader == nullptr) {
+        vs_blob->Release();
+        ps_blob->Release();
+        return false;
+    }
+
+    const D3D11_INPUT_ELEMENT_DESC input_desc[] = {
+        {"POSITION", 0U, DXGI_FORMAT_R32G32B32_FLOAT, 0U, 0U, D3D11_INPUT_PER_VERTEX_DATA, 0U},
+        {"TEXCOORD", 0U, DXGI_FORMAT_R32G32_FLOAT, 0U, 12U, D3D11_INPUT_PER_VERTEX_DATA, 0U},
+    };
+    hr = device->CreateInputLayout(
+        input_desc,
+        2U,
+        vs_blob->GetBufferPointer(),
+        vs_blob->GetBufferSize(),
+        &renderer->input_layout);
+    vs_blob->Release();
+    ps_blob->Release();
+    if (FAILED(hr) || renderer->input_layout == nullptr) {
+        return false;
+    }
+
+    struct alignas(16) SceneConstants {
+        float world_view_proj[16];
+        float base_color[4];
+        float alpha_cutoff;
+        float alpha_mode_mask;
+        float has_texture;
+        float _pad;
+    };
+    D3D11_BUFFER_DESC cb_desc {};
+    cb_desc.ByteWidth = static_cast<UINT>(sizeof(SceneConstants));
+    cb_desc.Usage = D3D11_USAGE_DYNAMIC;
+    cb_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cb_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    hr = device->CreateBuffer(&cb_desc, nullptr, &renderer->constant_buffer);
+    if (FAILED(hr) || renderer->constant_buffer == nullptr) {
+        return false;
+    }
+
+    D3D11_RASTERIZER_DESC raster_desc {};
+    raster_desc.FillMode = D3D11_FILL_SOLID;
+    raster_desc.CullMode = D3D11_CULL_BACK;
+    raster_desc.DepthClipEnable = TRUE;
+    hr = device->CreateRasterizerState(&raster_desc, &renderer->raster_cull_back);
+    if (FAILED(hr) || renderer->raster_cull_back == nullptr) {
+        return false;
+    }
+    raster_desc.CullMode = D3D11_CULL_NONE;
+    hr = device->CreateRasterizerState(&raster_desc, &renderer->raster_cull_none);
+    if (FAILED(hr) || renderer->raster_cull_none == nullptr) {
+        return false;
+    }
+
+    D3D11_DEPTH_STENCIL_DESC depth_desc {};
+    depth_desc.DepthEnable = TRUE;
+    depth_desc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    depth_desc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+    hr = device->CreateDepthStencilState(&depth_desc, &renderer->depth_write);
+    if (FAILED(hr) || renderer->depth_write == nullptr) {
+        return false;
+    }
+    depth_desc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    hr = device->CreateDepthStencilState(&depth_desc, &renderer->depth_read);
+    if (FAILED(hr) || renderer->depth_read == nullptr) {
+        return false;
+    }
+
+    D3D11_BLEND_DESC blend_desc {};
+    blend_desc.RenderTarget[0].BlendEnable = FALSE;
+    blend_desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    hr = device->CreateBlendState(&blend_desc, &renderer->blend_opaque);
+    if (FAILED(hr) || renderer->blend_opaque == nullptr) {
+        return false;
+    }
+
+    blend_desc.RenderTarget[0].BlendEnable = TRUE;
+    blend_desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    blend_desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    blend_desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    hr = device->CreateBlendState(&blend_desc, &renderer->blend_alpha);
+    if (FAILED(hr) || renderer->blend_alpha == nullptr) {
+        return false;
+    }
+    D3D11_SAMPLER_DESC sampler_desc {};
+    sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+    sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+    sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    sampler_desc.MaxAnisotropy = 1U;
+    sampler_desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sampler_desc.MinLOD = 0.0f;
+    sampler_desc.MaxLOD = D3D11_FLOAT32_MAX;
+    hr = device->CreateSamplerState(&sampler_desc, &renderer->linear_sampler);
+    if (FAILED(hr) || renderer->linear_sampler == nullptr) {
+        return false;
+    }
+    return true;
+}
+
+bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Device* device, GpuMeshResource* out_mesh) {
+    if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty() || payload.indices.empty()) {
+        return false;
+    }
+    const std::uint32_t src_stride = payload.vertex_stride >= 12U ? payload.vertex_stride : 12U;
+    if ((payload.vertex_blob.size() % src_stride) != 0U) {
+        return false;
+    }
+    const std::uint32_t vertex_count = static_cast<std::uint32_t>(payload.vertex_blob.size() / src_stride);
+    const std::uint32_t index_count = static_cast<std::uint32_t>(payload.indices.size());
+
+    std::vector<std::uint8_t> gpu_vertex_blob;
+    gpu_vertex_blob.reserve(static_cast<std::size_t>(vertex_count) * 20U);
+    const auto* src = payload.vertex_blob.data();
+    for (std::uint32_t i = 0U; i < vertex_count; ++i) {
+        const std::size_t base = static_cast<std::size_t>(i) * src_stride;
+        gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base, src + base + 12U);
+        if (src_stride >= 20U) {
+            gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base + 12U, src + base + 20U);
+        } else {
+            const std::array<float, 2U> uv_zero = {0.0f, 0.0f};
+            const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uv_zero.data());
+            gpu_vertex_blob.insert(gpu_vertex_blob.end(), uv_bytes, uv_bytes + 8U);
+        }
+    }
+
+    D3D11_BUFFER_DESC vb_desc {};
+    vb_desc.ByteWidth = static_cast<UINT>(gpu_vertex_blob.size());
+    vb_desc.Usage = D3D11_USAGE_DEFAULT;
+    vb_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA vb_data {};
+    vb_data.pSysMem = gpu_vertex_blob.data();
+
+    D3D11_BUFFER_DESC ib_desc {};
+    ib_desc.ByteWidth = static_cast<UINT>(payload.indices.size() * sizeof(std::uint32_t));
+    ib_desc.Usage = D3D11_USAGE_DEFAULT;
+    ib_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA ib_data {};
+    ib_data.pSysMem = payload.indices.data();
+
+    ID3D11Buffer* vb = nullptr;
+    ID3D11Buffer* ib = nullptr;
+    if (FAILED(device->CreateBuffer(&vb_desc, &vb_data, &vb)) || vb == nullptr) {
+        return false;
+    }
+    if (FAILED(device->CreateBuffer(&ib_desc, &ib_data, &ib)) || ib == nullptr) {
+        vb->Release();
+        return false;
+    }
+
+    DirectX::XMFLOAT3 center = {0.0f, 0.0f, 0.0f};
+    DirectX::XMFLOAT3 bmin = {
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max()};
+    DirectX::XMFLOAT3 bmax = {
+        -std::numeric_limits<float>::max(),
+        -std::numeric_limits<float>::max(),
+        -std::numeric_limits<float>::max()};
+    const auto* bytes = payload.vertex_blob.data();
+    for (std::uint32_t i = 0U; i < vertex_count; ++i) {
+        const std::size_t base = static_cast<std::size_t>(i) * src_stride;
+        float px = 0.0f;
+        float py = 0.0f;
+        float pz = 0.0f;
+        std::memcpy(&px, bytes + base, sizeof(float));
+        std::memcpy(&py, bytes + base + 4U, sizeof(float));
+        std::memcpy(&pz, bytes + base + 8U, sizeof(float));
+        center.x += px;
+        center.y += py;
+        center.z += pz;
+        bmin.x = std::min(bmin.x, px);
+        bmin.y = std::min(bmin.y, py);
+        bmin.z = std::min(bmin.z, pz);
+        bmax.x = std::max(bmax.x, px);
+        bmax.y = std::max(bmax.y, py);
+        bmax.z = std::max(bmax.z, pz);
+    }
+    const float inv_count = vertex_count > 0U ? (1.0f / static_cast<float>(vertex_count)) : 1.0f;
+    center.x *= inv_count;
+    center.y *= inv_count;
+    center.z *= inv_count;
+
+    out_mesh->vertex_buffer = vb;
+    out_mesh->index_buffer = ib;
+    out_mesh->vertex_count = vertex_count;
+    out_mesh->index_count = index_count;
+    out_mesh->material_index = payload.material_index;
+    out_mesh->center = center;
+    out_mesh->vertex_stride = 20U;
+    out_mesh->bounds_min = bmin;
+    out_mesh->bounds_max = bmax;
+    return true;
+}
+
+bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& avatar_pkg, std::uint64_t handle, ID3D11Device* device) {
+    if (renderer == nullptr || device == nullptr) {
+        return false;
+    }
+    if (renderer->avatar_meshes.find(handle) != renderer->avatar_meshes.end()) {
+        return true;
+    }
+    std::vector<GpuMeshResource> meshes;
+    meshes.reserve(avatar_pkg.mesh_payloads.size());
+    for (const auto& payload : avatar_pkg.mesh_payloads) {
+        GpuMeshResource mesh {};
+        if (!BuildGpuMeshForPayload(payload, device, &mesh)) {
+            for (auto& created : meshes) {
+                ReleaseGpuMeshResource(&created);
+            }
+            return false;
+        }
+        meshes.push_back(mesh);
+    }
+    renderer->avatar_meshes[handle] = std::move(meshes);
+    return true;
+}
+
+bool DecodeImageWithWic(
+    const std::vector<std::uint8_t>& encoded,
+    std::vector<std::uint8_t>* out_rgba,
+    std::uint32_t* out_width,
+    std::uint32_t* out_height) {
+    if (encoded.empty() || out_rgba == nullptr || out_width == nullptr || out_height == nullptr) {
+        return false;
+    }
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool com_initialized = SUCCEEDED(hr);
+
+    IWICImagingFactory* factory = nullptr;
+    hr = CoCreateInstance(
+        CLSID_WICImagingFactory,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&factory));
+    if (FAILED(hr) || factory == nullptr) {
+        if (com_initialized) {
+            CoUninitialize();
+        }
+        return false;
+    }
+    IWICStream* stream = nullptr;
+    IWICBitmapDecoder* decoder = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* converter = nullptr;
+
+    bool ok = false;
+    do {
+        hr = factory->CreateStream(&stream);
+        if (FAILED(hr) || stream == nullptr) {
+            break;
+        }
+        hr = stream->InitializeFromMemory(const_cast<BYTE*>(encoded.data()), static_cast<DWORD>(encoded.size()));
+        if (FAILED(hr)) {
+            break;
+        }
+        hr = factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad, &decoder);
+        if (FAILED(hr) || decoder == nullptr) {
+            break;
+        }
+        hr = decoder->GetFrame(0U, &frame);
+        if (FAILED(hr) || frame == nullptr) {
+            break;
+        }
+        hr = frame->GetSize(reinterpret_cast<UINT*>(out_width), reinterpret_cast<UINT*>(out_height));
+        if (FAILED(hr) || *out_width == 0U || *out_height == 0U) {
+            break;
+        }
+        hr = factory->CreateFormatConverter(&converter);
+        if (FAILED(hr) || converter == nullptr) {
+            break;
+        }
+        hr = converter->Initialize(
+            frame,
+            GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom);
+        if (FAILED(hr)) {
+            break;
+        }
+        out_rgba->assign(static_cast<std::size_t>(*out_width) * static_cast<std::size_t>(*out_height) * 4U, 0U);
+        hr = converter->CopyPixels(
+            nullptr,
+            (*out_width) * 4U,
+            static_cast<UINT>(out_rgba->size()),
+            out_rgba->data());
+        if (FAILED(hr)) {
+            out_rgba->clear();
+            break;
+        }
+        ok = true;
+    } while (false);
+
+    if (converter != nullptr) {
+        converter->Release();
+    }
+    if (frame != nullptr) {
+        frame->Release();
+    }
+    if (decoder != nullptr) {
+        decoder->Release();
+    }
+    if (stream != nullptr) {
+        stream->Release();
+    }
+    if (factory != nullptr) {
+        factory->Release();
+    }
+    if (com_initialized) {
+        CoUninitialize();
+    }
+    return ok;
+}
+
+ID3D11ShaderResourceView* CreateTextureSrvFromPayload(ID3D11Device* device, const avatar::TextureRenderPayload* payload) {
+    if (device == nullptr || payload == nullptr || payload->bytes.empty()) {
+        return nullptr;
+    }
+    std::vector<std::uint8_t> bgra;
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    if (!DecodeImageWithWic(payload->bytes, &bgra, &width, &height)) {
+        return nullptr;
+    }
+    D3D11_TEXTURE2D_DESC tex_desc {};
+    tex_desc.Width = width;
+    tex_desc.Height = height;
+    tex_desc.MipLevels = 1U;
+    tex_desc.ArraySize = 1U;
+    tex_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    tex_desc.SampleDesc.Count = 1U;
+    tex_desc.Usage = D3D11_USAGE_DEFAULT;
+    tex_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA tex_data {};
+    tex_data.pSysMem = bgra.data();
+    tex_data.SysMemPitch = width * 4U;
+    ID3D11Texture2D* texture = nullptr;
+    if (FAILED(device->CreateTexture2D(&tex_desc, &tex_data, &texture)) || texture == nullptr) {
+        return nullptr;
+    }
+    ID3D11ShaderResourceView* srv = nullptr;
+    const HRESULT hr = device->CreateShaderResourceView(texture, nullptr, &srv);
+    texture->Release();
+    if (FAILED(hr)) {
+        return nullptr;
+    }
+    return srv;
+}
+
+bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& avatar_pkg, std::uint64_t handle, ID3D11Device* device) {
+    if (renderer == nullptr || device == nullptr) {
+        return false;
+    }
+    if (renderer->avatar_materials.find(handle) != renderer->avatar_materials.end()) {
+        return true;
+    }
+    std::vector<GpuMaterialResource> materials;
+    materials.reserve(std::max<std::size_t>(avatar_pkg.material_payloads.size(), 1U));
+    for (const auto& payload : avatar_pkg.material_payloads) {
+        GpuMaterialResource material {};
+        material.alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : payload.alpha_mode;
+        material.alpha_cutoff = payload.alpha_cutoff;
+        material.double_sided = payload.double_sided;
+        if (!payload.base_color_texture_name.empty()) {
+            const auto tex_it = std::find_if(
+                avatar_pkg.texture_payloads.begin(),
+                avatar_pkg.texture_payloads.end(),
+                [&](const avatar::TextureRenderPayload& t) { return t.name == payload.base_color_texture_name; });
+            if (tex_it != avatar_pkg.texture_payloads.end()) {
+                material.base_color_srv = CreateTextureSrvFromPayload(device, &(*tex_it));
+            }
+        }
+        materials.push_back(std::move(material));
+    }
+    if (materials.empty()) {
+        materials.push_back(GpuMaterialResource{});
+    }
+    renderer->avatar_materials[handle] = std::move(materials);
+    return true;
+}
+
+DirectX::XMMATRIX ComputeViewMatrix() {
+    using namespace DirectX;
+    const XMVECTOR eye = XMVectorSet(0.35f, 0.22f, 3.2f, 1.0f);
+    const XMVECTOR at = XMVectorSet(0.0f, 0.05f, 0.0f, 1.0f);
+    const XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    return XMMatrixLookAtRH(eye, at, up);
+}
+
+DirectX::XMMATRIX ComputeProjectionMatrix(std::uint32_t width, std::uint32_t height) {
+    using namespace DirectX;
+    const float aspect = static_cast<float>(width) / static_cast<float>(std::max<std::uint32_t>(height, 1U));
+    return XMMatrixPerspectiveFovRH(XM_PIDIV4, aspect, 0.01f, 100.0f);
+}
+
 bool CaptureRtvBgra(
     ID3D11Device* device,
     ID3D11DeviceContext* device_ctx,
@@ -301,15 +1017,6 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         SetError(NC_ERROR_UNSUPPORTED, "render", "no avatar has render resources", true);
         return NC_ERROR_UNSUPPORTED;
     }
-    std::uint32_t frame_draw_calls = 0U;
-    for (const auto handle : g_state.render_ready_avatars) {
-        const auto it = g_state.avatars.find(handle);
-        if (it == g_state.avatars.end()) {
-            continue;
-        }
-        frame_draw_calls += static_cast<std::uint32_t>(it->second.mesh_payloads.size());
-    }
-
     const auto frame_begin = std::chrono::steady_clock::now();
 
 #if defined(_WIN32)
@@ -324,10 +1031,229 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             true);
         return NC_ERROR_INVALID_ARGUMENT;
     }
+    auto& renderer = g_state.renderer;
+    if (!EnsurePipelineResources(&renderer, device)) {
+        SetError(NC_ERROR_INTERNAL, "render", "failed to initialize D3D11 pipeline resources", true);
+        return NC_ERROR_INTERNAL;
+    }
+    if (!EnsureDepthResources(&renderer, device, ctx->width, ctx->height)) {
+        SetError(NC_ERROR_INTERNAL, "render", "failed to initialize depth-stencil resources", true);
+        return NC_ERROR_INTERNAL;
+    }
 
     const float clear_color[4] = {0.08f, 0.12f, 0.18f, 1.0f};
-    device_ctx->OMSetRenderTargets(1, &rtv, nullptr);
+    device_ctx->OMSetRenderTargets(1, &rtv, renderer.depth_dsv);
     device_ctx->ClearRenderTargetView(rtv, clear_color);
+    device_ctx->ClearDepthStencilView(renderer.depth_dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0U);
+
+    D3D11_VIEWPORT viewport {};
+    viewport.TopLeftX = 0.0f;
+    viewport.TopLeftY = 0.0f;
+    viewport.Width = static_cast<float>(ctx->width);
+    viewport.Height = static_cast<float>(ctx->height);
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    device_ctx->RSSetViewports(1U, &viewport);
+
+    device_ctx->IASetInputLayout(renderer.input_layout);
+    device_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    device_ctx->VSSetShader(renderer.vertex_shader, nullptr, 0U);
+    device_ctx->PSSetShader(renderer.pixel_shader, nullptr, 0U);
+    device_ctx->VSSetConstantBuffers(0U, 1U, &renderer.constant_buffer);
+    device_ctx->PSSetConstantBuffers(0U, 1U, &renderer.constant_buffer);
+
+    struct DrawItem {
+        std::uint64_t handle = 0U;
+        std::size_t mesh_index = 0U;
+        const AvatarPackage* pkg = nullptr;
+        GpuMeshResource* mesh = nullptr;
+        GpuMaterialResource* material = nullptr;
+        DirectX::XMMATRIX world = DirectX::XMMatrixIdentity();
+        float view_z = 0.0f;
+        bool is_blend = false;
+    };
+    std::vector<DrawItem> opaque_draws;
+    std::vector<DrawItem> blend_draws;
+    std::uint32_t frame_draw_calls = 0U;
+    const auto view = ComputeViewMatrix();
+    const auto proj = ComputeProjectionMatrix(ctx->width, ctx->height);
+    std::uint32_t avatar_slot = 0U;
+    for (const auto handle : g_state.render_ready_avatars) {
+        auto it = g_state.avatars.find(handle);
+        if (it == g_state.avatars.end()) {
+            continue;
+        }
+        if (!EnsureAvatarGpuMeshes(&renderer, it->second, handle, device)) {
+            SetError(NC_ERROR_INTERNAL, "render", "failed to upload mesh payloads to GPU", true);
+            return NC_ERROR_INTERNAL;
+        }
+        if (!EnsureAvatarGpuMaterials(&renderer, it->second, handle, device)) {
+            SetError(NC_ERROR_INTERNAL, "render", "failed to create material GPU resources", true);
+            return NC_ERROR_INTERNAL;
+        }
+        auto mesh_it = renderer.avatar_meshes.find(handle);
+        if (mesh_it == renderer.avatar_meshes.end()) {
+            continue;
+        }
+        auto material_it = renderer.avatar_materials.find(handle);
+        if (material_it == renderer.avatar_materials.end()) {
+            continue;
+        }
+        DirectX::XMFLOAT3 avatar_bmin = {
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max(),
+            std::numeric_limits<float>::max()};
+        DirectX::XMFLOAT3 avatar_bmax = {
+            -std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max(),
+            -std::numeric_limits<float>::max()};
+        for (const auto& m : mesh_it->second) {
+            avatar_bmin.x = std::min(avatar_bmin.x, m.bounds_min.x);
+            avatar_bmin.y = std::min(avatar_bmin.y, m.bounds_min.y);
+            avatar_bmin.z = std::min(avatar_bmin.z, m.bounds_min.z);
+            avatar_bmax.x = std::max(avatar_bmax.x, m.bounds_max.x);
+            avatar_bmax.y = std::max(avatar_bmax.y, m.bounds_max.y);
+            avatar_bmax.z = std::max(avatar_bmax.z, m.bounds_max.z);
+        }
+        const float extent_x = std::max(avatar_bmax.x - avatar_bmin.x, 0.0001f);
+        const float extent_y = std::max(avatar_bmax.y - avatar_bmin.y, 0.0001f);
+        const float extent_z = std::max(avatar_bmax.z - avatar_bmin.z, 0.0001f);
+        const float max_extent = std::max(extent_x, std::max(extent_y, extent_z));
+        const float fit_scale = 1.4f / max_extent;
+        const float cx = (avatar_bmin.x + avatar_bmax.x) * 0.5f;
+        const float cy = (avatar_bmin.y + avatar_bmax.y) * 0.5f;
+        const float cz = (avatar_bmin.z + avatar_bmax.z) * 0.5f;
+        const float x_offset = static_cast<float>(avatar_slot) * 1.8f;
+        const float preview_yaw = DirectX::XM_PI + DirectX::XMConvertToRadians(12.0f);
+        const auto world =
+            DirectX::XMMatrixTranslation(-cx, -cy, -cz) *
+            DirectX::XMMatrixRotationY(preview_yaw) *
+            DirectX::XMMatrixScaling(fit_scale, fit_scale, fit_scale) *
+            DirectX::XMMatrixTranslation(x_offset, 0.0f, 0.0f);
+        ++avatar_slot;
+        for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
+            auto& mesh = mesh_it->second[mesh_index];
+            std::size_t material_index = 0U;
+            if (mesh.material_index >= 0) {
+                material_index = static_cast<std::size_t>(mesh.material_index);
+            } else if (mesh_index < material_it->second.size()) {
+                material_index = mesh_index;
+            }
+            if (material_index >= material_it->second.size()) {
+                material_index = 0U;
+            }
+            auto* material = &material_it->second[material_index];
+            std::string alpha_mode = "OPAQUE";
+            if (!material->alpha_mode.empty()) {
+                alpha_mode = material->alpha_mode;
+            }
+            std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+            DrawItem item;
+            item.handle = handle;
+            item.mesh_index = mesh_index;
+            item.pkg = &it->second;
+            item.mesh = &mesh;
+            item.material = material;
+            item.world = world;
+            item.is_blend = (alpha_mode == "BLEND");
+            const auto center = DirectX::XMVectorSet(mesh.center.x, mesh.center.y, mesh.center.z, 1.0f);
+            const auto center_view = DirectX::XMVector3TransformCoord(DirectX::XMVector3TransformCoord(center, world), view);
+            item.view_z = DirectX::XMVectorGetZ(center_view);
+            if (item.is_blend) {
+                blend_draws.push_back(item);
+            } else {
+                opaque_draws.push_back(item);
+            }
+        }
+    }
+    std::sort(blend_draws.begin(), blend_draws.end(), [](const DrawItem& a, const DrawItem& b) {
+        return a.view_z > b.view_z;
+    });
+
+    struct alignas(16) SceneConstants {
+        float world_view_proj[16];
+        float base_color[4];
+        float alpha_cutoff;
+        float alpha_mode_mask;
+        float has_texture;
+        float _pad;
+    };
+    auto draw_pass = [&](const DrawItem& item) {
+        if (item.mesh == nullptr || item.mesh->vertex_buffer == nullptr || item.mesh->index_buffer == nullptr || item.pkg == nullptr) {
+            return;
+        }
+        std::string alpha_mode = "OPAQUE";
+        float alpha_cutoff = 0.5f;
+        bool double_sided = false;
+        ID3D11ShaderResourceView* srv = nullptr;
+        if (item.material != nullptr) {
+            if (!item.material->alpha_mode.empty()) {
+                alpha_mode = item.material->alpha_mode;
+            }
+            alpha_cutoff = item.material->alpha_cutoff;
+            double_sided = item.material->double_sided;
+            srv = item.material->base_color_srv;
+        }
+        std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::toupper(c));
+        });
+        const bool is_mask = (alpha_mode == "MASK");
+        const bool is_blend = (alpha_mode == "BLEND");
+        const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (is_blend) {
+            device_ctx->OMSetBlendState(renderer.blend_alpha, blend_factor, 0xFFFFFFFFU);
+            device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
+        } else {
+            device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
+            device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);
+        }
+        (void)double_sided;
+        device_ctx->RSSetState(renderer.raster_cull_none);
+
+        const UINT stride = item.mesh->vertex_stride;
+        const UINT offset = 0U;
+        device_ctx->IASetVertexBuffers(0U, 1U, &item.mesh->vertex_buffer, &stride, &offset);
+        device_ctx->IASetIndexBuffer(item.mesh->index_buffer, DXGI_FORMAT_R32_UINT, 0U);
+        device_ctx->PSSetSamplers(0U, 1U, &renderer.linear_sampler);
+        if (srv != nullptr) {
+            device_ctx->PSSetShaderResources(0U, 1U, &srv);
+        } else {
+            ID3D11ShaderResourceView* null_srv = nullptr;
+            device_ctx->PSSetShaderResources(0U, 1U, &null_srv);
+        }
+
+        const auto world_view_proj = item.world * view * proj;
+        const auto world_view_proj_t = DirectX::XMMatrixTranspose(world_view_proj);
+        SceneConstants cb {};
+        DirectX::XMFLOAT4X4 wvp_store {};
+        DirectX::XMStoreFloat4x4(&wvp_store, world_view_proj_t);
+        std::memcpy(cb.world_view_proj, &wvp_store, sizeof(cb.world_view_proj));
+        cb.base_color[0] = 1.0f;
+        cb.base_color[1] = 0.96f;
+        cb.base_color[2] = 0.92f;
+        cb.base_color[3] = is_blend ? 0.65f : 1.0f;
+        cb.alpha_cutoff = alpha_cutoff;
+        cb.alpha_mode_mask = is_mask ? 1.0f : 0.0f;
+        cb.has_texture = srv != nullptr ? 1.0f : 0.0f;
+
+        D3D11_MAPPED_SUBRESOURCE mapped {};
+        if (SUCCEEDED(device_ctx->Map(renderer.constant_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
+            std::memcpy(mapped.pData, &cb, sizeof(cb));
+            device_ctx->Unmap(renderer.constant_buffer, 0U);
+        }
+        device_ctx->DrawIndexed(item.mesh->index_count, 0U, 0);
+        ID3D11ShaderResourceView* null_srv = nullptr;
+        device_ctx->PSSetShaderResources(0U, 1U, &null_srv);
+        ++frame_draw_calls;
+    };
+    for (const auto& item : opaque_draws) {
+        draw_pass(item);
+    }
+    for (const auto& item : blend_draws) {
+        draw_pass(item);
+    }
 
     if (g_state.spout.IsActive()) {
         std::vector<std::uint8_t> pixels;
@@ -343,7 +1269,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         if (it == g_state.avatars.end()) {
             continue;
         }
-        it->second.last_render_draw_calls = static_cast<std::uint32_t>(it->second.mesh_payloads.size());
+        it->second.last_render_draw_calls = frame_draw_calls;
     }
     if (frame_draw_calls == 0U) {
         SetError(NC_ERROR_UNSUPPORTED, "render", "render-ready avatars produced zero draw calls", true);
@@ -394,6 +1320,7 @@ NcResultCode nc_shutdown(void) {
         vsfclone::nativecore::ReleaseWindowState(&state);
     }
     vsfclone::nativecore::g_state.window_targets.clear();
+    vsfclone::nativecore::ResetRendererResources(&vsfclone::nativecore::g_state.renderer);
 #endif
     vsfclone::nativecore::g_state.avatars.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
@@ -444,6 +1371,22 @@ NcResultCode nc_unload_avatar(NcAvatarHandle handle) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
     vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
+#if defined(_WIN32)
+    auto mesh_it = vsfclone::nativecore::g_state.renderer.avatar_meshes.find(handle);
+    if (mesh_it != vsfclone::nativecore::g_state.renderer.avatar_meshes.end()) {
+        for (auto& mesh : mesh_it->second) {
+            vsfclone::nativecore::ReleaseGpuMeshResource(&mesh);
+        }
+        vsfclone::nativecore::g_state.renderer.avatar_meshes.erase(mesh_it);
+    }
+    auto material_it = vsfclone::nativecore::g_state.renderer.avatar_materials.find(handle);
+    if (material_it != vsfclone::nativecore::g_state.renderer.avatar_materials.end()) {
+        for (auto& material : material_it->second) {
+            vsfclone::nativecore::ReleaseGpuMaterialResource(&material);
+        }
+        vsfclone::nativecore::g_state.renderer.avatar_materials.erase(material_it);
+    }
+#endif
     vsfclone::nativecore::g_state.avatars.erase(it);
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -533,6 +1476,22 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
     }
 
     vsfclone::nativecore::g_state.render_ready_avatars.insert(handle);
+#if defined(_WIN32)
+    auto mesh_it = vsfclone::nativecore::g_state.renderer.avatar_meshes.find(handle);
+    if (mesh_it != vsfclone::nativecore::g_state.renderer.avatar_meshes.end()) {
+        for (auto& mesh : mesh_it->second) {
+            vsfclone::nativecore::ReleaseGpuMeshResource(&mesh);
+        }
+        vsfclone::nativecore::g_state.renderer.avatar_meshes.erase(mesh_it);
+    }
+    auto material_it = vsfclone::nativecore::g_state.renderer.avatar_materials.find(handle);
+    if (material_it != vsfclone::nativecore::g_state.renderer.avatar_materials.end()) {
+        for (auto& material : material_it->second) {
+            vsfclone::nativecore::ReleaseGpuMaterialResource(&material);
+        }
+        vsfclone::nativecore::g_state.renderer.avatar_materials.erase(material_it);
+    }
+#endif
     it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -551,6 +1510,22 @@ NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
     }
 
     vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
+#if defined(_WIN32)
+    auto mesh_it = vsfclone::nativecore::g_state.renderer.avatar_meshes.find(handle);
+    if (mesh_it != vsfclone::nativecore::g_state.renderer.avatar_meshes.end()) {
+        for (auto& mesh : mesh_it->second) {
+            vsfclone::nativecore::ReleaseGpuMeshResource(&mesh);
+        }
+        vsfclone::nativecore::g_state.renderer.avatar_meshes.erase(mesh_it);
+    }
+    auto material_it = vsfclone::nativecore::g_state.renderer.avatar_materials.find(handle);
+    if (material_it != vsfclone::nativecore::g_state.renderer.avatar_materials.end()) {
+        for (auto& material : material_it->second) {
+            vsfclone::nativecore::ReleaseGpuMaterialResource(&material);
+        }
+        vsfclone::nativecore::g_state.renderer.avatar_materials.erase(material_it);
+    }
+#endif
     it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
