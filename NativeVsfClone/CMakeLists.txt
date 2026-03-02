@@ -12,6 +12,7 @@ add_library(vsfclone_core STATIC
     src/avatar/vrm_loader.cpp
     src/avatar/vxavatar_loader.cpp
     src/avatar/vxa2_loader.cpp
+    src/avatar/xav2_loader.cpp
     src/avatar/vsfavatar_loader.cpp
     src/vsf/unityfs_reader.cpp
     src/vsf/serialized_file_reader.cpp
@@ -46,6 +47,9 @@ if(VSFCLONE_BUILD_CONSOLE)
 
     add_executable(avatar_tool tools/avatar_tool.cpp)
     target_link_libraries(avatar_tool PRIVATE nativecore)
+
+    add_executable(vrm_to_xav2 tools/vrm_to_xav2.cpp)
+    target_link_libraries(vrm_to_xav2 PRIVATE vsfclone_core)
 
     add_executable(vsfavatar_sidecar tools/vsfavatar_sidecar.cpp)
     target_link_libraries(vsfavatar_sidecar PRIVATE vsfclone_core)

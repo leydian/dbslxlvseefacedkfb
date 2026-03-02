@@ -2,6 +2,57 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - XAV2 container path + VRM to XAV2 converter scaffold
+
+### Summary
+
+Added a first-class `.xav2` avatar container path based on the existing TLV family, plus a converter utility that packages VRM runtime payloads into XAV2.
+
+### Changed
+
+- `src/avatar/xav2_loader.cpp` / `src/avatar/xav2_loader.h` (new)
+  - Added `.xav2` loader with:
+    - `XAV2` magic/version validation
+    - manifest required key checks (`avatarId`, `meshRefs`, `materialRefs`, `textureRefs`)
+    - TLV decode for:
+      - `0x0011` mesh render payload
+      - `0x0002` texture payload
+      - `0x0003` material override
+      - `0x0012` material shader params JSON
+    - compatibility/error signaling (`XAV2_SCHEMA_INVALID`, `XAV2_SECTION_TRUNCATED`, `XAV2_ASSET_MISSING`)
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Registered `.xav2` dispatch route.
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Added `AvatarSourceType::Xav2`.
+  - Added `MaterialRenderPayload.shader_params_json`.
+
+- `include/vsfclone/nativecore/api.h`
+  - Added `NC_AVATAR_FORMAT_XAV2`.
+
+- `src/nativecore/native_core.cpp`
+  - Added native format hint mapping for `AvatarSourceType::Xav2`.
+
+- `host/HostCore/NativeCoreInterop.cs`
+  - Added managed enum mapping `NcAvatarFormatHint.Xav2`.
+
+- `tools/vrm_to_xav2.cpp` (new)
+  - Added converter utility:
+    - input: `.vrm`
+    - output: `.xav2`
+    - writes mesh/material/texture payload sections from runtime extraction
+
+- `CMakeLists.txt`
+  - Added `xav2_loader.cpp` to `vsfclone_core`.
+  - Added `vrm_to_xav2` executable target.
+
+- `docs/formats/xav2.md` (new)
+  - Added XAV2 format draft and section contract.
+
+- `README.md`, `docs/INDEX.md`
+  - Updated format and tool references to include `.xav2` and `vrm_to_xav2`.
+
 ## 2026-03-03 - Host UI operation-focused redesign (WPF + WinUI) and shared state controller
 
 ### Summary

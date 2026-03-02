@@ -21,6 +21,7 @@ public enum NcAvatarFormatHint : uint
     VxAvatar = 2,
     VsfAvatar = 3,
     Vxa2 = 4,
+    Xav2 = 5,
 }
 
 [StructLayout(LayoutKind.Sequential)]

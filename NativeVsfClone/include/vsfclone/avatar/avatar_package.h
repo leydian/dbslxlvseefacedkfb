@@ -11,6 +11,7 @@ enum class AvatarSourceType {
     Vrm,
     VxAvatar,
     Vxa2,
+    Xav2,
     VsfAvatar,
 };
 
@@ -44,6 +45,7 @@ struct MaterialRenderPayload {
     std::string name;
     std::string shader_name;
     std::string base_color_texture_name;
+    std::string shader_params_json = "{}";
     std::string alpha_mode = "OPAQUE";
     float alpha_cutoff = 0.5f;
     bool double_sided = false;

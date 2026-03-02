@@ -5,6 +5,7 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - `.vrm` input path handling (GLB/mesh payload MVP)
 - `.vxavatar` input path handling (MVP parser + payload)
 - `.vxa2` input path handling (manifest + TLV section decode MVP)
+- `.xav2` input path handling (vxa2-derived container with mesh-render/material-params sections)
 - `.vsfavatar` probing via UnityFS header parser (implemented)
 - `nativecore.dll` C ABI for host/UI integration
 - streaming and OSC runtime output path (`shared-memory frame sender`, `UDP OSC`)
@@ -27,7 +28,7 @@ If `sidecar` mode fails to execute:
 
 ## What is implemented now
 
-- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vxa2`, `.vsfavatar`).
+- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vxa2`, `.xav2`, `.vsfavatar`).
 - `VsfAvatarLoader` reads UnityFS metadata and reports:
   - signature/version/player version/engine version
   - compression mode flags
@@ -55,6 +56,7 @@ If `sidecar` mode fails to execute:
 - Detailed operation-focused UI redesign report:
   - `docs/reports/ui_host_operation_redesign_2026-03-03.md`
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
+- `vrm_to_xav2` converts `.vrm` to `.xav2` using runtime payload extraction.
 - `vsfavatar_sidecar` is built as an external parser process.
   - complete-state normalization:
     - when `probe_stage=complete` and `object_table_parsed=true`, `primary_error_code` is emitted as `NONE`
@@ -103,6 +105,7 @@ Run:
 ```powershell
 .\build\Release\vsfclone_cli.exe "D:\dbslxlvseefacedkfb\개인??1-3.vsfavatar"
 .\build\Release\avatar_tool.exe "D:\path\to\avatar.vxavatar"
+.\build\Release\vrm_to_xav2.exe "D:\path\to\avatar.vrm" "D:\path\to\avatar.xav2"
 .\build\Release\vsfavatar_sidecar.exe "D:\path\to\avatar.vsfavatar"
 ```
 
@@ -146,6 +149,15 @@ Notes:
 
 - Script auto-kills running `WpfHost`/`WinUiHost` before publish.
 - If `build/Release/nativecore.dll` is locked, script falls back to `build_hotfix` and copies the fallback DLL.
+
+## Unity XAV2 SDK scaffold
+
+- Package path: `unity/Packages/com.vsfclone.xav2`
+- Target: Unity `2022.3 LTS` (Built-in RP)
+- Included:
+  - runtime `.xav2` parser scaffold
+  - editor exporter scaffold with strict shader policy list:
+    - `lilToon`, `Poiyomi`, `potatoon`, `realtoon`
 
 ## VSFAvatar quality gate
 

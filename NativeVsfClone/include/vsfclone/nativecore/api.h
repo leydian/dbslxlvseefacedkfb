@@ -32,7 +32,8 @@ typedef enum NcAvatarFormatHint {
     NC_AVATAR_FORMAT_VRM = 1,
     NC_AVATAR_FORMAT_VXAVATAR = 2,
     NC_AVATAR_FORMAT_VSFAVATAR = 3,
-    NC_AVATAR_FORMAT_VXA2 = 4
+    NC_AVATAR_FORMAT_VXA2 = 4,
+    NC_AVATAR_FORMAT_XAV2 = 5
 } NcAvatarFormatHint;
 
 typedef enum NcCompatLevel {

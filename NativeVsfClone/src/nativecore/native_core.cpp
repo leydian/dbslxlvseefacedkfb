@@ -142,6 +142,8 @@ NcAvatarFormatHint ToFormatHint(AvatarSourceType source_type) {
             return NC_AVATAR_FORMAT_VXAVATAR;
         case AvatarSourceType::Vxa2:
             return NC_AVATAR_FORMAT_VXA2;
+        case AvatarSourceType::Xav2:
+            return NC_AVATAR_FORMAT_XAV2;
         case AvatarSourceType::VsfAvatar:
             return NC_AVATAR_FORMAT_VSFAVATAR;
         default:
