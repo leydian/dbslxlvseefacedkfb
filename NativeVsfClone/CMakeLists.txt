@@ -17,11 +17,14 @@ add_library(vsfclone_core STATIC
     src/vsf/serialized_file_reader.cpp
     src/stream/spout_sender_stub.cpp
     src/osc/osc_endpoint_stub.cpp
+    src/common/miniz_impl.cpp
 )
 
 target_include_directories(vsfclone_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
 )
 
 add_library(nativecore SHARED

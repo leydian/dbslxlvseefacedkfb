@@ -216,12 +216,25 @@ Latest behavior notes (2026-03-03, VXAvatar MVP parse/payload pass):
   - mesh entries -> `mesh_payloads[].vertex_blob`
   - material entries -> `material_payloads[]` (MToon placeholder policy)
   - texture entries -> `texture_payloads[]` with inferred format (`png/jpeg/tga/bmp/binary`)
-- Current `.vxavatar` MVP limitation:
-  - ZIP `stored(0)` method only (deflate not yet supported)
-  - unsupported compression returns `VX_UNSUPPORTED_COMPRESSION` with `Compat: partial`
+- Current `.vxavatar` compression behavior:
+  - ZIP `stored(0)` and `deflate(8)` are supported in-process
+  - other ZIP methods return `VX_UNSUPPORTED_COMPRESSION` with `Compat: partial`
 - NativeCore/CLI diagnostics expanded:
   - `NcAvatarInfo` now reports payload counts (`mesh/material/texture`)
   - `parser_stage`, `primary_error_code` are surfaced in `avatar_tool`
+
+Latest behavior notes (2026-03-02, VXAvatar in-process deflate migration):
+
+- Removed external PowerShell extractor fallback from `.vxavatar` payload reads.
+- Added in-process `deflate(8)` decode path in `vxavatar_loader`.
+- Updated payload failure classification:
+  - unsupported ZIP method -> `VX_UNSUPPORTED_COMPRESSION`
+  - malformed/truncated entry payload -> `VX_SCHEMA_INVALID`
+- Verified runtime behavior on current samples:
+  - `sample/demo_mvp.vxavatar` stays `Compat: full`, `ParserStage: runtime-ready`
+  - no `VX_EXTERNAL_EXTRACTOR` warning emitted
+- Detailed report:
+  - `docs/reports/vxavatar_deflate_inprocess_2026-03-02.md`
 
 Latest behavior notes (2026-03-03, VSFAvatar reconstruction scoring + failure offsets):
 

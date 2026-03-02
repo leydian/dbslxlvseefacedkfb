@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "miniz.h"
 
 namespace fs = std::filesystem;
 
@@ -25,6 +26,7 @@ constexpr std::uint32_t kZipCdfhSig = 0x02014B50U;
 constexpr std::uint32_t kZipLocalSig = 0x04034B50U;
 constexpr std::uint16_t kZipStored = 0U;
 constexpr std::uint16_t kZipDeflate = 8U;
+constexpr std::size_t kMaxInflateOutputBytes = 256U * 1024U * 1024U;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -86,6 +88,13 @@ struct ZipEntryMeta {
     std::uint32_t uncompressed_size = 0U;
     std::uint32_t local_header_offset = 0U;
 };
+
+bool ResolveZipEntryDataRange(
+    const std::vector<std::uint8_t>& file_bytes,
+    const ZipEntryMeta& entry,
+    std::size_t* out_data_offset,
+    std::size_t* out_data_size,
+    std::string* out_error);
 
 bool FindEocdOffset(const std::vector<std::uint8_t>& file_bytes, std::size_t* out_offset) {
     if (out_offset == nullptr || file_bytes.size() < 22U) {
@@ -193,10 +202,35 @@ bool ReadStoredZipEntry(
         *out_error = "compression method is not stored(0)";
         return false;
     }
+    std::size_t data_offset = 0U;
+    std::size_t data_size = 0U;
+    if (!ResolveZipEntryDataRange(file_bytes, entry, &data_offset, &data_size, out_error)) {
+        return false;
+    }
+    out_bytes->assign(
+        file_bytes.begin() + static_cast<std::ptrdiff_t>(data_offset),
+        file_bytes.begin() + static_cast<std::ptrdiff_t>(data_offset + data_size));
+    return true;
+}
+
+bool ResolveZipEntryDataRange(
+    const std::vector<std::uint8_t>& file_bytes,
+    const ZipEntryMeta& entry,
+    std::size_t* out_data_offset,
+    std::size_t* out_data_size,
+    std::string* out_error) {
+    if (out_data_offset == nullptr || out_data_size == nullptr || out_error == nullptr) {
+        return false;
+    }
     const std::size_t local_offset = static_cast<std::size_t>(entry.local_header_offset);
     const auto sig = ReadU32Le(file_bytes, local_offset);
     if (!sig || *sig != kZipLocalSig) {
         *out_error = "local header signature mismatch";
+        return false;
+    }
+    const auto local_method = ReadU16Le(file_bytes, local_offset + 8U);
+    if (!local_method || *local_method != entry.compression_method) {
+        *out_error = "local header compression method mismatch";
         return false;
     }
     const auto name_len = ReadU16Le(file_bytes, local_offset + 26U);
@@ -207,32 +241,21 @@ bool ReadStoredZipEntry(
     }
     const std::size_t data_offset =
         local_offset + 30U + static_cast<std::size_t>(*name_len) + static_cast<std::size_t>(*extra_len);
-    const std::size_t data_end = data_offset + static_cast<std::size_t>(entry.compressed_size);
+    const std::size_t data_size = static_cast<std::size_t>(entry.compressed_size);
+    const std::size_t data_end = data_offset + data_size;
     if (data_offset > file_bytes.size() || data_end > file_bytes.size()) {
         *out_error = "entry payload range invalid";
         return false;
     }
-    out_bytes->assign(file_bytes.begin() + static_cast<std::ptrdiff_t>(data_offset), file_bytes.begin() + static_cast<std::ptrdiff_t>(data_end));
+    *out_data_offset = data_offset;
+    *out_data_size = data_size;
+    out_error->clear();
     return true;
 }
 
-std::string EscapePowershellSingleQuoted(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 8U);
-    for (char c : s) {
-        if (c == '\'') {
-            out.push_back('\'');
-            out.push_back('\'');
-        } else {
-            out.push_back(c);
-        }
-    }
-    return out;
-}
-
-bool ReadZipEntryViaPowershell(
-    const std::string& archive_path,
-    const std::string& entry_name,
+bool ReadDeflateZipEntry(
+    const std::vector<std::uint8_t>& file_bytes,
+    const ZipEntryMeta& entry,
     std::vector<std::uint8_t>* out_bytes,
     std::string* out_error) {
     if (out_bytes == nullptr || out_error == nullptr) {
@@ -240,41 +263,53 @@ bool ReadZipEntryViaPowershell(
     }
     out_bytes->clear();
     out_error->clear();
-    const std::string archive_escaped = EscapePowershellSingleQuoted(archive_path);
-    const std::string entry_escaped = EscapePowershellSingleQuoted(entry_name);
-    const std::string temp_path = (fs::temp_directory_path() / fs::path("vxavatar_extract.tmp")).string();
-    const std::string temp_escaped = EscapePowershellSingleQuoted(temp_path);
-    const std::string command =
-        "powershell -NoProfile -NonInteractive -Command \""
-        "$ErrorActionPreference='Stop'; "
-        "Add-Type -AssemblyName System.IO.Compression; "
-        "Add-Type -AssemblyName System.IO.Compression.FileSystem; "
-        "$z=[System.IO.Compression.ZipFile]::OpenRead('" +
-        archive_escaped +
-        "'); "
-        "try { "
-        "$e=$z.GetEntry('" +
-        entry_escaped +
-        "'); "
-        "if($null -eq $e){ throw 'entry-not-found'; } "
-        "$ms=New-Object System.IO.MemoryStream; "
-        "$s=$e.Open(); "
-        "try { $s.CopyTo($ms); } finally { $s.Dispose(); } "
-        "[System.IO.File]::WriteAllBytes('" +
-        temp_escaped +
-        "', $ms.ToArray()) "
-        "} finally { $z.Dispose(); }\"";
-    const int rc = std::system(command.c_str());
-    if (rc != 0) {
-        *out_error = "powershell extractor failed";
+    if (entry.compression_method != kZipDeflate) {
+        *out_error = "compression method is not deflate(8)";
         return false;
     }
-    if (!ReadFileBytes(temp_path, out_bytes)) {
-        *out_error = "powershell extractor output is unreadable";
+    if (static_cast<std::size_t>(entry.uncompressed_size) > kMaxInflateOutputBytes) {
+        *out_error = "deflate output exceeds safety limit";
         return false;
     }
-    std::error_code ignored;
-    fs::remove(temp_path, ignored);
+    std::size_t data_offset = 0U;
+    std::size_t data_size = 0U;
+    if (!ResolveZipEntryDataRange(file_bytes, entry, &data_offset, &data_size, out_error)) {
+        return false;
+    }
+    if (data_size > static_cast<std::size_t>(std::numeric_limits<mz_uint>::max())) {
+        *out_error = "compressed payload is too large";
+        return false;
+    }
+
+    const std::size_t expected_out = static_cast<std::size_t>(entry.uncompressed_size);
+    const std::size_t out_capacity = expected_out > 0U ? expected_out : 1U;
+    out_bytes->assign(out_capacity, 0U);
+
+    mz_stream stream {};
+    stream.next_in = const_cast<unsigned char*>(file_bytes.data() + static_cast<std::ptrdiff_t>(data_offset));
+    stream.avail_in = static_cast<mz_uint>(data_size);
+    stream.next_out = out_bytes->data();
+    stream.avail_out = static_cast<mz_uint>(out_capacity);
+
+    const int init_rc = mz_inflateInit2(&stream, -MZ_DEFAULT_WINDOW_BITS);
+    if (init_rc != MZ_OK) {
+        *out_error = "inflate init failed";
+        out_bytes->clear();
+        return false;
+    }
+    int zrc = mz_inflate(&stream, MZ_FINISH);
+    mz_inflateEnd(&stream);
+    if (zrc != MZ_STREAM_END) {
+        *out_error = "inflate failed";
+        out_bytes->clear();
+        return false;
+    }
+    if (static_cast<std::size_t>(stream.total_out) != expected_out) {
+        *out_error = "inflate output size mismatch";
+        out_bytes->clear();
+        return false;
+    }
+    out_bytes->resize(expected_out);
     return true;
 }
 
@@ -646,7 +681,6 @@ std::optional<std::string> FindManifestKey(const std::unordered_map<std::string,
 
 bool ReadZipEntryPayload(
     const std::vector<std::uint8_t>& file_bytes,
-    const std::string& archive_path,
     const ZipEntryMeta& entry,
     std::vector<std::uint8_t>* out_bytes,
     std::string* out_error) {
@@ -654,7 +688,7 @@ bool ReadZipEntryPayload(
         return ReadStoredZipEntry(file_bytes, entry, out_bytes, out_error);
     }
     if (entry.compression_method == kZipDeflate) {
-        return ReadZipEntryViaPowershell(archive_path, entry.name, out_bytes, out_error);
+        return ReadDeflateZipEntry(file_bytes, entry, out_bytes, out_error);
     }
     if (out_error != nullptr) {
         *out_error = "unsupported compression method";
@@ -717,7 +751,7 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
     std::vector<std::uint8_t> manifest_bytes;
     std::string entry_error;
     const ZipEntryMeta& manifest_entry = entries[*manifest_key];
-    if (!ReadZipEntryPayload(file_bytes, path, manifest_entry, &manifest_bytes, &entry_error)) {
+    if (!ReadZipEntryPayload(file_bytes, manifest_entry, &manifest_bytes, &entry_error)) {
         pkg.compat_level = AvatarCompatLevel::Failed;
         pkg.primary_error_code = "VX_SCHEMA_INVALID";
         pkg.warnings.push_back("E_PARSE: VX_SCHEMA_INVALID: failed to read manifest.json: " + entry_error);
@@ -726,10 +760,6 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
     if (manifest_bytes.size() >= 3U && manifest_bytes[0] == 0xEFU && manifest_bytes[1] == 0xBBU && manifest_bytes[2] == 0xBFU) {
         manifest_bytes.erase(manifest_bytes.begin(), manifest_bytes.begin() + 3);
     }
-    if (manifest_entry.compression_method == kZipDeflate) {
-        pkg.warnings.push_back("W_PARSE: VX_EXTERNAL_EXTRACTOR: deflate manifest extracted via PowerShell.");
-    }
-
     JsonValue root;
     std::string parse_error;
     JsonParser parser(std::string_view(reinterpret_cast<const char*>(manifest_bytes.data()), manifest_bytes.size()));
@@ -805,6 +835,8 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
 
     pkg.parser_stage = "payload";
     bool has_payload_gap = false;
+    bool has_unsupported_compression = false;
+    bool has_payload_read_error = false;
     for (std::size_t i = 0; i < mesh_refs.size(); ++i) {
         MeshAssetSummary ms;
         ms.name = mesh_refs[i];
@@ -814,11 +846,18 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
         payload.name = mesh_refs[i];
         std::vector<std::uint8_t> payload_bytes;
         std::string payload_error;
-        if (resolved_meshes[i] != nullptr && ReadZipEntryPayload(file_bytes, path, *resolved_meshes[i], &payload_bytes, &payload_error)) {
+        if (resolved_meshes[i] != nullptr && ReadZipEntryPayload(file_bytes, *resolved_meshes[i], &payload_bytes, &payload_error)) {
             payload.vertex_blob = std::move(payload_bytes);
         } else {
             has_payload_gap = true;
-            pkg.warnings.push_back("W_PAYLOAD: VX_UNSUPPORTED_COMPRESSION: mesh=" + mesh_refs[i]);
+            if (resolved_meshes[i] != nullptr && resolved_meshes[i]->compression_method != kZipStored &&
+                resolved_meshes[i]->compression_method != kZipDeflate) {
+                has_unsupported_compression = true;
+                pkg.warnings.push_back("W_PAYLOAD: VX_UNSUPPORTED_COMPRESSION: mesh=" + mesh_refs[i]);
+            } else {
+                has_payload_read_error = true;
+                pkg.warnings.push_back("W_PAYLOAD: VX_PAYLOAD_READ_FAILED: mesh=" + mesh_refs[i] + ": " + payload_error);
+            }
         }
         pkg.mesh_payloads.push_back(std::move(payload));
     }
@@ -844,11 +883,18 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
         payload.format = DetectTextureFormat(texture_refs[i]);
         std::vector<std::uint8_t> texture_bytes;
         std::string payload_error;
-        if (resolved_textures[i] != nullptr && ReadZipEntryPayload(file_bytes, path, *resolved_textures[i], &texture_bytes, &payload_error)) {
+        if (resolved_textures[i] != nullptr && ReadZipEntryPayload(file_bytes, *resolved_textures[i], &texture_bytes, &payload_error)) {
             payload.bytes = std::move(texture_bytes);
         } else {
             has_payload_gap = true;
-            pkg.warnings.push_back("W_PAYLOAD: VX_UNSUPPORTED_COMPRESSION: texture=" + texture_refs[i]);
+            if (resolved_textures[i] != nullptr && resolved_textures[i]->compression_method != kZipStored &&
+                resolved_textures[i]->compression_method != kZipDeflate) {
+                has_unsupported_compression = true;
+                pkg.warnings.push_back("W_PAYLOAD: VX_UNSUPPORTED_COMPRESSION: texture=" + texture_refs[i]);
+            } else {
+                has_payload_read_error = true;
+                pkg.warnings.push_back("W_PAYLOAD: VX_PAYLOAD_READ_FAILED: texture=" + texture_refs[i] + ": " + payload_error);
+            }
         }
         pkg.texture_payloads.push_back(std::move(payload));
     }
@@ -858,8 +904,14 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
     pkg.warnings.push_back("W_STAGE: runtime-ready");
     if (has_payload_gap) {
         pkg.compat_level = AvatarCompatLevel::Partial;
-        pkg.primary_error_code = "VX_UNSUPPORTED_COMPRESSION";
-        pkg.missing_features.push_back("ZIP deflate decompression");
+        if (has_unsupported_compression) {
+            pkg.primary_error_code = "VX_UNSUPPORTED_COMPRESSION";
+            pkg.missing_features.push_back("ZIP compression methods beyond stored/deflate");
+        } else if (has_payload_read_error) {
+            pkg.primary_error_code = "VX_SCHEMA_INVALID";
+        } else {
+            pkg.primary_error_code = "VX_SCHEMA_INVALID";
+        }
     } else {
         pkg.compat_level = AvatarCompatLevel::Full;
         pkg.primary_error_code = "NONE";

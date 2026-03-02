@@ -2,6 +2,57 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VXAvatar in-process deflate decode (external extractor removal)
+
+### Summary
+
+Removed the PowerShell-based extraction fallback from `.vxavatar` and replaced it with in-process ZIP deflate decode using vendored `miniz`, so runtime no longer depends on external process execution for `method=8` entries.
+
+### Changed
+
+- `src/avatar/vxavatar_loader.cpp`
+  - Removed:
+    - `ReadZipEntryViaPowershell(...)`
+    - external `std::system("powershell ...")` path
+    - `W_PARSE: VX_EXTERNAL_EXTRACTOR` warning emission
+  - Added:
+    - local-header data-range resolver (`ResolveZipEntryDataRange`)
+    - in-process `deflate(8)` decoder (`ReadDeflateZipEntry`)
+    - payload failure classification split:
+      - unsupported method -> `VX_UNSUPPORTED_COMPRESSION`
+      - malformed/truncated/invalid payload read -> `VX_SCHEMA_INVALID`
+  - Kept:
+    - `stored(0)` path
+    - `parse -> resolve -> payload -> runtime-ready` stage contract
+
+- `third_party/miniz/*` (new vendored dependency)
+  - Added miniz source/header set for in-process inflate implementation:
+    - `miniz.c`, `miniz.h`, `miniz_common.h`, `miniz_tdef.h`, `miniz_tinfl.h`, `miniz_zip.h`, `miniz_export.h`
+
+- `src/common/miniz_impl.cpp` (new)
+  - Added single translation unit wrapper to compile miniz implementation files into `vsfclone_core`.
+
+- `CMakeLists.txt`
+  - Added `src/common/miniz_impl.cpp` to `vsfclone_core`.
+  - Added private include path for `third_party/miniz`.
+  - Removed temporary `find_package(ZLIB)` dependency path.
+
+- `README.md`
+  - Updated VXAvatar compression note: `stored(0)` + `deflate(8)` in-process support.
+  - Added behavior note for external extractor removal.
+
+### Verified
+
+- `cmake --build build_vxdeflate --config Release` succeeded.
+- `avatar_tool sample/demo_mvp.vxavatar`:
+  - `Compat: full`
+  - `ParserStage: runtime-ready`
+  - `PrimaryError: NONE`
+  - no external extractor warning.
+- Truncated sample check:
+  - `build/tmp_vx/demo_mvp_truncated.vxavatar`
+  - returns `Compat: failed`, `PrimaryError: VX_SCHEMA_INVALID`, no process crash.
+
 ## 2026-03-02 - VSFAvatar quality gate harness (A/B/C + baseline diff)
 
 ### Summary
