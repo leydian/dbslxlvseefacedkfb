@@ -24,6 +24,7 @@ constexpr std::uint32_t kZipEocdSig = 0x06054B50U;
 constexpr std::uint32_t kZipCdfhSig = 0x02014B50U;
 constexpr std::uint32_t kZipLocalSig = 0x04034B50U;
 constexpr std::uint16_t kZipStored = 0U;
+constexpr std::uint16_t kZipDeflate = 8U;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -212,6 +213,68 @@ bool ReadStoredZipEntry(
         return false;
     }
     out_bytes->assign(file_bytes.begin() + static_cast<std::ptrdiff_t>(data_offset), file_bytes.begin() + static_cast<std::ptrdiff_t>(data_end));
+    return true;
+}
+
+std::string EscapePowershellSingleQuoted(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8U);
+    for (char c : s) {
+        if (c == '\'') {
+            out.push_back('\'');
+            out.push_back('\'');
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+bool ReadZipEntryViaPowershell(
+    const std::string& archive_path,
+    const std::string& entry_name,
+    std::vector<std::uint8_t>* out_bytes,
+    std::string* out_error) {
+    if (out_bytes == nullptr || out_error == nullptr) {
+        return false;
+    }
+    out_bytes->clear();
+    out_error->clear();
+    const std::string archive_escaped = EscapePowershellSingleQuoted(archive_path);
+    const std::string entry_escaped = EscapePowershellSingleQuoted(entry_name);
+    const std::string temp_path = (fs::temp_directory_path() / fs::path("vxavatar_extract.tmp")).string();
+    const std::string temp_escaped = EscapePowershellSingleQuoted(temp_path);
+    const std::string command =
+        "powershell -NoProfile -NonInteractive -Command \""
+        "$ErrorActionPreference='Stop'; "
+        "Add-Type -AssemblyName System.IO.Compression; "
+        "Add-Type -AssemblyName System.IO.Compression.FileSystem; "
+        "$z=[System.IO.Compression.ZipFile]::OpenRead('" +
+        archive_escaped +
+        "'); "
+        "try { "
+        "$e=$z.GetEntry('" +
+        entry_escaped +
+        "'); "
+        "if($null -eq $e){ throw 'entry-not-found'; } "
+        "$ms=New-Object System.IO.MemoryStream; "
+        "$s=$e.Open(); "
+        "try { $s.CopyTo($ms); } finally { $s.Dispose(); } "
+        "[System.IO.File]::WriteAllBytes('" +
+        temp_escaped +
+        "', $ms.ToArray()) "
+        "} finally { $z.Dispose(); }\"";
+    const int rc = std::system(command.c_str());
+    if (rc != 0) {
+        *out_error = "powershell extractor failed";
+        return false;
+    }
+    if (!ReadFileBytes(temp_path, out_bytes)) {
+        *out_error = "powershell extractor output is unreadable";
+        return false;
+    }
+    std::error_code ignored;
+    fs::remove(temp_path, ignored);
     return true;
 }
 
@@ -581,6 +644,27 @@ std::optional<std::string> FindManifestKey(const std::unordered_map<std::string,
     return std::nullopt;
 }
 
+bool ReadZipEntryPayload(
+    const std::vector<std::uint8_t>& file_bytes,
+    const std::string& archive_path,
+    const ZipEntryMeta& entry,
+    std::vector<std::uint8_t>* out_bytes,
+    std::string* out_error) {
+    if (entry.compression_method == kZipStored) {
+        return ReadStoredZipEntry(file_bytes, entry, out_bytes, out_error);
+    }
+    if (entry.compression_method == kZipDeflate) {
+        return ReadZipEntryViaPowershell(archive_path, entry.name, out_bytes, out_error);
+    }
+    if (out_error != nullptr) {
+        *out_error = "unsupported compression method";
+    }
+    if (out_bytes != nullptr) {
+        out_bytes->clear();
+    }
+    return false;
+}
+
 }  // namespace
 
 bool VxAvatarLoader::CanLoadPath(const std::string& path) const {
@@ -633,17 +717,17 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
     std::vector<std::uint8_t> manifest_bytes;
     std::string entry_error;
     const ZipEntryMeta& manifest_entry = entries[*manifest_key];
-    if (manifest_entry.compression_method != kZipStored) {
-        pkg.compat_level = AvatarCompatLevel::Failed;
-        pkg.primary_error_code = "VX_SCHEMA_INVALID";
-        pkg.warnings.push_back("E_PARSE: VX_SCHEMA_INVALID: manifest.json must use stored ZIP method(0) for MVP.");
-        return core::Result<AvatarPackage>::Ok(pkg);
-    }
-    if (!ReadStoredZipEntry(file_bytes, manifest_entry, &manifest_bytes, &entry_error)) {
+    if (!ReadZipEntryPayload(file_bytes, path, manifest_entry, &manifest_bytes, &entry_error)) {
         pkg.compat_level = AvatarCompatLevel::Failed;
         pkg.primary_error_code = "VX_SCHEMA_INVALID";
         pkg.warnings.push_back("E_PARSE: VX_SCHEMA_INVALID: failed to read manifest.json: " + entry_error);
         return core::Result<AvatarPackage>::Ok(pkg);
+    }
+    if (manifest_bytes.size() >= 3U && manifest_bytes[0] == 0xEFU && manifest_bytes[1] == 0xBBU && manifest_bytes[2] == 0xBFU) {
+        manifest_bytes.erase(manifest_bytes.begin(), manifest_bytes.begin() + 3);
+    }
+    if (manifest_entry.compression_method == kZipDeflate) {
+        pkg.warnings.push_back("W_PARSE: VX_EXTERNAL_EXTRACTOR: deflate manifest extracted via PowerShell.");
     }
 
     JsonValue root;
@@ -730,7 +814,7 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
         payload.name = mesh_refs[i];
         std::vector<std::uint8_t> payload_bytes;
         std::string payload_error;
-        if (resolved_meshes[i] != nullptr && ReadStoredZipEntry(file_bytes, *resolved_meshes[i], &payload_bytes, &payload_error)) {
+        if (resolved_meshes[i] != nullptr && ReadZipEntryPayload(file_bytes, path, *resolved_meshes[i], &payload_bytes, &payload_error)) {
             payload.vertex_blob = std::move(payload_bytes);
         } else {
             has_payload_gap = true;
@@ -760,7 +844,7 @@ core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const 
         payload.format = DetectTextureFormat(texture_refs[i]);
         std::vector<std::uint8_t> texture_bytes;
         std::string payload_error;
-        if (resolved_textures[i] != nullptr && ReadStoredZipEntry(file_bytes, *resolved_textures[i], &texture_bytes, &payload_error)) {
+        if (resolved_textures[i] != nullptr && ReadZipEntryPayload(file_bytes, path, *resolved_textures[i], &texture_bytes, &payload_error)) {
             payload.bytes = std::move(texture_bytes);
         } else {
             has_payload_gap = true;

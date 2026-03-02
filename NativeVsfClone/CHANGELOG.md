@@ -2,6 +2,100 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VXAvatar deflate/BOM compatibility hardening (MVP unblock)
+
+### Summary
+
+Hardened the `.vxavatar` MVP path to handle real-world ZIPs produced with deflate compression (`method=8`) and UTF-8 BOM-prefixed manifests, removing the remaining blocker that kept valid sample files at `Compat: failed`.
+
+### Changed
+
+- `src/avatar/vxavatar_loader.cpp`
+  - Added compression-method branch:
+    - `stored(0)`: in-house local-header payload read (existing path)
+    - `deflate(8)`: temporary PowerShell/.NET extraction fallback
+  - Added `ReadZipEntryViaPowershell(...)` fallback:
+    - opens archive with .NET `ZipFile`
+    - extracts entry bytes
+    - writes temp payload and re-ingests into loader
+  - Added `ReadZipEntryPayload(...)` dispatcher so manifest/mesh/texture reads share the same compression-aware path.
+  - Added UTF-8 BOM stripping for `manifest.json` prior to JSON parse.
+  - Added parser warning for external extraction path:
+    - `W_PARSE: VX_EXTERNAL_EXTRACTOR: deflate manifest extracted via PowerShell.`
+
+### Behavior Impact
+
+- Before this pass:
+  - deflate-based `.vxavatar` files failed in parse stage with schema errors.
+- After this pass:
+  - deflate-based samples can complete parse/resolve/payload/runtime-ready flow.
+  - same sample now reaches `Compat: full` with populated mesh/material/texture payload counts.
+
+### Verified
+
+- `Release` build succeeded after the hardening patch.
+- `avatar_tool.exe D:\dbslxlvseefacedkfb\sample\demo_mvp.vxavatar`:
+  - `Format: VXAvatar`
+  - `Compat: full`
+  - `ParserStage: runtime-ready`
+  - `PrimaryError: NONE`
+  - `MeshPayloads/MaterialPayloads/TexturePayloads: 1/1/1`
+
+## 2026-03-03 - VSFAvatar reconstruction candidate scoring + failure-offset diagnostics
+
+### Summary
+
+Focused the VSFAvatar in-house reconstruction pass on reproducible candidate scoring and richer block failure metadata so block-0 read/decode blockers can be triaged with concrete offsets and size tuples.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added reconstruction diagnostics:
+    - `reconstruction_candidate_count`
+    - `best_candidate_score`
+  - Added block read diagnostics:
+    - `failed_block_read_offset`
+    - `failed_block_compressed_size`
+    - `failed_block_uncompressed_size`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded reconstruction window scan from `+/-256` to `+/-4096` (`16`-byte step).
+  - Normalized candidate families:
+    - `after-metadata`
+    - `aligned-after-metadata`
+    - `tail-packed`
+    - `header-window`
+    - `tail-window`
+  - Added candidate quality scoring (decoded block ratio + node-range consistency + block0 mode-source plausibility).
+  - Added block-0 decode hypotheses:
+    - `prefix-skip-16`
+    - `prefix-skip-32`
+  - Added implausible-size guard (`>256 MiB`) with explicit classification:
+    - `DATA_BLOCK_SIZE_IMPLAUSIBLE`
+  - Preserved failed read offset and size tuple in probe diagnostics for dominant failure paths.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added JSON output fields:
+    - `reconstruction_candidate_count`
+    - `best_candidate_score`
+    - `failed_block_read_offset`
+    - `failed_block_compressed_size`
+    - `failed_block_uncompressed_size`
+  - Added warning stream line:
+    - `W_RECON_META`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added sidecar warning mapping for reconstruction candidate score/count and failed-read tuple.
+  - Extended in-house reconstruction warning payload with failed-read tuple and score/candidate count.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added report fields:
+    - `SidecarReconCandidateCount`
+    - `SidecarBestCandidateScore`
+    - `SidecarFailedReadOffset`
+    - `SidecarFailedCompressedSize`
+    - `SidecarFailedUncompressedSize`
+
 ## 2026-03-03 - VXAvatar MVP parser/payload integration + NativeCore diagnostics expansion
 
 ### Summary
