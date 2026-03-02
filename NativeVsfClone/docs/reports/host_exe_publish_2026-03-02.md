@@ -1,40 +1,19 @@
 # Host EXE Publish Report (2026-03-02)
 
-## Goal
+## Scope
 
-Produce runnable GUI host artifacts as self-contained executables for both host tracks:
+This update adds a reproducible publish path that outputs runnable GUI executables for both host tracks:
 
 - WPF host
 - WinUI host
 
-Distribution policy is fixed to:
+Distribution contract:
 
-- `exe + nativecore.dll` (2 files minimum in output folder)
+- minimum required payload per host: `*.exe + nativecore.dll`
 
-## Build/Publish Pipeline
+## Implemented Changes
 
-New script:
-
-- `tools/publish_hosts.ps1`
-
-Pipeline stages:
-
-1. Build native release artifacts:
-   - `cmake --build build --config Release`
-2. Publish WPF host:
-   - `dotnet publish host/WpfHost/WpfHost.csproj ...`
-3. Publish WinUI host:
-   - `dotnet publish host/WinUiHost/WinUiHost.csproj ...`
-4. Copy `build/Release/nativecore.dll` into each host distribution folder.
-5. Consolidate output into:
-   - `dist/wpf`
-   - `dist/winui`
-6. Write publish report:
-   - `build/reports/host_publish_latest.txt`
-
-## Project Publish Defaults
-
-### WpfHost
+### 1) Project-level publish defaults
 
 `host/WpfHost/WpfHost.csproj`
 
@@ -42,8 +21,6 @@ Pipeline stages:
 - `SelfContained=true`
 - `PublishSingleFile=true`
 - `PublishTrimmed=false`
-
-### WinUiHost
 
 `host/WinUiHost/WinUiHost.csproj`
 
@@ -53,19 +30,38 @@ Pipeline stages:
 - `PublishTrimmed=false`
 - `WindowsAppSDKSelfContained=true`
 
-## Run Command
+Purpose:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1
-```
+- keep local publish commands short and deterministic
+- avoid runtime dependency on a preinstalled .NET runtime
+- reduce packaging variance across environments
 
-Optional:
+### 2) End-to-end publish automation script
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild
-```
+Added `tools/publish_hosts.ps1`.
 
-## Expected Output
+Script behavior:
+
+1. Ensure required tools are available (`cmake`, `dotnet`).
+2. Optionally build native release artifacts (`cmake --build build --config Release`).
+3. Publish WPF host with self-contained single-file options.
+4. Publish WinUI host with self-contained single-file options (+ Windows App SDK self-contained).
+5. Create/refresh distribution directories:
+   - `dist/wpf`
+   - `dist/winui`
+6. Copy publish output and force-copy `build/Release/nativecore.dll` into both distributions.
+7. Emit a machine-readable run report:
+   - `build/reports/host_publish_latest.txt`
+
+Supported parameters:
+
+- `-Configuration` (default: `Release`)
+- `-RuntimeIdentifier` (default: `win-x64`)
+- `-SkipNativeBuild` (use existing native binaries)
+
+### 3) Output contract
+
+Expected artifacts after successful run:
 
 - `dist/wpf/WpfHost.exe`
 - `dist/wpf/nativecore.dll`
@@ -73,10 +69,35 @@ powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBu
 - `dist/winui/nativecore.dll`
 - `build/reports/host_publish_latest.txt`
 
-## Validation Notes
+## Verification Summary
 
-If publish fails:
+Primary command:
 
-- check .NET SDK installation (`dotnet --version`)
-- check Windows App SDK workload for WinUI
-- verify `build/Release/nativecore.dll` exists
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1
+```
+
+Alternative (skip native rebuild):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild
+```
+
+Runtime checks performed by script:
+
+- native binary presence validation:
+  - `build/Release/nativecore.dll`
+- publish output directory validation for both hosts
+- executable path discovery and report serialization
+
+## Known Limitations
+
+- Host publish is currently Windows-focused (`win-x64`) in defaults.
+- WinUI publish still depends on a valid Windows App SDK-capable environment.
+- Script expects CMake build directory layout at `NativeVsfClone/build`.
+
+## Next Steps
+
+- Add CI job for `tools/publish_hosts.ps1` dry validation on Windows runner.
+- Add optional checksum/signature output for `dist/*` artifacts.
+- Add optional packaging mode (`zip`) per host output folder.

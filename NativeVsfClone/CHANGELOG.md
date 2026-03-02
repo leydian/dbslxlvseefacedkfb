@@ -2,6 +2,35 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host publish documentation refresh and index normalization
+
+### Summary
+
+Refined host publish documentation to be decision-complete for operation and maintenance, and normalized docs index coverage so host-track reports are discoverable from a single entrypoint.
+
+### Changed
+
+- `docs/reports/host_exe_publish_2026-03-02.md`
+  - Reorganized report using documentation template sections:
+    - `Scope`
+    - `Implemented Changes`
+    - `Verification Summary`
+    - `Known Limitations`
+    - `Next Steps`
+  - Added explicit script parameter contract (`-Configuration`, `-RuntimeIdentifier`, `-SkipNativeBuild`).
+  - Added step-by-step publish behavior and output contract details.
+  - Added operational constraints and follow-up recommendations.
+
+- `docs/INDEX.md`
+  - Added missing host-track report entries:
+    - `ui_host_runtime_integration_2026-03-02.md`
+    - `host_exe_publish_2026-03-02.md`
+
+### Verified
+
+- `docs/INDEX.md` now directly links all host-track reports created on `2026-03-02`.
+- Host publish report contains executable run commands, required outputs, and failure/limitation context in one place.
+
 ## 2026-03-02 - Host EXE publish pipeline (WPF + WinUI)
 
 ### Summary
@@ -36,8 +65,13 @@ Added reproducible GUI host publish automation so both WPF and WinUI hosts can b
 - `docs/reports/host_exe_publish_2026-03-02.md`
   - Added operational publish report and expected output contract.
 
-- `README.md`
-  - Added "GUI EXE Publish (WPF + WinUI)" section with one-command workflow.
+### Verified
+
+- Host publish command path documented:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1`
+- Distribution contract documented:
+  - `dist/wpf/*.exe + nativecore.dll`
+  - `dist/winui/*.exe + nativecore.dll`
 
 ## 2026-03-02 - UI host foundation + native window render path + runtime Spout/OSC backends
 
