@@ -31,7 +31,8 @@ typedef enum NcAvatarFormatHint {
     NC_AVATAR_FORMAT_AUTO = 0,
     NC_AVATAR_FORMAT_VRM = 1,
     NC_AVATAR_FORMAT_VXAVATAR = 2,
-    NC_AVATAR_FORMAT_VSFAVATAR = 3
+    NC_AVATAR_FORMAT_VSFAVATAR = 3,
+    NC_AVATAR_FORMAT_VXA2 = 4
 } NcAvatarFormatHint;
 
 typedef enum NcCompatLevel {
@@ -59,10 +60,15 @@ typedef struct NcAvatarInfo {
     NcCompatLevel compat_level;
     uint32_t mesh_count;
     uint32_t material_count;
+    uint32_t mesh_payload_count;
+    uint32_t material_payload_count;
+    uint32_t texture_payload_count;
     uint32_t warning_count;
     uint32_t missing_feature_count;
     char display_name[128];
     char source_path[260];
+    char parser_stage[32];
+    char primary_error_code[64];
     char last_warning[256];
     char last_missing_feature[256];
 } NcAvatarInfo;

@@ -3,7 +3,8 @@
 Native C++ scaffold for a standalone VTuber-style runtime with:
 
 - `.vrm` input path handling (scaffold)
-- `.vxavatar` input path handling (scaffold)
+- `.vxavatar` input path handling (MVP parser + payload)
+- `.vxa2` input path handling (header+manifest MVP)
 - `.vsfavatar` probing via UnityFS header parser (implemented)
 - `nativecore.dll` C ABI for host/UI integration
 - streaming and OSC interfaces (`Spout2`, `OSC`) as stubs for wiring
@@ -25,7 +26,7 @@ If `sidecar` mode fails to execute:
 
 ## What is implemented now
 
-- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vsfavatar`).
+- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vxa2`, `.vsfavatar`).
 - `VsfAvatarLoader` reads UnityFS metadata and reports:
   - signature/version/player version/engine version
   - compression mode flags
@@ -46,6 +47,7 @@ If `sidecar` mode fails to execute:
 - SerializedFile class parsing (`GameObject`, `Mesh`, `Material`, etc.)
 - Real VRM import pipeline (glTF/VRM decode and MToon binding)
 - `.vxavatar` manifest/material override parse/apply
+- `.vxa2` binary asset section decode/streaming payload unpack
 - DirectX11 renderer and WinUI/WPF host integration
 - Real Spout2 and OSC runtime bindings
 
@@ -113,6 +115,9 @@ Sidecar diagnostics semantics (schema v3):
 - `selected_block0_hypothesis` / `block0_attempt_count`:
   - records which block-0 hypothesis variant was selected (or last/best-partial failed hypothesis)
   - reports how many block-0 hypothesis attempts were executed
+- `block0_selected_offset` / `block0_selected_mode_source`:
+  - records which reconstruction start offset was associated with block-0 hypothesis selection
+  - records whether selected mode came from `header-derived`, `block-flag`, or `fallback`
 - `reconstruction_summary`:
   - dominant failure class aggregated across reconstruction attempts
   - currently converges to `DATA_BLOCK_READ_FAILED` on fixed baseline samples
@@ -159,6 +164,31 @@ Latest behavior notes (2026-03-03, block-0 hypothesis pass):
   - `SidecarBlock0Attempts`
 - Fixed baseline remains blocked after this pass:
   - all 4 fixed samples still report `failed-reconstruction`, `DATA_BLOCK_READ_FAILED`, `Meshes: 0`
+
+Latest behavior notes (2026-03-03, VXAvatar MVP parse/payload pass):
+
+- `.vxavatar` loader moved from signature-only scaffold to manifest/payload aware flow.
+- Added parser lifecycle state and dominant error code propagation:
+  - `parse -> resolve -> payload -> runtime-ready`
+  - exposed via `parser_stage`, `primary_error_code`
+- Added ZIP central-directory based entry resolution and manifest discovery:
+  - `manifest.json` (root or nested path suffix)
+  - path normalization and unsafe relative path rejection (`..`, absolute, drive-letter)
+- Added MVP manifest contract (required):
+  - `avatarId` (or `avatar_id`)
+  - `meshRefs[]`
+  - `materialRefs[]`
+  - `textureRefs[]`
+- Added payload mapping:
+  - mesh entries -> `mesh_payloads[].vertex_blob`
+  - material entries -> `material_payloads[]` (MToon placeholder policy)
+  - texture entries -> `texture_payloads[]` with inferred format (`png/jpeg/tga/bmp/binary`)
+- Current `.vxavatar` MVP limitation:
+  - ZIP `stored(0)` method only (deflate not yet supported)
+  - unsupported compression returns `VX_UNSUPPORTED_COMPRESSION` with `Compat: partial`
+- NativeCore/CLI diagnostics expanded:
+  - `NcAvatarInfo` now reports payload counts (`mesh/material/texture`)
+  - `parser_stage`, `primary_error_code` are surfaced in `avatar_tool`
 
 ## Repository layout
 

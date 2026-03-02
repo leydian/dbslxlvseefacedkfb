@@ -65,6 +65,8 @@ NcAvatarFormatHint ToFormatHint(AvatarSourceType source_type) {
             return NC_AVATAR_FORMAT_VRM;
         case AvatarSourceType::VxAvatar:
             return NC_AVATAR_FORMAT_VXAVATAR;
+        case AvatarSourceType::Vxa2:
+            return NC_AVATAR_FORMAT_VXA2;
         case AvatarSourceType::VsfAvatar:
             return NC_AVATAR_FORMAT_VSFAVATAR;
         default:
@@ -96,10 +98,21 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     out_info->compat_level = ToCompatLevel(pkg.compat_level);
     out_info->mesh_count = static_cast<std::uint32_t>(pkg.meshes.size());
     out_info->material_count = static_cast<std::uint32_t>(pkg.materials.size());
+    out_info->mesh_payload_count = static_cast<std::uint32_t>(pkg.mesh_payloads.size());
+    out_info->material_payload_count = static_cast<std::uint32_t>(pkg.material_payloads.size());
+    out_info->texture_payload_count = static_cast<std::uint32_t>(pkg.texture_payloads.size());
     out_info->warning_count = static_cast<std::uint32_t>(pkg.warnings.size());
     out_info->missing_feature_count = static_cast<std::uint32_t>(pkg.missing_features.size());
     CopyString(out_info->display_name, sizeof(out_info->display_name), pkg.display_name);
     CopyString(out_info->source_path, sizeof(out_info->source_path), pkg.source_path);
+    CopyString(
+        out_info->parser_stage,
+        sizeof(out_info->parser_stage),
+        pkg.parser_stage.empty() ? "unknown" : pkg.parser_stage);
+    CopyString(
+        out_info->primary_error_code,
+        sizeof(out_info->primary_error_code),
+        pkg.primary_error_code.empty() ? "NONE" : pkg.primary_error_code);
     if (!pkg.warnings.empty()) {
         CopyString(out_info->last_warning, sizeof(out_info->last_warning), pkg.warnings.back());
     }

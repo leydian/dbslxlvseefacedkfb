@@ -13,6 +13,8 @@ const char* ToFormatName(NcAvatarFormatHint fmt) {
             return "VXAvatar";
         case NC_AVATAR_FORMAT_VSFAVATAR:
             return "VSFAvatar";
+        case NC_AVATAR_FORMAT_VXA2:
+            return "VXA2";
         default:
             return "Unknown";
     }
@@ -78,8 +80,13 @@ int main(int argc, char** argv) {
     std::cout << "  SourcePath: " << info.source_path << "\n";
     std::cout << "  Format: " << ToFormatName(info.detected_format) << "\n";
     std::cout << "  Compat: " << ToCompatName(info.compat_level) << "\n";
+    std::cout << "  ParserStage: " << info.parser_stage << "\n";
+    std::cout << "  PrimaryError: " << info.primary_error_code << "\n";
     std::cout << "  Meshes: " << info.mesh_count << "\n";
     std::cout << "  Materials: " << info.material_count << "\n";
+    std::cout << "  MeshPayloads: " << info.mesh_payload_count << "\n";
+    std::cout << "  MaterialPayloads: " << info.material_payload_count << "\n";
+    std::cout << "  TexturePayloads: " << info.texture_payload_count << "\n";
     std::cout << "  Warnings: " << info.warning_count << "\n";
     if (info.last_warning[0] != '\0') {
         std::cout << "  LastWarning: " << info.last_warning << "\n";

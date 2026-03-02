@@ -235,6 +235,30 @@ static std::uint32_t GetJsonU32(const std::string& json, const std::string& key,
     return static_cast<std::uint32_t>(std::strtoul(json.substr(i, end - i).c_str(), nullptr, 10));
 }
 
+static std::uint64_t GetJsonU64(const std::string& json, const std::string& key, std::uint64_t fallback = 0ULL) {
+    const auto needle = "\"" + key + "\"";
+    const auto key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return fallback;
+    }
+    const auto colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return fallback;
+    }
+    std::size_t i = colon + 1U;
+    while (i < json.size() && std::isspace(static_cast<unsigned char>(json[i])) != 0) {
+        ++i;
+    }
+    std::size_t end = i;
+    while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end])) != 0) {
+        ++end;
+    }
+    if (end == i) {
+        return fallback;
+    }
+    return static_cast<std::uint64_t>(std::strtoull(json.substr(i, end - i).c_str(), nullptr, 10));
+}
+
 static bool HasJsonKey(const std::string& json, const std::string& key) {
     return json.find("\"" + key + "\"") != std::string::npos;
 }
@@ -484,6 +508,12 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.warnings.push_back("W_BLOCK0: hypothesis=" + block0_hypothesis +
                                ", attempts=" + std::to_string(block0_attempt_count));
     }
+    const auto block0_selected_offset = GetJsonU64(output, "block0_selected_offset");
+    const auto block0_mode_source = GetJsonString(output, "block0_selected_mode_source");
+    if (block0_selected_offset > 0U || !block0_mode_source.empty()) {
+        pkg.warnings.push_back("W_BLOCK0_META: offset=" + std::to_string(block0_selected_offset) +
+                               ", mode-source=" + block0_mode_source);
+    }
     const auto warning_items = GetJsonStringArray(output, "warnings");
     for (const auto& w : warning_items) {
         pkg.warnings.push_back(w);
@@ -547,6 +577,10 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
         if (!probe.value.selected_block0_hypothesis.empty()) {
             meta << ", block0 hypothesis=" << probe.value.selected_block0_hypothesis
                  << ", block0 attempts=" << probe.value.block0_attempt_count;
+        }
+        if (probe.value.block0_selected_offset > 0U || !probe.value.block0_selected_mode_source.empty()) {
+            meta << ", block0 offset=" << probe.value.block0_selected_offset
+                 << ", block0 mode-source=" << probe.value.block0_selected_mode_source;
         }
         if (!probe.value.reconstruction_failure_summary_code.empty()) {
             meta << ", recon summary code=" << probe.value.reconstruction_failure_summary_code;

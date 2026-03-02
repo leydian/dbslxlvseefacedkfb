@@ -125,6 +125,10 @@ int main(int argc, char** argv) {
         warnings.push_back("W_BLOCK0: hypothesis=" + p.selected_block0_hypothesis +
                            ", attempts=" + std::to_string(p.block0_attempt_count));
     }
+    if (p.block0_selected_offset > 0U || !p.block0_selected_mode_source.empty()) {
+        warnings.push_back("W_BLOCK0_META: offset=" + std::to_string(p.block0_selected_offset) +
+                           ", mode-source=" + p.block0_selected_mode_source);
+    }
     if (!p.object_table_parsed || mesh_count == 0U) {
         missing_features.push_back("mesh/material object discovery");
     } else {
@@ -154,6 +158,8 @@ int main(int argc, char** argv) {
               << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","
               << "\"selected_block0_hypothesis\":\"" << EscapeJson(p.selected_block0_hypothesis) << "\","
               << "\"block0_attempt_count\":" << p.block0_attempt_count << ","
+              << "\"block0_selected_offset\":" << p.block0_selected_offset << ","
+              << "\"block0_selected_mode_source\":\"" << EscapeJson(p.block0_selected_mode_source) << "\","
               << "\"selected_offset_family\":\"" << EscapeJson(p.selected_offset_family) << "\","
               << "\"reconstruction_summary\":\"" << EscapeJson(p.reconstruction_failure_summary_code) << "\","
               << "\"warnings\":" << JoinJsonStringArray(warnings) << ","

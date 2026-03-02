@@ -2,6 +2,129 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VXAvatar MVP parser/payload integration + NativeCore diagnostics expansion
+
+### Summary
+
+Upgraded `.vxavatar` from scaffold signature checks to a manifest-aware MVP pipeline with payload extraction (stored ZIP entries), and extended NativeCore/API diagnostics to expose parser state and payload coverage.
+
+### Changed
+
+- `src/avatar/vxavatar_loader.cpp`
+  - Replaced scaffold-only ZIP magic check with full ZIP central-directory traversal:
+    - EOCD locate
+    - central-directory parse
+    - local-header validation
+  - Added `manifest.json` discovery (root or nested suffix path).
+  - Added lightweight in-house JSON parser for manifest decode.
+  - Added required manifest validation:
+    - `avatarId`/`avatar_id`
+    - `meshRefs[]`
+    - `materialRefs[]`
+    - `textureRefs[]`
+  - Added path hardening for asset refs (reject absolute/drive-letter/`..` traversal).
+  - Added payload population:
+    - `mesh_payloads` (`vertex_blob` from entry bytes)
+    - `material_payloads` (MToon placeholder policy)
+    - `texture_payloads` (format inference + bytes)
+  - Added stage/error propagation:
+    - `parser_stage` (`parse`, `resolve`, `payload`, `runtime-ready`)
+    - `primary_error_code` (`NONE`, `VX_SCHEMA_INVALID`, `VX_MANIFEST_MISSING`, `VX_ASSET_MISSING`, `VX_UNSUPPORTED_COMPRESSION`)
+  - MVP compression scope is currently `stored(0)` entries only.
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Added new source type:
+    - `AvatarSourceType::Vxa2`
+  - Added package-level parser diagnostics:
+    - `parser_stage`
+    - `primary_error_code`
+
+- `include/vsfclone/nativecore/api.h`
+  - Added format hint:
+    - `NC_AVATAR_FORMAT_VXA2`
+  - Extended `NcAvatarInfo`:
+    - `mesh_payload_count`
+    - `material_payload_count`
+    - `texture_payload_count`
+    - `parser_stage`
+    - `primary_error_code`
+
+- `src/nativecore/native_core.cpp`
+  - Added `AvatarSourceType::Vxa2` mapping to `NC_AVATAR_FORMAT_VXA2`.
+  - Added payload-count and parser-diagnostic mapping into `NcAvatarInfo`.
+
+- `tools/avatar_tool.cpp`
+  - Added output fields:
+    - `ParserStage`
+    - `PrimaryError`
+    - `MeshPayloads`
+    - `MaterialPayloads`
+    - `TexturePayloads`
+  - Added format display branch for `VXA2`.
+
+- `src/avatar/vxa2_loader.h` / `src/avatar/vxa2_loader.cpp` (new)
+  - Added `.vxa2` loader with MVP validation flow:
+    - magic/version/header checks
+    - manifest section JSON key validation
+    - reference array extraction
+    - placeholder payload container mapping
+  - Emits staged diagnostics and `VXA2_SCHEMA_INVALID` codes on parse failures.
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Registered `Vxa2Loader` in extension dispatch chain.
+
+- `CMakeLists.txt`
+  - Added `src/avatar/vxa2_loader.cpp` to `vsfclone_core` target.
+
+- `src/main.cpp`
+  - Added CLI source-type display branch for `VXA2`.
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added block-0 trace fields:
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added block-0 mode candidate prioritization helper (`BuildBlockModeCandidates`).
+  - Added block-0 mode failure-hit demotion logic to reduce repeated low-value retries.
+  - Added block-0 selected offset/mode-source propagation:
+    - `header-derived`
+    - `block-flag`
+    - `fallback`
+    - `failed-candidate`
+  - Added reconstruction success candidate quality scoring before final selection.
+  - Preserved best-partial block-0 offset/mode metadata on failure.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added sidecar parse support for:
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+  - Added `W_BLOCK0_META` warning emission.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added JSON fields:
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+  - Added warning emission:
+    - `W_BLOCK0_META`
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Extended sample report with sidecar block-0 metadata:
+    - `SidecarBlock0Offset`
+    - `SidecarBlock0ModeSource`
+
+### Verified
+
+- `Release` build succeeded after all updates.
+- Fixed-set VSFAvatar report regenerated:
+  - `build/reports/vsfavatar_probe_latest_decode_tuning.txt`
+- VSFAvatar fixed baseline remains blocked:
+  - `Compat: partial`
+  - `Meshes: 0`
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - `SidecarBlock0Hypothesis=swap-size-flags`
+  - `SidecarBlock0ModeSource=failed-candidate`
+
 ## 2026-03-03 - VSFAvatar diagnostics contract refresh (probe stage + primary error)
 
 ### Summary
@@ -62,6 +185,8 @@ Implemented a block-0 focused reconstruction hypothesis pass and surfaced its ou
   - Added block-0 diagnostics:
     - `selected_block0_hypothesis`
     - `block0_attempt_count`
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
 
 - `src/vsf/unityfs_reader.cpp`
   - Extended block decode variants for block-0:
@@ -70,11 +195,14 @@ Implemented a block-0 focused reconstruction hypothesis pass and surfaced its ou
     - `orig-clamp-range`
   - Added block-0 attempt counting and selected-hypothesis capture.
   - Preserved best-partial block-0 diagnostics when full reconstruction does not succeed.
+  - Added block-0 mode-source trace (`header-derived` / `block-flag` / `fallback`).
 
 - `tools/vsfavatar_sidecar.cpp`
   - Added sidecar JSON fields:
     - `selected_block0_hypothesis`
     - `block0_attempt_count`
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
   - Added warning line:
     - `W_BLOCK0: hypothesis=..., attempts=...`
 
@@ -84,7 +212,7 @@ Implemented a block-0 focused reconstruction hypothesis pass and surfaced its ou
 
 - `tools/vsfavatar_sample_report.ps1`
   - Added sidecar invocation per sample and appended parsed JSON diagnostics:
-    - probe stage / primary error / block layout / offset family / block0 hypothesis / block0 attempts
+    - probe stage / primary error / block layout / offset family / block0 hypothesis / block0 attempts / block0 offset / block0 mode source
 
 ### Verified
 

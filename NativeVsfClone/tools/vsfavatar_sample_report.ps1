@@ -68,6 +68,8 @@ foreach ($f in $files) {
         "  SidecarOffsetFamily: $($sidecar.selected_offset_family)" | Add-Content -Path $OutputPath
         "  SidecarBlock0Hypothesis: $($sidecar.selected_block0_hypothesis)" | Add-Content -Path $OutputPath
         "  SidecarBlock0Attempts: $($sidecar.block0_attempt_count)" | Add-Content -Path $OutputPath
+        "  SidecarBlock0Offset: $($sidecar.block0_selected_offset)" | Add-Content -Path $OutputPath
+        "  SidecarBlock0ModeSource: $($sidecar.block0_selected_mode_source)" | Add-Content -Path $OutputPath
     } catch {
         "  SidecarParseError: failed to parse JSON output" | Add-Content -Path $OutputPath
     }

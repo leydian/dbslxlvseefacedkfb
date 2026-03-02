@@ -2,6 +2,7 @@
 
 #include "vrm_loader.h"
 #include "vxavatar_loader.h"
+#include "vxa2_loader.h"
 #include "vsfavatar_loader.h"
 
 namespace vsfclone::avatar {
@@ -9,6 +10,7 @@ namespace vsfclone::avatar {
 AvatarLoaderFacade::AvatarLoaderFacade() {
     loaders_.push_back(std::make_unique<VrmLoader>());
     loaders_.push_back(std::make_unique<VxAvatarLoader>());
+    loaders_.push_back(std::make_unique<Vxa2Loader>());
     loaders_.push_back(std::make_unique<VsfAvatarLoader>());
 }
 

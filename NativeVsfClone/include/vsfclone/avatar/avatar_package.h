@@ -10,6 +10,7 @@ enum class AvatarSourceType {
     Unknown = 0,
     Vrm,
     VxAvatar,
+    Vxa2,
     VsfAvatar,
 };
 
@@ -54,6 +55,8 @@ struct TextureRenderPayload {
 struct AvatarPackage {
     AvatarSourceType source_type = AvatarSourceType::Unknown;
     AvatarCompatLevel compat_level = AvatarCompatLevel::Unknown;
+    std::string parser_stage;
+    std::string primary_error_code;
     std::string source_path;
     std::string display_name;
     std::vector<MeshAssetSummary> meshes;
