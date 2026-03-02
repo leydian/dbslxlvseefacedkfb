@@ -337,6 +337,15 @@ bool TryGetNumber(const JsonValue& root, const std::string& key, double* out) {
     return true;
 }
 
+bool TryGetBool(const JsonValue& root, const std::string& key, bool* out) {
+    const auto* v = FindKey(root, key);
+    if (v == nullptr || v->type != JsonValue::Type::Bool) {
+        return false;
+    }
+    *out = v->bool_value;
+    return true;
+}
+
 bool TryGetIndex(const JsonValue& root, const std::string& key, std::size_t* out) {
     double n = 0.0;
     if (!TryGetNumber(root, key, &n)) {
@@ -347,6 +356,28 @@ bool TryGetIndex(const JsonValue& root, const std::string& key, std::size_t* out
     }
     *out = static_cast<std::size_t>(static_cast<std::uint32_t>(n));
     return true;
+}
+
+std::string DetectTextureFormat(const std::string& mime_type, const std::string& name_hint) {
+    const auto mime = ToLower(mime_type);
+    if (mime == "image/png") {
+        return "png";
+    }
+    if (mime == "image/jpeg" || mime == "image/jpg") {
+        return "jpeg";
+    }
+    if (mime == "image/bmp") {
+        return "bmp";
+    }
+    if (mime == "image/tga") {
+        return "tga";
+    }
+    const auto lower_name = ToLower(name_hint);
+    const auto dot = lower_name.find_last_of('.');
+    if (dot != std::string::npos && dot + 1U < lower_name.size()) {
+        return lower_name.substr(dot + 1U);
+    }
+    return "binary";
 }
 
 std::uint32_t ReadU32Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
@@ -572,6 +603,41 @@ bool ExtractIndices(const std::vector<std::uint8_t>& bin,
     return true;
 }
 
+struct MaterialInfo {
+    std::string name;
+    std::string shader_name = "MToon (minimal)";
+    std::string base_color_texture_name;
+    bool double_sided = false;
+    std::string alpha_mode = "OPAQUE";
+    float alpha_cutoff = 0.5f;
+};
+
+bool ReadBufferViewBytes(const std::vector<std::uint8_t>& bin,
+                         const std::vector<BufferViewMeta>& views,
+                         std::size_t view_index,
+                         std::vector<std::uint8_t>* out_bytes,
+                         std::string* out_error) {
+    if (view_index >= views.size()) {
+        if (out_error != nullptr) {
+            *out_error = "bufferView index out of range";
+        }
+        return false;
+    }
+    const auto& view = views[view_index];
+    const std::size_t start = static_cast<std::size_t>(view.byte_offset);
+    const std::size_t length = static_cast<std::size_t>(view.byte_length);
+    if (length == 0U || start + length > bin.size()) {
+        if (out_error != nullptr) {
+            *out_error = "bufferView range out of BIN bounds";
+        }
+        return false;
+    }
+    out_bytes->assign(
+        bin.begin() + static_cast<std::ptrdiff_t>(start),
+        bin.begin() + static_cast<std::ptrdiff_t>(start + length));
+    return true;
+}
+
 }  // namespace
 
 bool VrmLoader::CanLoadPath(const std::string& path) const {
@@ -653,6 +719,137 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     pkg.parser_stage = "resolve";
+    const auto* textures_v = FindKey(root, "textures");
+    const auto* images_v = FindKey(root, "images");
+    const auto* materials_v = FindKey(root, "materials");
+
+    struct TextureRef {
+        std::string name;
+        std::vector<std::uint8_t> bytes;
+        std::string format;
+        bool valid = false;
+    };
+    std::vector<TextureRef> image_table;
+    if (images_v != nullptr && images_v->type == JsonValue::Type::Array) {
+        image_table.resize(images_v->array_value.size());
+        for (std::size_t i = 0U; i < images_v->array_value.size(); ++i) {
+            const auto& img = images_v->array_value[i];
+            if (img.type != JsonValue::Type::Object) {
+                continue;
+            }
+            std::string image_name = "Image_" + std::to_string(i);
+            TryGetString(img, "name", &image_name);
+            std::string mime_type;
+            TryGetString(img, "mimeType", &mime_type);
+            image_table[i].name = image_name;
+            image_table[i].format = DetectTextureFormat(mime_type, image_name);
+
+            std::size_t buffer_view_index = 0U;
+            if (!TryGetIndex(img, "bufferView", &buffer_view_index)) {
+                pkg.warnings.push_back("W_PAYLOAD: VRM_TEXTURE_MISSING: image has no bufferView: " + image_name);
+                continue;
+            }
+            std::string texture_err;
+            if (!ReadBufferViewBytes(bin_chunk.bytes, views, buffer_view_index, &image_table[i].bytes, &texture_err)) {
+                pkg.warnings.push_back(
+                    "W_PAYLOAD: VRM_TEXTURE_MISSING: failed to read image '" + image_name + "': " + texture_err);
+                continue;
+            }
+            image_table[i].valid = true;
+        }
+    }
+
+    std::vector<std::size_t> texture_to_image;
+    if (textures_v != nullptr && textures_v->type == JsonValue::Type::Array) {
+        texture_to_image.assign(textures_v->array_value.size(), std::numeric_limits<std::size_t>::max());
+        for (std::size_t i = 0U; i < textures_v->array_value.size(); ++i) {
+            const auto& tex = textures_v->array_value[i];
+            if (tex.type != JsonValue::Type::Object) {
+                continue;
+            }
+            std::size_t source_index = std::numeric_limits<std::size_t>::max();
+            if (TryGetIndex(tex, "source", &source_index)) {
+                texture_to_image[i] = source_index;
+            }
+        }
+    }
+
+    std::vector<MaterialInfo> parsed_materials;
+    std::uint32_t missing_texture_refs = 0U;
+    std::uint32_t unsupported_materials = 0U;
+    if (materials_v != nullptr && materials_v->type == JsonValue::Type::Array) {
+        parsed_materials.reserve(materials_v->array_value.size());
+        for (std::size_t i = 0U; i < materials_v->array_value.size(); ++i) {
+            const auto& material = materials_v->array_value[i];
+            if (material.type != JsonValue::Type::Object) {
+                ++unsupported_materials;
+                pkg.warnings.push_back("W_PARSE: VRM_MATERIAL_UNSUPPORTED: material entry is not an object");
+                continue;
+            }
+            MaterialInfo info;
+            info.name = "Material_" + std::to_string(i);
+            TryGetString(material, "name", &info.name);
+            TryGetBool(material, "doubleSided", &info.double_sided);
+            TryGetString(material, "alphaMode", &info.alpha_mode);
+            double alpha_cutoff = static_cast<double>(info.alpha_cutoff);
+            if (TryGetNumber(material, "alphaCutoff", &alpha_cutoff)) {
+                info.alpha_cutoff = static_cast<float>(alpha_cutoff);
+            }
+
+            const auto* pbr = FindKey(material, "pbrMetallicRoughness");
+            if (pbr != nullptr && pbr->type == JsonValue::Type::Object) {
+                const auto* tex_obj = FindKey(*pbr, "baseColorTexture");
+                if (tex_obj != nullptr && tex_obj->type == JsonValue::Type::Object) {
+                    std::size_t texture_index = std::numeric_limits<std::size_t>::max();
+                    if (TryGetIndex(*tex_obj, "index", &texture_index)) {
+                        if (texture_index < texture_to_image.size()) {
+                            const auto image_index = texture_to_image[texture_index];
+                            if (image_index < image_table.size() && image_table[image_index].valid) {
+                                info.base_color_texture_name = image_table[image_index].name;
+                            } else {
+                                ++missing_texture_refs;
+                                pkg.warnings.push_back(
+                                    "W_PAYLOAD: VRM_TEXTURE_MISSING: baseColorTexture source missing for material '" +
+                                    info.name + "'");
+                            }
+                        } else {
+                            ++missing_texture_refs;
+                            pkg.warnings.push_back(
+                                "W_PAYLOAD: VRM_TEXTURE_MISSING: baseColorTexture index out of range for material '" +
+                                info.name + "'");
+                        }
+                    }
+                }
+            }
+            parsed_materials.push_back(std::move(info));
+        }
+    }
+
+    for (const auto& img : image_table) {
+        if (!img.valid) {
+            continue;
+        }
+        TextureRenderPayload texture_payload;
+        texture_payload.name = img.name;
+        texture_payload.format = img.format;
+        texture_payload.bytes = img.bytes;
+        pkg.texture_payloads.push_back(std::move(texture_payload));
+    }
+
+    for (const auto& m : parsed_materials) {
+        pkg.materials.push_back({m.name, m.shader_name});
+        pkg.material_payloads.push_back({m.name, m.shader_name, m.base_color_texture_name});
+        std::ostringstream material_diag;
+        material_diag << "W_MATERIAL: " << m.name
+                      << ", alphaMode=" << m.alpha_mode
+                      << ", alphaCutoff=" << m.alpha_cutoff
+                      << ", doubleSided=" << (m.double_sided ? "true" : "false");
+        if (!m.base_color_texture_name.empty()) {
+            material_diag << ", baseTexture=" << m.base_color_texture_name;
+        }
+        pkg.warnings.push_back(material_diag.str());
+    }
+
     std::size_t mesh_added = 0U;
     for (const auto& mesh : meshes_v->array_value) {
         if (mesh.type != JsonValue::Type::Object) {
@@ -717,14 +914,39 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         return core::Result<AvatarPackage>::Ok(pkg);
     }
 
-    pkg.materials.push_back({"Default", "MToon (minimal)"});
-    pkg.material_payloads.push_back({"Default", "MToon (minimal)", ""});
-    pkg.missing_features.push_back("MToon full parameter binding");
+    if (pkg.materials.empty()) {
+        pkg.materials.push_back({"Default", "MToon (minimal)"});
+        pkg.material_payloads.push_back({"Default", "MToon (minimal)", ""});
+        pkg.warnings.push_back("W_PARSE: VRM_MATERIAL_UNSUPPORTED: materials array missing or empty");
+        ++unsupported_materials;
+    }
+
+    if (missing_texture_refs > 0U || unsupported_materials > 0U) {
+        pkg.compat_level = AvatarCompatLevel::Partial;
+        if (missing_texture_refs > 0U) {
+            if (pkg.primary_error_code == "NONE") {
+                pkg.primary_error_code = "VRM_TEXTURE_MISSING";
+            }
+            pkg.warnings.push_back(
+                "W_PARSE: VRM_TEXTURE_MISSING: unresolved material texture refs=" + std::to_string(missing_texture_refs));
+        }
+        if (unsupported_materials > 0U) {
+            if (pkg.primary_error_code == "NONE") {
+                pkg.primary_error_code = "VRM_MATERIAL_UNSUPPORTED";
+            }
+            pkg.warnings.push_back(
+                "W_PARSE: VRM_MATERIAL_UNSUPPORTED: unsupported material entries=" + std::to_string(unsupported_materials));
+        }
+    }
+
+    pkg.missing_features.push_back("MToon advanced parameter binding");
     pkg.missing_features.push_back("SpringBone and expression support");
 
     pkg.parser_stage = "runtime-ready";
-    pkg.compat_level = AvatarCompatLevel::Full;
-    pkg.primary_error_code = "NONE";
+    if (pkg.compat_level != AvatarCompatLevel::Partial) {
+        pkg.compat_level = AvatarCompatLevel::Full;
+        pkg.primary_error_code = "NONE";
+    }
     pkg.warnings.push_back("W_STAGE: runtime-ready");
     return core::Result<AvatarPackage>::Ok(pkg);
 }

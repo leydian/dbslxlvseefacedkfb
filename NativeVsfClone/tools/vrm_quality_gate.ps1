@@ -1,0 +1,141 @@
+param(
+    [string]$SampleDir = "..\\sample",
+    [string]$AvatarToolPath = ".\\build\\Release\\avatar_tool.exe",
+    [string]$ReportPath = ".\\build\\reports\\vrm_probe_latest.txt",
+    [string]$SummaryPath = ".\\build\\reports\\vrm_gate_summary.txt",
+    [switch]$UseFixedSet,
+    [string[]]$FixedSamples = @()
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not (Test-Path $AvatarToolPath)) {
+    throw "avatar_tool not found at $AvatarToolPath"
+}
+if (-not (Test-Path $SampleDir)) {
+    throw "sample directory not found at $SampleDir"
+}
+
+function To-Int {
+    param([string]$Value)
+    [int]$out = 0
+    if ([int]::TryParse($Value, [ref]$out)) {
+        return $out
+    }
+    return 0
+}
+
+$reportDir = Split-Path -Parent $ReportPath
+if (-not (Test-Path $reportDir)) {
+    New-Item -ItemType Directory -Path $reportDir | Out-Null
+}
+$summaryDir = Split-Path -Parent $SummaryPath
+if (-not (Test-Path $summaryDir)) {
+    New-Item -ItemType Directory -Path $summaryDir | Out-Null
+}
+
+$candidates = @()
+if ($UseFixedSet -and $FixedSamples.Count -gt 0) {
+    foreach ($name in $FixedSamples) {
+        $p = Join-Path $SampleDir $name
+        if (Test-Path $p) {
+            $candidates += Get-Item $p
+        } else {
+            throw "fixed sample missing: $name"
+        }
+    }
+} else {
+    $candidates = Get-ChildItem -Path $SampleDir -Filter *.vrm -File | Sort-Object Name | Select-Object -First 5
+}
+
+if ($candidates.Count -lt 5) {
+    throw "at least 5 .vrm samples are required (found=$($candidates.Count))"
+}
+
+"VRM probe report" | Set-Content -Path $ReportPath
+"Generated: $(Get-Date -Format s)" | Add-Content -Path $ReportPath
+"SampleDir: $(Resolve-Path $SampleDir)" | Add-Content -Path $ReportPath
+"UseFixedSet: $UseFixedSet" | Add-Content -Path $ReportPath
+"FileCount: $($candidates.Count)" | Add-Content -Path $ReportPath
+"" | Add-Content -Path $ReportPath
+
+$rows = @()
+foreach ($f in $candidates) {
+    "---- $($f.Name)" | Add-Content -Path $ReportPath
+    $raw = & $AvatarToolPath $f.FullName
+    $raw | Add-Content -Path $ReportPath
+    "" | Add-Content -Path $ReportPath
+
+    $fields = @{}
+    foreach ($line in $raw) {
+        if ($line -match '^\s*([^:]+):\s*(.*)$') {
+            $fields[$matches[1].Trim()] = $matches[2].Trim()
+        }
+    }
+    $rows += [PSCustomObject]@{
+        Name = $f.Name
+        LoadSucceeded = ($raw -contains "Load succeeded")
+        Format = "$($fields["Format"])"
+        Compat = "$($fields["Compat"])"
+        ParserStage = "$($fields["ParserStage"])"
+        PrimaryError = "$($fields["PrimaryError"])"
+        MeshPayloads = (To-Int "$($fields["MeshPayloads"])")
+        MaterialPayloads = (To-Int "$($fields["MaterialPayloads"])")
+        TexturePayloads = (To-Int "$($fields["TexturePayloads"])")
+    }
+}
+
+$gateA = $true  # basic load stability
+$gateB = $true  # vrm/runtime-ready/mesh
+$gateC = $true  # material/texture minimum
+$failReasons = @()
+
+foreach ($r in $rows) {
+    if (-not $r.LoadSucceeded) {
+        $gateA = $false
+        $failReasons += "GateA: $($r.Name) did not load successfully"
+    }
+    if ($r.Format -ne "VRM" -or $r.ParserStage -ne "runtime-ready" -or $r.MeshPayloads -le 0 -or $r.Compat -eq "failed") {
+        $gateB = $false
+        $failReasons += "GateB: $($r.Name) expected VRM/runtime-ready/mesh>0/non-failed but got format=$($r.Format), stage=$($r.ParserStage), mesh=$($r.MeshPayloads), compat=$($r.Compat)"
+    }
+    if ($r.MaterialPayloads -le 0 -or $r.TexturePayloads -le 0) {
+        $gateC = $false
+        $failReasons += "GateC: $($r.Name) expected material+texture payloads > 0 but got material=$($r.MaterialPayloads), texture=$($r.TexturePayloads)"
+    }
+}
+
+$summary = @()
+$summary += "VRM Quality Gate Summary"
+$summary += "Generated: $(Get-Date -Format s)"
+$summary += "ReportPath: $ReportPath"
+$summary += "UseFixedSet: $UseFixedSet"
+$summary += ""
+$summary += "Gate Results"
+$summary += "- GateA (load stability): $(if($gateA){'PASS'}else{'FAIL'})"
+$summary += "- GateB (VRM runtime-ready + mesh payload): $(if($gateB){'PASS'}else{'FAIL'})"
+$summary += "- GateC (material+texture payload minimum): $(if($gateC){'PASS'}else{'FAIL'})"
+$overall = $gateA -and $gateB -and $gateC
+$summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
+$summary += ""
+$summary += "Per-sample"
+foreach ($r in $rows) {
+    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}" -f
+        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads)
+}
+if ($failReasons.Count -gt 0) {
+    $summary += ""
+    $summary += "Failure Reasons"
+    foreach ($reason in $failReasons) {
+        $summary += "- $reason"
+    }
+}
+
+$summary | Set-Content -Path $SummaryPath
+$summary | ForEach-Object { Write-Host $_ }
+Write-Host "Report written: $ReportPath"
+
+if ($overall) {
+    exit 0
+}
+exit 1

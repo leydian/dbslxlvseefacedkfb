@@ -1,0 +1,116 @@
+VRM probe report
+Generated: 2026-03-03T01:29:12
+SampleDir: D:\dbslxlvseefacedkfb\sample
+UseFixedSet: False
+FileCount: 5
+
+---- Kikyo_FT Variant(Clone).vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant(Clone)
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant(Clone).vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 26
+  Materials: 15
+  MeshPayloads: 26
+  MaterialPayloads: 15
+  TexturePayloads: 11
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 16
+  LastWarning: W_STAGE: runtime-ready
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone and expression support
+
+---- Kikyo_FT Variant.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 22
+  Materials: 18
+  MeshPayloads: 22
+  MaterialPayloads: 18
+  TexturePayloads: 22
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 19
+  LastWarning: W_STAGE: runtime-ready
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone and expression support
+
+---- Kikyo_FT Variant111.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant111
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant111.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 22
+  Materials: 18
+  MeshPayloads: 22
+  MaterialPayloads: 18
+  TexturePayloads: 22
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 19
+  LastWarning: W_STAGE: runtime-ready
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone and expression support
+
+---- Kikyo_FT Variant112.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant112
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant112.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 21
+  Materials: 18
+  MeshPayloads: 21
+  MaterialPayloads: 18
+  TexturePayloads: 22
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 19
+  LastWarning: W_STAGE: runtime-ready
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone and expression support
+
+---- MANUKA_FT Varian ∞≥¿Œ¿€05.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: MANUKA_FT Varian ??????05
+  SourcePath: D:\dbslxlvseefacedkfb\sample\MANUKA_FT Varian ??????05.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 27
+  Materials: 13
+  MeshPayloads: 27
+  MaterialPayloads: 13
+  TexturePayloads: 8
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 14
+  LastWarning: W_STAGE: runtime-ready
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone and expression support
+

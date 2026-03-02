@@ -2,6 +2,50 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VRM material/texture payload quality pass + 5-sample gate harness
+
+### Summary
+
+Started the VRM quality sprint by replacing default-only VRM material scaffolding with parsed material/texture payload extraction and adding a strict 5-sample quality gate harness.
+
+### Changed
+
+- `src/avatar/vrm_loader.cpp`
+  - Added JSON helpers:
+    - `TryGetBool(...)`
+    - texture format inference (`DetectTextureFormat`)
+  - Added GLB image extraction from BIN `bufferView` ranges.
+  - Added `materials[]` parse with basic fields:
+    - `name`
+    - `doubleSided`
+    - `alphaMode`
+    - `alphaCutoff`
+    - `pbrMetallicRoughness.baseColorTexture.index`
+  - Added `textures[] -> images[]` source resolution.
+  - Populates:
+    - `materials`
+    - `material_payloads`
+    - `texture_payloads`
+  - Added diagnostics and quality downgrade behavior:
+    - `VRM_TEXTURE_MISSING`
+    - `VRM_MATERIAL_UNSUPPORTED`
+    - unresolved/unsupported paths now return `Compat=partial` (when mesh path is otherwise valid).
+
+- `tools/vrm_quality_gate.ps1` (new)
+  - Added strict VRM 5-sample quality gate harness.
+  - Runs `avatar_tool` per sample and evaluates:
+    - Gate A: load stability
+    - Gate B: VRM/runtime-ready/mesh payload contract
+    - Gate C: material+texture payload minimum
+  - Outputs:
+    - `build/reports/vrm_probe_latest.txt`
+    - `build/reports/vrm_gate_summary.txt`
+  - Exit code:
+    - `0` pass, `1` fail
+
+- `README.md`
+  - Added `VRM quality gate` section (command, gate definitions, outputs, exit-code policy).
+
 ## 2026-03-03 - VRM minimal runtime-ready slice + native render clear path
 
 ### Summary

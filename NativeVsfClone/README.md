@@ -116,6 +116,36 @@ Outputs:
 - gate summary: `build/reports/vsfavatar_gate_summary.txt`
 - baseline compare input (default): `build/reports/vsfavatar_probe_fixed.txt`
 
+## VRM quality gate
+
+Run 5-sample VRM quality gate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1
+```
+
+Gate rules:
+
+- Gate A: all selected VRM samples must load successfully.
+- Gate B: each sample must satisfy:
+  - `Format=VRM`
+  - `ParserStage=runtime-ready`
+  - `Compat` is not `failed`
+  - `MeshPayloads > 0`
+- Gate C: each sample must satisfy:
+  - `MaterialPayloads > 0`
+  - `TexturePayloads > 0`
+
+Exit code:
+
+- `0`: all gates pass
+- `1`: one or more gates fail
+
+Outputs:
+
+- probe report: `build/reports/vrm_probe_latest.txt`
+- gate summary: `build/reports/vrm_gate_summary.txt`
+
 ## VXAvatar/VXA2 quality gate
 
 Run quick profile (fixed + synthetic):
