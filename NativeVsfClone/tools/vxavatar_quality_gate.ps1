@@ -7,6 +7,7 @@ param(
     [string]$SummaryPath = ".\\build\\reports\\vxavatar_gate_summary.txt",
     [string]$SummaryJsonPath = ".\\build\\reports\\vxavatar_gate_summary.json",
     [ValidateSet("quick", "full")][string]$Profile = "quick",
+    [int]$FixedXav2FromVrmCount = 5,
     [switch]$UseFixedSet,
     [switch]$RequireRealFullSamples,
     [string[]]$FixedVxSamples = @(
@@ -111,6 +112,7 @@ if (-not (Test-Path $ReportScriptPath)) {
     -VrmToXav2Path $VrmToXav2Path `
     -OutputPath $ReportPath `
     -Profile $Profile `
+    -FixedXav2FromVrmCount $FixedXav2FromVrmCount `
     -UseFixedSet:$UseFixedSet `
     -FixedVxSamples $FixedVxSamples `
     -FixedVxa2Samples $FixedVxa2Samples `

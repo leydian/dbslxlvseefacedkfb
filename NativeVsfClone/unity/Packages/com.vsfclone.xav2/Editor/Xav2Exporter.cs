@@ -9,6 +9,8 @@ namespace VsfClone.Xav2.Editor
 {
     public static class Xav2Exporter
     {
+        private const uint DefaultSchemaVersion = 1U;
+        private const string DefaultExporterVersion = "0.3.0";
         private const ushort SectionTextureBlob = 0x0002;
         private const ushort SectionMaterialOverride = 0x0003;
         private const ushort SectionMeshRenderPayload = 0x0011;
@@ -76,11 +78,56 @@ namespace VsfClone.Xav2.Editor
 
         private static void EnsureManifestDefaults(Xav2AvatarPayload payload, Xav2ExportOptions options)
         {
-            payload.Manifest.schemaVersion = payload.Manifest.schemaVersion == 0U ? 1U : payload.Manifest.schemaVersion;
+            payload.Manifest.schemaVersion =
+                payload.Manifest.schemaVersion == 0U ? DefaultSchemaVersion : payload.Manifest.schemaVersion;
             if (string.IsNullOrWhiteSpace(payload.Manifest.exporterVersion))
             {
-                payload.Manifest.exporterVersion = "0.2.0";
+                payload.Manifest.exporterVersion = DefaultExporterVersion;
             }
+            if (payload.Manifest.meshRefs == null)
+            {
+                payload.Manifest.meshRefs = new List<string>();
+            }
+            if (payload.Manifest.materialRefs == null)
+            {
+                payload.Manifest.materialRefs = new List<string>();
+            }
+            if (payload.Manifest.textureRefs == null)
+            {
+                payload.Manifest.textureRefs = new List<string>();
+            }
+            if (payload.Manifest.strictShaderSet == null)
+            {
+                payload.Manifest.strictShaderSet = new List<string>();
+            }
+            payload.Manifest.avatarId = string.IsNullOrWhiteSpace(payload.Manifest.avatarId) ? "avatar" : payload.Manifest.avatarId;
+            payload.Manifest.displayName = string.IsNullOrWhiteSpace(payload.Manifest.displayName)
+                ? payload.Manifest.avatarId
+                : payload.Manifest.displayName;
+            payload.Manifest.sourceExt = string.IsNullOrWhiteSpace(payload.Manifest.sourceExt) ? ".vrm" : payload.Manifest.sourceExt;
+
+            if (payload.Manifest.meshRefs.Count == 0)
+            {
+                foreach (var mesh in payload.Meshes)
+                {
+                    payload.Manifest.meshRefs.Add(mesh.Name ?? string.Empty);
+                }
+            }
+            if (payload.Manifest.materialRefs.Count == 0)
+            {
+                foreach (var material in payload.Materials)
+                {
+                    payload.Manifest.materialRefs.Add(material.Name ?? string.Empty);
+                }
+            }
+            if (payload.Manifest.textureRefs.Count == 0)
+            {
+                foreach (var texture in payload.Textures)
+                {
+                    payload.Manifest.textureRefs.Add(texture.Name ?? string.Empty);
+                }
+            }
+
             payload.Manifest.hasSkinning = payload.Skins.Count > 0;
             payload.Manifest.hasBlendShapes = payload.BlendShapes.Count > 0;
             payload.Manifest.strictShaderSet = new List<string>(options.StrictShaderSet ?? new List<string>());
@@ -111,7 +158,8 @@ namespace VsfClone.Xav2.Editor
                 }
                 if (!valid)
                 {
-                    throw new InvalidOperationException($"Unsupported shader for strict export: {mat.ShaderName}");
+                    throw new InvalidOperationException(
+                        $"XAV2 strict shader policy violation: material='{mat.Name}', shader='{mat.ShaderName}'.");
                 }
             }
         }

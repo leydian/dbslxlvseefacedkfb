@@ -2,6 +2,93 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host render advanced controls and local preset persistence
+
+### Summary
+
+Expanded host render UX with manual composition controls and reusable local presets, keeping WPF and WinUI behavior aligned.
+
+### Changed
+
+- `host/HostCore/HostInterfaces.cs`
+  - Added `IRenderPresetStore` interface.
+
+- `host/HostCore/RenderPresetStore.cs` (new)
+  - Added preset model:
+    - `RenderPresetModel`
+    - `RenderPresetStoreModel`
+  - Added local JSON persistence implementation:
+    - `RenderPresetStore`
+  - Added model normalization, value clamping, duplicate-name collapse, and corrupt-file fallback with `.bak` backup.
+
+- `host/HostCore/HostController.cs`
+  - Added preset management API:
+    - `CreatePreset`
+    - `SaveOrUpdateRenderPreset`
+    - `ApplyRenderPreset`
+    - `DeleteRenderPreset`
+    - `ResetRenderDefaults`
+  - Added exposed preset state:
+    - `RenderPresets`
+    - `SelectedRenderPresetName`
+  - Updated broadcast toggle behavior to preserve user camera controls (`CameraMode`, `Framing`, `Headroom`, `Yaw`, `FOV`, `Mirror`, overlay flag) while switching preset baseline.
+  - Added render state normalization/clamping path shared by UI apply and preset apply.
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added advanced render controls:
+    - `Camera Mode`, `Headroom`, `Yaw`, `FOV`, `Mirror`
+  - Added preset controls:
+    - save/apply/delete/reset UI and handlers
+  - Added render apply debounce timer (`~100ms`) to reduce high-frequency native apply calls during slider drag.
+
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added the same advanced render/preset controls and behavior as WPF.
+  - Added matching debounce and diagnostics field expansion for parity.
+
+- `docs/reports/ui_render_benchmark_plan_2026-03-02.md`
+  - Added advanced-controls implementation update and KPI status refinement.
+
+## 2026-03-03 - XAV2 Unity SDK diagnostics API + VRM-derived fixed sample generation
+
+### Summary
+
+Strengthened Unity-side XAV2 SDK loader reliability with a non-throwing diagnostics API, added stricter section boundary/schema validation while preserving v1 compatibility, and expanded gate input stability by generating fixed-valid XAV2 samples directly from VRM assets.
+
+### Changed
+
+- `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - Added load diagnostics contracts:
+    - `Xav2LoadErrorCode`
+    - `Xav2LoadDiagnostics` (`ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`)
+  - Updated manifest default exporter version to `0.3.0`.
+
+- `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - Added non-throwing API:
+    - `TryLoad(path, out payload, out diagnostics)`
+  - Preserved existing API:
+    - `Load(path)` now wraps `TryLoad` and throws with diagnostic context on failure.
+  - Added boundary/schema validation for manifest and TLV section payloads.
+  - Kept backward compatibility for material payloads with/without `shaderVariant`.
+  - Added unknown-section and partial-compat diagnostics warnings.
+
+- `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - Centralized manifest defaults (`schemaVersion=1`, `exporterVersion=0.3.0`).
+  - Ensured required manifest fields and ref arrays are always populated.
+  - Standardized strict shader policy failure message format with material/shader identifiers.
+
+- `tools/vxavatar_sample_report.ps1`
+  - Added `-FixedXav2FromVrmCount` (default `5`).
+  - Added VRM-driven fixed XAV2 generation path (`vrm_to_xav2`) that seeds `fixed-valid` XAV2 rows from `.vrm` inputs.
+
+- `tools/vxavatar_quality_gate.ps1`
+  - Added `-FixedXav2FromVrmCount` pass-through to sample report generation.
+
+- `README.md`
+- `unity/Packages/com.vsfclone.xav2/README.md`
+  - Documented `TryLoad` + diagnostics contract and fixed XAV2 sample generation policy.
+
 ## 2026-03-03 - Host render UI controls sync finalization + benchmark plan
 
 ### Summary

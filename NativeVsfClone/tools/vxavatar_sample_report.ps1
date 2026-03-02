@@ -6,6 +6,7 @@ param(
     [ValidateSet("quick", "full")][string]$Profile = "quick",
     [int]$MaxFiles = 20,
     [int]$FullMaxFiles = 200,
+    [int]$FixedXav2FromVrmCount = 5,
     [switch]$UseFixedSet,
     [string[]]$FixedVxSamples = @(
         "demo_mvp.vxavatar"
@@ -177,6 +178,53 @@ function Add-Entry {
     })
 }
 
+function Add-GeneratedXav2FromVrm {
+    param(
+        [string]$SampleDir,
+        [string]$OutputPath,
+        [string]$VrmToXav2Path,
+        [int]$Count,
+        [System.Collections.Generic.List[object]]$Entries,
+        [hashtable]$SeenPaths,
+        [ref]$BaseXav2Path,
+        [ref]$BaseVrmPath
+    )
+
+    if ($Count -le 0) {
+        return
+    }
+    if (-not (Test-Path $VrmToXav2Path)) {
+        return
+    }
+
+    $vrmFiles = Get-ChildItem -Path $SampleDir -Filter *.vrm | Select-Object -First $Count
+    if ($vrmFiles.Count -eq 0) {
+        return
+    }
+
+    $tmpDir = Join-Path (Split-Path -Parent $OutputPath) "..\\tmp_vx\\generated_xav2"
+    if (-not (Test-Path $tmpDir)) {
+        New-Item -ItemType Directory -Path $tmpDir | Out-Null
+    }
+
+    foreach ($vrm in $vrmFiles) {
+        if ($null -eq $BaseVrmPath.Value) {
+            $BaseVrmPath.Value = $vrm.FullName
+        }
+        $nameNoExt = [System.IO.Path]::GetFileNameWithoutExtension($vrm.Name)
+        $generatedXav2Path = Join-Path $tmpDir ("$nameNoExt.xav2")
+        & $VrmToXav2Path $vrm.FullName $generatedXav2Path | Out-Null
+        if (-not (Test-Path $generatedXav2Path)) {
+            continue
+        }
+        $resolvedGeneratedPath = (Resolve-Path $generatedXav2Path).Path
+        if ($null -eq $BaseXav2Path.Value) {
+            $BaseXav2Path.Value = $resolvedGeneratedPath
+        }
+        Add-Entry -Entries $Entries -SeenPaths $SeenPaths -Name ([System.IO.Path]::GetFileName($resolvedGeneratedPath)) -Path $resolvedGeneratedPath -Kind "XAV2" -Tag "fixed-valid"
+    }
+}
+
 if (-not (Test-Path $AvatarToolPath)) {
     throw "avatar_tool not found at $AvatarToolPath"
 }
@@ -267,6 +315,16 @@ if ($null -eq $baseVrmPath) {
         $baseVrmPath = $vrmFiles[0].FullName
     }
 }
+
+Add-GeneratedXav2FromVrm `
+    -SampleDir $SampleDir `
+    -OutputPath $OutputPath `
+    -VrmToXav2Path $VrmToXav2Path `
+    -Count $FixedXav2FromVrmCount `
+    -Entries $entries `
+    -SeenPaths $seenPaths `
+    -BaseXav2Path ([ref]$baseXav2Path) `
+    -BaseVrmPath ([ref]$baseVrmPath)
 
 if ($null -eq $baseXav2Path -and -not [string]::IsNullOrWhiteSpace($baseVrmPath)) {
     if (-not (Test-Path $VrmToXav2Path)) {

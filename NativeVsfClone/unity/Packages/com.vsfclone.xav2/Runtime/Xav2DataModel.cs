@@ -3,11 +3,34 @@ using System.Collections.Generic;
 
 namespace VsfClone.Xav2.Runtime
 {
+    public enum Xav2LoadErrorCode
+    {
+        None = 0,
+        IoError,
+        MagicMismatch,
+        UnsupportedVersion,
+        ManifestTruncated,
+        ManifestInvalid,
+        MissingRequiredManifestKeys,
+        SectionHeaderTruncated,
+        SectionTruncated,
+        SectionSchemaInvalid
+    }
+
+    public sealed class Xav2LoadDiagnostics
+    {
+        public Xav2LoadErrorCode ErrorCode = Xav2LoadErrorCode.None;
+        public string ErrorMessage = string.Empty;
+        public string ParserStage = "header";
+        public bool IsPartial;
+        public List<string> Warnings = new();
+    }
+
     [Serializable]
     public sealed class Xav2Manifest
     {
         public uint schemaVersion = 1U;
-        public string exporterVersion = "0.2.0";
+        public string exporterVersion = "0.3.0";
         public string avatarId = string.Empty;
         public string displayName = string.Empty;
         public string sourceExt = ".vrm";

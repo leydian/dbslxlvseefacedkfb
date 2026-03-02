@@ -162,7 +162,10 @@ Notes:
 - Package path: `unity/Packages/com.vsfclone.xav2`
 - Target: Unity `2022.3 LTS` (Built-in RP)
 - Included:
-  - runtime `.xav2` parser scaffold
+  - runtime `.xav2` parser with diagnostics API:
+    - `Xav2RuntimeLoader.Load(path)` (existing throw-on-failure path)
+    - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics)` (non-throwing path)
+    - `Xav2LoadDiagnostics` (`ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`)
   - editor exporter path (`Scene AvatarRoot -> .xav2`) with strict shader policy list:
     - `lilToon`, `Poiyomi`, `potatoon`, `realtoon`
   - skin/blendshape section support (`0x0013`, `0x0014`)
@@ -269,6 +272,7 @@ Gate rules:
   - Optional strict mode: `-RequireRealFullSamples` to fail when no `real-full` rows are present.
 - Gate F: fixed `.xav2` sample must satisfy `Format=XAV2`, `ParserStage=runtime-ready`, and `Compat!=failed`.
 - Gate G: synthetic corrupted `.xav2` samples must classify as `XAV2_SCHEMA_INVALID|XAV2_SECTION_TRUNCATED`.
+- Fixed XAV2 sample policy: gate script generates up to 5 `.xav2` files from `.vrm` inputs (`vrm_to_xav2`) and treats them as `fixed-valid`.
 
 Exit code:
 
