@@ -2,6 +2,86 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - Documentation structure normalization (index + archive policy)
+
+### Summary
+
+Standardized the documentation layout to reduce drift between core docs, format specs, implementation reports, and generated build reports.
+
+### Changed
+
+- Added documentation entrypoint:
+  - `docs/INDEX.md`
+- Added documentation maintenance guide:
+  - `docs/CONTRIBUTING_DOCS.md`
+- Added generated-report retention policy:
+  - `build/reports/README.md`
+- Added archive location for historical generated reports:
+  - `docs/archive/build-reports/README.md`
+- Applied `build/reports` cleanup by moving non-retained snapshots to archive.
+
+### Verified
+
+- Documentation index links resolve to existing files.
+- `build/reports` now contains latest/milestone snapshots only.
+- Archived report files are available under `docs/archive/build-reports/`.
+
+## 2026-03-02 - VXA2 TLV section decode MVP + format diagnostics
+
+### Summary
+
+Implemented `.vxa2` binary section decoding so the loader can map real mesh/texture/material payload sections beyond header+manifest validation.
+
+### Changed
+
+- `src/avatar/vxa2_loader.cpp`
+  - Added TLV section table parse after manifest:
+    - section header: `type(u16)`, `flags(u16)`, `size(u32)`
+  - Added known section decoders:
+    - `0x0001` mesh blob section
+    - `0x0002` texture blob section
+    - `0x0003` material override section
+  - Added strict boundary/truncation guard:
+    - `VXA2_SECTION_TRUNCATED`
+  - Added payload/schema guard for malformed known section payloads:
+    - `VXA2_SCHEMA_INVALID`
+  - Added manifest-reference coverage classification:
+    - `VXA2_ASSET_MISSING` when mesh/texture refs cannot be resolved to section payloads
+  - Added section counters in package diagnostics:
+    - `format_section_count`
+    - `format_decoded_section_count`
+    - `format_unknown_section_count`
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Added generic format diagnostics counters:
+    - `format_section_count`
+    - `format_decoded_section_count`
+    - `format_unknown_section_count`
+
+- `include/vsfclone/nativecore/api.h`
+  - Extended `NcAvatarInfo` with format diagnostics counters:
+    - `format_section_count`
+    - `format_decoded_section_count`
+    - `format_unknown_section_count`
+
+- `src/nativecore/native_core.cpp`
+  - Mapped package format diagnostics counters into `NcAvatarInfo`.
+
+- `tools/avatar_tool.cpp`
+  - Added output lines:
+    - `FormatSections`
+    - `FormatDecodedSections`
+    - `FormatUnknownSections`
+
+- `docs/formats/vxa2.md`
+  - Promoted v1 section layout from draft placeholder to concrete TLV contract.
+  - Documented section types (`0x0001/0x0002/0x0003`) and payload field layouts.
+  - Documented runtime truncation/unknown-type behavior.
+
+- `README.md`
+  - Updated `.vxa2` status to manifest + TLV section decode MVP.
+  - Added latest behavior notes for VXA2 section decode and diagnostics.
+
 ## 2026-03-02 - VXAvatar deflate/BOM compatibility hardening (MVP unblock)
 
 ### Summary

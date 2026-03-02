@@ -1,0 +1,62 @@
+VSFAvatar probe report
+Generated: 2026-03-02T23:40:51
+SampleDir: D:\dbslxlvseefacedkfb\sample
+UseFixedSet: True
+FileCount: 4
+
+---- NewOnYou.vsfavatar
+Load succeeded
+  Handle: 1
+  DisplayName: NewOnYou
+  SourcePath: D:\dbslxlvseefacedkfb\sample\NewOnYou.vsfavatar
+  Format: VSFAvatar
+  Compat: partial
+  Meshes: 0
+  Materials: 1
+  Warnings: 4
+  LastWarning: data block diagnostic: index=0, mode=1, expected=74890067, code=DATA_BLOCK_READ_FAILED
+  MissingFeatures: 2
+  LastMissingFeature: mesh/material object discovery
+
+---- Character vywjd.vsfavatar
+Load succeeded
+  Handle: 1
+  DisplayName: Character vywjd
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Character vywjd.vsfavatar
+  Format: VSFAvatar
+  Compat: partial
+  Meshes: 0
+  Materials: 1
+  Warnings: 4
+  LastWarning: data block diagnostic: index=0, mode=1, expected=88135067, code=DATA_BLOCK_READ_FAILED
+  MissingFeatures: 2
+  LastMissingFeature: mesh/material object discovery
+
+---- PPU (2).vsfavatar
+Load succeeded
+  Handle: 1
+  DisplayName: PPU (2)
+  SourcePath: D:\dbslxlvseefacedkfb\sample\PPU (2).vsfavatar
+  Format: VSFAvatar
+  Compat: partial
+  Meshes: 0
+  Materials: 1
+  Warnings: 4
+  LastWarning: data block diagnostic: index=0, mode=1, expected=125513796, code=DATA_BLOCK_READ_FAILED
+  MissingFeatures: 2
+  LastMissingFeature: mesh/material object discovery
+
+---- VRM dkdlrh.vsfavatar
+Load succeeded
+  Handle: 1
+  DisplayName: VRM dkdlrh
+  SourcePath: D:\dbslxlvseefacedkfb\sample\VRM dkdlrh.vsfavatar
+  Format: VSFAvatar
+  Compat: partial
+  Meshes: 0
+  Materials: 1
+  Warnings: 4
+  LastWarning: data block diagnostic: index=0, mode=1, expected=402596, code=DATA_BLOCK_READ_FAILED
+  MissingFeatures: 2
+  LastMissingFeature: mesh/material object discovery
+
