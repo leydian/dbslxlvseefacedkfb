@@ -87,12 +87,17 @@ int main(int argc, char** argv) {
     std::cout << "  MeshPayloads: " << info.mesh_payload_count << "\n";
     std::cout << "  MaterialPayloads: " << info.material_payload_count << "\n";
     std::cout << "  TexturePayloads: " << info.texture_payload_count << "\n";
+    std::cout << "  ExpressionCount: " << info.expression_count << "\n";
+    std::cout << "  LastRenderDrawCalls: " << info.last_render_draw_calls << "\n";
     std::cout << "  FormatSections: " << info.format_section_count << "\n";
     std::cout << "  FormatDecodedSections: " << info.format_decoded_section_count << "\n";
     std::cout << "  FormatUnknownSections: " << info.format_unknown_section_count << "\n";
     std::cout << "  Warnings: " << info.warning_count << "\n";
     if (info.last_warning[0] != '\0') {
         std::cout << "  LastWarning: " << info.last_warning << "\n";
+    }
+    if (info.last_expression_summary[0] != '\0') {
+        std::cout << "  LastExpressionSummary: " << info.last_expression_summary << "\n";
     }
     std::cout << "  MissingFeatures: " << info.missing_feature_count << "\n";
     if (info.last_missing_feature[0] != '\0') {

@@ -2,6 +2,43 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - Host EXE publish pipeline (WPF + WinUI)
+
+### Summary
+
+Added reproducible GUI host publish automation so both WPF and WinUI hosts can be produced as self-contained executables and distributed with `nativecore.dll`.
+
+### Changed
+
+- `host/WpfHost/WpfHost.csproj`
+  - Added publish defaults:
+    - `RuntimeIdentifier=win-x64`
+    - `SelfContained=true`
+    - `PublishSingleFile=true`
+    - `PublishTrimmed=false`
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - Added publish defaults:
+    - `RuntimeIdentifier=win-x64`
+    - `SelfContained=true`
+    - `PublishSingleFile=true`
+    - `PublishTrimmed=false`
+    - `WindowsAppSDKSelfContained=true`
+
+- `tools/publish_hosts.ps1`
+  - Added end-to-end publish script:
+    - native `Release` build
+    - WPF + WinUI publish
+    - `nativecore.dll` copy to both outputs
+    - consolidated output in `dist/wpf`, `dist/winui`
+    - report output in `build/reports/host_publish_latest.txt`
+
+- `docs/reports/host_exe_publish_2026-03-02.md`
+  - Added operational publish report and expected output contract.
+
+- `README.md`
+  - Added "GUI EXE Publish (WPF + WinUI)" section with one-command workflow.
+
 ## 2026-03-02 - UI host foundation + native window render path + runtime Spout/OSC backends
 
 ### Summary

@@ -52,6 +52,13 @@ struct TextureRenderPayload {
     std::vector<std::uint8_t> bytes;
 };
 
+struct ExpressionState {
+    std::string name;
+    std::string mapping_kind;
+    float default_weight = 0.0f;
+    float runtime_weight = 0.0f;
+};
+
 struct AvatarPackage {
     AvatarSourceType source_type = AvatarSourceType::Unknown;
     AvatarCompatLevel compat_level = AvatarCompatLevel::Unknown;
@@ -64,6 +71,9 @@ struct AvatarPackage {
     std::vector<MeshRenderPayload> mesh_payloads;
     std::vector<MaterialRenderPayload> material_payloads;
     std::vector<TextureRenderPayload> texture_payloads;
+    std::vector<ExpressionState> expressions;
+    std::string last_expression_summary;
+    std::uint32_t last_render_draw_calls = 0;
     std::uint32_t format_section_count = 0;
     std::uint32_t format_decoded_section_count = 0;
     std::uint32_t format_unknown_section_count = 0;

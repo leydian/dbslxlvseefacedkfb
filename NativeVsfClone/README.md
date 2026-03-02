@@ -90,6 +90,26 @@ $env:VSF_SIDECAR_PATH = "D:\custom\vsfavatar_sidecar.exe"
 $env:VSF_SIDECAR_TIMEOUT_MS = "15000"
 ```
 
+## GUI EXE Publish (WPF + WinUI)
+
+Prerequisites:
+
+- .NET 8 SDK
+- Windows App SDK tooling (WinUI host publish)
+- `build/Release/nativecore.dll` available (native build)
+
+Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1
+```
+
+Outputs:
+
+- `dist/wpf` (`WpfHost.exe` + `nativecore.dll`)
+- `dist/winui` (`WinUiHost.exe` + `nativecore.dll`)
+- `build/reports/host_publish_latest.txt`
+
 ## VSFAvatar quality gate
 
 Run fixed-set probe + gate evaluation:

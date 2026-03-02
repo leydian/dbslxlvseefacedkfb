@@ -1,0 +1,132 @@
+VRM probe report
+Generated: 2026-03-03T01:41:55
+SampleDir: D:\dbslxlvseefacedkfb\sample
+Profile: auto5
+UseFixedSet: False
+FileCount: 5
+
+---- Kikyo_FT Variant(Clone).vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant(Clone)
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant(Clone).vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 26
+  Materials: 15
+  MeshPayloads: 26
+  MaterialPayloads: 15
+  TexturePayloads: 11
+  ExpressionCount: 3
+  LastRenderDrawCalls: 0
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 17
+  LastWarning: W_STAGE: runtime-ready
+  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone support
+
+---- Kikyo_FT Variant.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 22
+  Materials: 18
+  MeshPayloads: 22
+  MaterialPayloads: 18
+  TexturePayloads: 22
+  ExpressionCount: 3
+  LastRenderDrawCalls: 0
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 20
+  LastWarning: W_STAGE: runtime-ready
+  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone support
+
+---- Kikyo_FT Variant111.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant111
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant111.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 22
+  Materials: 18
+  MeshPayloads: 22
+  MaterialPayloads: 18
+  TexturePayloads: 22
+  ExpressionCount: 17
+  LastRenderDrawCalls: 0
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 20
+  LastWarning: W_STAGE: runtime-ready
+  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone support
+
+---- Kikyo_FT Variant112.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: Kikyo_FT Variant112
+  SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant112.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 21
+  Materials: 18
+  MeshPayloads: 21
+  MaterialPayloads: 18
+  TexturePayloads: 22
+  ExpressionCount: 18
+  LastRenderDrawCalls: 0
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 20
+  LastWarning: W_STAGE: runtime-ready
+  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone support
+
+---- MANUKA_FT Varian ∞≥¿Œ¿€05.vrm
+Load succeeded
+  Handle: 1
+  DisplayName: MANUKA_FT Varian ??????05
+  SourcePath: D:\dbslxlvseefacedkfb\sample\MANUKA_FT Varian ??????05.vrm
+  Format: VRM
+  Compat: full
+  ParserStage: runtime-ready
+  PrimaryError: NONE
+  Meshes: 27
+  Materials: 13
+  MeshPayloads: 27
+  MaterialPayloads: 13
+  TexturePayloads: 8
+  ExpressionCount: 3
+  LastRenderDrawCalls: 0
+  FormatSections: 0
+  FormatDecodedSections: 0
+  FormatUnknownSections: 0
+  Warnings: 15
+  LastWarning: W_STAGE: runtime-ready
+  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
+  MissingFeatures: 2
+  LastMissingFeature: SpringBone support
+

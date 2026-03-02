@@ -1,10 +1,17 @@
 param(
     [string]$SampleDir = "..\\sample",
     [string]$AvatarToolPath = ".\\build\\Release\\avatar_tool.exe",
-    [string]$ReportPath = ".\\build\\reports\\vrm_probe_latest.txt",
-    [string]$SummaryPath = ".\\build\\reports\\vrm_gate_summary.txt",
+    [string]$ReportPath = "",
+    [string]$SummaryPath = "",
+    [ValidateSet("fixed5", "auto5")][string]$Profile = "fixed5",
     [switch]$UseFixedSet,
-    [string[]]$FixedSamples = @()
+    [string[]]$FixedSamples = @(
+        "Kikyo_FT Variant(Clone).vrm",
+        "Kikyo_FT Variant.vrm",
+        "Kikyo_FT Variant111.vrm",
+        "Kikyo_FT Variant112.vrm",
+        "NewOnYou.vrm"
+    )
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +21,13 @@ if (-not (Test-Path $AvatarToolPath)) {
 }
 if (-not (Test-Path $SampleDir)) {
     throw "sample directory not found at $SampleDir"
+}
+
+if ([string]::IsNullOrWhiteSpace($ReportPath)) {
+    $ReportPath = if ($Profile -eq "fixed5") { ".\\build\\reports\\vrm_probe_fixed5.txt" } else { ".\\build\\reports\\vrm_probe_auto5.txt" }
+}
+if ([string]::IsNullOrWhiteSpace($SummaryPath)) {
+    $SummaryPath = if ($Profile -eq "fixed5") { ".\\build\\reports\\vrm_gate_fixed5.txt" } else { ".\\build\\reports\\vrm_gate_auto5.txt" }
 }
 
 function To-Int {
@@ -35,7 +49,7 @@ if (-not (Test-Path $summaryDir)) {
 }
 
 $candidates = @()
-if ($UseFixedSet -and $FixedSamples.Count -gt 0) {
+if (($UseFixedSet -or $Profile -eq "fixed5") -and $FixedSamples.Count -gt 0) {
     foreach ($name in $FixedSamples) {
         $p = Join-Path $SampleDir $name
         if (Test-Path $p) {
@@ -55,6 +69,7 @@ if ($candidates.Count -lt 5) {
 "VRM probe report" | Set-Content -Path $ReportPath
 "Generated: $(Get-Date -Format s)" | Add-Content -Path $ReportPath
 "SampleDir: $(Resolve-Path $SampleDir)" | Add-Content -Path $ReportPath
+"Profile: $Profile" | Add-Content -Path $ReportPath
 "UseFixedSet: $UseFixedSet" | Add-Content -Path $ReportPath
 "FileCount: $($candidates.Count)" | Add-Content -Path $ReportPath
 "" | Add-Content -Path $ReportPath
@@ -82,12 +97,14 @@ foreach ($f in $candidates) {
         MeshPayloads = (To-Int "$($fields["MeshPayloads"])")
         MaterialPayloads = (To-Int "$($fields["MaterialPayloads"])")
         TexturePayloads = (To-Int "$($fields["TexturePayloads"])")
+        ExpressionCount = (To-Int "$($fields["ExpressionCount"])")
     }
 }
 
 $gateA = $true  # basic load stability
 $gateB = $true  # vrm/runtime-ready/mesh
 $gateC = $true  # material/texture minimum
+$gateD = $true  # expression extraction visibility
 $failReasons = @()
 
 foreach ($r in $rows) {
@@ -103,25 +120,31 @@ foreach ($r in $rows) {
         $gateC = $false
         $failReasons += "GateC: $($r.Name) expected material+texture payloads > 0 but got material=$($r.MaterialPayloads), texture=$($r.TexturePayloads)"
     }
+    if ($r.ExpressionCount -le 0) {
+        $gateD = $false
+        $failReasons += "GateD: $($r.Name) expected ExpressionCount > 0 but got $($r.ExpressionCount)"
+    }
 }
 
 $summary = @()
 $summary += "VRM Quality Gate Summary"
 $summary += "Generated: $(Get-Date -Format s)"
 $summary += "ReportPath: $ReportPath"
+$summary += "Profile: $Profile"
 $summary += "UseFixedSet: $UseFixedSet"
 $summary += ""
 $summary += "Gate Results"
 $summary += "- GateA (load stability): $(if($gateA){'PASS'}else{'FAIL'})"
 $summary += "- GateB (VRM runtime-ready + mesh payload): $(if($gateB){'PASS'}else{'FAIL'})"
 $summary += "- GateC (material+texture payload minimum): $(if($gateC){'PASS'}else{'FAIL'})"
-$overall = $gateA -and $gateB -and $gateC
+$summary += "- GateD (expression count visibility): $(if($gateD){'PASS'}else{'FAIL'})"
+$overall = $gateA -and $gateB -and $gateC -and $gateD
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Per-sample"
 foreach ($r in $rows) {
-    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}" -f
-        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads)
+    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}" -f
+        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount)
 }
 if ($failReasons.Count -gt 0) {
     $summary += ""

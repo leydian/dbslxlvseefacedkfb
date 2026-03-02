@@ -612,6 +612,97 @@ struct MaterialInfo {
     float alpha_cutoff = 0.5f;
 };
 
+void AddExpressionIfMissing(std::vector<ExpressionState>* out,
+                            const std::string& name,
+                            const std::string& mapping_kind,
+                            float default_weight = 0.0f) {
+    for (const auto& existing : *out) {
+        if (ToLower(existing.name) == ToLower(name)) {
+            return;
+        }
+    }
+    ExpressionState expr;
+    expr.name = name;
+    expr.mapping_kind = mapping_kind;
+    expr.default_weight = default_weight;
+    expr.runtime_weight = default_weight;
+    out->push_back(std::move(expr));
+}
+
+void ParseVrmExpressionEntries(const JsonValue& root, std::vector<ExpressionState>* out_expressions) {
+    const auto* extensions = FindKey(root, "extensions");
+    if (extensions == nullptr || extensions->type != JsonValue::Type::Object) {
+        return;
+    }
+
+    const auto* vrmc_vrm = FindKey(*extensions, "VRMC_vrm");
+    if (vrmc_vrm != nullptr && vrmc_vrm->type == JsonValue::Type::Object) {
+        const auto* expressions = FindKey(*vrmc_vrm, "expressions");
+        if (expressions != nullptr && expressions->type == JsonValue::Type::Object) {
+            const auto* preset = FindKey(*expressions, "preset");
+            if (preset != nullptr && preset->type == JsonValue::Type::Object) {
+                const std::array<std::pair<const char*, const char*>, 6U> preset_mappings = {
+                    std::pair<const char*, const char*> {"blink", "blink"},
+                    {"aa", "viseme_aa"},
+                    {"joy", "joy"},
+                    {"angry", "none"},
+                    {"sorrow", "none"},
+                    {"fun", "none"},
+                };
+                for (const auto& [name, mapping] : preset_mappings) {
+                    const auto* entry = FindKey(*preset, name);
+                    if (entry != nullptr && entry->type == JsonValue::Type::Object) {
+                        AddExpressionIfMissing(out_expressions, name, mapping);
+                    }
+                }
+            }
+            const auto* custom = FindKey(*expressions, "custom");
+            if (custom != nullptr && custom->type == JsonValue::Type::Object) {
+                for (const auto& [name, value] : custom->object_value) {
+                    if (value.type == JsonValue::Type::Object) {
+                        AddExpressionIfMissing(out_expressions, name, "none");
+                    }
+                }
+            }
+        }
+    }
+
+    // Legacy VRM0.x path: extensions.VRM.blendShapeMaster.blendShapeGroups[]
+    const auto* vrm_legacy = FindKey(*extensions, "VRM");
+    if (vrm_legacy != nullptr && vrm_legacy->type == JsonValue::Type::Object) {
+        const auto* bsm = FindKey(*vrm_legacy, "blendShapeMaster");
+        if (bsm == nullptr || bsm->type != JsonValue::Type::Object) {
+            return;
+        }
+        const auto* groups = FindKey(*bsm, "blendShapeGroups");
+        if (groups == nullptr || groups->type != JsonValue::Type::Array) {
+            return;
+        }
+        for (const auto& group : groups->array_value) {
+            if (group.type != JsonValue::Type::Object) {
+                continue;
+            }
+            std::string expr_name;
+            if (!TryGetString(group, "presetName", &expr_name)) {
+                TryGetString(group, "name", &expr_name);
+            }
+            if (expr_name.empty()) {
+                continue;
+            }
+            const auto lowered = ToLower(expr_name);
+            std::string mapping_kind = "none";
+            if (lowered.find("blink") != std::string::npos) {
+                mapping_kind = "blink";
+            } else if (lowered == "aa" || lowered.find("mouth") != std::string::npos) {
+                mapping_kind = "viseme_aa";
+            } else if (lowered.find("joy") != std::string::npos || lowered.find("happy") != std::string::npos) {
+                mapping_kind = "joy";
+            }
+            AddExpressionIfMissing(out_expressions, expr_name, mapping_kind);
+        }
+    }
+}
+
 bool ReadBufferViewBytes(const std::vector<std::uint8_t>& bin,
                          const std::vector<BufferViewMeta>& views,
                          std::size_t view_index,
@@ -939,8 +1030,19 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         }
     }
 
+    ParseVrmExpressionEntries(root, &pkg.expressions);
+    if (!pkg.expressions.empty()) {
+        pkg.warnings.push_back("W_EXPRESSION: extracted expression entries=" + std::to_string(pkg.expressions.size()));
+    } else {
+        AddExpressionIfMissing(&pkg.expressions, "blink", "blink");
+        AddExpressionIfMissing(&pkg.expressions, "aa", "viseme_aa");
+        AddExpressionIfMissing(&pkg.expressions, "joy", "joy");
+        pkg.warnings.push_back(
+            "W_VRM_EXPRESSION_FALLBACK: no expression entries found, injected default blink/aa/joy mappings");
+    }
+
     pkg.missing_features.push_back("MToon advanced parameter binding");
-    pkg.missing_features.push_back("SpringBone and expression support");
+    pkg.missing_features.push_back("SpringBone support");
 
     pkg.parser_stage = "runtime-ready";
     if (pkg.compat_level != AvatarCompatLevel::Partial) {

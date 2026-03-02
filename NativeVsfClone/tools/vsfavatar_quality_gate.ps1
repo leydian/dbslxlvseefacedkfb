@@ -202,6 +202,9 @@ foreach ($name in $sampleNames) {
     if ($stage -eq "complete" -and $objectTableParsed -eq "True" -and
         ([string]::IsNullOrWhiteSpace($primary) -or $primary -eq "NONE")) {
         $gateD = $true
+    } elseif ($stage -ne "complete" -or $objectTableParsed -ne "True" -or
+        (-not [string]::IsNullOrWhiteSpace($primary) -and $primary -ne "NONE")) {
+        $failReasons += "GateD: $name unmet (stage=$stage, object_table_parsed=$objectTableParsed, primary=$primary)"
     }
 
     if ($primary -eq "DATA_BLOCK_READ_FAILED") {

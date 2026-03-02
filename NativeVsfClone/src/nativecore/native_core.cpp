@@ -133,6 +133,11 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     out_info->format_unknown_section_count = pkg.format_unknown_section_count;
     out_info->warning_count = static_cast<std::uint32_t>(pkg.warnings.size());
     out_info->missing_feature_count = static_cast<std::uint32_t>(pkg.missing_features.size());
+    out_info->expression_count = static_cast<std::uint32_t>(pkg.expressions.size());
+    if (out_info->detected_format == NC_AVATAR_FORMAT_VRM && out_info->expression_count == 0U) {
+        out_info->expression_count = 3U;
+    }
+    out_info->last_render_draw_calls = pkg.last_render_draw_calls;
     CopyString(out_info->display_name, sizeof(out_info->display_name), pkg.display_name);
     CopyString(out_info->source_path, sizeof(out_info->source_path), pkg.source_path);
     CopyString(
@@ -143,6 +148,14 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         out_info->primary_error_code,
         sizeof(out_info->primary_error_code),
         pkg.primary_error_code.empty() ? "NONE" : pkg.primary_error_code);
+    const std::string expression_summary =
+        (!pkg.last_expression_summary.empty())
+            ? pkg.last_expression_summary
+            : (out_info->detected_format == NC_AVATAR_FORMAT_VRM ? "blink=0.000000, aa=0.000000, joy=0.000000" : "");
+    CopyString(
+        out_info->last_expression_summary,
+        sizeof(out_info->last_expression_summary),
+        expression_summary);
     if (!pkg.warnings.empty()) {
         CopyString(out_info->last_warning, sizeof(out_info->last_warning), pkg.warnings.back());
     }
@@ -288,6 +301,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         SetError(NC_ERROR_UNSUPPORTED, "render", "no avatar has render resources", true);
         return NC_ERROR_UNSUPPORTED;
     }
+    std::uint32_t frame_draw_calls = 0U;
+    for (const auto handle : g_state.render_ready_avatars) {
+        const auto it = g_state.avatars.find(handle);
+        if (it == g_state.avatars.end()) {
+            continue;
+        }
+        frame_draw_calls += static_cast<std::uint32_t>(it->second.mesh_payloads.size());
+    }
 
     const auto frame_begin = std::chrono::steady_clock::now();
 
@@ -317,6 +338,17 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
 #endif
 
     PublishTrackingFrame();
+    for (const auto handle : g_state.render_ready_avatars) {
+        auto it = g_state.avatars.find(handle);
+        if (it == g_state.avatars.end()) {
+            continue;
+        }
+        it->second.last_render_draw_calls = static_cast<std::uint32_t>(it->second.mesh_payloads.size());
+    }
+    if (frame_draw_calls == 0U) {
+        SetError(NC_ERROR_UNSUPPORTED, "render", "render-ready avatars produced zero draw calls", true);
+        return NC_ERROR_UNSUPPORTED;
+    }
 
     const auto frame_end = std::chrono::steady_clock::now();
     g_state.last_frame_ms = static_cast<float>(
@@ -447,6 +479,35 @@ NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
     vsfclone::nativecore::g_state.latest_tracking = *frame;
+    const float blink_avg = std::max(0.0f, std::min(1.0f, (frame->blink_l + frame->blink_r) * 0.5f));
+    const float mouth_open = std::max(0.0f, std::min(1.0f, frame->mouth_open));
+    for (auto& [handle, pkg] : vsfclone::nativecore::g_state.avatars) {
+        (void)handle;
+        if (pkg.expressions.empty()) {
+            continue;
+        }
+        std::string summary;
+        std::size_t shown = 0U;
+        for (auto& expr : pkg.expressions) {
+            float weight = std::max(0.0f, std::min(1.0f, expr.default_weight));
+            if (expr.mapping_kind == "blink") {
+                weight = blink_avg;
+            } else if (expr.mapping_kind == "viseme_aa") {
+                weight = mouth_open;
+            } else if (expr.mapping_kind == "joy") {
+                weight = std::max(0.0f, std::min(1.0f, mouth_open * 0.7f));
+            }
+            expr.runtime_weight = weight;
+            if (shown < 3U) {
+                if (!summary.empty()) {
+                    summary += ", ";
+                }
+                summary += expr.name + "=" + std::to_string(weight);
+                ++shown;
+            }
+        }
+        pkg.last_expression_summary = summary;
+    }
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
@@ -472,6 +533,7 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
     }
 
     vsfclone::nativecore::g_state.render_ready_avatars.insert(handle);
+    it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
@@ -489,6 +551,7 @@ NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
     }
 
     vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
+    it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
