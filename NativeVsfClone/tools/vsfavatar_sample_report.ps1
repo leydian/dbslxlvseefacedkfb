@@ -57,6 +57,7 @@ if ($files.Count -eq 0) {
 "FileCount: $($files.Count)" | Add-Content -Path $OutputPath
 "" | Add-Content -Path $OutputPath
 
+$gateRows = @()
 foreach ($f in $files) {
     "---- $($f.Name)" | Add-Content -Path $OutputPath
     & $AvatarToolPath $f.FullName | Add-Content -Path $OutputPath
@@ -76,10 +77,60 @@ foreach ($f in $files) {
         "  SidecarFailedReadOffset: $($sidecar.failed_block_read_offset)" | Add-Content -Path $OutputPath
         "  SidecarFailedCompressedSize: $($sidecar.failed_block_compressed_size)" | Add-Content -Path $OutputPath
         "  SidecarFailedUncompressedSize: $($sidecar.failed_block_uncompressed_size)" | Add-Content -Path $OutputPath
+        $gateRows += [PSCustomObject]@{
+            Name = $f.Name
+            ParseOk = $true
+            Stage = "$($sidecar.probe_stage)"
+            Primary = "$($sidecar.primary_error_code)"
+            ReadOffset = [uint64]($sidecar.failed_block_read_offset)
+            CSize = [uint64]($sidecar.failed_block_compressed_size)
+            USize = [uint64]($sidecar.failed_block_uncompressed_size)
+        }
     } catch {
         "  SidecarParseError: failed to parse JSON output" | Add-Content -Path $OutputPath
+        $gateRows += [PSCustomObject]@{
+            Name = $f.Name
+            ParseOk = $false
+            Stage = ""
+            Primary = ""
+            ReadOffset = 0
+            CSize = 0
+            USize = 0
+        }
     }
     "" | Add-Content -Path $OutputPath
 }
+
+$gateA = $true
+foreach ($r in $gateRows) {
+    if (-not $r.ParseOk -or [string]::IsNullOrWhiteSpace($r.Stage) -or [string]::IsNullOrWhiteSpace($r.Primary)) {
+        $gateA = $false
+        break
+    }
+}
+
+$gateB = $false
+foreach ($r in $gateRows) {
+    if ($r.Stage -eq "failed-serialized" -or $r.Stage -eq "complete") {
+        $gateB = $true
+        break
+    }
+}
+
+$gateC = $true
+foreach ($r in $gateRows) {
+    if ($r.Primary -eq "DATA_BLOCK_READ_FAILED") {
+        if ($r.ReadOffset -le 0 -or $r.CSize -le 0 -or $r.USize -le 0) {
+            $gateC = $false
+            break
+        }
+    }
+}
+
+"== Gate Summary ==" | Add-Content -Path $OutputPath
+"GateA_NoCrashAndDiagPresent: $(if($gateA){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
+"GateB_AtLeastOneFailedSerializedOrComplete: $(if($gateB){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
+"GateC_ReadFailureHasOffsetModeSizeEvidence: $(if($gateC){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
+"GateRows: $($gateRows.Count)" | Add-Content -Path $OutputPath
 
 Write-Host "Report written: $OutputPath"

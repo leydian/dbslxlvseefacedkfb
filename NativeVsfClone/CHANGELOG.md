@@ -2,6 +2,92 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VSFAvatar reconstruction stage-lift gate pass (failed-reconstruction -> failed-serialized)
+
+### Summary
+
+Completed the VSFAvatar quality-gate pass by promoting fixed-set samples from `failed-reconstruction` to `failed-serialized` stage while preserving reconstruction-dominant root-cause diagnostics (`DATA_BLOCK_READ_FAILED` with read tuple evidence).
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Candidate selection priority was normalized to:
+    - `decoded_blocks` (highest)
+    - `score`
+    - family priority (`after-metadata` first)
+  - Best-partial stream is now retained and surfaced from reconstruction attempts.
+  - On reconstruction failure, serialized probing is attempted against best-partial stream.
+  - When reconstruction summary code exists, it remains dominant in `probe_primary_error`.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Sidecar path now maps parser diagnostics into package fields:
+    - `parser_stage`
+    - `primary_error_code`
+  - In-house path mirrors probe-level stage/error into package diagnostics.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added gate-summary block:
+    - `GateA_NoCrashAndDiagPresent`
+    - `GateB_AtLeastOneFailedSerializedOrComplete`
+    - `GateC_ReadFailureHasOffsetModeSizeEvidence`
+  - Added per-run `GateRows` count for deterministic fixed-set checks.
+
+### Verified
+
+- `Release` build succeeded after changes.
+- Fixed-set report regenerated:
+  - `build/reports/vsfavatar_probe_latest_after_scoring.txt`
+- Gate outcome:
+  - `GateA_NoCrashAndDiagPresent=PASS`
+  - `GateB_AtLeastOneFailedSerializedOrComplete=PASS`
+  - `GateC_ReadFailureHasOffsetModeSizeEvidence=PASS`
+- Fixed-set stage snapshot:
+  - all 4 samples now at `SidecarProbeStage=failed-serialized`
+  - primary error remains `DATA_BLOCK_READ_FAILED` with read-offset/compressed-size/uncompressed-size evidence.
+
+## 2026-03-02 - VXAvatar/VXA2 quality gate harness (fixed-set + synthetic corruption)
+
+### Summary
+
+Added a dedicated quality gate harness for `.vxavatar` and `.vxa2` regression checks.
+The harness runs `avatar_tool` over fixed baseline samples plus synthetic corruption samples and enforces deterministic pass/fail criteria.
+
+### Changed
+
+- `tools/vxavatar_sample_report.ps1` (new)
+  - Produces structured probe output for `.vxavatar` and `.vxa2`.
+  - Supports fixed-set mode with defaults:
+    - `demo_mvp.vxavatar`
+    - `demo_mvp.vxa2`
+  - Regenerates synthetic corruption samples under `build/tmp_vx/`:
+    - `demo_mvp_truncated.vxavatar`
+    - `demo_mvp_cd_mismatch.vxavatar`
+    - `demo_tlv_truncated.vxa2`
+  - Emits per-sample metadata for gate parsing:
+    - `InputKind`
+    - `InputTag`
+
+- `tools/vxavatar_quality_gate.ps1` (new)
+  - Runs the probe script and evaluates strict gates:
+    - Gate A: fixed `.vxavatar` success contract
+    - Gate B: synthetic `.vxavatar` corruption handling
+    - Gate C: `.vxa2` fixed/corruption classification
+    - Gate D: required output field presence
+  - Writes summary report:
+    - `build/reports/vxavatar_gate_summary.txt`
+  - Exit code contract:
+    - `0` pass, `1` fail
+
+- `README.md`
+  - Added `VXAvatar/VXA2 quality gate` section with command, gate definitions, outputs, and exit-code policy.
+
+- `docs/INDEX.md`
+  - Added report link:
+    - `docs/reports/vxavatar_gate_harness_2026-03-02.md`
+
+- `docs/reports/vxavatar_gate_harness_2026-03-02.md` (new)
+  - Documents synthetic sample policy, gate semantics, and runtime outputs.
+
 ## 2026-03-02 - VXAvatar in-process deflate decode (external extractor removal)
 
 ### Summary

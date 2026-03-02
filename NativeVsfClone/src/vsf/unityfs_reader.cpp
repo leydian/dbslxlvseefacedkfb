@@ -1286,6 +1286,8 @@ bool TryReconstructDataStream(std::ifstream& in,
     std::uint32_t best_partial_block0_attempt_count = 0U;
     std::uint64_t best_partial_block0_selected_offset = 0U;
     std::string best_partial_block0_mode_source;
+    std::vector<unsigned char> best_partial_stream;
+    std::int32_t best_partial_score = std::numeric_limits<std::int32_t>::min();
     std::vector<unsigned char> best_success_stream;
     std::uint64_t best_success_start = 0U;
     std::string best_success_family;
@@ -1348,15 +1350,19 @@ bool TryReconstructDataStream(std::ifstream& in,
             if (!code.empty()) {
                 ++failure_code_hits[code];
             }
+            const auto better_partial_family = FamilyPriority(candidate.family) > FamilyPriority(best_partial_family);
             if (decoded_block_count > best_partial_blocks ||
-                (decoded_block_count == best_partial_blocks && best_partial_family.empty())) {
+                (decoded_block_count == best_partial_blocks && failed_score > best_partial_score) ||
+                (decoded_block_count == best_partial_blocks && failed_score == best_partial_score && better_partial_family)) {
                 best_partial_blocks = decoded_block_count;
+                best_partial_score = failed_score;
                 best_partial_start = start;
                 best_partial_family = candidate.family;
                 best_partial_block0_hypothesis = probe.selected_block0_hypothesis;
                 best_partial_block0_attempt_count = probe.block0_attempt_count;
                 best_partial_block0_selected_offset = probe.block0_selected_offset;
                 best_partial_block0_mode_source = probe.block0_selected_mode_source;
+                best_partial_stream = reconstructed;
                 probe.reconstruction_best_partial_blocks = decoded_block_count;
             }
             if (attempt_errors.size() < 4096U) {
@@ -1375,9 +1381,9 @@ bool TryReconstructDataStream(std::ifstream& in,
         const auto success_score = ComputeCandidateScore(decoded_block_count, true, probe.block0_selected_mode_source);
         probe.best_candidate_score = std::max(probe.best_candidate_score, success_score);
         const auto better_family = FamilyPriority(candidate.family) > FamilyPriority(best_success_family);
-        if (success_score > best_success_score ||
-            (success_score == best_success_score && decoded_block_count > best_success_blocks) ||
-            (success_score == best_success_score && decoded_block_count == best_success_blocks && better_family)) {
+        if (decoded_block_count > best_success_blocks ||
+            (decoded_block_count == best_success_blocks && success_score > best_success_score) ||
+            (decoded_block_count == best_success_blocks && success_score == best_success_score && better_family)) {
             best_success_score = success_score;
             best_success_blocks = decoded_block_count;
             best_success_start = start;
@@ -1430,6 +1436,7 @@ bool TryReconstructDataStream(std::ifstream& in,
         if (probe.block0_selected_mode_source.empty()) {
             probe.block0_selected_mode_source = best_partial_block0_mode_source;
         }
+        out_stream = std::move(best_partial_stream);
     }
     error = "failed to reconstruct uncompressed bundle data stream. " + attempt_errors;
     if (best_partial_blocks > 0U) {
@@ -1694,11 +1701,25 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
                 probe.metadata_error += "; ";
             }
             probe.metadata_error += stream_err;
-            probe.probe_stage = "failed-reconstruction";
-            if (probe.probe_primary_error.empty()) {
-                probe.probe_primary_error = probe.reconstruction_failure_summary_code.empty()
-                                                ? "RECONSTRUCT_FAILED"
-                                                : probe.reconstruction_failure_summary_code;
+            // Even on reconstruction failure, attempt serialized probing with best-partial stream
+            // to preserve stage progression and candidate diagnostics.
+            probe.probe_stage = "serialized";
+            std::string serialized_err;
+            if (!ParseSerializedFromNodes(metadata, stream, probe, serialized_err)) {
+                if (!serialized_err.empty()) {
+                    if (!probe.metadata_error.empty()) {
+                        probe.metadata_error += "; ";
+                    }
+                    probe.metadata_error += "partial serialized probe: " + serialized_err;
+                }
+                probe.probe_stage = "failed-serialized";
+                if (!probe.reconstruction_failure_summary_code.empty()) {
+                    probe.probe_primary_error = probe.reconstruction_failure_summary_code;
+                } else if (probe.probe_primary_error.empty()) {
+                    probe.probe_primary_error = "RECONSTRUCT_FAILED";
+                }
+            } else {
+                probe.probe_stage = "complete";
             }
         }
     }

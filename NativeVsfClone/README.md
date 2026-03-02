@@ -112,6 +112,34 @@ Outputs:
 - gate summary: `build/reports/vsfavatar_gate_summary.txt`
 - baseline compare input (default): `build/reports/vsfavatar_probe_fixed.txt`
 
+## VXAvatar/VXA2 quality gate
+
+Run fixed-set probe + gate evaluation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet
+```
+
+Gate rules:
+
+- Gate A: fixed `.vxavatar` sample must satisfy `Format=VXAvatar`, `Compat=full`, `ParserStage=runtime-ready`, `PrimaryError=NONE`, and payload counts (`MeshPayloads`, `TexturePayloads`) >= 1.
+- Gate B: synthetic corrupted `.vxavatar` samples must stay non-crashing and classify as `Compat=failed|partial` with `PrimaryError=VX_SCHEMA_INVALID|VX_UNSUPPORTED_COMPRESSION`.
+- Gate C: `.vxa2` fixed + corrupted coverage:
+  - fixed `.vxa2` must keep `Format=VXA2` and valid parser stage (`parse|resolve|payload|runtime-ready`)
+  - corrupted `.vxa2` must classify as `VXA2_SECTION_TRUNCATED|VXA2_SCHEMA_INVALID`
+- Gate D: required output fields must exist for each sample (`InputKind`, `InputTag`, `Format`, `Compat`, `ParserStage`, `PrimaryError`).
+
+Exit code:
+
+- `0`: all gates pass
+- `1`: one or more gates fail
+
+Outputs:
+
+- probe report: `build/reports/vxavatar_probe_latest.txt`
+- gate summary: `build/reports/vxavatar_gate_summary.txt`
+- synthetic inputs: `build/tmp_vx/demo_mvp_truncated.vxavatar`, `build/tmp_vx/demo_mvp_cd_mismatch.vxavatar`, `build/tmp_vx/demo_tlv_truncated.vxa2`
+
 Sidecar JSON contract:
 
 - loader accepts `schema_version=2|3` (current output: `3`)
@@ -263,6 +291,23 @@ Latest behavior notes (2026-03-03, VSFAvatar reconstruction scoring + failure of
     - `SidecarFailedReadOffset=4250`
     - `SidecarFailedCompressedSize=14778976`
     - `SidecarFailedUncompressedSize=74890067`
+
+Latest behavior notes (2026-03-03, VSFAvatar stage-lift gate pass):
+
+- Reconstruction candidate tie-break was aligned to:
+  - `decoded_blocks` > `score` > family priority (`after-metadata` first)
+- On reconstruction failure, serialized probing now runs against best-partial stream.
+- Primary error remains reconstruction-dominant when present:
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+- Fixed-set gate report was regenerated:
+  - `build/reports/vsfavatar_probe_latest_after_scoring.txt`
+- Gate outcome (fixed 4 samples):
+  - `GateA_NoCrashAndDiagPresent=PASS`
+  - `GateB_AtLeastOneFailedSerializedOrComplete=PASS`
+  - `GateC_ReadFailureHasOffsetModeSizeEvidence=PASS`
+- Current stage status:
+  - all fixed samples now report `SidecarProbeStage=failed-serialized`
+  - dominant offset family is `after-metadata`
 
 Latest behavior notes (2026-03-02, VXA2 TLV section decode MVP):
 

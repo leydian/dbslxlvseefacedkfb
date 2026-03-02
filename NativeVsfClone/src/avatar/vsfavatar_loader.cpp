@@ -483,10 +483,12 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
 
     pkg.warnings.push_back("W_MODE: parser mode=sidecar");
     const auto probe_stage = GetJsonString(output, "probe_stage");
+    pkg.parser_stage = probe_stage.empty() ? "unknown" : probe_stage;
     if (!probe_stage.empty()) {
         pkg.warnings.push_back("W_STAGE: " + probe_stage);
     }
     const auto primary_error_code = GetJsonString(output, "primary_error_code");
+    pkg.primary_error_code = primary_error_code.empty() ? "NONE" : primary_error_code;
     if (!primary_error_code.empty() && primary_error_code != "NONE") {
         pkg.warnings.push_back("W_PRIMARY: " + primary_error_code);
     }
@@ -551,6 +553,8 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
     AvatarPackage pkg;
     pkg.source_type = AvatarSourceType::VsfAvatar;
     pkg.compat_level = AvatarCompatLevel::Partial;
+    pkg.parser_stage = probe.value.probe_stage.empty() ? "unknown" : probe.value.probe_stage;
+    pkg.primary_error_code = probe.value.probe_primary_error.empty() ? "NONE" : probe.value.probe_primary_error;
     pkg.source_path = path;
     pkg.display_name = fs::path(path).stem().string();
     for (std::uint32_t i = 0; i < probe.value.mesh_object_count; ++i) {
