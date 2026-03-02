@@ -2,6 +2,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "vsfclone/vsf/unityfs_reader.h"
 
@@ -40,8 +41,25 @@ std::string EscapeJson(const std::string& s) {
 void PrintErrorJson(const std::string& error) {
     std::cout << "{"
               << "\"status\":\"error\","
+              << "\"schema_version\":2,"
+              << "\"extractor_version\":\"inhouse-sidecar-v2\","
+              << "\"error_code\":\"SIDECAR_RUNTIME_ERROR\","
+              << "\"error_message\":\"" << EscapeJson(error) << "\","
               << "\"error\":\"" << EscapeJson(error) << "\""
               << "}\n";
+}
+
+std::string JoinJsonStringArray(const std::vector<std::string>& items) {
+    std::ostringstream out;
+    out << "[";
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(items[i]) << "\"";
+    }
+    out << "]";
+    return out.str();
 }
 
 }  // namespace
@@ -68,9 +86,8 @@ int main(int argc, char** argv) {
     const auto& p = probe.value;
     const auto mesh_count = p.mesh_object_count;
     const auto material_count = p.material_object_count > 0U ? p.material_object_count : 1U;
-    const auto missing = (!p.object_table_parsed || mesh_count == 0U)
-                             ? "mesh/material object discovery"
-                             : "mesh/material payload extraction";
+    std::vector<std::string> warnings;
+    std::vector<std::string> missing_features;
 
     std::ostringstream warning;
     if (!p.metadata_error.empty()) {
@@ -87,20 +104,40 @@ int main(int argc, char** argv) {
     if (!p.selected_reconstruction_layout.empty()) {
         warning << ", recon layout=" << p.selected_reconstruction_layout;
     }
+    warnings.push_back(warning.str());
+    if (!p.failed_block_error_code.empty()) {
+        std::ostringstream block;
+        block << "block=" << p.failed_block_index
+              << ", mode=" << p.failed_block_mode
+              << ", expected=" << p.failed_block_expected_size
+              << ", code=" << p.failed_block_error_code;
+        warnings.push_back(block.str());
+    }
+    if (!p.object_table_parsed || mesh_count == 0U) {
+        missing_features.push_back("mesh/material object discovery");
+    } else {
+        missing_features.push_back("mesh/material payload extraction");
+    }
+
+    std::string compat_level = "partial";
+    if (p.object_table_parsed && mesh_count > 0U) {
+        compat_level = "full";
+    }
+    if (!p.metadata_parsed) {
+        compat_level = "failed";
+    }
 
     std::cout << "{"
               << "\"status\":\"ok\","
-              << "\"schema_version\":1,"
-              << "\"extractor_version\":\"inhouse-sidecar-v1\","
+              << "\"schema_version\":2,"
+              << "\"extractor_version\":\"inhouse-sidecar-v2\","
               << "\"display_name\":\"" << EscapeJson(fs::path(path).stem().string()) << "\","
+              << "\"compat_level\":\"" << compat_level << "\","
               << "\"object_table_parsed\":" << (p.object_table_parsed ? "true" : "false") << ","
               << "\"mesh_count\":" << mesh_count << ","
               << "\"material_count\":" << material_count << ","
-              << "\"warning_count\":1,"
-              << "\"missing_feature_count\":1,"
-              << "\"last_warning\":\"" << EscapeJson(warning.str()) << "\","
-              << "\"last_missing_feature\":\"" << EscapeJson(missing) << "\""
+              << "\"warnings\":" << JoinJsonStringArray(warnings) << ","
+              << "\"missing_features\":" << JoinJsonStringArray(missing_features)
               << "}\n";
     return 0;
 }
-

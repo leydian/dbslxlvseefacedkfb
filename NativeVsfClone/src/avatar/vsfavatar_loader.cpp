@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <sstream>
+#include <vector>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -35,7 +36,22 @@ static std::string EscapeCmdArg(const std::string& s) {
     return out;
 }
 
-static core::Result<std::string> RunSidecar(const std::string& sidecar_path, const std::string& avatar_path) {
+static std::uint32_t GetEnvU32(const char* name, std::uint32_t fallback) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return fallback;
+    }
+    const auto parsed = std::strtoul(value, nullptr, 10);
+    if (parsed == 0UL) {
+        return fallback;
+    }
+    return static_cast<std::uint32_t>(parsed);
+}
+
+static core::Result<std::string> RunSidecar(
+    const std::string& sidecar_path,
+    const std::string& avatar_path,
+    std::uint32_t timeout_ms) {
 #if defined(_WIN32)
     SECURITY_ATTRIBUTES sa {};
     sa.nLength = sizeof(sa);
@@ -85,24 +101,79 @@ static core::Result<std::string> RunSidecar(const std::string& sidecar_path, con
 
     std::string output;
     char buffer[1024];
-    DWORD read = 0;
-    while (ReadFile(read_pipe, buffer, static_cast<DWORD>(sizeof(buffer)), &read, nullptr) && read > 0) {
-        output.append(buffer, buffer + read);
+    const DWORD start_tick = GetTickCount();
+    bool process_exited = false;
+
+    for (;;) {
+        DWORD available = 0;
+        if (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) == 0) {
+            CloseHandle(read_pipe);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return core::Result<std::string>::Fail("SIDECAR_EXEC_FAILED: PeekNamedPipe failed");
+        }
+        while (available > 0) {
+            DWORD read = 0;
+            const DWORD to_read = (available > sizeof(buffer)) ? static_cast<DWORD>(sizeof(buffer)) : available;
+            if (ReadFile(read_pipe, buffer, to_read, &read, nullptr) == 0) {
+                CloseHandle(read_pipe);
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                return core::Result<std::string>::Fail("SIDECAR_EXEC_FAILED: ReadFile failed");
+            }
+            if (read == 0) {
+                break;
+            }
+            output.append(buffer, buffer + read);
+            available -= read;
+        }
+
+        const DWORD wait_result = WaitForSingleObject(pi.hProcess, 30);
+        if (wait_result == WAIT_OBJECT_0) {
+            process_exited = true;
+            break;
+        }
+        if (wait_result != WAIT_TIMEOUT) {
+            CloseHandle(read_pipe);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return core::Result<std::string>::Fail("SIDECAR_EXEC_FAILED: wait failed");
+        }
+        if (GetTickCount() - start_tick > timeout_ms) {
+            TerminateProcess(pi.hProcess, 124);
+            CloseHandle(read_pipe);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return core::Result<std::string>::Fail("SIDECAR_TIMEOUT: process timed out");
+        }
+    }
+
+    if (process_exited) {
+        for (;;) {
+            DWORD read = 0;
+            if (ReadFile(read_pipe, buffer, static_cast<DWORD>(sizeof(buffer)), &read, nullptr) == 0 || read == 0) {
+                break;
+            }
+            output.append(buffer, buffer + read);
+        }
     }
     CloseHandle(read_pipe);
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD exit_code = 1;
     GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     if (exit_code != 0) {
-        return core::Result<std::string>::Fail(output.empty() ? "sidecar process failed" : output);
+        if (!output.empty()) {
+            return core::Result<std::string>::Fail("SIDECAR_RUNTIME_ERROR: " + output);
+        }
+        return core::Result<std::string>::Fail("SIDECAR_RUNTIME_ERROR: sidecar process failed");
     }
     return core::Result<std::string>::Ok(output);
 #else
     (void)sidecar_path;
     (void)avatar_path;
+    (void)timeout_ms;
     return core::Result<std::string>::Fail("sidecar mode is only supported on Windows");
 #endif
 }
@@ -164,6 +235,138 @@ static std::uint32_t GetJsonU32(const std::string& json, const std::string& key,
     return static_cast<std::uint32_t>(std::strtoul(json.substr(i, end - i).c_str(), nullptr, 10));
 }
 
+static bool HasJsonKey(const std::string& json, const std::string& key) {
+    return json.find("\"" + key + "\"") != std::string::npos;
+}
+
+static bool TryGetJsonBool(const std::string& json, const std::string& key, bool* out_value) {
+    if (out_value == nullptr) {
+        return false;
+    }
+    const auto needle = "\"" + key + "\"";
+    const auto key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return false;
+    }
+    const auto colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return false;
+    }
+    std::size_t i = colon + 1U;
+    while (i < json.size() && std::isspace(static_cast<unsigned char>(json[i])) != 0) {
+        ++i;
+    }
+    if (json.compare(i, 4U, "true") == 0) {
+        *out_value = true;
+        return true;
+    }
+    if (json.compare(i, 5U, "false") == 0) {
+        *out_value = false;
+        return true;
+    }
+    return false;
+}
+
+static std::vector<std::string> GetJsonStringArray(const std::string& json, const std::string& key) {
+    std::vector<std::string> values;
+    const auto needle = "\"" + key + "\"";
+    const auto key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return values;
+    }
+    const auto colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return values;
+    }
+    const auto begin = json.find('[', colon + 1U);
+    if (begin == std::string::npos) {
+        return values;
+    }
+    const auto end = json.find(']', begin + 1U);
+    if (end == std::string::npos) {
+        return values;
+    }
+
+    std::size_t i = begin + 1U;
+    while (i < end) {
+        while (i < end && (std::isspace(static_cast<unsigned char>(json[i])) != 0 || json[i] == ',')) {
+            ++i;
+        }
+        if (i >= end || json[i] != '"') {
+            ++i;
+            continue;
+        }
+        std::string item;
+        ++i;
+        while (i < end) {
+            const auto c = json[i];
+            if (c == '\\') {
+                if (i + 1U < end) {
+                    item.push_back(json[i + 1U]);
+                    i += 2U;
+                    continue;
+                }
+                break;
+            }
+            if (c == '"') {
+                ++i;
+                break;
+            }
+            item.push_back(c);
+            ++i;
+        }
+        if (!item.empty()) {
+            values.push_back(item);
+        }
+    }
+    return values;
+}
+
+static core::Result<bool> ValidateSidecarSchemaV2(const std::string& output) {
+    const auto schema_version = GetJsonU32(output, "schema_version");
+    if (schema_version != 2U) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2");
+    }
+    const auto status = GetJsonString(output, "status");
+    if (status.empty()) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing status");
+    }
+    if (status == "ok" && GetJsonString(output, "display_name").empty()) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing display_name");
+    }
+    if (status == "ok" && GetJsonString(output, "extractor_version").empty()) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing extractor_version");
+    }
+    if (status == "ok" && GetJsonString(output, "compat_level").empty()) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing compat_level");
+    }
+    bool object_table_parsed = false;
+    if (status == "ok" && !TryGetJsonBool(output, "object_table_parsed", &object_table_parsed)) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing object_table_parsed");
+    }
+    if (status == "ok" && !HasJsonKey(output, "warnings")) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing warnings");
+    }
+    if (status == "ok" && !HasJsonKey(output, "missing_features")) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing missing_features");
+    }
+    return core::Result<bool>::Ok(true);
+}
+
+static AvatarCompatLevel ParseCompatLevel(const std::string& value) {
+    const auto lowered = ToLower(value);
+    if (lowered == "full") {
+        return AvatarCompatLevel::Full;
+    }
+    if (lowered == "failed") {
+        return AvatarCompatLevel::Failed;
+    }
+    if (lowered == "partial") {
+        return AvatarCompatLevel::Partial;
+    }
+    return AvatarCompatLevel::Unknown;
+}
+
 bool VsfAvatarLoader::CanLoadPath(const std::string& path) const {
     const auto ext = ToLower(fs::path(path).extension().string());
     return ext == ".vsfavatar";
@@ -202,22 +405,37 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     if (const char* env = std::getenv("VSF_SIDECAR_PATH")) {
         sidecar_path = env;
     }
+    const auto timeout_ms = GetEnvU32("VSF_SIDECAR_TIMEOUT_MS", 15000U);
 
-    const auto ran = RunSidecar(sidecar_path, path);
+    const auto ran = RunSidecar(sidecar_path, path, timeout_ms);
     if (!ran.ok) {
-        return core::Result<AvatarPackage>::Fail("sidecar failed: " + ran.error);
+        return core::Result<AvatarPackage>::Fail(ran.error);
     }
     const std::string output = ran.value;
+    const auto schema = ValidateSidecarSchemaV2(output);
+    if (!schema.ok) {
+        return core::Result<AvatarPackage>::Fail(schema.error);
+    }
 
     const auto status = GetJsonString(output, "status");
     if (status != "ok") {
+        const auto err_code = GetJsonString(output, "error_code");
         const auto err = GetJsonString(output, "error");
-        return core::Result<AvatarPackage>::Fail(err.empty() ? "sidecar returned non-ok status" : err);
+        const auto err_message = GetJsonString(output, "error_message");
+        if (!err_code.empty() || !err_message.empty()) {
+            return core::Result<AvatarPackage>::Fail(
+                "SIDECAR_RUNTIME_ERROR: " + err_code + " " + err_message);
+        }
+        return core::Result<AvatarPackage>::Fail(
+            err.empty() ? "SIDECAR_RUNTIME_ERROR: sidecar returned non-ok status" : err);
     }
 
     AvatarPackage pkg;
     pkg.source_type = AvatarSourceType::VsfAvatar;
-    pkg.compat_level = AvatarCompatLevel::Partial;
+    pkg.compat_level = ParseCompatLevel(GetJsonString(output, "compat_level"));
+    if (pkg.compat_level == AvatarCompatLevel::Unknown) {
+        pkg.compat_level = AvatarCompatLevel::Partial;
+    }
     pkg.source_path = path;
     pkg.display_name = GetJsonString(output, "display_name");
     if (pkg.display_name.empty()) {
@@ -236,16 +454,16 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.materials.push_back({"Default", "MToon (placeholder)"});
     }
 
-    const auto last_warning = GetJsonString(output, "last_warning");
-    const auto last_missing = GetJsonString(output, "last_missing_feature");
     pkg.warnings.push_back("parser mode=sidecar");
-    if (!last_warning.empty()) {
-        pkg.warnings.push_back(last_warning);
+    const auto warning_items = GetJsonStringArray(output, "warnings");
+    for (const auto& w : warning_items) {
+        pkg.warnings.push_back(w);
     }
-    if (!last_missing.empty()) {
-        pkg.missing_features.push_back(last_missing);
+    const auto missing_items = GetJsonStringArray(output, "missing_features");
+    for (const auto& m : missing_items) {
+        pkg.missing_features.push_back(m);
     }
-    if (mesh_count == 0U && material_count == 0U) {
+    if (pkg.missing_features.empty() && mesh_count == 0U && material_count == 0U) {
         pkg.missing_features.push_back("mesh/material object discovery");
     }
     return core::Result<AvatarPackage>::Ok(pkg);

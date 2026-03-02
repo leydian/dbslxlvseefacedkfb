@@ -16,6 +16,7 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - In-house only mode: `VSF_PARSER_MODE=inhouse`
 - Strict sidecar mode (no fallback): `VSF_PARSER_MODE=sidecar-strict`
 - Sidecar binary override: `VSF_SIDECAR_PATH=...`
+- Sidecar timeout override (ms): `VSF_SIDECAR_TIMEOUT_MS=15000`
 
 If `sidecar` mode fails to execute:
 
@@ -77,7 +78,28 @@ $env:VSF_PARSER_MODE = "sidecar"        # default
 $env:VSF_PARSER_MODE = "inhouse"        # bypass sidecar
 $env:VSF_PARSER_MODE = "sidecar-strict" # no fallback
 $env:VSF_SIDECAR_PATH = "D:\custom\vsfavatar_sidecar.exe"
+$env:VSF_SIDECAR_TIMEOUT_MS = "15000"
 ```
+
+Sidecar JSON contract:
+
+- loader requires `schema_version=2`
+- required fields: `status`, `display_name`, `extractor_version`, `object_table_parsed`
+- expected arrays: `warnings[]`, `missing_features[]`
+- sidecar errors are surfaced with codes such as:
+  - `SIDECAR_TIMEOUT`
+  - `SIDECAR_EXEC_FAILED`
+  - `SIDECAR_RUNTIME_ERROR`
+  - `SCHEMA_INVALID`
+
+Latest behavior notes (2026-03-02):
+
+- Sidecar stdout capture was hardened to avoid pipe deadlock when warnings are long.
+- `sidecar-strict` now surfaces timeout/failure directly with structured error strings.
+- `sidecar` mode preserves in-house fallback for operational continuity.
+- Current parser blocker is still unchanged:
+  - baseline samples remain `Compat: partial`, `Meshes: 0`
+  - representative decode failure remains `DATA_BLOCK_READ_FAILED` at block 0
 
 ## Repository layout
 

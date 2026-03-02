@@ -8,6 +8,32 @@ All notable implementation changes in this workspace are documented here.
 
 Shifted `.vsfavatar` loading from in-process parser-first to a sidecar-first execution model, while keeping in-house parsing as fallback.
 
+### Update (schema v2 + timeout)
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added sidecar timeout env var support:
+    - `VSF_SIDECAR_TIMEOUT_MS` (default `15000`)
+  - Added sidecar timeout handling with explicit failure code:
+    - `SIDECAR_TIMEOUT`
+  - Added schema validation for sidecar output (`schema_version=2`) with explicit failure code:
+    - `SCHEMA_INVALID`
+  - Added structured sidecar/runtime failure prefixes:
+    - `SIDECAR_EXEC_FAILED`
+    - `SIDECAR_RUNTIME_ERROR`
+  - Added `warnings[]`/`missing_features[]` JSON array parsing.
+  - Added sidecar `compat_level` mapping (`full|partial|failed`).
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Upgraded JSON output to schema v2.
+  - Added fields:
+    - `compat_level`
+    - `warnings`
+    - `missing_features`
+  - Error output now includes:
+    - `schema_version`
+    - `error_code`
+    - `error_message`
+
 ### Changed
 
 - `src/avatar/vsfavatar_loader.h`
@@ -44,6 +70,11 @@ Shifted `.vsfavatar` loading from in-process parser-first to a sidecar-first exe
   - `build/Release/vsfavatar_sidecar.exe`
 - `VSF_PARSER_MODE=sidecar` path works in both `vsfclone_cli` and `avatar_tool`.
 - Sidecar-mode fixed sample report generated (`build/reports/vsfavatar_probe_sidecar.txt`).
+- Sidecar pipe handling was hardened; long JSON warning payloads no longer force fallback via timeout.
+- `sidecar-strict` timeout path verified with `VSF_SIDECAR_TIMEOUT_MS=1`:
+  - returns `SIDECAR_TIMEOUT: process timed out`
+- `sidecar` fallback path re-verified with invalid `VSF_SIDECAR_PATH`:
+  - load succeeds through in-house fallback with `parser mode=inhouse (fallback)` warning.
 - Compatibility remains `partial` on baseline samples (block-0 reconstruction blocker still active in in-house decode internals used by current sidecar output path).
 
 ## 2026-03-02 - VSFAvatar reconstruction summary-code pass and count-endian probing
