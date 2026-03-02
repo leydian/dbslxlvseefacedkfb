@@ -322,10 +322,10 @@ static std::vector<std::string> GetJsonStringArray(const std::string& json, cons
     return values;
 }
 
-static core::Result<bool> ValidateSidecarSchemaV2(const std::string& output) {
+static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
     const auto schema_version = GetJsonU32(output, "schema_version");
-    if (schema_version != 2U) {
-        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2");
+    if (schema_version != 2U && schema_version != 3U) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2 or 3");
     }
     const auto status = GetJsonString(output, "status");
     if (status.empty()) {
@@ -343,6 +343,9 @@ static core::Result<bool> ValidateSidecarSchemaV2(const std::string& output) {
     bool object_table_parsed = false;
     if (status == "ok" && !TryGetJsonBool(output, "object_table_parsed", &object_table_parsed)) {
         return core::Result<bool>::Fail("SCHEMA_INVALID: missing object_table_parsed");
+    }
+    if (status == "ok" && GetJsonString(output, "primary_error_code").empty()) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing primary_error_code");
     }
     if (status == "ok" && !HasJsonKey(output, "warnings")) {
         return core::Result<bool>::Fail("SCHEMA_INVALID: missing warnings");
@@ -395,8 +398,8 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
     if (!fallback.ok) {
         return fallback;
     }
-    fallback.value.warnings.push_back("sidecar fallback: " + sidecar.error);
-    fallback.value.warnings.push_back("parser mode=inhouse (fallback)");
+    fallback.value.warnings.push_back("W_FALLBACK: sidecar fallback: " + sidecar.error);
+    fallback.value.warnings.push_back("W_MODE: parser mode=inhouse (fallback)");
     return fallback;
 }
 
@@ -412,7 +415,7 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         return core::Result<AvatarPackage>::Fail(ran.error);
     }
     const std::string output = ran.value;
-    const auto schema = ValidateSidecarSchemaV2(output);
+    const auto schema = ValidateSidecarSchema(output);
     if (!schema.ok) {
         return core::Result<AvatarPackage>::Fail(schema.error);
     }
@@ -454,7 +457,27 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.materials.push_back({"Default", "MToon (placeholder)"});
     }
 
-    pkg.warnings.push_back("parser mode=sidecar");
+    pkg.warnings.push_back("W_MODE: parser mode=sidecar");
+    const auto probe_stage = GetJsonString(output, "probe_stage");
+    if (!probe_stage.empty()) {
+        pkg.warnings.push_back("W_STAGE: " + probe_stage);
+    }
+    const auto primary_error_code = GetJsonString(output, "primary_error_code");
+    if (!primary_error_code.empty() && primary_error_code != "NONE") {
+        pkg.warnings.push_back("W_PRIMARY: " + primary_error_code);
+    }
+    const auto block_layout = GetJsonString(output, "selected_block_layout");
+    if (!block_layout.empty()) {
+        pkg.warnings.push_back("W_LAYOUT: " + block_layout);
+    }
+    const auto offset_family = GetJsonString(output, "selected_offset_family");
+    if (!offset_family.empty()) {
+        pkg.warnings.push_back("W_OFFSET: " + offset_family);
+    }
+    const auto recon_summary = GetJsonString(output, "reconstruction_summary");
+    if (!recon_summary.empty()) {
+        pkg.warnings.push_back("W_RECON_SUMMARY: " + recon_summary);
+    }
     const auto warning_items = GetJsonStringArray(output, "warnings");
     for (const auto& w : warning_items) {
         pkg.warnings.push_back(w);
@@ -494,7 +517,7 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
     warn << "UnityFS " << probe.value.header.engine_version
          << ", compression mode=" << static_cast<int>(probe.value.header.compression_mode)
          << ", VRM token hits=" << probe.value.vrm_token_hits;
-    pkg.warnings.push_back(warn.str());
+    pkg.warnings.push_back("W_HEADER: " + warn.str());
     if (probe.value.metadata_parsed) {
         std::ostringstream meta;
         meta << "metadata parsed: blocks=" << probe.value.block_count
@@ -521,22 +544,25 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
         if (probe.value.metadata_offset > 0U) {
             meta << ", metadata offset=" << probe.value.metadata_offset;
         }
+        if (!probe.value.selected_offset_family.empty()) {
+            meta << ", offset family=" << probe.value.selected_offset_family;
+        }
         if (probe.value.reconstruction_success_offset > 0U) {
             meta << ", reconstruct success offset=" << probe.value.reconstruction_success_offset;
         }
         if (!probe.value.first_node_path.empty()) {
             meta << ", first node=" << probe.value.first_node_path;
         }
-        pkg.warnings.push_back(meta.str());
+        pkg.warnings.push_back("W_META: " + meta.str());
     }
     if (!probe.value.metadata_error.empty()) {
         if (probe.value.metadata_parsed) {
-            pkg.warnings.push_back("metadata/serialized diagnostic: " + probe.value.metadata_error);
+            pkg.warnings.push_back("E_META_SERIALIZED: " + probe.value.metadata_error);
         } else {
-            pkg.warnings.push_back("metadata parse failed: " + probe.value.metadata_error);
+            pkg.warnings.push_back("E_META_PARSE: " + probe.value.metadata_error);
         }
         if (!probe.value.metadata_decode_error_code.empty()) {
-            pkg.warnings.push_back("metadata decode code: " + probe.value.metadata_decode_error_code);
+            pkg.warnings.push_back("E_META_CODE: " + probe.value.metadata_decode_error_code);
         }
         if (!probe.value.failed_block_error_code.empty()) {
             std::ostringstream block;
@@ -544,8 +570,14 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
                   << ", mode=" << probe.value.failed_block_mode
                   << ", expected=" << probe.value.failed_block_expected_size
                   << ", code=" << probe.value.failed_block_error_code;
-            pkg.warnings.push_back(block.str());
+            pkg.warnings.push_back("E_RECON_BLOCK: " + block.str());
         }
+    }
+    if (!probe.value.probe_stage.empty()) {
+        pkg.warnings.push_back("W_STAGE: " + probe.value.probe_stage);
+    }
+    if (!probe.value.probe_primary_error.empty()) {
+        pkg.warnings.push_back("E_PRIMARY: " + probe.value.probe_primary_error);
     }
     if (probe.value.object_table_parsed) {
         std::ostringstream obj;
@@ -555,13 +587,13 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
         if (!probe.value.major_types_found.empty()) {
             obj << ", types={" << probe.value.major_types_found << "}";
         }
-        pkg.warnings.push_back(obj.str());
-        pkg.warnings.push_back("payload decode pending: mesh vertex/index and material parameter extraction.");
+        pkg.warnings.push_back("W_OBJECT_TABLE: " + obj.str());
+        pkg.warnings.push_back("W_PAYLOAD_PENDING: mesh vertex/index and material parameter extraction.");
     } else if (!probe.value.serialized_parse_error_code.empty()) {
-        pkg.warnings.push_back("serialized parse code: " + probe.value.serialized_parse_error_code);
+        pkg.warnings.push_back("E_SERIALIZED_CODE: " + probe.value.serialized_parse_error_code);
     }
     if (!probe.value.has_cab_token) {
-        pkg.warnings.push_back("CAB token not found in first probe window.");
+        pkg.warnings.push_back("W_CAB_TOKEN: not found in first probe window.");
     }
     if (!probe.value.metadata_parsed) {
         pkg.missing_features.push_back("UnityFS metadata decompression");
@@ -574,7 +606,7 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
     } else {
         pkg.missing_features.push_back("mesh/material payload extraction");
     }
-    pkg.warnings.push_back("parser mode=inhouse");
+    pkg.warnings.push_back("W_MODE: parser mode=inhouse");
 
     return core::Result<AvatarPackage>::Ok(pkg);
 }

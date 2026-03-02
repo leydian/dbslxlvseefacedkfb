@@ -32,10 +32,13 @@ struct UnityFsProbe {
     UnityFsHeader header;
     bool has_cab_token = false;
     std::uint32_t vrm_token_hits = 0;
+    std::string probe_stage = "header";
+    std::string probe_primary_error;
     bool metadata_parsed = false;
     std::uint32_t block_count = 0;
     std::uint32_t node_count = 0;
     std::string first_node_path;
+    std::uint32_t serialized_candidate_count = 0;
     bool object_table_parsed = false;
     std::uint32_t object_count = 0;
     std::uint32_t mesh_object_count = 0;
@@ -53,6 +56,7 @@ struct UnityFsProbe {
     std::string metadata_decode_error_code;
     std::string selected_block_layout;
     std::string selected_reconstruction_layout;
+    std::string selected_offset_family;
     std::string reconstruction_failure_summary_code;
     std::uint64_t total_block_compressed_size = 0;
     std::uint64_t total_block_uncompressed_size = 0;

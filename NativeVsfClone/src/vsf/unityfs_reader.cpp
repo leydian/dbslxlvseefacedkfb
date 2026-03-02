@@ -964,6 +964,23 @@ std::string ExtractFailureCode(const std::string& message) {
     return message.substr(start, end - start);
 }
 
+std::string ClassifyFailureCode(const std::string& detail) {
+    if (detail.find("failed to read data block") != std::string::npos ||
+        detail.find("out of bundle range") != std::string::npos) {
+        return "DATA_BLOCK_READ_FAILED";
+    }
+    if (detail.find("raw block size mismatch") != std::string::npos) {
+        return "DATA_BLOCK_RAW_MISMATCH";
+    }
+    if (detail.find("LZ4 decompression failed") != std::string::npos) {
+        return "DATA_BLOCK_LZ4_FAIL";
+    }
+    if (detail.find("LZMA decompression is not implemented") != std::string::npos) {
+        return "DATA_BLOCK_LZMA_UNIMPLEMENTED";
+    }
+    return "DATA_BLOCK_DECODE_FAILED";
+}
+
 bool ReconstructStreamAt(std::ifstream& in,
                          const UnityFsHeader& header,
                          const ParsedMetadata& metadata,
@@ -1067,18 +1084,7 @@ bool ReconstructStreamAt(std::ifstream& in,
             probe.failed_block_index = block_index;
             probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
             probe.failed_block_expected_size = b.uncompressed_size;
-            if (last_err.find("failed to read data block") != std::string::npos ||
-                last_err.find("out of bundle range") != std::string::npos) {
-                probe.failed_block_error_code = "DATA_BLOCK_READ_FAILED";
-            } else if (last_err.find("raw block size mismatch") != std::string::npos) {
-                probe.failed_block_error_code = "DATA_BLOCK_RAW_MISMATCH";
-            } else if (last_err.find("LZ4 decompression failed") != std::string::npos) {
-                probe.failed_block_error_code = "DATA_BLOCK_LZ4_FAIL";
-            } else if (last_err.find("LZMA decompression is not implemented") != std::string::npos) {
-                probe.failed_block_error_code = "DATA_BLOCK_LZMA_UNIMPLEMENTED";
-            } else {
-                probe.failed_block_error_code = "DATA_BLOCK_DECODE_FAILED";
-            }
+            probe.failed_block_error_code = ClassifyFailureCode(last_err);
             error = "data block decode failed: block=" + std::to_string(block_index) +
                     ", mode=" + std::to_string(probe.failed_block_mode) +
                     ", expected=" + std::to_string(b.uncompressed_size) +
@@ -1120,57 +1126,75 @@ bool TryReconstructDataStream(std::ifstream& in,
         total_compressed += b.compressed_size;
     }
 
-    std::set<std::uint64_t> candidate_set;
-    const auto add_candidate = [&](std::uint64_t v) {
-        if (v < header.bundle_file_size) {
-            candidate_set.insert(v);
+    struct CandidateStart {
+        std::uint64_t offset = 0U;
+        std::string family;
+    };
+    std::unordered_map<std::uint64_t, std::string> candidate_map;
+    const auto add_candidate = [&](std::uint64_t v, const char* family) {
+        if (v >= header.bundle_file_size) {
+            return;
+        }
+        auto it = candidate_map.find(v);
+        if (it == candidate_map.end()) {
+            candidate_map.emplace(v, family);
         }
     };
-    const auto add_window = [&](std::uint64_t anchor) {
+    const auto add_window = [&](std::uint64_t anchor, const char* family) {
         constexpr std::int64_t kWindow = 256;
         for (std::int64_t d = -kWindow; d <= kWindow; d += 16) {
             const auto value = static_cast<std::int64_t>(anchor) + d;
             if (value >= 0) {
-                add_candidate(static_cast<std::uint64_t>(value));
+                add_candidate(static_cast<std::uint64_t>(value), family);
             }
         }
     };
 
-    add_candidate(after_header);
-    add_candidate((after_header + 15ULL) & ~15ULL);
-    add_candidate(after_header + header.compressed_metadata_size);
-    add_candidate(((after_header + header.compressed_metadata_size) + 15ULL) & ~15ULL);
-    add_candidate(metadata_offset + header.compressed_metadata_size);
-    add_candidate(((metadata_offset + header.compressed_metadata_size) + 15ULL) & ~15ULL);
+    add_candidate(after_header, "after-header");
+    add_candidate((after_header + 15ULL) & ~15ULL, "after-header-aligned");
+    add_candidate(after_header + header.compressed_metadata_size, "header-plus-metadata");
+    add_candidate(((after_header + header.compressed_metadata_size) + 15ULL) & ~15ULL, "header-plus-metadata-aligned");
+    add_candidate(metadata_offset + header.compressed_metadata_size, "metadata-plus-metadata-size");
+    add_candidate(((metadata_offset + header.compressed_metadata_size) + 15ULL) & ~15ULL, "metadata-plus-metadata-size-aligned");
     if (total_compressed <= header.bundle_file_size) {
-        add_candidate(header.bundle_file_size - total_compressed);
-        add_candidate((header.bundle_file_size - total_compressed) & ~15ULL);
+        add_candidate(header.bundle_file_size - total_compressed, "tail-packed");
+        add_candidate((header.bundle_file_size - total_compressed) & ~15ULL, "tail-packed-aligned");
     }
     if (metadata_at_end) {
         if (metadata_offset >= total_compressed) {
-            add_candidate(metadata_offset - total_compressed);
-            add_candidate((metadata_offset - total_compressed) & ~15ULL);
+            add_candidate(metadata_offset - total_compressed, "metadata-end-minus-total-compressed");
+            add_candidate((metadata_offset - total_compressed) & ~15ULL, "metadata-end-minus-total-compressed-aligned");
         }
     }
-    add_window(after_header);
-    add_window(after_header + header.compressed_metadata_size);
-    add_window(metadata_offset + header.compressed_metadata_size);
+    add_window(after_header, "window-after-header");
+    add_window(after_header + header.compressed_metadata_size, "window-header-plus-metadata");
+    add_window(metadata_offset + header.compressed_metadata_size, "window-metadata-plus-metadata-size");
     if (total_compressed <= header.bundle_file_size) {
-        add_window(header.bundle_file_size - total_compressed);
+        add_window(header.bundle_file_size - total_compressed, "window-tail-packed");
     }
     if (metadata_offset >= total_compressed) {
-        add_window(metadata_offset - total_compressed);
+        add_window(metadata_offset - total_compressed, "window-metadata-end-minus-total-compressed");
     }
-    std::vector<std::uint64_t> candidates(candidate_set.begin(), candidate_set.end());
+    std::vector<CandidateStart> candidates;
+    candidates.reserve(candidate_map.size());
+    for (const auto& [offset, family] : candidate_map) {
+        candidates.push_back({offset, family});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const CandidateStart& lhs, const CandidateStart& rhs) {
+        return lhs.offset < rhs.offset;
+    });
 
     std::string attempt_errors;
     std::uint32_t best_partial_blocks = 0U;
     std::uint64_t best_partial_start = 0U;
+    std::string best_partial_family;
     probe.reconstruction_best_partial_blocks = 0U;
     probe.reconstruction_failure_summary_code.clear();
+    probe.selected_offset_family.clear();
     probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
     std::unordered_map<std::string, std::uint32_t> failure_code_hits;
-    for (const auto start : candidates) {
+    for (const auto& candidate : candidates) {
+        const auto start = candidate.offset;
         std::vector<unsigned char> reconstructed;
         std::uint32_t decoded_block_count = 0U;
         std::string local_err;
@@ -1182,21 +1206,23 @@ bool TryReconstructDataStream(std::ifstream& in,
             if (decoded_block_count > best_partial_blocks) {
                 best_partial_blocks = decoded_block_count;
                 best_partial_start = start;
+                best_partial_family = candidate.family;
                 probe.reconstruction_best_partial_blocks = decoded_block_count;
             }
             if (attempt_errors.size() < 4096U) {
-                attempt_errors += "start=" + std::to_string(start) + ": " + local_err + "; ";
+                attempt_errors += "start=" + std::to_string(start) + " (" + candidate.family + "): " + local_err + "; ";
             }
             continue;
         }
         if (!StreamMatchesNodes(metadata, reconstructed)) {
             if (attempt_errors.size() < 4096U) {
-                attempt_errors += "start=" + std::to_string(start) + ": node range mismatch; ";
+                attempt_errors += "start=" + std::to_string(start) + " (" + candidate.family + "): node range mismatch; ";
             }
             continue;
         }
         out_stream = std::move(reconstructed);
         probe.reconstruction_success_offset = start;
+        probe.selected_offset_family = candidate.family;
         probe.reconstruction_failure_summary_code.clear();
         return true;
     }
@@ -1208,9 +1234,16 @@ bool TryReconstructDataStream(std::ifstream& in,
             probe.reconstruction_failure_summary_code = code;
         }
     }
+    if (!probe.reconstruction_failure_summary_code.empty()) {
+        probe.probe_primary_error = probe.reconstruction_failure_summary_code;
+    }
+    if (!best_partial_family.empty()) {
+        probe.selected_offset_family = best_partial_family;
+    }
     error = "failed to reconstruct uncompressed bundle data stream. " + attempt_errors;
     if (best_partial_blocks > 0U) {
         error += "best partial: start=" + std::to_string(best_partial_start) +
+                 " (" + best_partial_family + ")" +
                  ", decoded_blocks=" + std::to_string(best_partial_blocks) +
                  "/" + std::to_string(metadata.blocks.size()) + "; ";
     }
@@ -1256,6 +1289,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     std::sort(candidates.begin(), candidates.end(), [](const CandidateRef& a, const CandidateRef& b) {
         return a.score > b.score;
     });
+    probe.serialized_candidate_count = static_cast<std::uint32_t>(candidates.size());
 
     for (const auto& candidate : candidates) {
         const auto& node = metadata.nodes[candidate.index];
@@ -1278,6 +1312,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         if (probe.serialized_parse_error_code.empty()) {
             probe.serialized_parse_error_code = found_candidate ? "SF_NO_VALID_NODE_PARSED" : "SF_NO_CANDIDATE_NODE";
         }
+        probe.probe_primary_error = probe.serialized_parse_error_code;
         error = found_candidate ? "no candidate node could be parsed as SerializedFile" : "no serialized candidate nodes found";
         return false;
     }
@@ -1289,6 +1324,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     probe.game_object_count = best.game_object_count;
     probe.skinned_mesh_renderer_count = best.skinned_mesh_renderer_count;
     probe.major_types_found = best.major_types_found;
+    probe.probe_primary_error.clear();
     return true;
 }
 
@@ -1305,6 +1341,8 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
     }
 
     UnityFsProbe probe;
+    probe.probe_stage = "header";
+    probe.probe_primary_error.clear();
     probe.header.signature = ReadNullTerminated(in, 64U);
     if (probe.header.signature != "UnityFS") {
         return core::Result<UnityFsProbe>::Fail("not a UnityFS bundle");
@@ -1318,6 +1356,7 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
     probe.header.uncompressed_metadata_size = ReadU32BE(in);
     probe.header.flags = ReadU32BE(in);
     probe.header.compression_mode = ParseCompressionMode(probe.header.flags);
+    probe.probe_stage = "metadata-candidate";
 
     const auto after_header = static_cast<std::uint64_t>(in.tellg());
     // UnityFS bundles in the sample set use 0x40 for "block info at end".
@@ -1388,6 +1427,7 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
         metadata = std::move(best_metadata);
         metadata_ok = true;
         meta_err.clear();
+        probe.probe_stage = "metadata-parsed";
     }
     if (!metadata_ok && err_count > 8U) {
         meta_err += "(+ " + std::to_string(err_count - 8U) + " more offsets)";
@@ -1419,8 +1459,17 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
         }
     }
     probe.metadata_error = meta_err;
+    if (!probe.metadata_parsed) {
+        probe.probe_stage = "failed-metadata";
+        if (!probe.metadata_decode_error_code.empty()) {
+            probe.probe_primary_error = probe.metadata_decode_error_code;
+        } else {
+            probe.probe_primary_error = "META_PARSE_FAILED";
+        }
+    }
 
     if (probe.metadata_parsed) {
+        probe.probe_stage = "reconstruction";
         std::vector<unsigned char> stream;
         std::string stream_err;
         if (TryReconstructDataStream(
@@ -1433,18 +1482,33 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
                 probe,
                 stream,
                 stream_err)) {
+            probe.probe_stage = "serialized";
             std::string serialized_err;
             if (!ParseSerializedFromNodes(metadata, stream, probe, serialized_err)) {
                 if (!probe.metadata_error.empty()) {
                     probe.metadata_error += "; ";
                 }
                 probe.metadata_error += serialized_err;
+                probe.probe_stage = "failed-serialized";
+                if (probe.probe_primary_error.empty()) {
+                    probe.probe_primary_error = probe.serialized_parse_error_code.empty()
+                                                    ? "SF_PARSE_FAILED"
+                                                    : probe.serialized_parse_error_code;
+                }
+            } else {
+                probe.probe_stage = "complete";
             }
         } else {
             if (!probe.metadata_error.empty()) {
                 probe.metadata_error += "; ";
             }
             probe.metadata_error += stream_err;
+            probe.probe_stage = "failed-reconstruction";
+            if (probe.probe_primary_error.empty()) {
+                probe.probe_primary_error = probe.reconstruction_failure_summary_code.empty()
+                                                ? "RECONSTRUCT_FAILED"
+                                                : probe.reconstruction_failure_summary_code;
+            }
         }
     }
 

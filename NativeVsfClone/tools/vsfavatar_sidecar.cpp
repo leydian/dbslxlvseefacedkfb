@@ -41,9 +41,10 @@ std::string EscapeJson(const std::string& s) {
 void PrintErrorJson(const std::string& error) {
     std::cout << "{"
               << "\"status\":\"error\","
-              << "\"schema_version\":2,"
-              << "\"extractor_version\":\"inhouse-sidecar-v2\","
+              << "\"schema_version\":3,"
+              << "\"extractor_version\":\"inhouse-sidecar-v3\","
               << "\"error_code\":\"SIDECAR_RUNTIME_ERROR\","
+              << "\"primary_error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"error_message\":\"" << EscapeJson(error) << "\","
               << "\"error\":\"" << EscapeJson(error) << "\""
               << "}\n";
@@ -60,6 +61,13 @@ std::string JoinJsonStringArray(const std::vector<std::string>& items) {
     }
     out << "]";
     return out.str();
+}
+
+std::string TruncateForSummary(const std::string& text, std::size_t max_chars) {
+    if (text.size() <= max_chars) {
+        return text;
+    }
+    return text.substr(0, max_chars) + "...";
 }
 
 }  // namespace
@@ -91,7 +99,7 @@ int main(int argc, char** argv) {
 
     std::ostringstream warning;
     if (!p.metadata_error.empty()) {
-        warning << p.metadata_error;
+        warning << TruncateForSummary(p.metadata_error, 180U);
     } else {
         warning << "metadata parsed";
     }
@@ -104,14 +112,14 @@ int main(int argc, char** argv) {
     if (!p.selected_reconstruction_layout.empty()) {
         warning << ", recon layout=" << p.selected_reconstruction_layout;
     }
-    warnings.push_back(warning.str());
+    warnings.push_back("W_META: " + warning.str());
     if (!p.failed_block_error_code.empty()) {
         std::ostringstream block;
         block << "block=" << p.failed_block_index
               << ", mode=" << p.failed_block_mode
               << ", expected=" << p.failed_block_expected_size
               << ", code=" << p.failed_block_error_code;
-        warnings.push_back(block.str());
+        warnings.push_back("W_RECON: " + block.str());
     }
     if (!p.object_table_parsed || mesh_count == 0U) {
         missing_features.push_back("mesh/material object discovery");
@@ -126,16 +134,22 @@ int main(int argc, char** argv) {
     if (!p.metadata_parsed) {
         compat_level = "failed";
     }
+    const std::string primary_error_code = p.probe_primary_error.empty() ? "NONE" : p.probe_primary_error;
 
     std::cout << "{"
               << "\"status\":\"ok\","
-              << "\"schema_version\":2,"
-              << "\"extractor_version\":\"inhouse-sidecar-v2\","
+              << "\"schema_version\":3,"
+              << "\"extractor_version\":\"inhouse-sidecar-v3\","
               << "\"display_name\":\"" << EscapeJson(fs::path(path).stem().string()) << "\","
               << "\"compat_level\":\"" << compat_level << "\","
+              << "\"probe_stage\":\"" << EscapeJson(p.probe_stage) << "\","
+              << "\"primary_error_code\":\"" << EscapeJson(primary_error_code) << "\","
               << "\"object_table_parsed\":" << (p.object_table_parsed ? "true" : "false") << ","
               << "\"mesh_count\":" << mesh_count << ","
               << "\"material_count\":" << material_count << ","
+              << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","
+              << "\"selected_offset_family\":\"" << EscapeJson(p.selected_offset_family) << "\","
+              << "\"reconstruction_summary\":\"" << EscapeJson(p.reconstruction_failure_summary_code) << "\","
               << "\"warnings\":" << JoinJsonStringArray(warnings) << ","
               << "\"missing_features\":" << JoinJsonStringArray(missing_features)
               << "}\n";

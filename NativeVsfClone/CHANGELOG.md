@@ -2,6 +2,54 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VSFAvatar diagnostics contract refresh (probe stage + primary error)
+
+### Summary
+
+Refined VSFAvatar diagnostics into explicit probe stages and primary-error codes, and aligned sidecar/loader JSON contracts to expose the same root-cause fields.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added stage/error and trace fields:
+    - `probe_stage`
+    - `probe_primary_error`
+    - `serialized_candidate_count`
+    - `selected_offset_family`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added explicit failure classification helper for reconstruction decode paths.
+  - Reworked reconstruction candidate generation to track offset families.
+  - Added stage transitions (`metadata-parsed`, `reconstruction`, `failed-reconstruction`, `failed-serialized`, `complete`).
+  - Added primary error propagation from metadata/reconstruction/serialized stages.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Upgraded sidecar response schema to `schema_version=3`.
+  - Added sidecar diagnostic fields:
+    - `probe_stage`
+    - `primary_error_code`
+    - `selected_block_layout`
+    - `selected_offset_family`
+    - `reconstruction_summary`
+  - Structured sidecar warnings with code prefixes (`W_META`, `W_RECON`).
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Loader schema validation now accepts `schema_version=2|3` and requires `primary_error_code` in `ok` responses.
+  - Added sidecar diagnostic mapping into loader warnings (`W_STAGE`, `W_PRIMARY`, `W_LAYOUT`, `W_OFFSET`, `W_RECON_SUMMARY`).
+  - In-house warning/error outputs were normalized to `W_*` / `E_*` prefixes.
+  - Fallback path warnings were normalized (`W_FALLBACK`, `W_MODE`) to keep parser-path traces machine-readable.
+
+- `README.md`
+  - Updated sidecar JSON contract to reflect schema `v3` and diagnostic fields.
+  - Documented `probe_stage` semantics and `primary_error_code` usage guidance.
+
+### Verified
+
+- `Release` build succeeded (`nativecore.dll`, `avatar_tool.exe`, `vsfavatar_sidecar.exe`, `vsfclone_cli.exe`).
+- Fixed-set sample report regenerated (`build/reports/vsfavatar_probe_latest_after_impl.txt`).
+- Sidecar direct execution now returns compact schema-v3 diagnostics with truncation-safe warning payloads.
+- Baseline samples remain `Compat: partial`, `Meshes: 0`; primary blocker is still `DATA_BLOCK_READ_FAILED` on block 0.
+
 ## 2026-03-02 - VSFAvatar parser pivot: sidecar-first loading path
 
 ### Summary

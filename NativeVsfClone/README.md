@@ -83,14 +83,36 @@ $env:VSF_SIDECAR_TIMEOUT_MS = "15000"
 
 Sidecar JSON contract:
 
-- loader requires `schema_version=2`
-- required fields: `status`, `display_name`, `extractor_version`, `object_table_parsed`
+- loader accepts `schema_version=2|3` (current output: `3`)
+- required fields: `status`, `display_name`, `extractor_version`, `object_table_parsed`, `primary_error_code`
+- diagnostic fields: `probe_stage`, `selected_block_layout`, `selected_offset_family`, `reconstruction_summary`
 - expected arrays: `warnings[]`, `missing_features[]`
 - sidecar errors are surfaced with codes such as:
   - `SIDECAR_TIMEOUT`
   - `SIDECAR_EXEC_FAILED`
   - `SIDECAR_RUNTIME_ERROR`
   - `SCHEMA_INVALID`
+
+Sidecar diagnostics semantics (schema v3):
+
+- `probe_stage` values:
+  - `header`: UnityFS header read
+  - `metadata-candidate`: metadata offset probing
+  - `metadata-parsed`: metadata table parse succeeded
+  - `reconstruction`: block stream reconstruction in progress
+  - `failed-reconstruction`: data block reconstruction failed
+  - `serialized`: serialized node parse in progress
+  - `failed-serialized`: serialized parse failed on candidates
+  - `complete`: object table parsed successfully
+- `primary_error_code`:
+  - a single dominant blocker code for automation and dashboards
+  - examples: `META_DECODE_FAILED`, `DATA_BLOCK_READ_FAILED`, `SF_NO_VALID_NODE_PARSED`
+- `selected_offset_family`:
+  - indicates which reconstruction offset candidate family won (or best-partial family on failure)
+  - examples: `tail-packed`, `window-after-header`
+- `reconstruction_summary`:
+  - dominant failure class aggregated across reconstruction attempts
+  - currently converges to `DATA_BLOCK_READ_FAILED` on fixed baseline samples
 
 Latest behavior notes (2026-03-02):
 
@@ -100,6 +122,23 @@ Latest behavior notes (2026-03-02):
 - Current parser blocker is still unchanged:
   - baseline samples remain `Compat: partial`, `Meshes: 0`
   - representative decode failure remains `DATA_BLOCK_READ_FAILED` at block 0
+
+Latest behavior notes (2026-03-03):
+
+- In-house and sidecar warning streams now use normalized prefixes:
+  - `W_*` for stage/progress diagnostics
+  - `E_*` for dominant failure diagnostics
+- Sidecar contract now exposes stage + primary error directly:
+  - `probe_stage`
+  - `primary_error_code`
+  - `selected_block_layout`
+  - `selected_offset_family`
+  - `reconstruction_summary`
+- Fixed sample report was regenerated after this update:
+  - `build/reports/vsfavatar_probe_latest_after_impl.txt`
+- Result did not change yet for fixed baseline:
+  - all 4 samples still end at `Compat: partial`, `Meshes: 0`
+  - dominant blocker still `DATA_BLOCK_READ_FAILED` at block 0
 
 ## Repository layout
 
