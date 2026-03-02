@@ -9,6 +9,7 @@
 #include <limits>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "vsfclone/vsf/serialized_file_reader.h"
@@ -404,7 +405,10 @@ std::int64_t ScoreBlockLayout(const std::vector<BlockInfo>& blocks) {
         if (mode == 2U || mode == 3U) {
             score += 6;
         } else if (mode == 0U) {
-            score += 2;
+            score += 1;
+            if (b.compressed_size != b.uncompressed_size) {
+                score -= 10;
+            }
         } else if (mode == 1U) {
             score -= 2;
         } else {
@@ -436,22 +440,17 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
     out.blocks.clear();
     out.nodes.clear();
     selected_layout.clear();
-    std::size_t header_at = kExpectedHashBytes;
-    std::uint32_t block_count = 0;
-    if (!ReadU32BE(metadata, header_at, block_count)) {
-        error = "failed to read block count";
-        return false;
-    }
-    if (block_count == 0U || block_count > 16384U) {
-        error = "invalid block count";
-        return false;
-    }
+    const std::size_t header_at = kExpectedHashBytes;
 
     struct BlockLayoutVariant {
         const char* label;
         bool size_little_endian;
         bool swap_size_order;
         bool swap_flag_bytes;
+    };
+    struct CountEndianVariant {
+        const char* label;
+        bool little_endian;
     };
     constexpr std::array<BlockLayoutVariant, 8> kLayouts {{
         {"be", false, false, false},
@@ -463,17 +462,42 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
         {"le-swap-flags", true, false, true},
         {"le-swap-size-flags", true, true, true},
     }};
+    constexpr std::array<CountEndianVariant, 2> kCountEndians {{
+        {"be", false},
+        {"le", true},
+    }};
 
     ParsedMetadata best_candidate {};
     std::int64_t best_score = std::numeric_limits<std::int64_t>::min();
     bool found = false;
     std::string last_layout_err;
 
-    for (const auto& layout : kLayouts) {
+    for (const auto& block_count_endian : kCountEndians) {
+        for (const auto& node_count_endian : kCountEndians) {
+            std::uint32_t block_count = 0;
+            {
+                std::size_t count_at = header_at;
+                const bool ok_count = block_count_endian.little_endian
+                                          ? ReadU32LESafe(metadata, count_at, block_count)
+                                          : ReadU32BE(metadata, count_at, block_count);
+                if (!ok_count || block_count == 0U || block_count > 16384U) {
+                    continue;
+                }
+            }
+            for (const auto& layout : kLayouts) {
         ParsedMetadata candidate {};
         std::size_t at = header_at;
         bool ok = true;
-        candidate.blocks.reserve(block_count);
+        if (block_count_endian.little_endian) {
+            ok = ReadU32LESafe(metadata, at, block_count);
+        } else {
+            ok = ReadU32BE(metadata, at, block_count);
+        }
+        if (!ok) {
+            last_layout_err = std::string(layout.label) + ": failed to read block count";
+            continue;
+        }
+        candidate.blocks.reserve(static_cast<std::size_t>(block_count));
         for (std::uint32_t i = 0; i < block_count; ++i) {
             std::uint32_t a = 0U;
             std::uint32_t b = 0U;
@@ -505,7 +529,12 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
         }
 
         std::uint32_t node_count = 0;
-        if (!ReadU32BE(metadata, at, node_count)) {
+        if (node_count_endian.little_endian) {
+            ok = ReadU32LESafe(metadata, at, node_count);
+        } else {
+            ok = ReadU32BE(metadata, at, node_count);
+        }
+        if (!ok) {
             last_layout_err = std::string(layout.label) + ": failed to read node count";
             continue;
         }
@@ -552,9 +581,11 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
         }
         if (!found || score > best_score) {
             best_candidate = std::move(candidate);
-            selected_layout = layout.label;
+            selected_layout = std::string(layout.label) + "/bc-" + block_count_endian.label + "/nc-" + node_count_endian.label;
             best_score = score;
             found = true;
+        }
+    }
         }
     }
 
@@ -913,6 +944,26 @@ std::int64_t ScoreMetadataCandidate(const UnityFsHeader& header,
     return score;
 }
 
+std::string ExtractFailureCode(const std::string& message) {
+    const std::string token = "code=";
+    const auto at = message.find(token);
+    if (at == std::string::npos) {
+        return {};
+    }
+    const auto start = at + token.size();
+    auto end = message.find(',', start);
+    if (end == std::string::npos) {
+        end = message.find(';', start);
+    }
+    if (end == std::string::npos) {
+        end = message.size();
+    }
+    if (end <= start) {
+        return {};
+    }
+    return message.substr(start, end - start);
+}
+
 bool ReconstructStreamAt(std::ifstream& in,
                          const UnityFsHeader& header,
                          const ParsedMetadata& metadata,
@@ -927,6 +978,7 @@ bool ReconstructStreamAt(std::ifstream& in,
     probe.failed_block_mode = 0U;
     probe.failed_block_expected_size = 0U;
     probe.failed_block_error_code.clear();
+    probe.selected_reconstruction_layout.clear();
     std::uint32_t block_index = 0U;
     std::uint64_t offset = data_start;
     for (const auto& b : metadata.blocks) {
@@ -953,6 +1005,8 @@ bool ReconstructStreamAt(std::ifstream& in,
         std::string variant_errors;
         std::vector<unsigned char> decoded;
         std::uint64_t next_offset = offset;
+        std::string chosen_variant;
+        std::uint8_t chosen_mode = 0U;
         for (const auto& v : variants) {
             if (v.compressed_size == 0U || v.uncompressed_size == 0U) {
                 continue;
@@ -996,6 +1050,8 @@ bool ReconstructStreamAt(std::ifstream& in,
                     probe.failed_block_expected_size = v.uncompressed_size;
                     decoded_ok = true;
                     next_offset = offset + v.compressed_size;
+                    chosen_variant = v.label;
+                    chosen_mode = m;
                     break;
                 }
                 last_err = std::string(v.label) + ": " + local_err;
@@ -1031,6 +1087,9 @@ bool ReconstructStreamAt(std::ifstream& in,
             return false;
         }
         offset = next_offset;
+        if (block_index == 0U && !chosen_variant.empty()) {
+            probe.selected_reconstruction_layout = chosen_variant + "/mode=" + std::to_string(chosen_mode);
+        }
         out_stream.insert(out_stream.end(), decoded.begin(), decoded.end());
         ++block_index;
         decoded_block_count = block_index;
@@ -1108,12 +1167,18 @@ bool TryReconstructDataStream(std::ifstream& in,
     std::uint32_t best_partial_blocks = 0U;
     std::uint64_t best_partial_start = 0U;
     probe.reconstruction_best_partial_blocks = 0U;
+    probe.reconstruction_failure_summary_code.clear();
     probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
+    std::unordered_map<std::string, std::uint32_t> failure_code_hits;
     for (const auto start : candidates) {
         std::vector<unsigned char> reconstructed;
         std::uint32_t decoded_block_count = 0U;
         std::string local_err;
         if (!ReconstructStreamAt(in, header, metadata, start, probe, reconstructed, decoded_block_count, local_err)) {
+            const auto code = ExtractFailureCode(local_err);
+            if (!code.empty()) {
+                ++failure_code_hits[code];
+            }
             if (decoded_block_count > best_partial_blocks) {
                 best_partial_blocks = decoded_block_count;
                 best_partial_start = start;
@@ -1132,9 +1197,17 @@ bool TryReconstructDataStream(std::ifstream& in,
         }
         out_stream = std::move(reconstructed);
         probe.reconstruction_success_offset = start;
+        probe.reconstruction_failure_summary_code.clear();
         return true;
     }
 
+    std::uint32_t best_hits = 0U;
+    for (const auto& [code, hits] : failure_code_hits) {
+        if (hits > best_hits) {
+            best_hits = hits;
+            probe.reconstruction_failure_summary_code = code;
+        }
+    }
     error = "failed to reconstruct uncompressed bundle data stream. " + attempt_errors;
     if (best_partial_blocks > 0U) {
         error += "best partial: start=" + std::to_string(best_partial_start) +

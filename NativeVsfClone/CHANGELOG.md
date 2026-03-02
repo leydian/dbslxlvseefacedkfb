@@ -2,6 +2,40 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar reconstruction summary-code pass and count-endian probing
+
+### Summary
+
+Added another decode iteration to improve reconstruction observability and broaden metadata table interpretation hypotheses while keeping the in-house decoder path.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added reconstruction summary diagnostics:
+    - `selected_reconstruction_layout`
+    - `reconstruction_failure_summary_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added reconstruction failure-code extraction/aggregation to report dominant error class across offset attempts.
+  - Added reconstruction layout capture (`variant/mode`) when block decode succeeds for leading block.
+  - Expanded metadata table parse hypotheses with count-endian probing:
+    - block-count endian: `BE` / `LE`
+    - node-count endian: `BE` / `LE`
+  - Adjusted block-layout scoring to penalize implausible raw-mode (`mode=0`) size relationships.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Metadata warning now includes reconstruction summary code.
+
+### Verified
+
+- `Release` build succeeded.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`, generated `2026-03-02T23:40:51`).
+- Baseline remains `Compat: partial` / `Meshes: 0` across fixed samples.
+- Block-0 failure remains converged:
+  - `code=DATA_BLOCK_READ_FAILED`
+  - observed mode in latest snapshot: `mode=1`
+  - expected sizes: `74890067`, `88135067`, `125513796`, `402596`
+
 ## 2026-03-02 - VSFAvatar reconstruction window expansion and block-total diagnostics
 
 ### Summary

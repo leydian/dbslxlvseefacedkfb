@@ -345,3 +345,35 @@ From `build/reports/vsfavatar_probe_latest.txt`:
   - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=125513796, code=DATA_BLOCK_READ_FAILED`
 - `VRM dkdlrh.vsfavatar`
   - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=402596, code=DATA_BLOCK_READ_FAILED`
+
+## Recent implementation summary (2026-03-02, recon summary-code + count-endian probing)
+
+Implemented another decode-focused pass in the in-house parser path:
+
+- Added reconstruction summary diagnostics:
+  - `selected_reconstruction_layout`
+  - `reconstruction_failure_summary_code`
+- Added reconstruction failure-code aggregation across offset attempts to surface dominant failure class.
+- Expanded metadata table hypothesis space with count-endian probing:
+  - block-count `BE/LE`
+  - node-count `BE/LE`
+- Adjusted layout scoring to penalize implausible `mode=0` raw-size interpretations.
+
+Current status after this pass:
+
+- Build remains stable.
+- Fixed sample set still reports `Compat: partial`, `Meshes: 0`.
+- Block-0 reconstruction failure remains dominant with `DATA_BLOCK_READ_FAILED`.
+
+### Fixed-sample snapshot (2026-03-02T23:40:51)
+
+From `build/reports/vsfavatar_probe_latest.txt`:
+
+- `NewOnYou.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=1, expected=74890067, code=DATA_BLOCK_READ_FAILED`
+- `Character vywjd.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=1, expected=88135067, code=DATA_BLOCK_READ_FAILED`
+- `PPU (2).vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=1, expected=125513796, code=DATA_BLOCK_READ_FAILED`
+- `VRM dkdlrh.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=1, expected=402596, code=DATA_BLOCK_READ_FAILED`
