@@ -50,6 +50,7 @@ if ($files.Count -eq 0) {
 }
 
 "VSFAvatar probe report" | Set-Content -Path $OutputPath
+"GateInputVersion: 1" | Add-Content -Path $OutputPath
 "Generated: $(Get-Date -Format s)" | Add-Content -Path $OutputPath
 "SampleDir: $(Resolve-Path $SampleDir)" | Add-Content -Path $OutputPath
 "UseFixedSet: $UseFixedSet" | Add-Content -Path $OutputPath

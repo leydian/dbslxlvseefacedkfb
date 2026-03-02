@@ -2,6 +2,57 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar quality gate harness (A/B/C + baseline diff)
+
+### Summary
+
+Added a standalone quality-gate harness for fixed-set VSFAvatar regression checks so parser iteration runs can be evaluated with deterministic pass/fail criteria and baseline comparison.
+
+### Changed
+
+- `tools/vsfavatar_quality_gate.ps1` (new)
+  - Runs `vsfavatar_sample_report.ps1` and parses probe output.
+  - Evaluates strict gates:
+    - Gate A: required field completeness + no parse/process failure
+    - Gate B: at least one sample reaches `failed-serialized|complete`
+    - Gate C: `DATA_BLOCK_READ_FAILED` samples include offset/size/family tuple evidence
+  - Generates baseline diff summary:
+    - `IMPROVED|REGRESSED|CHANGED|UNCHANGED|NEW`
+  - Emits machine-usable exit code:
+    - `0` pass, `1` fail
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added report header marker:
+    - `GateInputVersion: 1`
+
+- `README.md`
+  - Added `VSFAvatar quality gate` section with command, gate definitions, output files, and exit-code policy.
+
+- `docs/INDEX.md`
+  - Added report link for gate harness documentation.
+
+- `docs/reports/vsfavatar_gate_harness_2026-03-03.md` (new)
+  - Documents gate semantics, diff labels, and failure interpretation.
+
+### Verified
+
+- Harness script parses fixed-set reports and emits explicit gate pass/fail summary.
+- Gate B is strict-fail by default (`exit 1` when unmet).
+- Fixed-set gate run result (`tools/vsfavatar_quality_gate.ps1 -UseFixedSet`):
+  - `GateA=PASS`
+  - `GateB=FAIL` (all samples remained `failed-reconstruction`)
+  - `GateC=PASS`
+  - `Overall=FAIL` (strict policy)
+- Diff summary from gate output:
+  - `Improved=0`
+  - `Regressed=0`
+  - `Changed=4`
+  - `Unchanged=0`
+  - `New=0`
+- Generated files:
+  - `build/reports/vsfavatar_probe_latest_after_gate.txt`
+  - `build/reports/vsfavatar_gate_summary.txt`
+
 ## 2026-03-02 - Docs: add detailed VXA2 TLV update report
 
 ### Summary

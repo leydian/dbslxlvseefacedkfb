@@ -83,6 +83,35 @@ $env:VSF_SIDECAR_PATH = "D:\custom\vsfavatar_sidecar.exe"
 $env:VSF_SIDECAR_TIMEOUT_MS = "15000"
 ```
 
+## VSFAvatar quality gate
+
+Run fixed-set probe + gate evaluation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet
+```
+
+Gate rules:
+
+- Gate A: all samples complete without process failure and required sidecar fields exist.
+- Gate B: at least one sample reaches `failed-serialized` or `complete`.
+- Gate C: when `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`, tuple evidence must exist:
+  - `SidecarFailedReadOffset > 0`
+  - `SidecarFailedCompressedSize > 0`
+  - `SidecarFailedUncompressedSize > 0`
+  - `SidecarOffsetFamily` must be non-empty
+
+Exit code:
+
+- `0`: all gates pass
+- `1`: at least one gate fails (including Gate B strict fail)
+
+Outputs:
+
+- probe report: `build/reports/vsfavatar_probe_latest_after_gate.txt`
+- gate summary: `build/reports/vsfavatar_gate_summary.txt`
+- baseline compare input (default): `build/reports/vsfavatar_probe_fixed.txt`
+
 Sidecar JSON contract:
 
 - loader accepts `schema_version=2|3` (current output: `3`)
