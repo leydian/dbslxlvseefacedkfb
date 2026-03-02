@@ -14,7 +14,13 @@ namespace VsfClone.Xav2.Runtime
         MissingRequiredManifestKeys,
         SectionHeaderTruncated,
         SectionTruncated,
-        SectionSchemaInvalid
+        SectionSchemaInvalid,
+        StrictValidationFailed
+    }
+
+    public sealed class Xav2LoadOptions
+    {
+        public bool StrictValidation;
     }
 
     public sealed class Xav2LoadDiagnostics

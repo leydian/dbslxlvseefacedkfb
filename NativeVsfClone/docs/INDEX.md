@@ -30,6 +30,7 @@ Entry point for `NativeVsfClone` documentation.
 - [xav2_sdk_bootstrap_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_sdk_bootstrap_2026-03-02.md): XAV2 loader/converter/Unity SDK scaffold bootstrap report
 - [xav2_avatarroot_export_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_avatarroot_export_2026-03-02.md): Unity AvatarRoot direct export + skin/blendshape section extension report
 - [xav2_sdk_diagnostics_and_gate_expansion_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_sdk_diagnostics_and_gate_expansion_2026-03-03.md): Unity XAV2 runtime diagnostics API hardening + VRM-derived fixed XAV2 gate expansion report
+- [xav2_tryload_test_and_deterministic_gate_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_tryload_test_and_deterministic_gate_2026-03-03.md): XAV2 strict option path, runtime test suite, and deterministic VRM allowlist gate report
 - [nativecore_render_quality_api_sync_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/nativecore_render_quality_api_sync_2026-03-02.md): nativecore render quality public C API sync report
 - [ui_render_benchmark_plan_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_render_benchmark_plan_2026-03-02.md): host render UI benchmark KPI and acceptance scenario plan
 - [vsfavatar_gate_harness_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_gate_harness_2026-03-03.md): VSFAvatar quality gate harness report

@@ -165,10 +165,14 @@ Notes:
   - runtime `.xav2` parser with diagnostics API:
     - `Xav2RuntimeLoader.Load(path)` (existing throw-on-failure path)
     - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics)` (non-throwing path)
+    - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics, options)` (option-based validation path)
+    - `Xav2LoadOptions.StrictValidation` (default `false`; warning-level issues are upgraded to fail when `true`)
     - `Xav2LoadDiagnostics` (`ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`)
   - editor exporter path (`Scene AvatarRoot -> .xav2`) with strict shader policy list:
     - `lilToon`, `Poiyomi`, `potatoon`, `realtoon`
   - skin/blendshape section support (`0x0013`, `0x0014`)
+  - local Unity runtime tests:
+    - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
   - menu entry: `Tools/VsfClone/XAV2/Export Selected AvatarRoot`
 
 ## VSFAvatar quality gate
@@ -272,7 +276,10 @@ Gate rules:
   - Optional strict mode: `-RequireRealFullSamples` to fail when no `real-full` rows are present.
 - Gate F: fixed `.xav2` sample must satisfy `Format=XAV2`, `ParserStage=runtime-ready`, and `Compat!=failed`.
 - Gate G: synthetic corrupted `.xav2` samples must classify as `XAV2_SCHEMA_INVALID|XAV2_SECTION_TRUNCATED`.
-- Fixed XAV2 sample policy: gate script generates up to 5 `.xav2` files from `.vrm` inputs (`vrm_to_xav2`) and treats them as `fixed-valid`.
+- Fixed XAV2 sample policy:
+  - allowlist-first deterministic generation from VRM (`-FixedXav2FromVrmAllowlist`)
+  - default allowlist size target: 5 files (`-FixedXav2FromVrmCount 5`)
+  - in `-UseFixedSet`/`-Profile full`, missing allowlist file causes gate input failure.
 
 Exit code:
 

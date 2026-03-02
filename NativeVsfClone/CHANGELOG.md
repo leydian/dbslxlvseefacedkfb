@@ -91,6 +91,50 @@ Strengthened Unity-side XAV2 SDK loader reliability with a non-throwing diagnost
 - `unity/Packages/com.vsfclone.xav2/README.md`
   - Documented `TryLoad` + diagnostics contract and fixed XAV2 sample generation policy.
 
+## 2026-03-03 - XAV2 TryLoad strict option + runtime tests + deterministic VRM allowlist gate
+
+### Summary
+
+Completed the follow-up hardening slice for XAV2 SDK by adding an option-based strict validation path, introducing Unity runtime loader tests, and making fixed-valid XAV2 generation deterministic through a VRM allowlist policy.
+
+### Changed
+
+- `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - Added:
+    - `Xav2LoadOptions` (`StrictValidation`)
+    - `Xav2LoadErrorCode.StrictValidationFailed`
+
+- `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - Added overload:
+    - `TryLoad(path, out payload, out diagnostics, options)`
+  - Kept compatibility:
+    - existing `Load(...)` and `TryLoad(...)` signatures remain, now delegating to default options.
+  - Added strict-mode behavior:
+    - warning-level conditions now fail when `StrictValidation=true`:
+      - unknown sections
+      - trailing bytes in section payload
+      - ref/payload mismatch diagnostics
+
+- `unity/Packages/com.vsfclone.xav2/Tests/Runtime/VsfClone.Xav2.Runtime.Tests.asmdef` (new)
+- `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs` (new)
+  - Added runtime test coverage for:
+    - valid load
+    - magic/version/manifest/section truncation failures
+    - legacy material compatibility (without `shaderVariant`)
+    - strict/non-strict unknown-section behavior
+    - strict ref/payload mismatch failure
+
+- `tools/vxavatar_sample_report.ps1`
+- `tools/vxavatar_quality_gate.ps1`
+  - Added deterministic allowlist-first VRM generation contract:
+    - `-FixedXav2FromVrmAllowlist`
+    - `-FixedXav2FromVrmCount`
+  - In fixed/full modes, missing allowlist entries now fail input preparation.
+
+- `README.md`
+- `unity/Packages/com.vsfclone.xav2/README.md`
+  - Documented strict option path, test location, and deterministic gate input policy.
+
 ## 2026-03-03 - Host render UI controls sync finalization + benchmark plan
 
 ### Summary

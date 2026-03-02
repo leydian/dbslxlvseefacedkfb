@@ -27,5 +27,14 @@ If a material in the export target set references a shader outside this list, ex
   - throw-on-failure path for simple call sites
 - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics)`
   - non-throwing path with stage/error diagnostics
+- `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics, options)`
+  - option-based path (`Xav2LoadOptions.StrictValidation`)
 - `Xav2LoadDiagnostics`
   - `ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`
+
+## Tests
+
+- Runtime tests:
+  - `Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+- Recommended execution:
+  - Unity Editor Test Runner (EditMode)

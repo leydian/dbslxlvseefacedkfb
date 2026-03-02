@@ -8,6 +8,13 @@ param(
     [string]$SummaryJsonPath = ".\\build\\reports\\vxavatar_gate_summary.json",
     [ValidateSet("quick", "full")][string]$Profile = "quick",
     [int]$FixedXav2FromVrmCount = 5,
+    [string[]]$FixedXav2FromVrmAllowlist = @(
+        "Kikyo_FT Variant.vrm",
+        "Kikyo_FT Variant111.vrm",
+        "Kikyo_FT Variant112.vrm",
+        "MANUKA_FT Variant(Clone).vrm",
+        "NewOnYou.vrm"
+    ),
     [switch]$UseFixedSet,
     [switch]$RequireRealFullSamples,
     [string[]]$FixedVxSamples = @(
@@ -113,6 +120,7 @@ if (-not (Test-Path $ReportScriptPath)) {
     -OutputPath $ReportPath `
     -Profile $Profile `
     -FixedXav2FromVrmCount $FixedXav2FromVrmCount `
+    -FixedXav2FromVrmAllowlist $FixedXav2FromVrmAllowlist `
     -UseFixedSet:$UseFixedSet `
     -FixedVxSamples $FixedVxSamples `
     -FixedVxa2Samples $FixedVxa2Samples `

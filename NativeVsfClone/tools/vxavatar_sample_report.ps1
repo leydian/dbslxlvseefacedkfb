@@ -7,6 +7,13 @@ param(
     [int]$MaxFiles = 20,
     [int]$FullMaxFiles = 200,
     [int]$FixedXav2FromVrmCount = 5,
+    [string[]]$FixedXav2FromVrmAllowlist = @(
+        "Kikyo_FT Variant.vrm",
+        "Kikyo_FT Variant111.vrm",
+        "Kikyo_FT Variant112.vrm",
+        "MANUKA_FT Variant(Clone).vrm",
+        "NewOnYou.vrm"
+    ),
     [switch]$UseFixedSet,
     [string[]]$FixedVxSamples = @(
         "demo_mvp.vxavatar"
@@ -184,6 +191,8 @@ function Add-GeneratedXav2FromVrm {
         [string]$OutputPath,
         [string]$VrmToXav2Path,
         [int]$Count,
+        [string[]]$Allowlist,
+        [bool]$FailOnAllowlistMiss,
         [System.Collections.Generic.List[object]]$Entries,
         [hashtable]$SeenPaths,
         [ref]$BaseXav2Path,
@@ -197,7 +206,26 @@ function Add-GeneratedXav2FromVrm {
         return
     }
 
-    $vrmFiles = Get-ChildItem -Path $SampleDir -Filter *.vrm | Select-Object -First $Count
+    $vrmFiles = @()
+    if ($Allowlist -and $Allowlist.Count -gt 0) {
+        $missing = @()
+        foreach ($name in $Allowlist) {
+            $p = Join-Path $SampleDir $name
+            if (Test-Path $p) {
+                $vrmFiles += Get-Item $p
+            } else {
+                $missing += $name
+            }
+        }
+        if ($FailOnAllowlistMiss -and $missing.Count -gt 0) {
+            throw ("missing fixed XAV2 VRM allowlist files: " + ($missing -join ", "))
+        }
+    }
+    if ($vrmFiles.Count -eq 0) {
+        $vrmFiles = Get-ChildItem -Path $SampleDir -Filter *.vrm | Select-Object -First $Count
+    } else {
+        $vrmFiles = $vrmFiles | Select-Object -First $Count
+    }
     if ($vrmFiles.Count -eq 0) {
         return
     }
@@ -321,6 +349,8 @@ Add-GeneratedXav2FromVrm `
     -OutputPath $OutputPath `
     -VrmToXav2Path $VrmToXav2Path `
     -Count $FixedXav2FromVrmCount `
+    -Allowlist $FixedXav2FromVrmAllowlist `
+    -FailOnAllowlistMiss ($UseFixedSet -or $isFullProfile) `
     -Entries $entries `
     -SeenPaths $seenPaths `
     -BaseXav2Path ([ref]$baseXav2Path) `

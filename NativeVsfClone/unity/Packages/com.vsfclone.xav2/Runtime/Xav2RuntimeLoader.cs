@@ -26,8 +26,18 @@ namespace VsfClone.Xav2.Runtime
 
         public static bool TryLoad(string path, out Xav2AvatarPayload payload, out Xav2LoadDiagnostics diagnostics)
         {
+            return TryLoad(path, out payload, out diagnostics, new Xav2LoadOptions());
+        }
+
+        public static bool TryLoad(
+            string path,
+            out Xav2AvatarPayload payload,
+            out Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
             payload = new Xav2AvatarPayload();
             diagnostics = new Xav2LoadDiagnostics();
+            options ??= new Xav2LoadOptions();
 
             byte[] bytes;
             try
@@ -132,7 +142,13 @@ namespace VsfClone.Xav2.Runtime
                 cursor += sectionLength;
                 if (sectionFlags != 0)
                 {
-                    diagnostics.Warnings.Add($"XAV2_SECTION_FLAGS_NONZERO: type=0x{sectionType:X4}, flags={sectionFlags}");
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV2_SECTION_FLAGS_NONZERO: type=0x{sectionType:X4}, flags={sectionFlags}"))
+                    {
+                        return false;
+                    }
                 }
 
                 if (!TryParseSection(
@@ -142,7 +158,8 @@ namespace VsfClone.Xav2.Runtime
                         sectionLength,
                         payload,
                         materialsByName,
-                        diagnostics))
+                        diagnostics,
+                        options))
                 {
                     return false;
                 }
@@ -153,7 +170,10 @@ namespace VsfClone.Xav2.Runtime
                 payload.Materials.Add(mat);
             }
 
-            EvaluatePartialCompatibility(payload, diagnostics);
+            if (!EvaluatePartialCompatibility(payload, diagnostics, options))
+            {
+                return false;
+            }
             diagnostics.ParserStage = "runtime-ready";
             return true;
         }
@@ -165,25 +185,25 @@ namespace VsfClone.Xav2.Runtime
             int sectionLength,
             Xav2AvatarPayload payload,
             Dictionary<string, Xav2MaterialPayload> materialsByName,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             switch (sectionType)
             {
                 case SectionMeshRenderPayload:
-                    return TryParseMesh(bytes, sectionOffset, sectionLength, payload, diagnostics);
+                    return TryParseMesh(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionTextureBlob:
-                    return TryParseTexture(bytes, sectionOffset, sectionLength, payload, diagnostics);
+                    return TryParseTexture(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionMaterialOverride:
-                    return TryParseMaterialOverride(bytes, sectionOffset, sectionLength, materialsByName, diagnostics);
+                    return TryParseMaterialOverride(bytes, sectionOffset, sectionLength, materialsByName, diagnostics, options);
                 case SectionMaterialShaderParams:
-                    return TryParseMaterialParams(bytes, sectionOffset, sectionLength, materialsByName, diagnostics);
+                    return TryParseMaterialParams(bytes, sectionOffset, sectionLength, materialsByName, diagnostics, options);
                 case SectionSkinPayload:
-                    return TryParseSkin(bytes, sectionOffset, sectionLength, payload, diagnostics);
+                    return TryParseSkin(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionBlendShapePayload:
-                    return TryParseBlendShape(bytes, sectionOffset, sectionLength, payload, diagnostics);
+                    return TryParseBlendShape(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 default:
-                    diagnostics.Warnings.Add($"XAV2_UNKNOWN_SECTION: 0x{sectionType:X4}");
-                    return true;
+                    return AddWarningOrFail(diagnostics, options, $"XAV2_UNKNOWN_SECTION: 0x{sectionType:X4}");
             }
         }
 
@@ -192,7 +212,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionOffset,
             int sectionLength,
             Xav2AvatarPayload payload,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -217,7 +238,7 @@ namespace VsfClone.Xav2.Runtime
 
             if (ms.Position != ms.Length)
             {
-                diagnostics.Warnings.Add($"XAV2_MESH_TRAILING_BYTES: mesh={name}");
+                return AddWarningOrFail(diagnostics, options, $"XAV2_MESH_TRAILING_BYTES: mesh={name}");
             }
 
             payload.Meshes.Add(new Xav2MeshPayload
@@ -236,7 +257,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionOffset,
             int sectionLength,
             Xav2AvatarPayload payload,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -249,7 +271,7 @@ namespace VsfClone.Xav2.Runtime
 
             if (ms.Position != ms.Length)
             {
-                diagnostics.Warnings.Add($"XAV2_TEXTURE_TRAILING_BYTES: texture={name}");
+                return AddWarningOrFail(diagnostics, options, $"XAV2_TEXTURE_TRAILING_BYTES: texture={name}");
             }
 
             payload.Textures.Add(new Xav2TexturePayload
@@ -265,7 +287,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionOffset,
             int sectionLength,
             Dictionary<string, Xav2MaterialPayload> materialsByName,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -328,7 +351,10 @@ namespace VsfClone.Xav2.Runtime
                         $"Invalid trailing bytes in XAV2 material section '{name}'.");
                 }
 
-                diagnostics.Warnings.Add($"XAV2_MATERIAL_LEGACY_VARIANT: material={name}");
+                if (!AddWarningOrFail(diagnostics, options, $"XAV2_MATERIAL_LEGACY_VARIANT: material={name}"))
+                {
+                    return false;
+                }
             }
 
             materialsByName[name] = material;
@@ -340,7 +366,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionOffset,
             int sectionLength,
             Dictionary<string, Xav2MaterialPayload> materialsByName,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -352,7 +379,7 @@ namespace VsfClone.Xav2.Runtime
 
             if (ms.Position != ms.Length)
             {
-                diagnostics.Warnings.Add($"XAV2_MATERIAL_PARAMS_TRAILING_BYTES: material={name}");
+                return AddWarningOrFail(diagnostics, options, $"XAV2_MATERIAL_PARAMS_TRAILING_BYTES: material={name}");
             }
 
             if (!materialsByName.TryGetValue(name, out var material))
@@ -370,7 +397,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionOffset,
             int sectionLength,
             Xav2AvatarPayload payload,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -409,7 +437,7 @@ namespace VsfClone.Xav2.Runtime
 
             if (ms.Position != ms.Length)
             {
-                diagnostics.Warnings.Add($"XAV2_SKIN_TRAILING_BYTES: mesh={meshName}");
+                return AddWarningOrFail(diagnostics, options, $"XAV2_SKIN_TRAILING_BYTES: mesh={meshName}");
             }
 
             payload.Skins.Add(new Xav2SkinPayload
@@ -427,7 +455,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionOffset,
             int sectionLength,
             Xav2AvatarPayload payload,
-            Xav2LoadDiagnostics diagnostics)
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -461,7 +490,7 @@ namespace VsfClone.Xav2.Runtime
 
             if (ms.Position != ms.Length)
             {
-                diagnostics.Warnings.Add($"XAV2_BLENDSHAPE_TRAILING_BYTES: mesh={meshName}");
+                return AddWarningOrFail(diagnostics, options, $"XAV2_BLENDSHAPE_TRAILING_BYTES: mesh={meshName}");
             }
 
             payload.BlendShapes.Add(blendPayload);
@@ -484,7 +513,10 @@ namespace VsfClone.Xav2.Runtime
             }
         }
 
-        private static void EvaluatePartialCompatibility(Xav2AvatarPayload payload, Xav2LoadDiagnostics diagnostics)
+        private static bool EvaluatePartialCompatibility(
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             var meshNameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var mesh in payload.Meshes)
@@ -510,7 +542,10 @@ namespace VsfClone.Xav2.Runtime
                 if (!meshNameSet.Contains(meshRef))
                 {
                     missingMeshRef = true;
-                    diagnostics.Warnings.Add($"XAV2_ASSET_MISSING: meshRef='{meshRef}'");
+                    if (!AddWarningOrFail(diagnostics, options, $"XAV2_ASSET_MISSING: meshRef='{meshRef}'"))
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -520,18 +555,41 @@ namespace VsfClone.Xav2.Runtime
                 if (!textureNameSet.Contains(textureRef))
                 {
                     missingTextureRef = true;
-                    diagnostics.Warnings.Add($"XAV2_ASSET_MISSING: textureRef='{textureRef}'");
+                    if (!AddWarningOrFail(diagnostics, options, $"XAV2_ASSET_MISSING: textureRef='{textureRef}'"))
+                    {
+                        return false;
+                    }
                 }
             }
 
             if (payload.Manifest.materialRefs.Count != 0 && payload.Materials.Count == 0)
             {
-                diagnostics.Warnings.Add("XAV2_ASSET_MISSING: materialRefs exist but no material payloads were parsed.");
+                if (!AddWarningOrFail(
+                        diagnostics,
+                        options,
+                        "XAV2_ASSET_MISSING: materialRefs exist but no material payloads were parsed."))
+                {
+                    return false;
+                }
                 diagnostics.IsPartial = true;
-                return;
+                return true;
             }
 
             diagnostics.IsPartial = missingMeshRef || missingTextureRef;
+            return true;
+        }
+
+        private static bool AddWarningOrFail(Xav2LoadDiagnostics diagnostics, Xav2LoadOptions options, string warning)
+        {
+            if (options != null && options.StrictValidation)
+            {
+                return Fail(
+                    diagnostics,
+                    Xav2LoadErrorCode.StrictValidationFailed,
+                    $"Strict validation failed: {warning}");
+            }
+            diagnostics.Warnings.Add(warning);
+            return true;
         }
 
         private static bool Fail(Xav2LoadDiagnostics diagnostics, Xav2LoadErrorCode errorCode, string errorMessage)
