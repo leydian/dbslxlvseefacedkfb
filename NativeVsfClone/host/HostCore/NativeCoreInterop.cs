@@ -24,6 +24,13 @@ public enum NcAvatarFormatHint : uint
     Xav2 = 5,
 }
 
+public enum NcCameraMode : uint
+{
+    AutoFitFull = 0,
+    AutoFitBust = 1,
+    Manual = 2,
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NcInitOptions
 {
@@ -101,6 +108,21 @@ public struct NcWindowRenderTarget
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct NcRenderQualityOptions
+{
+    public NcCameraMode CameraMode;
+    public float FramingTarget;
+    public float Headroom;
+    public float YawDeg;
+    public float FovDeg;
+    public float BackgroundR;
+    public float BackgroundG;
+    public float BackgroundB;
+    public float BackgroundA;
+    public uint ShowDebugOverlay;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct NcRuntimeStats
 {
     public uint RenderReadyAvatarCount;
@@ -161,6 +183,12 @@ public static class NativeCoreInterop
     public static extern NcResultCode nc_render_frame_to_window(IntPtr hwnd, float deltaTimeSeconds);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_set_render_quality_options(ref NcRenderQualityOptions options);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_render_quality_options(out NcRenderQualityOptions outOptions);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_start_spout(ref NcSpoutOptions options);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -188,5 +216,29 @@ public static class NativeCoreInterop
 
         var recoverable = err.Recoverable == 0 ? "fatal" : "recoverable";
         return $"{err.Code} [{err.Subsystem}] {err.Message} ({recoverable})";
+    }
+
+    public static NcRenderQualityOptions BuildBroadcastPreset()
+    {
+        return new NcRenderQualityOptions
+        {
+            CameraMode = NcCameraMode.AutoFitBust,
+            FramingTarget = 0.72f,
+            Headroom = 0.12f,
+            YawDeg = 192.0f,
+            FovDeg = 45.0f,
+            BackgroundR = 0.08f,
+            BackgroundG = 0.12f,
+            BackgroundB = 0.18f,
+            BackgroundA = 1.0f,
+            ShowDebugOverlay = 0U,
+        };
+    }
+
+    public static NcRenderQualityOptions BuildDebugPreset()
+    {
+        var options = BuildBroadcastPreset();
+        options.ShowDebugOverlay = 1U;
+        return options;
     }
 }

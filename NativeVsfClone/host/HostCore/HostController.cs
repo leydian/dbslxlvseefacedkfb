@@ -11,6 +11,7 @@ public sealed class HostController
     private readonly IRenderLoopService _renderLoopService;
     private readonly IOutputService _outputService;
     private readonly Queue<HostLogEntry> _logs = new();
+    private NcRenderQualityOptions _renderOptions;
     private bool _windowAttached;
     private IntPtr _windowHandle = IntPtr.Zero;
 
@@ -27,13 +28,16 @@ public sealed class HostController
         _sessionService = sessionService;
         _renderLoopService = renderLoopService;
         _outputService = outputService;
+        _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
         Outputs = new OutputState(false, false, "VsfClone", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
+        RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
         LastSnapshot = BuildSnapshot();
     }
 
     public HostSessionState SessionState { get; private set; }
     public OutputState Outputs { get; private set; }
+    public RenderUiState RenderState { get; private set; }
     public DiagnosticsSnapshot LastSnapshot { get; private set; }
 
     public event EventHandler? StateChanged;
@@ -46,6 +50,10 @@ public sealed class HostController
     {
         var rc = _sessionService.Initialize();
         TrackResult("Initialize", rc);
+        if (rc == NcResultCode.Ok)
+        {
+            ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
+        }
         RefreshState();
         return rc;
     }
@@ -78,6 +86,8 @@ public sealed class HostController
 
         var rc = _sessionService.Shutdown();
         TrackResult("Shutdown", rc);
+        _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
+        RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
         PublishDiagnostics();
         StateChanged?.Invoke(this, EventArgs.Empty);
@@ -90,6 +100,10 @@ public sealed class HostController
         var rc = _renderLoopService.AttachWindow(hwnd, width, height);
         _windowAttached = rc == NcResultCode.Ok;
         TrackResult("AttachWindow", rc);
+        if (rc == NcResultCode.Ok)
+        {
+            ApplyRenderOptionsInternal("ApplyRenderOptionsAttach");
+        }
         RefreshState();
         return rc;
     }
@@ -103,6 +117,10 @@ public sealed class HostController
 
         var rc = _renderLoopService.Resize(width, height);
         TrackResult("ResizeWindow", rc);
+        if (rc == NcResultCode.Ok)
+        {
+            ApplyRenderOptionsInternal("ApplyRenderOptionsResize");
+        }
         if (rc == NcResultCode.Ok && Outputs.SpoutActive)
         {
             AutoReconfigureSpout(width, height);
@@ -176,6 +194,35 @@ public sealed class HostController
         var rc = _outputService.StopOsc();
         TrackResult("StopOsc", rc);
         Outputs = Outputs with { OscActive = false };
+        RefreshState();
+        return rc;
+    }
+
+    public NcResultCode SetBroadcastMode(bool enabled)
+    {
+        var preferredPreset = RenderState.BackgroundPreset;
+        _renderOptions = enabled ? NativeCoreInterop.BuildBroadcastPreset() : NativeCoreInterop.BuildDebugPreset();
+        ApplyBackgroundPreset(ref _renderOptions, preferredPreset);
+        RenderState = BuildRenderUiState(_renderOptions, enabled, preferredPreset, RenderState.MirrorMode);
+        var rc = ApplyRenderOptionsInternal("SetBroadcastMode");
+        RefreshState();
+        return rc;
+    }
+
+    public NcResultCode ApplyRenderUiState(RenderUiState state)
+    {
+        _renderOptions = new NcRenderQualityOptions
+        {
+            CameraMode = ToNativeCameraMode(state.CameraMode),
+            FramingTarget = state.FramingTarget,
+            Headroom = state.Headroom,
+            YawDeg = state.YawDeg,
+            FovDeg = state.FovDeg,
+            ShowDebugOverlay = state.ShowDebugOverlay ? 1U : 0U,
+        };
+        ApplyBackgroundPreset(ref _renderOptions, state.BackgroundPreset);
+        RenderState = state;
+        var rc = ApplyRenderOptionsInternal("ApplyRenderUiState");
         RefreshState();
         return rc;
     }
@@ -263,6 +310,7 @@ public sealed class HostController
             DateTimeOffset.UtcNow,
             SessionState,
             Outputs,
+            RenderState,
             runtime,
             _sessionService.ActiveAvatarInfo,
             SessionState.LastRenderRc);
