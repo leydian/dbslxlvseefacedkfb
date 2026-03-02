@@ -2,6 +2,108 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host UI operation-focused redesign (WPF + WinUI) and shared state controller
+
+### Summary
+
+Reworked both host shells from MVP button panels into operation-focused UI layouts with explicit lifecycle sections, status strip visibility, structured diagnostics, and guarded actions.  
+Added a shared HostCore controller/state model so WPF and WinUI follow the same runtime workflow and control semantics.
+
+### Changed
+
+- `host/HostCore/HostInterfaces.cs` (new)
+  - Added explicit host service contracts:
+    - `IAvatarSessionService`
+    - `IRenderLoopService`
+    - `IOutputService`
+  - Enables host-shell behavior to depend on interfaces instead of concrete service classes.
+
+- `host/HostCore/HostUiState.cs` (new)
+  - Added UI-facing state contracts:
+    - `HostSessionState`
+    - `OutputState`
+    - `DiagnosticsSnapshot`
+    - `HostLogEntry`
+  - Defines a stable snapshot/log model for both host tracks.
+
+- `host/HostCore/HostController.cs` (new)
+  - Added a shared orchestration layer over session/render/output services.
+  - Added bounded operation log ring buffer (200 entries).
+  - Added events:
+    - `StateChanged`
+    - `DiagnosticsUpdated`
+    - `ErrorRaised`
+  - Added guarded workflow methods:
+    - initialize/shutdown
+    - attach/resize/tick
+    - load/unload avatar
+    - start/stop Spout
+    - start/stop OSC
+  - Added unified diagnostics snapshot publication on each state transition/tick.
+
+- `host/HostCore/AvatarSessionService.cs`
+- `host/HostCore/RenderLoopService.cs`
+- `host/HostCore/OutputService.cs`
+  - Updated services to implement new interface contracts.
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Replaced MVP layout with operation-focused sections:
+    - `Session` (Initialize/Shutdown)
+    - `Avatar` (path + Browse + Load/Unload)
+    - `Outputs` (Spout/OSC config + start/stop)
+  - Added structured diagnostics tabs:
+    - Runtime
+    - Avatar
+    - Logs
+  - Added status strip:
+    - session/avatar/render/frame/output/last-error
+  - Added state-based button enable/disable rules.
+  - Added guarded confirmations for disruptive actions (reinitialize, unload, stop outputs, shutdown).
+  - Added input validation for OSC bind port.
+  - Added file picker flow for avatar selection.
+
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Applied the same operation-focused information architecture and interaction semantics as WPF.
+  - Added runtime/avatar/log diagnostics panels and status strip parity.
+  - Added WinUI content dialog confirmations and file picker avatar browse flow.
+  - Added render-host resize handling to align with WPF runtime behavior.
+
+### Verified
+
+- Build success:
+  - `dotnet build host/WpfHost/WpfHost.csproj -c Release`
+- Build attempt failed in current environment/toolchain:
+  - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+  - failure point: Windows App SDK XAML compiler (`XamlCompiler.exe` exit code 1) with no surfaced line-level diagnostics in generated `output.json`.
+
+## 2026-03-03 - VSFAvatar serialized candidate fallback expansion and complete-state normalization
+
+### Summary
+
+Improved VSFAvatar serialized probing resilience by adding node-window and stream-scan fallback candidate discovery, and normalized sidecar complete-state reporting so `probe_stage=complete` consistently emits `primary_error_code=NONE`.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded serialized candidate selection:
+    - accept truncated node windows when reconstructed stream is partial
+    - fallback to all-node candidate probing when CAB/assets paths are unusable
+    - fallback to bounded stream scan for SerializedFile-like headers when node candidates are empty
+  - Extended candidate offset deltas to improve alignment recovery (`±128`, `±256`).
+  - Added richer candidate scoring/sorting and normalized empty-candidate failure code (`SF_NO_CANDIDATE_WINDOW`).
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added bounded offset scan fallback for misaligned serialized payloads.
+  - Reuses existing parse path while annotating successful scan origin (`+scan@<offset>`).
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Normalized complete-state primary error:
+    - `probe_stage=complete && object_table_parsed=true` => `primary_error_code=NONE`
+  - Updated compatibility classification to treat complete/object-table-parsed as `full`.
+  - Refined missing-feature labeling for object-table parsed but mesh-zero cases.
+
 ## 2026-03-03 - VRM runtime draw-path activation + host diagnostics/publish hardening
 
 ### Summary

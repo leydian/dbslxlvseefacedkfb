@@ -2,7 +2,7 @@ using System;
 
 namespace HostCore;
 
-public sealed class AvatarSessionService
+public sealed class AvatarSessionService : IAvatarSessionService
 {
     public bool IsInitialized { get; private set; }
     public ulong? ActiveAvatarHandle { get; private set; }

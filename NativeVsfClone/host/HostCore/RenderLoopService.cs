@@ -2,7 +2,7 @@ using System;
 
 namespace HostCore;
 
-public sealed class RenderLoopService
+public sealed class RenderLoopService : IRenderLoopService
 {
     private IntPtr _hwnd = IntPtr.Zero;
     private uint _width;

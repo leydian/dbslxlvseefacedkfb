@@ -32,6 +32,10 @@ If `sidecar` mode fails to execute:
   - signature/version/player version/engine version
   - compression mode flags
   - basic token probes (`CAB-`, `VRM`) in early data window
+  - serialized candidate fallback probing:
+    - truncated node-window retries on partial reconstructed streams
+    - all-node fallback when CAB/assets path hints are weak
+    - bounded stream scan for SerializedFile-like headers
 - `nativecore.dll` exports a stable API:
   - init/shutdown
   - avatar load/query/unload
@@ -41,11 +45,19 @@ If `sidecar` mode fails to execute:
   - runtime stats retrieval (`nc_get_runtime_stats`)
   - last error retrieval
 - `host/HostCore` wraps C ABI calls for WPF/WinUI hosts.
+- `host/HostCore` now includes a shared UI orchestration layer:
+  - `HostController` (lifecycle/render/output coordination)
+  - UI state snapshots (`HostSessionState`, `OutputState`, `DiagnosticsSnapshot`)
+  - bounded operation log stream (`HostLogEntry`)
 - `host/HostApps.sln` groups `HostCore`, `WpfHost`, and `WinUiHost`.
 - Detailed implementation report:
   - `docs/reports/ui_host_runtime_integration_2026-03-02.md`
+- Detailed operation-focused UI redesign report:
+  - `docs/reports/ui_host_operation_redesign_2026-03-03.md`
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
 - `vsfavatar_sidecar` is built as an external parser process.
+  - complete-state normalization:
+    - when `probe_stage=complete` and `object_table_parsed=true`, `primary_error_code` is emitted as `NONE`
 - VRM runtime payloads now include:
   - interleaved position/uv vertex payload extraction
   - material alpha mode/cutoff/double-sided metadata
@@ -54,6 +66,12 @@ If `sidecar` mode fails to execute:
   - per-frame render return code
   - per-avatar draw-call count
   - expression summary text
+- WPF/WinUI host shells now provide:
+  - operation sections (`Session`, `Avatar`, `Outputs`)
+  - guarded actions with confirmation prompts for disruptive operations
+  - state-based button enable/disable to enforce valid operation order
+  - structured diagnostics views (`Runtime`, `Avatar`, `Logs`)
+  - persistent status strip (session/avatar/render/frame/output/last-error)
 
 ## What is not implemented yet
 

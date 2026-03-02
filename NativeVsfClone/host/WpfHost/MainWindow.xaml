@@ -1,39 +1,122 @@
 <Window x:Class="WpfHost.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WPF Host" Height="720" Width="1200">
+        Title="VsfClone Host (WPF)" Height="820" Width="1380" MinHeight="760" MinWidth="1240">
     <Grid Margin="12">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="320"/>
+            <ColumnDefinition Width="420" />
+            <ColumnDefinition Width="12" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Column="0" Margin="0,0,12,0">
-            <TextBlock Text="Avatar Path" FontWeight="Bold"/>
-            <TextBox x:Name="AvatarPathTextBox" Margin="0,4,0,8" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm"/>
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <GroupBox Header="Session" Margin="0,0,0,8">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="Runtime lifecycle controls. Initialize before loading avatars." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
+                        <WrapPanel>
+                            <Button x:Name="InitializeButton" Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button x:Name="ShutdownButton" Content="Shutdown" Click="Shutdown_Click" MinWidth="92"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
 
-            <WrapPanel Margin="0,0,0,8">
-                <Button Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0"/>
-                <Button Content="Load" Click="Load_Click" Margin="0,0,8,0"/>
-                <Button Content="Unload" Click="Unload_Click"/>
-            </WrapPanel>
+                <GroupBox Header="Avatar" Margin="0,0,0,8">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="Avatar file path" FontWeight="SemiBold"/>
+                        <DockPanel Margin="0,4,0,8">
+                            <Button x:Name="BrowseAvatarButton" Content="Browse..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                            <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" />
+                        </DockPanel>
+                        <WrapPanel>
+                            <Button x:Name="LoadButton" Content="Load" Click="Load_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button x:Name="UnloadButton" Content="Unload" Click="Unload_Click" MinWidth="92"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
 
-            <TextBlock Text="Spout" FontWeight="Bold" Margin="0,8,0,0"/>
-            <WrapPanel Margin="0,4,0,8">
-                <Button Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0"/>
-                <Button Content="Stop Spout" Click="StopSpout_Click"/>
-            </WrapPanel>
+                <GroupBox Header="Outputs">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="Spout" FontWeight="SemiBold"/>
+                        <Grid Margin="0,4,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Channel" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1" x:Name="SpoutChannelTextBox" Text="VsfClone"/>
+                        </Grid>
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="StartSpoutButton" Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopSpoutButton" Content="Stop Spout" Click="StopSpout_Click" MinWidth="110"/>
+                        </WrapPanel>
 
-            <TextBlock Text="OSC" FontWeight="Bold" Margin="0,8,0,0"/>
-            <WrapPanel Margin="0,4,0,8">
-                <Button Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0"/>
-                <Button Content="Stop OSC" Click="StopOsc_Click"/>
-            </WrapPanel>
+                        <TextBlock Text="OSC" FontWeight="SemiBold"/>
+                        <Grid Margin="0,4,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Bind Port" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="OscBindPortTextBox" Text="39539"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Publish" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="OscPublishAddressTextBox" Text="127.0.0.1:39540" Margin="0,8,0,0"/>
+                        </Grid>
+                        <WrapPanel>
+                            <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopOscButton" Content="Stop OSC" Click="StopOsc_Click" MinWidth="110"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
 
-            <TextBlock Text="Diagnostics" FontWeight="Bold" Margin="0,8,0,0"/>
-            <TextBox x:Name="DiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="360"/>
-        </StackPanel>
+        <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#102030" />
 
-        <Border Grid.Column="1" x:Name="RenderHost" Background="#111722" BorderBrush="#304050" BorderThickness="1"/>
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="260" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" x:Name="RenderHost" Background="#111722" BorderBrush="#304050" BorderThickness="1" CornerRadius="4"/>
+
+            <TabControl Grid.Row="1" Margin="0,8,0,8">
+                <TabItem Header="Runtime">
+                    <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                </TabItem>
+                <TabItem Header="Avatar">
+                    <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                </TabItem>
+                <TabItem Header="Logs">
+                    <DockPanel>
+                        <Button Content="Copy Logs" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyLogs_Click"/>
+                        <TextBox x:Name="LogsTextBox" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                    </DockPanel>
+                </TabItem>
+            </TabControl>
+
+            <Border Grid.Row="2" Padding="8" Background="#0F1720" BorderBrush="#2D3A48" BorderThickness="1" CornerRadius="4">
+                <WrapPanel>
+                    <TextBlock Text="Session: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="SessionStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="Avatar: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="AvatarStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="Render: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="RenderStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="Frame: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="Outputs: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="LastError: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360"/>
+                </WrapPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

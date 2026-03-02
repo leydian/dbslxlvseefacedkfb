@@ -1,6 +1,6 @@
 namespace HostCore;
 
-public sealed class OutputService
+public sealed class OutputService : IOutputService
 {
     public NcResultCode StartSpout(uint width, uint height, uint fps, string channelName)
     {
