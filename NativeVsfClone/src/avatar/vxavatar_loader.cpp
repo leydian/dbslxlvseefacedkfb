@@ -706,6 +706,16 @@ bool VxAvatarLoader::CanLoadPath(const std::string& path) const {
     return ext == ".vxavatar";
 }
 
+bool VxAvatarLoader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
+    if (head.size() < 4U || head[0] != 0x50U || head[1] != 0x4BU) {
+        return false;
+    }
+    const bool valid_sig03 = head[2] == 0x03U && head[3] == 0x04U;
+    const bool valid_sig05 = head[2] == 0x05U && head[3] == 0x06U;
+    const bool valid_sig07 = head[2] == 0x07U && head[3] == 0x08U;
+    return valid_sig03 || valid_sig05 || valid_sig07;
+}
+
 core::Result<AvatarPackage> VxAvatarLoader::Load(const std::string& path) const {
     std::vector<std::uint8_t> file_bytes;
     if (!ReadFileBytes(path, &file_bytes)) {

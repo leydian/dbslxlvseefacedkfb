@@ -23,6 +23,8 @@ constexpr std::uint16_t kSectionTextureBlob = 0x0002U;
 constexpr std::uint16_t kSectionMaterialOverride = 0x0003U;
 constexpr std::uint16_t kSectionMeshRenderPayload = 0x0011U;
 constexpr std::uint16_t kSectionMaterialShaderParams = 0x0012U;
+constexpr std::uint16_t kSectionSkinPayload = 0x0013U;
+constexpr std::uint16_t kSectionBlendShapePayload = 0x0014U;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -262,26 +264,184 @@ bool ParseMaterialOverrideSection(
     if (!ReadSizedString(bytes, &cursor, end, &out_override->shader_name) || out_override->shader_name.empty()) {
         return false;
     }
-    if (!ReadSizedString(bytes, &cursor, end, &out_override->base_color_texture_name)) {
+    const std::size_t cursor_after_shader = cursor;
+
+    auto parse_tail = [&](bool with_variant) -> bool {
+        std::size_t c = cursor_after_shader;
+        if (with_variant) {
+            if (!ReadSizedString(bytes, &c, end, &out_override->shader_variant) || out_override->shader_variant.empty()) {
+                return false;
+            }
+        } else {
+            out_override->shader_variant = "default";
+        }
+        if (!ReadSizedString(bytes, &c, end, &out_override->base_color_texture_name)) {
+            return false;
+        }
+        if (!ReadSizedString(bytes, &c, end, &out_override->alpha_mode) || out_override->alpha_mode.empty()) {
+            return false;
+        }
+        const auto alpha_cutoff_bits = ReadU32Le(bytes, c);
+        if (!alpha_cutoff_bits) {
+            return false;
+        }
+        c += 4U;
+        float alpha_cutoff = 0.5f;
+        static_assert(sizeof(float) == sizeof(std::uint32_t));
+        std::memcpy(&alpha_cutoff, &(*alpha_cutoff_bits), sizeof(float));
+        out_override->alpha_cutoff = alpha_cutoff;
+        if (c >= end) {
+            return false;
+        }
+        out_override->double_sided = bytes[c] != 0U;
+        c += 1U;
+        if (c != end) {
+            return false;
+        }
+        cursor = c;
+        return true;
+    };
+
+    if (parse_tail(true)) {
+        return true;
+    }
+    return parse_tail(false);
+}
+
+bool ParseSkinPayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    SkinRenderPayload* out_payload) {
+    if (out_payload == nullptr) {
         return false;
     }
-    if (!ReadSizedString(bytes, &cursor, end, &out_override->alpha_mode) || out_override->alpha_mode.empty()) {
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->mesh_name) || out_payload->mesh_name.empty()) {
         return false;
     }
-    const auto alpha_cutoff_bits = ReadU32Le(bytes, cursor);
-    if (!alpha_cutoff_bits) {
+    const auto bone_count = ReadU32Le(bytes, cursor);
+    if (!bone_count) {
         return false;
     }
     cursor += 4U;
-    float alpha_cutoff = 0.5f;
-    static_assert(sizeof(float) == sizeof(std::uint32_t));
-    std::memcpy(&alpha_cutoff, &(*alpha_cutoff_bits), sizeof(float));
-    out_override->alpha_cutoff = alpha_cutoff;
-    if (cursor >= end) {
+    const std::size_t bone_count_sz = static_cast<std::size_t>(*bone_count);
+    out_payload->bone_indices.clear();
+    out_payload->bone_indices.reserve(bone_count_sz);
+    for (std::size_t i = 0; i < bone_count_sz; ++i) {
+        const auto bone_index = ReadI32Le(bytes, cursor + i * 4U);
+        if (!bone_index) {
+            return false;
+        }
+        out_payload->bone_indices.push_back(*bone_index);
+    }
+    cursor += bone_count_sz * 4U;
+    const auto bindpose_f32_count = ReadU32Le(bytes, cursor);
+    if (!bindpose_f32_count) {
         return false;
     }
-    out_override->double_sided = bytes[cursor] != 0U;
-    cursor += 1U;
+    cursor += 4U;
+    const std::size_t bindpose_count_sz = static_cast<std::size_t>(*bindpose_f32_count);
+    out_payload->bind_poses_16xn.clear();
+    out_payload->bind_poses_16xn.reserve(bindpose_count_sz);
+    for (std::size_t i = 0; i < bindpose_count_sz; ++i) {
+        const auto f32_bits = ReadU32Le(bytes, cursor + i * 4U);
+        if (!f32_bits) {
+            return false;
+        }
+        float value = 0.0f;
+        std::memcpy(&value, &(*f32_bits), sizeof(float));
+        out_payload->bind_poses_16xn.push_back(value);
+    }
+    cursor += bindpose_count_sz * 4U;
+    const auto weight_blob_size = ReadU32Le(bytes, cursor);
+    if (!weight_blob_size) {
+        return false;
+    }
+    cursor += 4U;
+    const std::size_t weight_blob_size_sz = static_cast<std::size_t>(*weight_blob_size);
+    if (cursor + weight_blob_size_sz != end) {
+        return false;
+    }
+    out_payload->skin_weight_blob.assign(
+        bytes.begin() + static_cast<std::ptrdiff_t>(cursor),
+        bytes.begin() + static_cast<std::ptrdiff_t>(end));
+    return true;
+}
+
+bool ParseBlendShapePayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    BlendShapeRenderPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->mesh_name) || out_payload->mesh_name.empty()) {
+        return false;
+    }
+    const auto frame_count = ReadU32Le(bytes, cursor);
+    if (!frame_count) {
+        return false;
+    }
+    cursor += 4U;
+    out_payload->frames.clear();
+    out_payload->frames.reserve(*frame_count);
+    for (std::size_t i = 0; i < *frame_count; ++i) {
+        BlendShapeFramePayload frame;
+        if (!ReadSizedString(bytes, &cursor, end, &frame.name) || frame.name.empty()) {
+            return false;
+        }
+        const auto weight_bits = ReadU32Le(bytes, cursor);
+        if (!weight_bits) {
+            return false;
+        }
+        cursor += 4U;
+        std::memcpy(&frame.weight, &(*weight_bits), sizeof(float));
+        const auto dv_size = ReadU32Le(bytes, cursor);
+        if (!dv_size) {
+            return false;
+        }
+        cursor += 4U;
+        const std::size_t dv_size_sz = static_cast<std::size_t>(*dv_size);
+        if (cursor + dv_size_sz > end) {
+            return false;
+        }
+        frame.delta_vertices.assign(
+            bytes.begin() + static_cast<std::ptrdiff_t>(cursor),
+            bytes.begin() + static_cast<std::ptrdiff_t>(cursor + dv_size_sz));
+        cursor += dv_size_sz;
+        const auto dn_size = ReadU32Le(bytes, cursor);
+        if (!dn_size) {
+            return false;
+        }
+        cursor += 4U;
+        const std::size_t dn_size_sz = static_cast<std::size_t>(*dn_size);
+        if (cursor + dn_size_sz > end) {
+            return false;
+        }
+        frame.delta_normals.assign(
+            bytes.begin() + static_cast<std::ptrdiff_t>(cursor),
+            bytes.begin() + static_cast<std::ptrdiff_t>(cursor + dn_size_sz));
+        cursor += dn_size_sz;
+        const auto dt_size = ReadU32Le(bytes, cursor);
+        if (!dt_size) {
+            return false;
+        }
+        cursor += 4U;
+        const std::size_t dt_size_sz = static_cast<std::size_t>(*dt_size);
+        if (cursor + dt_size_sz > end) {
+            return false;
+        }
+        frame.delta_tangents.assign(
+            bytes.begin() + static_cast<std::ptrdiff_t>(cursor),
+            bytes.begin() + static_cast<std::ptrdiff_t>(cursor + dt_size_sz));
+        cursor += dt_size_sz;
+        out_payload->frames.push_back(std::move(frame));
+    }
     return cursor == end;
 }
 
@@ -371,6 +531,10 @@ bool Xav2Loader::CanLoadPath(const std::string& path) const {
     return ext == ".xav2";
 }
 
+bool Xav2Loader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
+    return head.size() >= 4U && head[0] == 'X' && head[1] == 'A' && head[2] == 'V' && head[3] == '2';
+}
+
 core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
     std::vector<std::uint8_t> bytes;
     if (!ReadFileBytes(path, &bytes)) {
@@ -447,6 +611,8 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
     std::unordered_map<std::string, std::vector<std::uint8_t>> texture_sections;
     std::unordered_map<std::string, MaterialRenderPayload> material_sections;
     std::unordered_map<std::string, std::string> material_params_sections;
+    std::unordered_map<std::string, SkinRenderPayload> skin_sections;
+    std::unordered_map<std::string, BlendShapeRenderPayload> blendshape_sections;
 
     std::size_t cursor = manifest_end;
     while (cursor < bytes.size()) {
@@ -515,6 +681,24 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             }
             material_params_sections[NormalizeRefKey(material_name)] = std::move(params_json);
             ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionSkinPayload) {
+            SkinRenderPayload skin_payload;
+            if (!ParseSkinPayloadSection(bytes, payload_offset, payload_size, &skin_payload)) {
+                pkg.primary_error_code = "XAV2_SKIN_SCHEMA_INVALID";
+                pkg.warnings.push_back("E_PARSE: XAV2_SKIN_SCHEMA_INVALID: invalid skin payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            skin_sections[NormalizeRefKey(skin_payload.mesh_name)] = std::move(skin_payload);
+            ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionBlendShapePayload) {
+            BlendShapeRenderPayload blendshape_payload;
+            if (!ParseBlendShapePayloadSection(bytes, payload_offset, payload_size, &blendshape_payload)) {
+                pkg.primary_error_code = "XAV2_BLENDSHAPE_SCHEMA_INVALID";
+                pkg.warnings.push_back("E_PARSE: XAV2_BLENDSHAPE_SCHEMA_INVALID: invalid blendshape payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            blendshape_sections[NormalizeRefKey(blendshape_payload.mesh_name)] = std::move(blendshape_payload);
+            ++pkg.format_decoded_section_count;
         } else {
             ++pkg.format_unknown_section_count;
             pkg.warnings.push_back("W_PARSE: XAV2_UNKNOWN_SECTION: type=" + std::to_string(*type));
@@ -545,6 +729,15 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             }
         }
         pkg.mesh_payloads.push_back(std::move(payload));
+
+        const auto skin_it = skin_sections.find(key);
+        if (skin_it != skin_sections.end()) {
+            pkg.skin_payloads.push_back(skin_it->second);
+        }
+        const auto bs_it = blendshape_sections.find(key);
+        if (bs_it != blendshape_sections.end()) {
+            pkg.blendshape_payloads.push_back(bs_it->second);
+        }
     }
 
     for (const std::string& mat_ref : material_refs) {
@@ -597,6 +790,16 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
     }
     if (matched_texture_payloads != texture_refs.size()) {
         pkg.missing_features.push_back("XAV2 texture section payload decode coverage");
+    }
+    if (!skin_sections.empty() && pkg.skin_payloads.size() != mesh_refs.size()) {
+        pkg.warnings.push_back(
+            "W_PAYLOAD: XAV2_SKIN_PARTIAL: skin sections=" + std::to_string(skin_sections.size()) +
+            ", mesh refs=" + std::to_string(mesh_refs.size()));
+    }
+    if (!blendshape_sections.empty() && pkg.blendshape_payloads.size() != mesh_refs.size()) {
+        pkg.warnings.push_back(
+            "W_PAYLOAD: XAV2_BLENDSHAPE_PARTIAL: blendshape sections=" + std::to_string(blendshape_sections.size()) +
+            ", mesh refs=" + std::to_string(mesh_refs.size()));
     }
     pkg.warnings.push_back("W_STAGE: payload");
 

@@ -41,9 +41,30 @@ struct MeshRenderPayload {
     std::int32_t material_index = -1;
 };
 
+struct SkinRenderPayload {
+    std::string mesh_name;
+    std::vector<std::int32_t> bone_indices;
+    std::vector<float> bind_poses_16xn;
+    std::vector<std::uint8_t> skin_weight_blob;
+};
+
+struct BlendShapeFramePayload {
+    std::string name;
+    float weight = 0.0f;
+    std::vector<std::uint8_t> delta_vertices;
+    std::vector<std::uint8_t> delta_normals;
+    std::vector<std::uint8_t> delta_tangents;
+};
+
+struct BlendShapeRenderPayload {
+    std::string mesh_name;
+    std::vector<BlendShapeFramePayload> frames;
+};
+
 struct MaterialRenderPayload {
     std::string name;
     std::string shader_name;
+    std::string shader_variant = "default";
     std::string base_color_texture_name;
     std::string shader_params_json = "{}";
     std::string alpha_mode = "OPAQUE";
@@ -76,6 +97,8 @@ struct AvatarPackage {
     std::vector<MeshAssetSummary> meshes;
     std::vector<MaterialAssetSummary> materials;
     std::vector<MeshRenderPayload> mesh_payloads;
+    std::vector<SkinRenderPayload> skin_payloads;
+    std::vector<BlendShapeRenderPayload> blendshape_payloads;
     std::vector<MaterialRenderPayload> material_payloads;
     std::vector<TextureRenderPayload> texture_payloads;
     std::vector<ExpressionState> expressions;

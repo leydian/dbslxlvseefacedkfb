@@ -6,6 +6,8 @@ namespace VsfClone.Xav2.Runtime
     [Serializable]
     public sealed class Xav2Manifest
     {
+        public uint schemaVersion = 1U;
+        public string exporterVersion = "0.2.0";
         public string avatarId = string.Empty;
         public string displayName = string.Empty;
         public string sourceExt = ".vrm";
@@ -13,6 +15,31 @@ namespace VsfClone.Xav2.Runtime
         public List<string> materialRefs = new();
         public List<string> textureRefs = new();
         public List<string> strictShaderSet = new();
+        public bool hasSkinning;
+        public bool hasBlendShapes;
+    }
+
+    public sealed class Xav2BlendShapeFramePayload
+    {
+        public string Name = string.Empty;
+        public float Weight;
+        public byte[] DeltaVertices = Array.Empty<byte>();
+        public byte[] DeltaNormals = Array.Empty<byte>();
+        public byte[] DeltaTangents = Array.Empty<byte>();
+    }
+
+    public sealed class Xav2SkinPayload
+    {
+        public string MeshName = string.Empty;
+        public int[] BoneIndices = Array.Empty<int>();
+        public float[] BindPoses16xN = Array.Empty<float>();
+        public byte[] SkinWeightBlob = Array.Empty<byte>();
+    }
+
+    public sealed class Xav2BlendShapePayload
+    {
+        public string MeshName = string.Empty;
+        public List<Xav2BlendShapeFramePayload> Frames = new();
     }
 
     public sealed class Xav2MeshPayload
@@ -28,6 +55,7 @@ namespace VsfClone.Xav2.Runtime
     {
         public string Name = string.Empty;
         public string ShaderName = "MToon (minimal)";
+        public string ShaderVariant = "default";
         public string BaseColorTextureName = string.Empty;
         public string AlphaMode = "OPAQUE";
         public float AlphaCutoff = 0.5f;
@@ -47,5 +75,7 @@ namespace VsfClone.Xav2.Runtime
         public List<Xav2MeshPayload> Meshes = new();
         public List<Xav2MaterialPayload> Materials = new();
         public List<Xav2TexturePayload> Textures = new();
+        public List<Xav2SkinPayload> Skins = new();
+        public List<Xav2BlendShapePayload> BlendShapes = new();
     }
 }

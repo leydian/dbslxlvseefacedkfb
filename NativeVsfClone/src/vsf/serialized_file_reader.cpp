@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -414,6 +415,75 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
     if (big.ok) {
         return big;
     }
+
+    auto LooksLikeHeaderAt = [&](std::size_t at) -> bool {
+        if (at + 20U > bytes.size()) {
+            return false;
+        }
+        const auto metadata_size_be = ReadU32(bytes, at, Endian::Big);
+        const auto version_be = ReadU32(bytes, at + 8U, Endian::Big);
+        if (metadata_size_be == 0U || metadata_size_be > (64U * 1024U * 1024U)) {
+            return false;
+        }
+        if (version_be == 0U || version_be > 40U) {
+            return false;
+        }
+        const std::size_t header_size = version_be >= 22U ? 48U : 20U;
+        return at + header_size + metadata_size_be <= bytes.size();
+    };
+    auto TryOffsetScan = [&](Endian metadata_endian, SerializedFileSummary* out_best) -> bool {
+        if (out_best == nullptr || bytes.size() < 64U) {
+            return false;
+        }
+        bool found = false;
+        std::uint32_t best_objects = 0U;
+        std::int32_t best_groups = std::numeric_limits<std::int32_t>::min();
+        const std::size_t scan_limit = std::min<std::size_t>(bytes.size(), 8U * 1024U * 1024U);
+        std::size_t scan_hits = 0U;
+        for (std::size_t at = 8U; at + 64U <= scan_limit && scan_hits < 512U; at += 8U) {
+            if (!LooksLikeHeaderAt(at)) {
+                continue;
+            }
+            ++scan_hits;
+            std::vector<unsigned char> sliced(bytes.begin() + static_cast<std::ptrdiff_t>(at), bytes.end());
+            auto parsed = ParseWithMetadataEndian(sliced, metadata_endian);
+            if (!parsed.ok) {
+                continue;
+            }
+            std::int32_t groups = 0;
+            if (parsed.value.game_object_count > 0U) {
+                ++groups;
+            }
+            if (parsed.value.mesh_object_count > 0U) {
+                ++groups;
+            }
+            if (parsed.value.material_object_count > 0U) {
+                ++groups;
+            }
+            if (parsed.value.texture_object_count > 0U) {
+                ++groups;
+            }
+            if (parsed.value.skinned_mesh_renderer_count > 0U) {
+                ++groups;
+            }
+            if (!found ||
+                parsed.value.object_count > best_objects ||
+                (parsed.value.object_count == best_objects && groups > best_groups)) {
+                found = true;
+                best_objects = parsed.value.object_count;
+                best_groups = groups;
+                *out_best = parsed.value;
+                out_best->parse_path += "+scan@" + std::to_string(at);
+            }
+        }
+        return found;
+    };
+
+    SerializedFileSummary scanned_best;
+    if (TryOffsetScan(Endian::Little, &scanned_best) || TryOffsetScan(Endian::Big, &scanned_best)) {
+        return core::Result<SerializedFileSummary>::Ok(scanned_best);
+    }
+
     const auto little_code = ClassifySerializedParseError(little.error);
     const auto big_code = ClassifySerializedParseError(big.error);
     return core::Result<SerializedFileSummary>::Fail(

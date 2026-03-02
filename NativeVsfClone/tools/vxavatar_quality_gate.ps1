@@ -1,6 +1,7 @@
 param(
     [string]$SampleDir = "..\\sample",
     [string]$AvatarToolPath = ".\\build\\Release\\avatar_tool.exe",
+    [string]$VrmToXav2Path = ".\\build\\Release\\vrm_to_xav2.exe",
     [string]$ReportScriptPath = ".\\tools\\vxavatar_sample_report.ps1",
     [string]$ReportPath = ".\\build\\reports\\vxavatar_probe_latest.txt",
     [string]$SummaryPath = ".\\build\\reports\\vxavatar_gate_summary.txt",
@@ -13,6 +14,9 @@ param(
     ),
     [string[]]$FixedVxa2Samples = @(
         "demo_mvp.vxa2"
+    ),
+    [string[]]$FixedXav2Samples = @(
+        "demo_mvp.xav2"
     )
 )
 
@@ -104,11 +108,13 @@ if (-not (Test-Path $ReportScriptPath)) {
 & $ReportScriptPath `
     -SampleDir $SampleDir `
     -AvatarToolPath $AvatarToolPath `
+    -VrmToXav2Path $VrmToXav2Path `
     -OutputPath $ReportPath `
     -Profile $Profile `
     -UseFixedSet:$UseFixedSet `
     -FixedVxSamples $FixedVxSamples `
-    -FixedVxa2Samples $FixedVxa2Samples
+    -FixedVxa2Samples $FixedVxa2Samples `
+    -FixedXav2Samples $FixedXav2Samples
 
 $current = Parse-Report -Path $ReportPath
 $sampleNames = $current.Order
@@ -118,6 +124,8 @@ $gateB = $true
 $gateC = $true
 $gateD = $true
 $gateE = $true
+$gateF = $true
+$gateG = $true
 $failReasons = @()
 
 $requiredFields = @("InputKind", "InputTag", "Format", "Compat", "ParserStage", "PrimaryError")
@@ -126,6 +134,8 @@ $foundFixedVx = 0
 $foundCorruptVx = 0
 $foundFixedVxa2 = 0
 $foundCorruptVxa2 = 0
+$foundFixedXav2 = 0
+$foundCorruptXav2 = 0
 $foundRealFull = 0
 
 foreach ($name in $sampleNames) {
@@ -200,6 +210,30 @@ foreach ($name in $sampleNames) {
         }
     }
 
+    if ($kind -eq "XAV2" -and $tag -eq "fixed-valid") {
+        $foundFixedXav2++
+        if ($format -ne "XAV2") {
+            $gateF = $false
+            $failReasons += "GateF: $name expected format XAV2 but got $format"
+        }
+        if ($stage -ne "runtime-ready") {
+            $gateF = $false
+            $failReasons += "GateF: $name expected parser stage runtime-ready but got $stage"
+        }
+        if ($compat -eq "failed") {
+            $gateF = $false
+            $failReasons += "GateF: $name expected compat not failed but got $compat"
+        }
+    }
+
+    if ($kind -eq "XAV2" -and $tag -eq "synthetic-corrupt-xav2") {
+        $foundCorruptXav2++
+        if (-not (Is-OneOf -Value $primary -Allowed @("XAV2_SCHEMA_INVALID", "XAV2_SECTION_TRUNCATED"))) {
+            $gateG = $false
+            $failReasons += "GateG: $name expected primary XAV2_SCHEMA_INVALID|XAV2_SECTION_TRUNCATED but got $primary"
+        }
+    }
+
     if ($Profile -eq "full" -and $tag -eq "real-full") {
         $foundRealFull++
         if ([string]::IsNullOrWhiteSpace($format) -or [string]::IsNullOrWhiteSpace($compat)) {
@@ -225,20 +259,30 @@ if ($foundCorruptVxa2 -eq 0) {
     $gateC = $false
     $failReasons += "GateC: no synthetic-corrupt-vxa2 sample found"
 }
+if ($foundFixedXav2 -eq 0) {
+    $gateF = $false
+    $failReasons += "GateF: no fixed-valid XAV2 sample found"
+}
+if ($foundCorruptXav2 -eq 0) {
+    $gateG = $false
+    $failReasons += "GateG: no synthetic-corrupt-xav2 sample found"
+}
 if ($Profile -eq "full" -and $RequireRealFullSamples -and $foundRealFull -eq 0) {
     $gateE = $false
     $failReasons += "GateE: no real-full sample rows found in full profile"
 }
 
-$overallPass = $gateA -and $gateB -and $gateC -and $gateD -and $gateE
+$overallPass = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateG
 $gateAStatus = if ($gateA) { "PASS" } else { "FAIL" }
 $gateBStatus = if ($gateB) { "PASS" } else { "FAIL" }
 $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
 $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
 $gateEStatus = if ($gateE) { "PASS" } else { "FAIL" }
+$gateFStatus = if ($gateF) { "PASS" } else { "FAIL" }
+$gateGStatus = if ($gateG) { "PASS" } else { "FAIL" }
 
 $summary = @()
-$summary += "VXAvatar/VXA2 Quality Gate Summary"
+$summary += "VXAvatar/VXA2/XAV2 Quality Gate Summary"
 $summary += "Generated: $(Get-Date -Format s)"
 $summary += "ReportPath: $ReportPath"
 $summary += "Profile: $Profile"
@@ -250,6 +294,8 @@ $summary += "- GateB (synthetic VXAvatar corruption handling): $gateBStatus"
 $summary += "- GateC (VXA2 fixed + corruption checks): $gateCStatus"
 $summary += "- GateD (required output fields): $gateDStatus"
 $summary += "- GateE (full profile real-sample contract): $gateEStatus"
+$summary += "- GateF (fixed XAV2 success contract): $gateFStatus"
+$summary += "- GateG (synthetic XAV2 corruption handling): $gateGStatus"
 $summary += "- Overall: $(if ($overallPass) { 'PASS' } else { 'FAIL' })"
 $summary += ""
 $summary += "Sample Coverage"
@@ -257,6 +303,8 @@ $summary += "- FixedVX: $foundFixedVx"
 $summary += "- CorruptVX: $foundCorruptVx"
 $summary += "- FixedVXA2: $foundFixedVxa2"
 $summary += "- CorruptVXA2: $foundCorruptVxa2"
+$summary += "- FixedXAV2: $foundFixedXav2"
+$summary += "- CorruptXAV2: $foundCorruptXav2"
 $summary += "- RealFull: $foundRealFull"
 
 if ($failReasons.Count -gt 0) {
@@ -286,6 +334,8 @@ $jsonSummary = [ordered]@{
         gate_c = $gateCStatus
         gate_d = $gateDStatus
         gate_e = $gateEStatus
+        gate_f = $gateFStatus
+        gate_g = $gateGStatus
         overall = if ($overallPass) { "PASS" } else { "FAIL" }
     }
     coverage = [ordered]@{
@@ -293,6 +343,8 @@ $jsonSummary = [ordered]@{
         corrupt_vx = $foundCorruptVx
         fixed_vxa2 = $foundFixedVxa2
         corrupt_vxa2 = $foundCorruptVxa2
+        fixed_xav2 = $foundFixedXav2
+        corrupt_xav2 = $foundCorruptXav2
         real_full = $foundRealFull
     }
     failure_reasons = $failReasons

@@ -15,6 +15,8 @@ const char* SourceTypeName(vsfclone::avatar::AvatarSourceType t) {
             return "VXAvatar";
         case AvatarSourceType::Vxa2:
             return "VXA2";
+        case AvatarSourceType::Xav2:
+            return "XAV2";
         case AvatarSourceType::VsfAvatar:
             return "VSFAvatar(UnityFS)";
         default:

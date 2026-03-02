@@ -2,6 +2,66 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - XAV2 payload expansion + signature dispatch fallback + VSFAvatar probe hardening
+
+### Summary
+
+Expanded XAV2 runtime payload coverage (skin/blendshape), added extension-independent loader dispatch fallback via file signature probing, and hardened VSFAvatar serialized probing with candidate/window/raw-bundle fallback paths and complete-state sidecar normalization.
+
+### Changed
+
+- `include/vsfclone/avatar/i_avatar_loader.h`
+  - Added `CanLoadBytes(...)` interface for header-based loader routing.
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Added head-byte reader and signature fallback dispatch path when extension dispatch misses.
+
+- `src/avatar/xav2_loader.cpp`
+  - Added decode support for:
+    - `0x0013` skin payload sections
+    - `0x0014` blendshape payload sections
+  - Added mesh-key linkage for skin/blendshape runtime payload attachment.
+  - Added material override parser compatibility path with default variant fallback.
+  - Added partial mapping warnings for mesh-ref and payload section cardinality mismatch.
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Expanded payload model fields used by XAV2 skin/blendshape decode paths.
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded serialized candidate discovery with:
+    - truncated node-window handling
+    - all-node fallback
+    - in-stream serialized-header scan fallback
+    - wider offset deltas
+  - Added raw-bundle serialized scan fallback path for failed node-based probe cases.
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added offset-scan parse fallback for misaligned serialized byte windows.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Normalized complete-state contract:
+    - `probe_stage=complete && object_table_parsed=true` emits `primary_error_code=NONE`
+  - Refined complete-state compatibility/missing-feature labeling.
+
+- `tools/vxavatar_sample_report.ps1`
+- `tools/vxavatar_quality_gate.ps1`
+- `.github/workflows/vxavatar-gate.yml`
+  - Expanded quality-gate/report/workflow scope from VXAvatar/VXA2 to VXAvatar/VXA2/XAV2.
+  - Added XAV2 fixed-valid and synthetic-corrupt gate contracts (Gate F / Gate G).
+
+- `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - Added schema/exporter metadata and runtime data containers for skin/blendshape payloads.
+
+### Verified
+
+- Release build success:
+  - `cmake --build build --config Release`
+- VXAvatar/VXA2/XAV2 quick gate success:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - `GateA/B/C/D/E/F/G=PASS`
+- Signature fallback behavior check success:
+  - renamed a `.vxa2` sample to `.bin`, `avatar_tool` still detected `Format: VXA2` via header signature dispatch.
+
 ## 2026-03-03 - Host auto-quality pass (DPI-aware render sizing + resize debounce + Spout auto reconfigure)
 
 ### Summary

@@ -12,6 +12,8 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionMaterialOverride = 0x0003;
         private const ushort SectionMeshRenderPayload = 0x0011;
         private const ushort SectionMaterialShaderParams = 0x0012;
+        private const ushort SectionSkinPayload = 0x0013;
+        private const ushort SectionBlendShapePayload = 0x0014;
 
         public static Xav2AvatarPayload Load(string path)
         {
@@ -83,11 +85,33 @@ namespace VsfClone.Xav2.Runtime
                     {
                         Name = ReadSizedString(secReader),
                         ShaderName = ReadSizedString(secReader),
-                        BaseColorTextureName = ReadSizedString(secReader),
-                        AlphaMode = ReadSizedString(secReader),
-                        AlphaCutoff = secReader.ReadSingle(),
-                        DoubleSided = secReader.ReadByte() != 0
+                        ShaderVariant = "default"
                     };
+                    var cursor = secStream.Position;
+                    var parsedWithVariant = false;
+                    try
+                    {
+                        material.ShaderVariant = ReadSizedString(secReader);
+                        material.BaseColorTextureName = ReadSizedString(secReader);
+                        material.AlphaMode = ReadSizedString(secReader);
+                        material.AlphaCutoff = secReader.ReadSingle();
+                        material.DoubleSided = secReader.ReadByte() != 0;
+                        parsedWithVariant = secStream.Position == secStream.Length;
+                    }
+                    catch
+                    {
+                        parsedWithVariant = false;
+                    }
+
+                    if (!parsedWithVariant)
+                    {
+                        secStream.Position = cursor;
+                        material.ShaderVariant = "default";
+                        material.BaseColorTextureName = ReadSizedString(secReader);
+                        material.AlphaMode = ReadSizedString(secReader);
+                        material.AlphaCutoff = secReader.ReadSingle();
+                        material.DoubleSided = secReader.ReadByte() != 0;
+                    }
                     materialsByName[material.Name] = material;
                     continue;
                 }
@@ -102,6 +126,56 @@ namespace VsfClone.Xav2.Runtime
                         materialsByName[name] = material;
                     }
                     material.ShaderParamsJson = paramsJson;
+                    continue;
+                }
+
+                if (type == SectionSkinPayload)
+                {
+                    var skin = new Xav2SkinPayload
+                    {
+                        MeshName = ReadSizedString(secReader)
+                    };
+                    var boneCount = secReader.ReadUInt32();
+                    skin.BoneIndices = new int[boneCount];
+                    for (var i = 0; i < boneCount; i++)
+                    {
+                        skin.BoneIndices[i] = secReader.ReadInt32();
+                    }
+                    var bindPoseFloatCount = secReader.ReadUInt32();
+                    skin.BindPoses16xN = new float[bindPoseFloatCount];
+                    for (var i = 0; i < bindPoseFloatCount; i++)
+                    {
+                        skin.BindPoses16xN[i] = secReader.ReadSingle();
+                    }
+                    var blobSize = secReader.ReadUInt32();
+                    skin.SkinWeightBlob = secReader.ReadBytes((int)blobSize);
+                    payload.Skins.Add(skin);
+                    continue;
+                }
+
+                if (type == SectionBlendShapePayload)
+                {
+                    var blend = new Xav2BlendShapePayload
+                    {
+                        MeshName = ReadSizedString(secReader)
+                    };
+                    var frameCount = secReader.ReadUInt32();
+                    for (var i = 0; i < frameCount; i++)
+                    {
+                        var frame = new Xav2BlendShapeFramePayload
+                        {
+                            Name = ReadSizedString(secReader),
+                            Weight = secReader.ReadSingle()
+                        };
+                        var dvSize = secReader.ReadUInt32();
+                        frame.DeltaVertices = secReader.ReadBytes((int)dvSize);
+                        var dnSize = secReader.ReadUInt32();
+                        frame.DeltaNormals = secReader.ReadBytes((int)dnSize);
+                        var dtSize = secReader.ReadUInt32();
+                        frame.DeltaTangents = secReader.ReadBytes((int)dtSize);
+                        blend.Frames.Add(frame);
+                    }
+                    payload.BlendShapes.Add(blend);
                 }
             }
 

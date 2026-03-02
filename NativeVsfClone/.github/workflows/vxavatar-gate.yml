@@ -1,4 +1,4 @@
-name: vxavatar-gate
+name: vxavatar-vxa2-xav2-gate
 
 on:
   pull_request:

@@ -399,6 +399,11 @@ bool VsfAvatarLoader::CanLoadPath(const std::string& path) const {
     return ext == ".vsfavatar";
 }
 
+bool VsfAvatarLoader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
+    return head.size() >= 7U && head[0] == 'U' && head[1] == 'n' && head[2] == 'i' && head[3] == 't' &&
+           head[4] == 'y' && head[5] == 'F' && head[6] == 'S';
+}
+
 core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const {
     std::string mode = "sidecar";
     if (const char* env = std::getenv("VSF_PARSER_MODE")) {

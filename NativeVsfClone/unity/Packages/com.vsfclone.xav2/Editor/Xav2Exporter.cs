@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using UnityEngine;
 using VsfClone.Xav2.Runtime;
@@ -14,6 +13,19 @@ namespace VsfClone.Xav2.Editor
         private const ushort SectionMaterialOverride = 0x0003;
         private const ushort SectionMeshRenderPayload = 0x0011;
         private const ushort SectionMaterialShaderParams = 0x0012;
+        private const ushort SectionSkinPayload = 0x0013;
+        private const ushort SectionBlendShapePayload = 0x0014;
+
+        public static void Export(string outputPath, GameObject avatarRoot, Xav2ExportOptions options)
+        {
+            if (avatarRoot == null)
+            {
+                throw new ArgumentNullException(nameof(avatarRoot));
+            }
+            var extractor = new UniVrmAvatarExtractor();
+            var payload = extractor.Extract(avatarRoot, options ?? new Xav2ExportOptions());
+            Export(outputPath, payload, options ?? new Xav2ExportOptions());
+        }
 
         public static void Export(string outputPath, Xav2AvatarPayload payload, Xav2ExportOptions options)
         {
@@ -26,6 +38,7 @@ namespace VsfClone.Xav2.Editor
                 throw new ArgumentNullException(nameof(options));
             }
             ValidateShaderPolicy(payload, options);
+            EnsureManifestDefaults(payload, options);
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
             using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -51,6 +64,26 @@ namespace VsfClone.Xav2.Editor
                 WriteSection(bw, SectionMaterialOverride, BuildMaterialPayload(material));
                 WriteSection(bw, SectionMaterialShaderParams, BuildMaterialParamsPayload(material));
             }
+            foreach (var skin in payload.Skins)
+            {
+                WriteSection(bw, SectionSkinPayload, BuildSkinPayload(skin));
+            }
+            foreach (var blendShape in payload.BlendShapes)
+            {
+                WriteSection(bw, SectionBlendShapePayload, BuildBlendShapePayload(blendShape));
+            }
+        }
+
+        private static void EnsureManifestDefaults(Xav2AvatarPayload payload, Xav2ExportOptions options)
+        {
+            payload.Manifest.schemaVersion = payload.Manifest.schemaVersion == 0U ? 1U : payload.Manifest.schemaVersion;
+            if (string.IsNullOrWhiteSpace(payload.Manifest.exporterVersion))
+            {
+                payload.Manifest.exporterVersion = "0.2.0";
+            }
+            payload.Manifest.hasSkinning = payload.Skins.Count > 0;
+            payload.Manifest.hasBlendShapes = payload.BlendShapes.Count > 0;
+            payload.Manifest.strictShaderSet = new List<string>(options.StrictShaderSet ?? new List<string>());
         }
 
         private static void ValidateShaderPolicy(Xav2AvatarPayload payload, Xav2ExportOptions options)
@@ -62,7 +95,21 @@ namespace VsfClone.Xav2.Editor
             var allowed = new HashSet<string>(options.StrictShaderSet ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
             foreach (var mat in payload.Materials)
             {
-                if (allowed.Count > 0 && !allowed.Contains(mat.ShaderName))
+                if (allowed.Count == 0)
+                {
+                    continue;
+                }
+                var valid = false;
+                foreach (var token in allowed)
+                {
+                    if (!string.IsNullOrWhiteSpace(token) &&
+                        mat.ShaderName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        valid = true;
+                        break;
+                    }
+                }
+                if (!valid)
                 {
                     throw new InvalidOperationException($"Unsupported shader for strict export: {mat.ShaderName}");
                 }
@@ -102,6 +149,7 @@ namespace VsfClone.Xav2.Editor
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, material.Name);
             WriteSizedString(bw, material.ShaderName);
+            WriteSizedString(bw, string.IsNullOrEmpty(material.ShaderVariant) ? "default" : material.ShaderVariant);
             WriteSizedString(bw, material.BaseColorTextureName ?? string.Empty);
             WriteSizedString(bw, string.IsNullOrEmpty(material.AlphaMode) ? "OPAQUE" : material.AlphaMode);
             bw.Write(material.AlphaCutoff);
@@ -115,6 +163,46 @@ namespace VsfClone.Xav2.Editor
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, material.Name);
             WriteSizedString(bw, string.IsNullOrEmpty(material.ShaderParamsJson) ? "{}" : material.ShaderParamsJson);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildSkinPayload(Xav2SkinPayload skin)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, skin.MeshName);
+            bw.Write((uint)skin.BoneIndices.Length);
+            foreach (var bone in skin.BoneIndices)
+            {
+                bw.Write(bone);
+            }
+            bw.Write((uint)skin.BindPoses16xN.Length);
+            foreach (var value in skin.BindPoses16xN)
+            {
+                bw.Write(value);
+            }
+            bw.Write((uint)skin.SkinWeightBlob.Length);
+            bw.Write(skin.SkinWeightBlob);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildBlendShapePayload(Xav2BlendShapePayload blendShape)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, blendShape.MeshName);
+            bw.Write((uint)blendShape.Frames.Count);
+            foreach (var frame in blendShape.Frames)
+            {
+                WriteSizedString(bw, frame.Name);
+                bw.Write(frame.Weight);
+                bw.Write((uint)frame.DeltaVertices.Length);
+                bw.Write(frame.DeltaVertices);
+                bw.Write((uint)frame.DeltaNormals.Length);
+                bw.Write(frame.DeltaNormals);
+                bw.Write((uint)frame.DeltaTangents.Length);
+                bw.Write(frame.DeltaTangents);
+            }
             return ms.ToArray();
         }
 

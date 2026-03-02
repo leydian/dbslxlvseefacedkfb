@@ -774,6 +774,10 @@ bool VrmLoader::CanLoadPath(const std::string& path) const {
     return ext == ".vrm";
 }
 
+bool VrmLoader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
+    return head.size() >= 4U && head[0] == 'g' && head[1] == 'l' && head[2] == 'T' && head[3] == 'F';
+}
+
 core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     std::ifstream in(path, std::ios::binary);
     if (!in) {

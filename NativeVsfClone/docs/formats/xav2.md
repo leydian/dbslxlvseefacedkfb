@@ -26,6 +26,10 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 - `displayName`: string
 - `sourceExt`: string (example: `.vrm`)
 - `strictShaderSet`: string array
+- `schemaVersion`: uint (`1`)
+- `exporterVersion`: string
+- `hasSkinning`: bool
+- `hasBlendShapes`: bool
 
 ## TLV Section Header
 
@@ -43,6 +47,8 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `0x0003` Material override
 - `0x0011` Mesh render payload
 - `0x0012` Material shader params
+- `0x0013` Skin payload
+- `0x0014` BlendShape payload
 
 ### `0x0011` Mesh render payload
 
@@ -61,6 +67,8 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `name[name_len]`
 - `shader_len[2]`
 - `shader[shader_len]`
+- `shader_variant_len[2]`
+- `shader_variant[shader_variant_len]`
 - `base_color_texture_len[2]`
 - `base_color_texture_name[base_color_texture_len]`
 - `alpha_mode_len[2]`
@@ -76,6 +84,33 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `params_json[params_json_len]`
 
 `params_json` is a shader-specific payload (for example lilToon/Poiyomi parameter blocks).
+
+### `0x0013` Skin payload
+
+- `mesh_name_len[2]`
+- `mesh_name[mesh_name_len]`
+- `bone_count[4]`
+- `bone_indices[bone_count * 4]` (`int32`)
+- `bindpose_f32_count[4]`
+- `bindposes[bindpose_f32_count * 4]` (`float32`)
+- `skin_weight_blob_size[4]`
+- `skin_weight_blob[skin_weight_blob_size]`
+
+### `0x0014` BlendShape payload
+
+- `mesh_name_len[2]`
+- `mesh_name[mesh_name_len]`
+- `frame_count[4]`
+- repeated frame:
+  - `frame_name_len[2]`
+  - `frame_name[frame_name_len]`
+  - `weight[4]` (`float32`)
+  - `delta_vertices_size[4]`
+  - `delta_vertices[delta_vertices_size]`
+  - `delta_normals_size[4]`
+  - `delta_normals[delta_normals_size]`
+  - `delta_tangents_size[4]`
+  - `delta_tangents[delta_tangents_size]`
 
 ## Loader behavior in this repository
 

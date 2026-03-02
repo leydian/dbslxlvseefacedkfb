@@ -28,7 +28,7 @@ If `sidecar` mode fails to execute:
 
 ## What is implemented now
 
-- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vxa2`, `.xav2`, `.vsfavatar`).
+- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vxa2`, `.xav2`, `.vsfavatar`) and falls back to header signature detection when extension routing does not match.
 - `VsfAvatarLoader` reads UnityFS metadata and reports:
   - signature/version/player version/engine version
   - compression mode flags
@@ -163,8 +163,10 @@ Notes:
 - Target: Unity `2022.3 LTS` (Built-in RP)
 - Included:
   - runtime `.xav2` parser scaffold
-  - editor exporter scaffold with strict shader policy list:
+  - editor exporter path (`Scene AvatarRoot -> .xav2`) with strict shader policy list:
     - `lilToon`, `Poiyomi`, `potatoon`, `realtoon`
+  - skin/blendshape section support (`0x0013`, `0x0014`)
+  - menu entry: `Tools/VsfClone/XAV2/Export Selected AvatarRoot`
 
 ## VSFAvatar quality gate
 
@@ -241,7 +243,7 @@ Outputs:
   - probe report: `build/reports/vrm_probe_auto5.txt`
   - gate summary: `build/reports/vrm_gate_auto5.txt`
 
-## VXAvatar/VXA2 quality gate
+## VXAvatar/VXA2/XAV2 quality gate
 
 Run quick profile (fixed + synthetic):
 
@@ -265,6 +267,8 @@ Gate rules:
 - Gate D: required output fields must exist for each sample (`InputKind`, `InputTag`, `Format`, `Compat`, `ParserStage`, `PrimaryError`).
 - Gate E (full profile): `real-full` sample rows must remain parseable.
   - Optional strict mode: `-RequireRealFullSamples` to fail when no `real-full` rows are present.
+- Gate F: fixed `.xav2` sample must satisfy `Format=XAV2`, `ParserStage=runtime-ready`, and `Compat!=failed`.
+- Gate G: synthetic corrupted `.xav2` samples must classify as `XAV2_SCHEMA_INVALID|XAV2_SECTION_TRUNCATED`.
 
 Exit code:
 
@@ -276,7 +280,7 @@ Outputs:
 - probe report: `build/reports/vxavatar_probe_latest.txt`
 - gate summary: `build/reports/vxavatar_gate_summary.txt`
 - gate summary JSON: `build/reports/vxavatar_gate_summary.json`
-- synthetic inputs: `build/tmp_vx/demo_mvp_truncated.vxavatar`, `build/tmp_vx/demo_mvp_cd_mismatch.vxavatar`, `build/tmp_vx/demo_tlv_truncated.vxa2`
+- synthetic inputs: `build/tmp_vx/demo_mvp_truncated.vxavatar`, `build/tmp_vx/demo_mvp_cd_mismatch.vxavatar`, `build/tmp_vx/demo_tlv_truncated.vxa2`, `build/tmp_vx/demo_manifest_mismatch.xav2`, `build/tmp_vx/demo_tlv_truncated.xav2`
 
 CI:
 

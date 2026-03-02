@@ -270,6 +270,10 @@ bool Vxa2Loader::CanLoadPath(const std::string& path) const {
     return ext == ".vxa2";
 }
 
+bool Vxa2Loader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
+    return head.size() >= 4U && head[0] == 'V' && head[1] == 'X' && head[2] == 'A' && head[3] == '2';
+}
+
 core::Result<AvatarPackage> Vxa2Loader::Load(const std::string& path) const {
     std::vector<std::uint8_t> bytes;
     if (!ReadFileBytes(path, &bytes)) {

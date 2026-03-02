@@ -140,20 +140,25 @@ int main(int argc, char** argv) {
         warnings.push_back("W_BLOCK0_META: offset=" + std::to_string(p.block0_selected_offset) +
                            ", mode-source=" + p.block0_selected_mode_source);
     }
-    if (!p.object_table_parsed || mesh_count == 0U) {
+    if (!p.object_table_parsed) {
         missing_features.push_back("mesh/material object discovery");
+    } else if (mesh_count == 0U) {
+        missing_features.push_back("mesh object discovery");
     } else {
         missing_features.push_back("mesh/material payload extraction");
     }
 
     std::string compat_level = "partial";
-    if (p.object_table_parsed && mesh_count > 0U) {
+    if (p.probe_stage == "complete" && p.object_table_parsed) {
         compat_level = "full";
     }
     if (!p.metadata_parsed) {
         compat_level = "failed";
     }
-    const std::string primary_error_code = p.probe_primary_error.empty() ? "NONE" : p.probe_primary_error;
+    std::string primary_error_code = p.probe_primary_error.empty() ? "NONE" : p.probe_primary_error;
+    if (p.probe_stage == "complete" && p.object_table_parsed) {
+        primary_error_code = "NONE";
+    }
 
     std::cout << "{"
               << "\"status\":\"ok\","

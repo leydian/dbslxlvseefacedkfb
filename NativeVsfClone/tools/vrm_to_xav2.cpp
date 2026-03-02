@@ -83,6 +83,8 @@ std::string EscapeJson(std::string_view input) {
 
 std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg) {
     std::string out = "{";
+    out += "\"schemaVersion\":1,";
+    out += "\"exporterVersion\":\"0.2.0\",";
     out += "\"avatarId\":\"" + EscapeJson(fs::path(pkg.source_path).stem().string()) + "\",";
     out += "\"displayName\":\"" + EscapeJson(pkg.display_name) + "\",";
     out += "\"sourceExt\":\".vrm\",";
@@ -107,7 +109,8 @@ std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg) {
         }
         out += "\"" + EscapeJson(pkg.texture_payloads[i].name) + "\"";
     }
-    out += "],\"strictShaderSet\":[\"lilToon\",\"Poiyomi\",\"potatoon\",\"realtoon\"]}";
+    out += "],\"strictShaderSet\":[\"lilToon\",\"Poiyomi\",\"potatoon\",\"realtoon\"],";
+    out += "\"hasSkinning\":false,\"hasBlendShapes\":false}";
     return out;
 }
 
@@ -176,6 +179,7 @@ std::vector<std::uint8_t> BuildMaterialSection(const vsfclone::avatar::MaterialR
     };
     append_sized(mat.name);
     append_sized(mat.shader_name);
+    append_sized(mat.shader_variant.empty() ? "default" : mat.shader_variant);
     append_sized(mat.base_color_texture_name);
     append_sized(mat.alpha_mode.empty() ? "OPAQUE" : mat.alpha_mode);
     std::uint32_t bits = 0U;

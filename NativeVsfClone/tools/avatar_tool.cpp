@@ -15,6 +15,8 @@ const char* ToFormatName(NcAvatarFormatHint fmt) {
             return "VSFAvatar";
         case NC_AVATAR_FORMAT_VXA2:
             return "VXA2";
+        case NC_AVATAR_FORMAT_XAV2:
+            return "XAV2";
         default:
             return "Unknown";
     }

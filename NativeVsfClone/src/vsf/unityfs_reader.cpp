@@ -1458,24 +1458,53 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     bool attempted_candidate = false;
     SerializedFileSummary best {};
     struct CandidateRef {
-        std::size_t index = 0U;
+        std::uint64_t offset = 0U;
+        std::uint64_t window_size = 0U;
+        std::string label;
         std::int64_t score = 0;
     };
     std::vector<CandidateRef> candidates;
     candidates.reserve(metadata.nodes.size());
+    std::unordered_set<std::uint64_t> candidate_keys;
+    candidate_keys.reserve(metadata.nodes.size() * 2U + 64U);
+    auto AddCandidate = [&](std::uint64_t offset,
+                            std::uint64_t window_size,
+                            std::string label,
+                            std::int64_t score) {
+        if (offset >= stream.size()) {
+            return;
+        }
+        const auto remaining = static_cast<std::uint64_t>(stream.size()) - offset;
+        if (remaining < 256U) {
+            return;
+        }
+        window_size = std::min<std::uint64_t>(window_size, remaining);
+        if (window_size < 256U) {
+            return;
+        }
+        const std::uint64_t key = (offset << 20U) ^ window_size;
+        if (!candidate_keys.insert(key).second) {
+            return;
+        }
+        candidates.push_back({offset, window_size, std::move(label), score});
+    };
+
+    std::size_t named_candidates = 0U;
     for (std::size_t i = 0; i < metadata.nodes.size(); ++i) {
         const auto& node = metadata.nodes[i];
-        if (!(node.path.rfind("CAB-", 0U) == 0U || node.path.find(".assets") != std::string::npos)) {
+        if (node.size == 0U) {
             continue;
         }
-        if (node.size == 0U || node.offset + node.size > stream.size()) {
+        const bool cab_like = node.path.rfind("CAB-", 0U) == 0U;
+        const bool assets_like = node.path.find(".assets") != std::string::npos;
+        if (!cab_like && !assets_like) {
             continue;
         }
         std::int64_t score = 0;
-        if (node.path.rfind("CAB-", 0U) == 0U) {
+        if (cab_like) {
             score += 10;
         }
-        if (node.path.find(".assets") != std::string::npos) {
+        if (assets_like) {
             score += 8;
         }
         if (node.size >= 1024U) {
@@ -1484,10 +1513,96 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         if (node.size > (64U * 1024U * 1024U)) {
             score -= 4;
         }
-        candidates.push_back({i, score});
+        if (node.offset >= stream.size()) {
+            score -= 10;
+            continue;
+        }
+        const auto available = static_cast<std::uint64_t>(stream.size()) - node.offset;
+        if (available < node.size) {
+            score -= 5;
+        }
+        AddCandidate(
+            node.offset,
+            std::min<std::uint64_t>(node.size, available),
+            node.path.empty() ? ("node#" + std::to_string(i)) : node.path,
+            score);
+        ++named_candidates;
     }
+
+    // Fallback 1: if named candidates are unusable, try all nodes in the reconstructed stream.
+    if (candidates.empty()) {
+        for (std::size_t i = 0; i < metadata.nodes.size(); ++i) {
+            const auto& node = metadata.nodes[i];
+            if (node.size == 0U || node.offset >= stream.size()) {
+                continue;
+            }
+            const auto available = static_cast<std::uint64_t>(stream.size()) - node.offset;
+            std::int64_t score = 1;
+            if (node.size >= 1024U) {
+                score += 2;
+            }
+            if (!node.path.empty()) {
+                score += 1;
+            }
+            if (available < node.size) {
+                score -= 4;
+            }
+            AddCandidate(
+                node.offset,
+                std::min<std::uint64_t>(node.size, available),
+                node.path.empty() ? ("node#" + std::to_string(i)) : node.path,
+                score);
+        }
+    }
+
+    // Fallback 2: if node-based selection still finds nothing, scan for SerializedFile-like headers.
+    if (candidates.empty()) {
+        auto ReadU32BEAt = [&](std::size_t at) -> std::uint32_t {
+            return (static_cast<std::uint32_t>(stream[at]) << 24U) |
+                   (static_cast<std::uint32_t>(stream[at + 1U]) << 16U) |
+                   (static_cast<std::uint32_t>(stream[at + 2U]) << 8U) |
+                   static_cast<std::uint32_t>(stream[at + 3U]);
+        };
+        auto LooksLikeSerializedHeader = [&](std::size_t at) -> bool {
+            if (at + 20U > stream.size()) {
+                return false;
+            }
+            const auto metadata_size_be = ReadU32BEAt(at);
+            const auto version_be = ReadU32BEAt(at + 8U);
+            if (metadata_size_be == 0U || metadata_size_be > (64U * 1024U * 1024U)) {
+                return false;
+            }
+            if (version_be == 0U || version_be > 40U) {
+                return false;
+            }
+            const std::size_t header_size = version_be >= 22U ? 48U : 20U;
+            const auto needed = static_cast<std::uint64_t>(header_size) + metadata_size_be;
+            return static_cast<std::uint64_t>(stream.size()) - at >= needed;
+        };
+
+        const std::size_t scan_limit = std::min<std::size_t>(stream.size(), 16U * 1024U * 1024U);
+        std::size_t scan_hits = 0U;
+        for (std::size_t at = 0U; at + 64U <= scan_limit && scan_hits < 96U; at += 16U) {
+            if (!LooksLikeSerializedHeader(at)) {
+                continue;
+            }
+            AddCandidate(
+                static_cast<std::uint64_t>(at),
+                static_cast<std::uint64_t>(stream.size() - at),
+                "scan#" + std::to_string(at),
+                6);
+            ++scan_hits;
+        }
+    }
+
     std::sort(candidates.begin(), candidates.end(), [](const CandidateRef& a, const CandidateRef& b) {
-        return a.score > b.score;
+        if (a.score != b.score) {
+            return a.score > b.score;
+        }
+        if (a.window_size != b.window_size) {
+            return a.window_size > b.window_size;
+        }
+        return a.offset < b.offset;
     });
     probe.serialized_candidate_count = static_cast<std::uint32_t>(candidates.size());
     probe.serialized_attempt_count = 0U;
@@ -1523,22 +1638,26 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         }
         return score;
     };
-    const std::array<std::int64_t, 7U> node_offset_deltas = {0, 16, -16, 32, -32, 64, -64};
+    const std::array<std::int64_t, 11U> node_offset_deltas = {0, 16, -16, 32, -32, 64, -64, 128, -128, 256, -256};
     std::unordered_set<std::uint64_t> tried_ranges;
     tried_ranges.reserve(candidates.size() * node_offset_deltas.size());
 
     for (const auto& candidate : candidates) {
-        const auto& node = metadata.nodes[candidate.index];
         found_candidate = true;
         for (const auto delta : node_offset_deltas) {
-            if (delta < 0 && node.offset < static_cast<std::uint64_t>(-delta)) {
+            if (delta < 0 && candidate.offset < static_cast<std::uint64_t>(-delta)) {
                 continue;
             }
-            const auto adjusted_offset = static_cast<std::uint64_t>(static_cast<std::int64_t>(node.offset) + delta);
-            if (adjusted_offset + node.size > stream.size()) {
+            const auto adjusted_offset = static_cast<std::uint64_t>(static_cast<std::int64_t>(candidate.offset) + delta);
+            if (adjusted_offset >= stream.size()) {
                 continue;
             }
-            const std::uint64_t key = (adjusted_offset << 16U) ^ node.size;
+            const auto remaining = static_cast<std::uint64_t>(stream.size()) - adjusted_offset;
+            const auto window_size = std::min<std::uint64_t>(candidate.window_size, remaining);
+            if (window_size < 256U) {
+                continue;
+            }
+            const std::uint64_t key = (adjusted_offset << 16U) ^ window_size;
             if (!tried_ranges.insert(key).second) {
                 continue;
             }
@@ -1546,7 +1665,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
             attempted_candidate = true;
             ++probe.serialized_attempt_count;
             const auto begin = stream.begin() + static_cast<std::ptrdiff_t>(adjusted_offset);
-            const auto end = begin + static_cast<std::ptrdiff_t>(node.size);
+            const auto end = begin + static_cast<std::ptrdiff_t>(window_size);
             std::vector<unsigned char> file_bytes(begin, end);
             auto parsed = serialized.ParseObjectSummary(file_bytes);
             if (!parsed.ok) {
@@ -1555,7 +1674,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
                     best_failure_score = fail_score;
                     best_failure_error_code = parsed.error;
                     probe.serialized_best_candidate_path =
-                        node.path + "@offset=" + std::to_string(adjusted_offset);
+                        candidate.label + "@offset=" + std::to_string(adjusted_offset);
                 }
                 continue;
             }
@@ -1568,7 +1687,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
                 best = parsed.value;
                 probe.object_table_parsed = true;
                 probe.serialized_best_candidate_score = parsed_score;
-                probe.serialized_best_candidate_path = node.path + "@offset=" + std::to_string(adjusted_offset);
+                probe.serialized_best_candidate_path = candidate.label + "@offset=" + std::to_string(adjusted_offset);
             }
         }
     }
@@ -1578,7 +1697,9 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
             probe.serialized_parse_error_code = best_failure_error_code;
         } else if (probe.serialized_parse_error_code.empty()) {
             if (!found_candidate) {
-                probe.serialized_parse_error_code = "SF_NO_CANDIDATE_NODE";
+                probe.serialized_parse_error_code = named_candidates > 0U
+                                                        ? "SF_NO_CANDIDATE_WINDOW"
+                                                        : "SF_NO_CANDIDATE_NODE";
             } else if (!attempted_candidate) {
                 probe.serialized_parse_error_code = "SF_NO_VALID_OFFSET_WINDOW";
             } else {
@@ -1605,6 +1726,155 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     probe.skinned_mesh_renderer_count = best.skinned_mesh_renderer_count;
     probe.major_types_found = best.major_types_found;
     probe.probe_primary_error.clear();
+    return true;
+}
+
+bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std::string& error) {
+    const auto original_pos = in.tellg();
+    in.clear();
+    in.seekg(0, std::ios::end);
+    const auto file_size_stream = in.tellg();
+    if (file_size_stream <= 0) {
+        in.clear();
+        in.seekg(original_pos, std::ios::beg);
+        error = "raw serialized scan: failed to determine file size";
+        return false;
+    }
+    const auto file_size = static_cast<std::uint64_t>(file_size_stream);
+    const std::size_t max_read = 512U * 1024U * 1024U;
+    const std::size_t read_size = static_cast<std::size_t>(std::min<std::uint64_t>(file_size, max_read));
+    if (read_size < 64U) {
+        in.clear();
+        in.seekg(original_pos, std::ios::beg);
+        error = "raw serialized scan: file too small";
+        return false;
+    }
+
+    in.clear();
+    in.seekg(0, std::ios::beg);
+    std::vector<unsigned char> raw_bytes(read_size, 0U);
+    in.read(reinterpret_cast<char*>(raw_bytes.data()), static_cast<std::streamsize>(raw_bytes.size()));
+    const auto bytes_read = static_cast<std::size_t>(in.gcount());
+    raw_bytes.resize(bytes_read);
+    in.clear();
+    in.seekg(original_pos, std::ios::beg);
+    if (raw_bytes.size() < 64U) {
+        error = "raw serialized scan: failed to read enough bytes";
+        return false;
+    }
+
+    auto ReadU32BEAt = [&](std::size_t at) -> std::uint32_t {
+        return (static_cast<std::uint32_t>(raw_bytes[at]) << 24U) |
+               (static_cast<std::uint32_t>(raw_bytes[at + 1U]) << 16U) |
+               (static_cast<std::uint32_t>(raw_bytes[at + 2U]) << 8U) |
+               static_cast<std::uint32_t>(raw_bytes[at + 3U]);
+    };
+    auto LooksLikeSerializedHeader = [&](std::size_t at, std::uint32_t* out_metadata_size, std::uint32_t* out_version) -> bool {
+        if (at + 20U > raw_bytes.size() || out_metadata_size == nullptr || out_version == nullptr) {
+            return false;
+        }
+        const auto metadata_size = ReadU32BEAt(at);
+        const auto version = ReadU32BEAt(at + 8U);
+        if (metadata_size == 0U || metadata_size > (64U * 1024U * 1024U)) {
+            return false;
+        }
+        if (version == 0U || version > 40U) {
+            return false;
+        }
+        const std::size_t header_size = version >= 22U ? 48U : 20U;
+        if (at + header_size + metadata_size > raw_bytes.size()) {
+            return false;
+        }
+        *out_metadata_size = metadata_size;
+        *out_version = version;
+        return true;
+    };
+    auto CountMajorTypeGroups = [](const SerializedFileSummary& summary) -> std::int32_t {
+        std::int32_t groups = 0;
+        if (summary.game_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.mesh_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.material_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.texture_object_count > 0U) {
+            ++groups;
+        }
+        if (summary.skinned_mesh_renderer_count > 0U) {
+            ++groups;
+        }
+        return groups;
+    };
+
+    SerializedFileReader serialized;
+    bool success = false;
+    std::uint32_t best_objects = 0U;
+    std::int32_t best_groups = std::numeric_limits<std::int32_t>::min();
+    std::size_t attempts = 0U;
+    std::size_t candidates = 0U;
+    std::string best_error;
+    SerializedFileSummary best {};
+    std::size_t best_offset = 0U;
+    const std::size_t scan_limit = raw_bytes.size();
+    for (std::size_t at = 0U; at + 64U <= scan_limit && candidates < 4096U; at += 8U) {
+        std::uint32_t metadata_size = 0U;
+        std::uint32_t version = 0U;
+        if (!LooksLikeSerializedHeader(at, &metadata_size, &version)) {
+            continue;
+        }
+        ++candidates;
+        ++attempts;
+        const std::size_t header_size = version >= 22U ? 48U : 20U;
+        const std::size_t needed_size = header_size + static_cast<std::size_t>(metadata_size);
+        std::vector<unsigned char> candidate_bytes(
+            raw_bytes.begin() + static_cast<std::ptrdiff_t>(at),
+            raw_bytes.begin() + static_cast<std::ptrdiff_t>(at + needed_size));
+        auto parsed = serialized.ParseObjectSummary(candidate_bytes);
+        if (!parsed.ok) {
+            best_error = parsed.error;
+            continue;
+        }
+        const auto groups = CountMajorTypeGroups(parsed.value);
+        if (!success ||
+            parsed.value.object_count > best_objects ||
+            (parsed.value.object_count == best_objects && groups > best_groups)) {
+            success = true;
+            best = parsed.value;
+            best_objects = parsed.value.object_count;
+            best_groups = groups;
+            best_offset = at;
+        }
+    }
+
+    probe.serialized_candidate_count = std::max(probe.serialized_candidate_count, static_cast<std::uint32_t>(candidates));
+    probe.serialized_attempt_count += static_cast<std::uint32_t>(attempts);
+
+    if (!success) {
+        if (best_error.empty()) {
+            error = "raw serialized scan: no valid serialized header candidates";
+        } else {
+            error = "raw serialized scan: " + best_error;
+        }
+        return false;
+    }
+
+    probe.object_table_parsed = true;
+    probe.object_count = best.object_count;
+    probe.mesh_object_count = best.mesh_object_count;
+    probe.material_object_count = best.material_object_count;
+    probe.texture_object_count = best.texture_object_count;
+    probe.game_object_count = best.game_object_count;
+    probe.skinned_mesh_renderer_count = best.skinned_mesh_renderer_count;
+    probe.major_types_found = best.major_types_found;
+    probe.serialized_best_candidate_score =
+        std::max(probe.serialized_best_candidate_score, static_cast<std::int32_t>(best.object_count * 4U + best_groups * 15));
+    probe.serialized_best_candidate_path = "raw-scan@offset=" + std::to_string(best_offset);
+    probe.serialized_parse_error_code.clear();
+    probe.probe_primary_error.clear();
+    error.clear();
     return true;
 }
 
@@ -1765,15 +2035,27 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
             probe.probe_stage = "serialized";
             std::string serialized_err;
             if (!ParseSerializedFromNodes(metadata, stream, probe, serialized_err)) {
-                if (!probe.metadata_error.empty()) {
-                    probe.metadata_error += "; ";
-                }
-                probe.metadata_error += serialized_err;
-                probe.probe_stage = "failed-serialized";
-                if (probe.probe_primary_error.empty()) {
-                    probe.probe_primary_error = probe.serialized_parse_error_code.empty()
-                                                    ? "SF_PARSE_FAILED"
-                                                    : probe.serialized_parse_error_code;
+                std::string raw_scan_err;
+                if (TryParseSerializedFromRawBundle(in, probe, raw_scan_err)) {
+                    probe.probe_stage = "complete";
+                    if (!probe.metadata_error.empty()) {
+                        probe.metadata_error += "; ";
+                    }
+                    probe.metadata_error += "raw serialized fallback engaged";
+                } else {
+                    if (!probe.metadata_error.empty()) {
+                        probe.metadata_error += "; ";
+                    }
+                    probe.metadata_error += serialized_err;
+                    if (!raw_scan_err.empty()) {
+                        probe.metadata_error += "; " + raw_scan_err;
+                    }
+                    probe.probe_stage = "failed-serialized";
+                    if (probe.probe_primary_error.empty()) {
+                        probe.probe_primary_error = probe.serialized_parse_error_code.empty()
+                                                        ? "SF_PARSE_FAILED"
+                                                        : probe.serialized_parse_error_code;
+                    }
                 }
             } else {
                 probe.probe_stage = "complete";
@@ -1788,17 +2070,32 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
             probe.probe_stage = "serialized";
             std::string serialized_err;
             if (!ParseSerializedFromNodes(metadata, stream, probe, serialized_err)) {
-                if (!serialized_err.empty()) {
+                std::string raw_scan_err;
+                if (TryParseSerializedFromRawBundle(in, probe, raw_scan_err)) {
+                    probe.probe_stage = "complete";
                     if (!probe.metadata_error.empty()) {
                         probe.metadata_error += "; ";
                     }
-                    probe.metadata_error += "partial serialized probe: " + serialized_err;
-                }
-                probe.probe_stage = "failed-serialized";
-                if (!probe.reconstruction_failure_summary_code.empty()) {
-                    probe.probe_primary_error = probe.reconstruction_failure_summary_code;
-                } else if (probe.probe_primary_error.empty()) {
-                    probe.probe_primary_error = "RECONSTRUCT_FAILED";
+                    probe.metadata_error += "raw serialized fallback engaged";
+                } else {
+                    if (!serialized_err.empty()) {
+                        if (!probe.metadata_error.empty()) {
+                            probe.metadata_error += "; ";
+                        }
+                        probe.metadata_error += "partial serialized probe: " + serialized_err;
+                    }
+                    if (!raw_scan_err.empty()) {
+                        if (!probe.metadata_error.empty()) {
+                            probe.metadata_error += "; ";
+                        }
+                        probe.metadata_error += raw_scan_err;
+                    }
+                    probe.probe_stage = "failed-serialized";
+                    if (!probe.reconstruction_failure_summary_code.empty()) {
+                        probe.probe_primary_error = probe.reconstruction_failure_summary_code;
+                    } else if (probe.probe_primary_error.empty()) {
+                        probe.probe_primary_error = "RECONSTRUCT_FAILED";
+                    }
                 }
             } else {
                 probe.probe_stage = "complete";
