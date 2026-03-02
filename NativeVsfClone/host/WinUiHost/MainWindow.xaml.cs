@@ -7,6 +7,7 @@ using HostCore;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
@@ -18,6 +19,7 @@ public sealed partial class MainWindow : Window
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private readonly DispatcherQueueTimer _timer;
     private readonly DispatcherQueueTimer _resizeTimer;
+    private bool _isSyncingRenderUi;
     private readonly IntPtr _hwnd;
 
     public MainWindow()
@@ -37,6 +39,7 @@ public sealed partial class MainWindow : Window
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
+        SyncRenderControlsFromState();
         RefreshAll();
     }
 
@@ -66,6 +69,7 @@ public sealed partial class MainWindow : Window
         {
             var metrics = GetRenderMetrics();
             _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
+            _ = PushRenderUiState();
             var attachRc = _controller.AttachWindow(_hwnd, metrics.pixelWidth, metrics.pixelHeight);
             if (attachRc == NcResultCode.Ok)
             {
@@ -195,6 +199,45 @@ public sealed partial class MainWindow : Window
         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
     }
 
+    private void BroadcastMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+
+        _ = _controller.SetBroadcastMode(BroadcastModeCheckBox.IsChecked == true);
+        _ = PushRenderUiState();
+    }
+
+    private void FramingSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        FramingValueText.Text = FramingSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        _ = PushRenderUiState();
+    }
+
+    private void BackgroundPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        _ = PushRenderUiState();
+    }
+
+    private void DebugOverlay_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        _ = PushRenderUiState();
+    }
+
     private void RenderHost_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         var state = _controller.SessionState;
@@ -269,6 +312,7 @@ public sealed partial class MainWindow : Window
         AvatarStatusText.Text = $"Avatar: {(hasAvatar ? "Loaded" : "None")}";
         RenderStatusText.Text = $"Render: {session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
         OutputStatusText.Text = $"Outputs: Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
+        SyncRenderControlsFromState();
     }
 
     private void UpdateDiagnostics()
@@ -284,12 +328,15 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
+        runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, bg={snapshot.Render.BackgroundPreset}, debug={snapshot.Render.ShowDebugOverlay}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         RuntimeDiagnosticsTextBox.Text = runtimeSb.ToString();
+        DebugOverlayPanel.Visibility = snapshot.Render.ShowDebugOverlay ? Visibility.Visible : Visibility.Collapsed;
+        DebugOverlayText.Text = runtimeSb.ToString();
 
         var avatarSb = new StringBuilder();
         avatarSb.AppendLine($"AvatarHandle: {snapshot.Session.ActiveAvatarHandle?.ToString() ?? "none"}");
@@ -379,5 +426,40 @@ public sealed partial class MainWindow : Window
         var pixelWidth = (uint)Math.Max(1.0, Math.Round(logicalWidth * dpiScaleX));
         var pixelHeight = (uint)Math.Max(1.0, Math.Round(logicalHeight * dpiScaleY));
         return (pixelWidth, pixelHeight, logicalWidth, logicalHeight, dpiScaleX, dpiScaleY);
+    }
+
+    private void SyncRenderControlsFromState()
+    {
+        var render = _controller.RenderState;
+        _isSyncingRenderUi = true;
+        BroadcastModeCheckBox.IsChecked = render.BroadcastMode;
+        FramingSlider.Value = render.FramingTarget;
+        FramingValueText.Text = render.FramingTarget.ToString("F2", CultureInfo.InvariantCulture);
+        BackgroundPresetComboBox.SelectedIndex = render.BackgroundPreset switch
+        {
+            BackgroundPreset.NeutralGray => 1,
+            BackgroundPreset.GreenScreen => 2,
+            _ => 0,
+        };
+        DebugOverlayCheckBox.IsChecked = render.ShowDebugOverlay;
+        _isSyncingRenderUi = false;
+    }
+
+    private NcResultCode PushRenderUiState()
+    {
+        var preset = BackgroundPresetComboBox.SelectedIndex switch
+        {
+            1 => BackgroundPreset.NeutralGray,
+            2 => BackgroundPreset.GreenScreen,
+            _ => BackgroundPreset.DarkBlue,
+        };
+        var state = _controller.RenderState with
+        {
+            BroadcastMode = BroadcastModeCheckBox.IsChecked == true,
+            FramingTarget = (float)FramingSlider.Value,
+            BackgroundPreset = preset,
+            ShowDebugOverlay = DebugOverlayCheckBox.IsChecked == true,
+        };
+        return _controller.ApplyRenderUiState(state);
     }
 }

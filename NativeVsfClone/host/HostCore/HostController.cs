@@ -322,6 +322,112 @@ public sealed class HostController
         DiagnosticsUpdated?.Invoke(this, EventArgs.Empty);
     }
 
+    private NcResultCode ApplyRenderOptionsInternal(string source)
+    {
+        if (!_sessionService.IsInitialized)
+        {
+            return NcResultCode.Ok;
+        }
+
+        var rc = NativeCoreInterop.nc_set_render_quality_options(ref _renderOptions);
+        TrackResult(source, rc);
+        if (rc != NcResultCode.Ok)
+        {
+            return rc;
+        }
+
+        if (NativeCoreInterop.nc_get_render_quality_options(out var applied) == NcResultCode.Ok)
+        {
+            _renderOptions = applied;
+            RenderState = BuildRenderUiState(
+                applied,
+                RenderState.BroadcastMode,
+                InferBackgroundPreset(applied),
+                RenderState.MirrorMode);
+        }
+
+        return rc;
+    }
+
+    private static NcCameraMode ToNativeCameraMode(RenderCameraMode mode)
+    {
+        return mode switch
+        {
+            RenderCameraMode.AutoFitFull => NcCameraMode.AutoFitFull,
+            RenderCameraMode.Manual => NcCameraMode.Manual,
+            _ => NcCameraMode.AutoFitBust,
+        };
+    }
+
+    private static RenderCameraMode ToRenderCameraMode(NcCameraMode mode)
+    {
+        return mode switch
+        {
+            NcCameraMode.AutoFitFull => RenderCameraMode.AutoFitFull,
+            NcCameraMode.Manual => RenderCameraMode.Manual,
+            _ => RenderCameraMode.AutoFitBust,
+        };
+    }
+
+    private static void ApplyBackgroundPreset(ref NcRenderQualityOptions options, BackgroundPreset preset)
+    {
+        switch (preset)
+        {
+            case BackgroundPreset.NeutralGray:
+                options.BackgroundR = 0.55f;
+                options.BackgroundG = 0.55f;
+                options.BackgroundB = 0.55f;
+                options.BackgroundA = 1.0f;
+                break;
+            case BackgroundPreset.GreenScreen:
+                options.BackgroundR = 0.0f;
+                options.BackgroundG = 1.0f;
+                options.BackgroundB = 0.0f;
+                options.BackgroundA = 1.0f;
+                break;
+            default:
+                options.BackgroundR = 0.08f;
+                options.BackgroundG = 0.12f;
+                options.BackgroundB = 0.18f;
+                options.BackgroundA = 1.0f;
+                break;
+        }
+    }
+
+    private static BackgroundPreset InferBackgroundPreset(NcRenderQualityOptions options)
+    {
+        if (Math.Abs(options.BackgroundG - 1.0f) < 0.001f &&
+            Math.Abs(options.BackgroundR) < 0.001f &&
+            Math.Abs(options.BackgroundB) < 0.001f)
+        {
+            return BackgroundPreset.GreenScreen;
+        }
+        if (Math.Abs(options.BackgroundR - options.BackgroundG) < 0.02f &&
+            Math.Abs(options.BackgroundG - options.BackgroundB) < 0.02f)
+        {
+            return BackgroundPreset.NeutralGray;
+        }
+        return BackgroundPreset.DarkBlue;
+    }
+
+    private static RenderUiState BuildRenderUiState(
+        NcRenderQualityOptions options,
+        bool broadcastMode,
+        BackgroundPreset preset,
+        bool mirrorMode)
+    {
+        return new RenderUiState(
+            broadcastMode,
+            ToRenderCameraMode(options.CameraMode),
+            options.FramingTarget,
+            options.Headroom,
+            options.YawDeg,
+            options.FovDeg,
+            preset,
+            options.ShowDebugOverlay != 0U,
+            mirrorMode);
+    }
+
     private void TrackResult(string source, NcResultCode rc)
     {
         if (rc == NcResultCode.Ok)

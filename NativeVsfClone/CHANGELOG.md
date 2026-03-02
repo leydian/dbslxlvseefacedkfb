@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host render UI controls sync finalization + benchmark plan
+
+### Summary
+
+Finalized host-side render option controls for both WPF and WinUI by wiring the same Render UI state flow through HostCore and documenting KPI-based follow-up validation scenarios.
+
+### Changed
+
+- `host/HostCore/HostController.cs`
+  - Added render option apply/sync helpers:
+    - native apply/readback (`nc_set_render_quality_options` / `nc_get_render_quality_options`)
+    - camera mode mapping between host and native enums
+    - background preset encode/decode helpers
+    - centralized `RenderUiState` reconstruction from applied native options
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added Render control panel:
+    - `Broadcast Mode`
+    - `Framing` slider with live numeric label
+    - `Background` preset combo (`Dark Blue`, `Neutral Gray`, `Green Screen`)
+    - `Show Debug Overlay`
+  - Added bidirectional UI/state sync and reentry guard (`_isSyncingRenderUi`).
+  - Added on-canvas debug overlay panel that mirrors runtime diagnostics content.
+
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added the same Render control surface and debug overlay behavior as WPF.
+  - Added matching UI/state sync flow and event-driven apply path.
+
+- `docs/reports/ui_render_benchmark_plan_2026-03-02.md` (new)
+  - Added KPI checklist and runtime acceptance scenarios for framing, visibility, overlay hygiene, background presets, DPI stability, and frame-time regression checks.
+
+- `docs/INDEX.md`
+  - Added index entry for the render benchmark plan report.
+
+### Verified
+
+- Build success:
+  - `dotnet build host/HostCore/HostCore.csproj -c Release`
+- Environment-constrained build result:
+  - WPF/WinUI project restore failed in current environment due to `NU1301` (`api.nuget.org:443` unreachable), so host-app compilation must be revalidated in network-enabled CI/local setup.
+
 ## 2026-03-02 - NativeCore render quality API contract sync
 
 ### Summary

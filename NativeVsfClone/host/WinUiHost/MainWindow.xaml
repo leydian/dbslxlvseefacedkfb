@@ -17,6 +17,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
@@ -50,7 +51,37 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="2" BorderThickness="1" BorderBrush="#2D3A48" Padding="8">
+            <Border Grid.Row="2" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+                <StackPanel>
+                    <TextBlock Text="Render" FontSize="16"/>
+                    <CheckBox x:Name="BroadcastModeCheckBox" Content="Broadcast Mode" IsChecked="True" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,8,0,8"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Framing" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="FramingSlider" Minimum="0.35" Maximum="0.95" Value="0.72" StepFrequency="0.01" ValueChanged="FramingSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="FramingValueText" Text="0.72" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Background" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" x:Name="BackgroundPresetComboBox" SelectionChanged="BackgroundPreset_SelectionChanged">
+                            <x:String>Dark Blue</x:String>
+                            <x:String>Neutral Gray</x:String>
+                            <x:String>Green Screen</x:String>
+                        </ComboBox>
+                    </Grid>
+                    <CheckBox x:Name="DebugOverlayCheckBox" Content="Show Debug Overlay" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="3" BorderThickness="1" BorderBrush="#2D3A48" Padding="8">
                 <StackPanel>
                     <TextBlock Text="Outputs" FontSize="16"/>
                     <TextBlock Text="Spout" Margin="0,4,0,4"/>
@@ -97,7 +128,12 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" x:Name="RenderHost" Background="#111722" BorderBrush="#304050" BorderThickness="1"/>
+            <Grid Grid.Row="0">
+                <Border x:Name="RenderHost" Background="#111722" BorderBrush="#304050" BorderThickness="1"/>
+                <Border x:Name="DebugOverlayPanel" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="8" Background="#EEFFFFFF" BorderBrush="#203040" BorderThickness="1">
+                    <TextBlock x:Name="DebugOverlayText" FontFamily="Consolas" FontSize="11" Foreground="#1A2530" TextWrapping="Wrap" Width="420"/>
+                </Border>
+            </Grid>
 
             <Grid Grid.Row="1" Margin="0,8,0,8">
                 <Grid.RowDefinitions>
