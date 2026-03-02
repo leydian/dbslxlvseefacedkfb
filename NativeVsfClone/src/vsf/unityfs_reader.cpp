@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -392,11 +393,23 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
     out.blocks.reserve(block_count);
     for (std::uint32_t i = 0; i < block_count; ++i) {
         BlockInfo b;
+        std::uint16_t flags_be = 0;
         if (!ReadU32BE(metadata, at, b.uncompressed_size) ||
             !ReadU32BE(metadata, at, b.compressed_size) ||
-            !ReadU16BE(metadata, at, b.flags)) {
+            !ReadU16BE(metadata, at, flags_be)) {
             error = "failed to read block info table";
             return false;
+        }
+        // Some bundles encode block flags with opposite byte order in metadata.
+        // Prefer the variant that yields a plausible compression mode.
+        const auto flags_le = static_cast<std::uint16_t>((flags_be >> 8U) | (flags_be << 8U));
+        const auto mode_be = static_cast<std::uint8_t>(flags_be & 0x3FU);
+        const auto mode_le = static_cast<std::uint8_t>(flags_le & 0x3FU);
+        if ((mode_be == 0U && (mode_le == 2U || mode_le == 3U)) ||
+            (mode_be > 3U && mode_le <= 3U)) {
+            b.flags = flags_le;
+        } else {
+            b.flags = flags_be;
         }
         out.blocks.push_back(b);
     }
@@ -626,13 +639,118 @@ bool ParseMetadataBlock(std::ifstream& in,
     return true;
 }
 
+bool HasLikelySerializedNode(const ParsedMetadata& metadata) {
+    for (const auto& n : metadata.nodes) {
+        if (n.path.rfind("CAB-", 0U) == 0U || n.path.find(".assets") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ValidateParsedMetadataCandidate(const UnityFsHeader& header,
+                                     const ParsedMetadata& metadata,
+                                     std::uint64_t after_header,
+                                     std::uint64_t metadata_offset,
+                                     bool metadata_at_end,
+                                     std::string& error) {
+    if (metadata.blocks.empty() || metadata.nodes.empty()) {
+        error = "metadata has empty block/node table";
+        return false;
+    }
+
+    std::uint64_t total_compressed = 0U;
+    std::uint64_t total_uncompressed = 0U;
+    for (const auto& b : metadata.blocks) {
+        total_compressed += b.compressed_size;
+        total_uncompressed += b.uncompressed_size;
+        if (b.compressed_size == 0U || b.uncompressed_size == 0U) {
+            error = "metadata block has zero size";
+            return false;
+        }
+    }
+
+    if (total_compressed == 0U || total_uncompressed == 0U) {
+        error = "invalid metadata block totals";
+        return false;
+    }
+
+    const std::uint64_t data_start_after_metadata = metadata_offset + header.compressed_metadata_size;
+    if (data_start_after_metadata > header.bundle_file_size) {
+        error = "metadata range exceeds bundle size";
+        return false;
+    }
+    if (total_compressed > header.bundle_file_size) {
+        error = "metadata compressed total exceeds bundle size";
+        return false;
+    }
+
+    for (const auto& n : metadata.nodes) {
+        if (n.size == 0U) {
+            continue;
+        }
+        if (n.offset + n.size > total_uncompressed) {
+            error = "node range exceeds reconstructed stream size";
+            return false;
+        }
+    }
+
+    if (!HasLikelySerializedNode(metadata)) {
+        error = "no likely serialized node path in metadata";
+        return false;
+    }
+
+    return true;
+}
+
+std::int64_t ScoreMetadataCandidate(const UnityFsHeader& header,
+                                    const ParsedMetadata& metadata,
+                                    std::uint64_t after_header,
+                                    std::uint64_t metadata_offset,
+                                    std::uint64_t primary_metadata_offset,
+                                    bool metadata_at_end) {
+    std::int64_t score = 0;
+
+    if (metadata_offset >= after_header) {
+        score += 2;
+    }
+    if (HasLikelySerializedNode(metadata)) {
+        score += 10;
+    }
+    if (metadata_at_end && metadata_offset > header.bundle_file_size / 2U) {
+        score += 8;
+    }
+
+    const auto diff = (metadata_offset > primary_metadata_offset)
+                          ? (metadata_offset - primary_metadata_offset)
+                          : (primary_metadata_offset - metadata_offset);
+    if (diff < 4U * 1024U) {
+        score += 8;
+    } else if (diff < 64U * 1024U) {
+        score += 4;
+    } else if (diff < 1024U * 1024U) {
+        score += 2;
+    }
+
+    if (!metadata.nodes.empty() && metadata.nodes.front().path.rfind("CAB-", 0U) == 0U) {
+        score += 4;
+    }
+    return score;
+}
+
 bool ReconstructStreamAt(std::ifstream& in,
                          const UnityFsHeader& header,
                          const ParsedMetadata& metadata,
                          std::uint64_t data_start,
+                         UnityFsProbe& probe,
                          std::vector<unsigned char>& out_stream,
                          std::string& error) {
     out_stream.clear();
+    probe.failed_block_index = 0U;
+    probe.failed_block_mode = 0U;
+    probe.failed_block_expected_size = 0U;
+    probe.failed_block_error_code.clear();
+    std::uint32_t block_index = 0U;
     std::uint64_t offset = data_start;
     for (const auto& b : metadata.blocks) {
         in.clear();
@@ -645,6 +763,10 @@ bool ReconstructStreamAt(std::ifstream& in,
         std::vector<unsigned char> compressed(b.compressed_size, 0U);
         in.read(reinterpret_cast<char*>(compressed.data()), static_cast<std::streamsize>(compressed.size()));
         if (static_cast<std::size_t>(in.gcount()) != compressed.size()) {
+            probe.failed_block_index = block_index;
+            probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
+            probe.failed_block_expected_size = b.uncompressed_size;
+            probe.failed_block_error_code = "DATA_BLOCK_READ_FAILED";
             error = "failed to read data block";
             return false;
         }
@@ -665,10 +787,27 @@ bool ReconstructStreamAt(std::ifstream& in,
             last_err = local_err;
         }
         if (!decoded_ok) {
-            error = "data block decode failed: " + last_err;
+            probe.failed_block_index = block_index;
+            probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
+            probe.failed_block_expected_size = b.uncompressed_size;
+            if (last_err.find("raw block size mismatch") != std::string::npos) {
+                probe.failed_block_error_code = "DATA_BLOCK_RAW_MISMATCH";
+            } else if (last_err.find("LZ4 decompression failed") != std::string::npos) {
+                probe.failed_block_error_code = "DATA_BLOCK_LZ4_FAIL";
+            } else if (last_err.find("LZMA decompression is not implemented") != std::string::npos) {
+                probe.failed_block_error_code = "DATA_BLOCK_LZMA_UNIMPLEMENTED";
+            } else {
+                probe.failed_block_error_code = "DATA_BLOCK_DECODE_FAILED";
+            }
+            error = "data block decode failed: block=" + std::to_string(block_index) +
+                    ", mode=" + std::to_string(probe.failed_block_mode) +
+                    ", expected=" + std::to_string(b.uncompressed_size) +
+                    ", code=" + probe.failed_block_error_code +
+                    ", detail=" + last_err;
             return false;
         }
         out_stream.insert(out_stream.end(), decoded.begin(), decoded.end());
+        ++block_index;
     }
     return true;
 }
@@ -722,7 +861,7 @@ bool TryReconstructDataStream(std::ifstream& in,
     for (const auto start : candidates) {
         std::vector<unsigned char> reconstructed;
         std::string local_err;
-        if (!ReconstructStreamAt(in, header, metadata, start, reconstructed, local_err)) {
+        if (!ReconstructStreamAt(in, header, metadata, start, probe, reconstructed, local_err)) {
             attempt_errors += "start=" + std::to_string(start) + ": " + local_err + "; ";
             continue;
         }
@@ -833,18 +972,55 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
         probe.header.bundle_file_size,
         probe.header.compressed_metadata_size);
     metadata_candidates = MergeOffsets(metadata_candidates, header_candidates);
+    UnityFsProbe best_probe = probe;
+    ParsedMetadata best_metadata;
+    std::int64_t best_score = std::numeric_limits<std::int64_t>::min();
+    bool best_found = false;
     std::size_t err_count = 0U;
     for (const auto candidate : metadata_candidates) {
         std::string candidate_err;
-        if (ParseMetadataBlock(in, candidate, probe.header, probe, metadata, candidate_err)) {
-            metadata_ok = true;
-            meta_err.clear();
-            break;
+        UnityFsProbe probe_candidate = probe;
+        ParsedMetadata metadata_candidate;
+        if (ParseMetadataBlock(in, candidate, probe.header, probe_candidate, metadata_candidate, candidate_err)) {
+            std::string validate_err;
+            if (ValidateParsedMetadataCandidate(
+                    probe.header,
+                    metadata_candidate,
+                    after_header,
+                    candidate,
+                    metadata_at_end,
+                    validate_err)) {
+                const auto score = ScoreMetadataCandidate(
+                    probe.header,
+                    metadata_candidate,
+                    after_header,
+                    candidate,
+                    primary_metadata_offset,
+                    metadata_at_end);
+                if (!best_found || score > best_score) {
+                    best_probe = std::move(probe_candidate);
+                    best_metadata = std::move(metadata_candidate);
+                    best_score = score;
+                    best_found = true;
+                }
+                continue;
+            }
+            if (err_count < 8U) {
+                meta_err += "offset=" + std::to_string(candidate) + ": " + validate_err + "; ";
+            }
+            ++err_count;
+            continue;
         }
         if (err_count < 8U) {
             meta_err += "offset=" + std::to_string(candidate) + ": " + candidate_err + "; ";
         }
         ++err_count;
+    }
+    if (best_found) {
+        probe = std::move(best_probe);
+        metadata = std::move(best_metadata);
+        metadata_ok = true;
+        meta_err.clear();
     }
     if (!metadata_ok && err_count > 8U) {
         meta_err += "(+ " + std::to_string(err_count - 8U) + " more offsets)";
@@ -853,9 +1029,24 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
     if (!metadata_ok && !metadata_at_end) {
         const std::uint64_t aligned = (after_header + 15ULL) & ~15ULL;
         std::string aligned_err;
-        if (ParseMetadataBlock(in, aligned, probe.header, probe, metadata, aligned_err)) {
-            metadata_ok = true;
-            meta_err.clear();
+        UnityFsProbe probe_candidate = probe;
+        ParsedMetadata metadata_candidate;
+        if (ParseMetadataBlock(in, aligned, probe.header, probe_candidate, metadata_candidate, aligned_err)) {
+            std::string validate_err;
+            if (ValidateParsedMetadataCandidate(
+                    probe.header,
+                    metadata_candidate,
+                    after_header,
+                    aligned,
+                    metadata_at_end,
+                    validate_err)) {
+                probe = std::move(probe_candidate);
+                metadata = std::move(metadata_candidate);
+                metadata_ok = true;
+                meta_err.clear();
+            } else {
+                meta_err += "aligned-fallback=" + std::to_string(aligned) + ": " + validate_err + "; ";
+            }
         } else {
             meta_err += "aligned-fallback=" + std::to_string(aligned) + ": " + aligned_err + "; ";
         }

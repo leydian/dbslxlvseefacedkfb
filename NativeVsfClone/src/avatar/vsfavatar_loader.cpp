@@ -76,6 +76,14 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
         if (!probe.value.metadata_decode_error_code.empty()) {
             pkg.warnings.push_back("metadata decode code: " + probe.value.metadata_decode_error_code);
         }
+        if (!probe.value.failed_block_error_code.empty()) {
+            std::ostringstream block;
+            block << "data block diagnostic: index=" << probe.value.failed_block_index
+                  << ", mode=" << probe.value.failed_block_mode
+                  << ", expected=" << probe.value.failed_block_expected_size
+                  << ", code=" << probe.value.failed_block_error_code;
+            pkg.warnings.push_back(block.str());
+        }
     }
     if (probe.value.object_table_parsed) {
         std::ostringstream obj;

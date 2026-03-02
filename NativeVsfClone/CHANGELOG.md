@@ -2,6 +2,60 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar diagnostics hardening + NativeCore render-resource API extension
+
+### Summary
+
+Added stronger reconstruction diagnostics for `.vsfavatar` block decode failures and extended `nativecore` render API lifecycle for host-side wiring.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added block decode failure diagnostics:
+    - `failed_block_index`
+    - `failed_block_mode`
+    - `failed_block_expected_size`
+    - `failed_block_error_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added metadata candidate validation + scoring path to reduce fragile first-hit candidate selection.
+  - Added block failure error-code mapping:
+    - `DATA_BLOCK_READ_FAILED`
+    - `DATA_BLOCK_RAW_MISMATCH`
+    - `DATA_BLOCK_LZ4_FAIL`
+    - `DATA_BLOCK_LZMA_UNIMPLEMENTED`
+  - Added block-level failure context in reconstruction error text (`block`, `mode`, `expected`, `code`).
+  - Added heuristic byte-order handling for block flags to improve compression-mode plausibility.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added warning emission for block diagnostics (`data block diagnostic: ...`).
+
+- `include/vsfclone/nativecore/api.h`
+  - Extended `NcRenderContext` with D3D11 handles:
+    - `d3d11_device`
+    - `d3d11_device_context`
+    - `d3d11_rtv`
+  - Added render-resource lifecycle APIs:
+    - `nc_create_render_resources`
+    - `nc_destroy_render_resources`
+
+- `src/nativecore/native_core.cpp`
+  - Added per-avatar render-resource readiness tracking.
+  - Implemented lifecycle API stubs with handle validation.
+  - Updated `nc_render_frame` validation to require D3D11 context handles and at least one render-ready avatar.
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Added future-facing render payload containers:
+    - `mesh_payloads`
+    - `material_payloads`
+    - `texture_payloads`
+
+### Verified
+
+- `Release` build succeeded after API and parser updates.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`).
+- Current samples still load as `Compat: partial`, with clearer blocker details now visible in diagnostics (`mode=1`, large expected block sizes, read/decode failure).
+
 ## 2026-03-02 - VSFAvatar phase 2 kickoff (UnityFS metadata deep parse)
 
 ### Summary

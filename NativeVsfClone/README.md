@@ -83,6 +83,7 @@ This repository was upgraded from a loader-only scaffold to a first executable r
 - Lifecycle: `nc_initialize`, `nc_shutdown`
 - Avatar: `nc_load_avatar`, `nc_get_avatar_info`, `nc_unload_avatar`
 - Runtime hooks: `nc_set_tracking_frame`, `nc_render_frame`
+- Render resource lifecycle: `nc_create_render_resources`, `nc_destroy_render_resources`
 - Broadcast stubs: `nc_start_spout`, `nc_stop_spout`, `nc_start_osc`, `nc_stop_osc`
 - Diagnostics: `nc_get_last_error`
 
@@ -229,3 +230,56 @@ Validation outcome:
 - Metadata parse now succeeds on baseline samples (`decode strategy=prefix-0`, metadata offset discovered).
 - Pipeline advances to reconstruction stage consistently.
 - Current blocker has shifted to data-block decode mismatch (`raw block size mismatch` / read failure), which is now explicitly visible in diagnostics.
+
+## Recent implementation summary (2026-03-02, diagnostics hardening + render API extension)
+
+Implemented two focused updates:
+
+- VSFAvatar reconstruction diagnostics hardening:
+  - added block-level failure diagnostics (`failed_block_index/mode/expected/error_code`) to `UnityFsProbe`
+  - added metadata candidate validation + scoring to reduce fragile first-hit selection
+  - added explicit loader warnings for block diagnostics (`data block diagnostic: ...`)
+- NativeCore render API extension:
+  - `NcRenderContext` now includes D3D11 pointers (`d3d11_device`, `d3d11_device_context`, `d3d11_rtv`)
+  - added `nc_create_render_resources` and `nc_destroy_render_resources` for host-managed render lifecycle
+
+Current status after this pass:
+
+- Fixed sample set still reports `Compat: partial`, `Meshes: 0`.
+- Blocker is clearer: reconstruction currently fails at block 0 with `mode=1` and implausibly large expected uncompressed sizes on baseline samples, indicating remaining interpretation mismatch in block table/decode stage.
+
+### Detailed code-level update
+
+- UnityFS probe/diagnostics
+  - `include/vsfclone/vsf/unityfs_reader.h`
+    - added block failure fields (`failed_block_index`, `failed_block_mode`, `failed_block_expected_size`, `failed_block_error_code`)
+  - `src/vsf/unityfs_reader.cpp`
+    - metadata candidate path now validates parsed tables and scores candidates before selection
+    - reconstruction failure path now emits structured error codes for each block
+    - block flag byte-order heuristic added for mode plausibility checks
+- Loader warning behavior
+  - `src/avatar/vsfavatar_loader.cpp`
+    - emits explicit `data block diagnostic: ...` warnings so `avatar_tool`/`vsfclone_cli` show root-cause context directly
+- NativeCore C ABI extension for renderer wiring
+  - `include/vsfclone/nativecore/api.h`
+    - `NcRenderContext` extended with:
+      - `d3d11_device`
+      - `d3d11_device_context`
+      - `d3d11_rtv`
+    - new APIs:
+      - `nc_create_render_resources`
+      - `nc_destroy_render_resources`
+  - `src/nativecore/native_core.cpp`
+    - added per-avatar render-ready state tracking
+    - `nc_render_frame` now validates D3D11 pointers and render-ready avatar presence
+- Avatar package forward-compat payload slots
+  - `include/vsfclone/avatar/avatar_package.h`
+    - added `mesh_payloads`, `material_payloads`, `texture_payloads` containers for upcoming extraction stages
+
+### Quick verification commands
+
+```powershell
+cmake --build build --config Release
+powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_sample_report.ps1 -SampleDir ..\sample -OutputPath .\build\reports\vsfavatar_probe_latest.txt -UseFixedSet
+Get-Content .\build\reports\vsfavatar_probe_latest.txt
+```

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "vsfclone/avatar/avatar_loader_facade.h"
 #include "vsfclone/avatar/avatar_package.h"
@@ -23,6 +24,7 @@ struct CoreState {
     bool initialized = false;
     std::uint64_t next_avatar_handle = 1;
     std::unordered_map<std::uint64_t, AvatarPackage> avatars;
+    std::unordered_set<std::uint64_t> render_ready_avatars;
     avatar::AvatarLoaderFacade loader;
     stream::SpoutSenderStub spout;
     osc::OscEndpointStub osc;
@@ -143,6 +145,7 @@ NcResultCode nc_shutdown(void) {
     vsfclone::nativecore::g_state.spout.Stop();
     vsfclone::nativecore::g_state.osc.Close();
     vsfclone::nativecore::g_state.avatars.clear();
+    vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.initialized = false;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -183,6 +186,7 @@ NcResultCode nc_unload_avatar(NcAvatarHandle handle) {
         vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "unknown avatar handle", true);
         return NC_ERROR_INVALID_ARGUMENT;
     }
+    vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
     vsfclone::nativecore::g_state.avatars.erase(it);
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -222,6 +226,40 @@ NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame) {
     return NC_OK;
 }
 
+NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+
+    auto it = vsfclone::nativecore::g_state.avatars.find(handle);
+    if (it == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    vsfclone::nativecore::g_state.render_ready_avatars.insert(handle);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+
+    auto it = vsfclone::nativecore::g_state.avatars.find(handle);
+    if (it == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
 NcResultCode nc_render_frame(const NcRenderContext* ctx) {
     std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
     if (!vsfclone::nativecore::EnsureInitialized()) {
@@ -231,7 +269,19 @@ NcResultCode nc_render_frame(const NcRenderContext* ctx) {
         vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "render context/size is invalid", true);
         return NC_ERROR_INVALID_ARGUMENT;
     }
-    // Render backend is not wired yet; this keeps the frame API stable.
+    if (ctx->d3d11_device == nullptr || ctx->d3d11_device_context == nullptr || ctx->d3d11_rtv == nullptr) {
+        vsfclone::nativecore::SetError(
+            NC_ERROR_INVALID_ARGUMENT,
+            "render",
+            "d3d11_device/d3d11_device_context/d3d11_rtv must be non-null",
+            true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    if (vsfclone::nativecore::g_state.render_ready_avatars.empty()) {
+        vsfclone::nativecore::SetError(NC_ERROR_UNSUPPORTED, "render", "no avatar has render resources", true);
+        return NC_ERROR_UNSUPPORTED;
+    }
+    // Placeholder render loop gate: validates full context + resource lifecycle wiring.
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }

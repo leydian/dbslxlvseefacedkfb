@@ -51,6 +51,10 @@ struct UnityFsProbe {
     std::string metadata_decode_strategy;
     std::uint32_t metadata_decode_mode = 0;
     std::string metadata_decode_error_code;
+    std::uint32_t failed_block_index = 0;
+    std::uint32_t failed_block_mode = 0;
+    std::uint32_t failed_block_expected_size = 0;
+    std::string failed_block_error_code;
     std::string metadata_error;
 };
 

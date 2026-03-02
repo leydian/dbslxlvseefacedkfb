@@ -79,6 +79,9 @@ typedef struct NcTrackingFrame {
 
 typedef struct NcRenderContext {
     void* hwnd;
+    void* d3d11_device;
+    void* d3d11_device_context;
+    void* d3d11_rtv;
     uint32_t width;
     uint32_t height;
     float delta_time_seconds;
@@ -111,6 +114,8 @@ VSFCLONE_API NcResultCode nc_unload_avatar(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_get_avatar_info(NcAvatarHandle handle, NcAvatarInfo* out_info);
 
 VSFCLONE_API NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame);
+VSFCLONE_API NcResultCode nc_create_render_resources(NcAvatarHandle handle);
+VSFCLONE_API NcResultCode nc_destroy_render_resources(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_render_frame(const NcRenderContext* ctx);
 
 VSFCLONE_API NcResultCode nc_start_spout(const NcSpoutOptions* options);
