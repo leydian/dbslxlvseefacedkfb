@@ -1,0 +1,9 @@
+NativeVsfClone/build/
+NativeVsfClone/build_*/
+NativeVsfClone/host/.vs/
+**/.vs/
+**/bin/
+**/obj/
+NativeVsfClone/dist/
+sample/
+VSeeFace-v1.13.38c2/
