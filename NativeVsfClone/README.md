@@ -55,6 +55,8 @@ If `sidecar` mode fails to execute:
   - `docs/reports/ui_host_runtime_integration_2026-03-02.md`
 - Detailed operation-focused UI redesign report:
   - `docs/reports/ui_host_operation_redesign_2026-03-03.md`
+- Detailed auto-quality pass report:
+  - `docs/reports/ui_host_auto_quality_2026-03-03.md`
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
 - `vrm_to_xav2` converts `.vrm` to `.xav2` using runtime payload extraction.
 - `vsfavatar_sidecar` is built as an external parser process.
@@ -74,6 +76,11 @@ If `sidecar` mode fails to execute:
   - state-based button enable/disable to enforce valid operation order
   - structured diagnostics views (`Runtime`, `Avatar`, `Logs`)
   - persistent status strip (session/avatar/render/frame/output/last-error)
+- WPF/WinUI host render path now applies automatic quality safeguards:
+  - DPI-aware physical-pixel render target sizing
+  - resize debounce to reduce swapchain thrash during drag-resize
+  - automatic Spout output reconfiguration when render target size changes
+  - runtime auto-quality telemetry (`logical size`, `dpi scale`, `render target px`)
 
 ## What is not implemented yet
 

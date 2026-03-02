@@ -28,7 +28,7 @@ public sealed class HostController
         _renderLoopService = renderLoopService;
         _outputService = outputService;
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
-        Outputs = new OutputState(false, false, "VsfClone", 39539, "127.0.0.1:39540");
+        Outputs = new OutputState(false, false, "VsfClone", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
         LastSnapshot = BuildSnapshot();
     }
 
@@ -78,7 +78,7 @@ public sealed class HostController
 
         var rc = _sessionService.Shutdown();
         TrackResult("Shutdown", rc);
-        SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
+        SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
         PublishDiagnostics();
         StateChanged?.Invoke(this, EventArgs.Empty);
         return rc;
@@ -103,6 +103,10 @@ public sealed class HostController
 
         var rc = _renderLoopService.Resize(width, height);
         TrackResult("ResizeWindow", rc);
+        if (rc == NcResultCode.Ok && Outputs.SpoutActive)
+        {
+            AutoReconfigureSpout(width, height);
+        }
         RefreshState();
         return rc;
     }
@@ -136,6 +140,9 @@ public sealed class HostController
         {
             SpoutActive = rc == NcResultCode.Ok,
             SpoutChannelName = channelName,
+            SpoutWidthPx = width,
+            SpoutHeightPx = height,
+            SpoutFps = fps,
         };
         RefreshState();
         return rc;
@@ -198,7 +205,53 @@ public sealed class HostController
             _sessionService.IsInitialized,
             _windowAttached && _windowHandle != IntPtr.Zero,
             _sessionService.ActiveAvatarHandle,
-            SessionState.LastRenderRc);
+            SessionState.LastRenderRc,
+            SessionState.LogicalWidth,
+            SessionState.LogicalHeight,
+            SessionState.DpiScaleX,
+            SessionState.DpiScaleY,
+            SessionState.RenderWidthPx,
+            SessionState.RenderHeightPx);
+        PublishDiagnostics();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void UpdateRenderMetrics(
+        double logicalWidth,
+        double logicalHeight,
+        double dpiScaleX,
+        double dpiScaleY,
+        uint renderWidthPx,
+        uint renderHeightPx)
+    {
+        var normalizedLogicalWidth = Math.Max(1.0, logicalWidth);
+        var normalizedLogicalHeight = Math.Max(1.0, logicalHeight);
+        var normalizedDpiX = dpiScaleX > 0.0 ? dpiScaleX : 1.0;
+        var normalizedDpiY = dpiScaleY > 0.0 ? dpiScaleY : 1.0;
+        var normalizedRenderWidth = Math.Max(1U, renderWidthPx);
+        var normalizedRenderHeight = Math.Max(1U, renderHeightPx);
+
+        var changed =
+            Math.Abs(SessionState.LogicalWidth - normalizedLogicalWidth) > 0.01 ||
+            Math.Abs(SessionState.LogicalHeight - normalizedLogicalHeight) > 0.01 ||
+            Math.Abs(SessionState.DpiScaleX - normalizedDpiX) > 0.001 ||
+            Math.Abs(SessionState.DpiScaleY - normalizedDpiY) > 0.001 ||
+            SessionState.RenderWidthPx != normalizedRenderWidth ||
+            SessionState.RenderHeightPx != normalizedRenderHeight;
+        if (!changed)
+        {
+            return;
+        }
+
+        SessionState = SessionState with
+        {
+            LogicalWidth = normalizedLogicalWidth,
+            LogicalHeight = normalizedLogicalHeight,
+            DpiScaleX = normalizedDpiX,
+            DpiScaleY = normalizedDpiY,
+            RenderWidthPx = normalizedRenderWidth,
+            RenderHeightPx = normalizedRenderHeight,
+        };
         PublishDiagnostics();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -246,5 +299,44 @@ public sealed class HostController
         {
             ErrorRaised?.Invoke(this, entry);
         }
+    }
+
+    private void AutoReconfigureSpout(uint width, uint height)
+    {
+        if (!Outputs.SpoutActive)
+        {
+            return;
+        }
+        if (Outputs.SpoutWidthPx == width && Outputs.SpoutHeightPx == height)
+        {
+            return;
+        }
+
+        var stopRc = _outputService.StopSpout();
+        TrackResult("SpoutAutoStop", stopRc);
+        if (stopRc != NcResultCode.Ok)
+        {
+            return;
+        }
+
+        var fps = Outputs.SpoutFps > 0U ? Outputs.SpoutFps : 60U;
+        var channel = string.IsNullOrWhiteSpace(Outputs.SpoutChannelName) ? "VsfClone" : Outputs.SpoutChannelName;
+        var startRc = _outputService.StartSpout(width, height, fps, channel);
+        TrackResult("SpoutAutoStart", startRc);
+        Outputs = Outputs with
+        {
+            SpoutActive = startRc == NcResultCode.Ok,
+            SpoutWidthPx = width,
+            SpoutHeightPx = height,
+            SpoutFps = fps,
+            SpoutChannelName = channel,
+        };
+        AddLog(
+            new HostLogEntry(
+                DateTimeOffset.UtcNow,
+                "SpoutAutoReconfigure",
+                $"target={width}x{height} fps={fps}",
+                startRc),
+            false);
     }
 }

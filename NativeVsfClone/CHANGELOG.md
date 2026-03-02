@@ -2,6 +2,60 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host auto-quality pass (DPI-aware render sizing + resize debounce + Spout auto reconfigure)
+
+### Summary
+
+Addressed perceived blurriness/pixel-break artifacts in host preview by introducing DPI-aware physical-pixel render sizing and automatic runtime reconfiguration behavior.  
+Applied the same logic to both WPF and WinUI hosts without exposing manual quality toggles.
+
+### Changed
+
+- `host/HostCore/HostUiState.cs`
+  - Extended `HostSessionState` with render-metric fields:
+    - `LogicalWidth`
+    - `LogicalHeight`
+    - `DpiScaleX`
+    - `DpiScaleY`
+    - `RenderWidthPx`
+    - `RenderHeightPx`
+  - Extended `OutputState` with Spout runtime dimensions:
+    - `SpoutWidthPx`
+    - `SpoutHeightPx`
+    - `SpoutFps`
+
+- `host/HostCore/HostController.cs`
+  - Added `UpdateRenderMetrics(...)` to publish effective render sizing telemetry.
+  - `ResizeWindow(...)` now triggers auto Spout reconfiguration when active and target size changes.
+  - Added automatic Spout stop/start flow on render target resize:
+    - `SpoutAutoStop`
+    - `SpoutAutoStart`
+    - `SpoutAutoReconfigure` log entry
+  - Preserved existing interface surface while improving runtime behavior observability.
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added DPI-aware pixel-size computation using `VisualTreeHelper.GetDpi(RenderHost)`.
+  - Switched attach/resize/Spout-start dimensions from logical size to physical pixel size.
+  - Added resize debounce timer (`~90ms`) to reduce resize-thrash and avoid repeated swapchain churn.
+  - Runtime diagnostics now include auto-quality line:
+    - logical size
+    - DPI scale
+    - effective render target pixel size
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added DPI-aware pixel-size computation using `RenderHost.XamlRoot.RasterizationScale`.
+  - Switched attach/resize/Spout-start dimensions to physical pixel size parity with WPF.
+  - Added resize debounce timer (`~90ms`) with matching behavior.
+  - Runtime diagnostics now include the same auto-quality telemetry line.
+
+### Verified
+
+- Build success:
+  - `dotnet build host/WpfHost/WpfHost.csproj -c Release`
+- Build attempt failed in current environment/toolchain:
+  - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+  - failure point remains Windows App SDK XAML compiler (`XamlCompiler.exe` exit code 1).
+
 ## 2026-03-02 - XAV2 container path + VRM to XAV2 converter scaffold
 
 ### Summary

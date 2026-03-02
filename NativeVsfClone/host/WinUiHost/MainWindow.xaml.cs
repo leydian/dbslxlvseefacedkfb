@@ -17,6 +17,7 @@ public sealed partial class MainWindow : Window
     private readonly HostController _controller = new();
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private readonly DispatcherQueueTimer _timer;
+    private readonly DispatcherQueueTimer _resizeTimer;
     private readonly IntPtr _hwnd;
 
     public MainWindow()
@@ -26,6 +27,10 @@ public sealed partial class MainWindow : Window
         _timer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(16.0);
         _timer.Tick += Timer_Tick;
+        _resizeTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _resizeTimer.Interval = TimeSpan.FromMilliseconds(90.0);
+        _resizeTimer.IsRepeating = false;
+        _resizeTimer.Tick += ResizeTimer_Tick;
         Closed += MainWindow_Closed;
         RenderHost.SizeChanged += RenderHost_SizeChanged;
 
@@ -38,6 +43,7 @@ public sealed partial class MainWindow : Window
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         _timer.Stop();
+        _resizeTimer.Stop();
         _ = _controller.Shutdown();
     }
 
@@ -58,9 +64,9 @@ public sealed partial class MainWindow : Window
         var initRc = _controller.Initialize();
         if (initRc == NcResultCode.Ok)
         {
-            var width = (uint)Math.Max(1.0, RenderHost.ActualWidth);
-            var height = (uint)Math.Max(1.0, RenderHost.ActualHeight);
-            var attachRc = _controller.AttachWindow(_hwnd, width, height);
+            var metrics = GetRenderMetrics();
+            _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
+            var attachRc = _controller.AttachWindow(_hwnd, metrics.pixelWidth, metrics.pixelHeight);
             if (attachRc == NcResultCode.Ok)
             {
                 _timer.Start();
@@ -129,8 +135,8 @@ public sealed partial class MainWindow : Window
             _ = _controller.StopSpout();
         }
 
-        var width = (uint)Math.Max(1.0, RenderHost.ActualWidth);
-        var height = (uint)Math.Max(1.0, RenderHost.ActualHeight);
+        var metrics = GetRenderMetrics();
+        _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
         var channel = SpoutChannelTextBox.Text.Trim();
         if (string.IsNullOrEmpty(channel))
         {
@@ -138,7 +144,7 @@ public sealed partial class MainWindow : Window
             SpoutChannelTextBox.Text = channel;
         }
 
-        _ = _controller.StartSpout(width, height, 60, channel);
+        _ = _controller.StartSpout(metrics.pixelWidth, metrics.pixelHeight, 60, channel);
     }
 
     private async void StopSpout_Click(object sender, RoutedEventArgs e)
@@ -194,12 +200,13 @@ public sealed partial class MainWindow : Window
         var state = _controller.SessionState;
         if (!state.IsInitialized || !state.IsWindowAttached)
         {
+            UpdateRenderMetricsFromHost();
             return;
         }
 
-        var width = (uint)Math.Max(1.0, RenderHost.ActualWidth);
-        var height = (uint)Math.Max(1.0, RenderHost.ActualHeight);
-        _ = _controller.ResizeWindow(width, height);
+        UpdateRenderMetricsFromHost();
+        _resizeTimer.Stop();
+        _resizeTimer.Start();
     }
 
     private void Timer_Tick(DispatcherQueueTimer sender, object args)
@@ -214,6 +221,19 @@ public sealed partial class MainWindow : Window
         _ = _controller.Tick((float)elapsed.TotalSeconds);
     }
 
+    private void ResizeTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        var state = _controller.SessionState;
+        if (!state.IsInitialized || !state.IsWindowAttached)
+        {
+            return;
+        }
+
+        var metrics = GetRenderMetrics();
+        _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
+        _ = _controller.ResizeWindow(metrics.pixelWidth, metrics.pixelHeight);
+    }
+
     private void Controller_StateChanged(object? sender, EventArgs e) => RefreshAll();
     private void Controller_DiagnosticsUpdated(object? sender, EventArgs e) => RefreshAll();
 
@@ -224,6 +244,7 @@ public sealed partial class MainWindow : Window
 
     private void RefreshAll()
     {
+        UpdateRenderMetricsFromHost();
         UpdateUiState();
         UpdateDiagnostics();
     }
@@ -246,7 +267,7 @@ public sealed partial class MainWindow : Window
 
         SessionStatusText.Text = $"Session: {(session.IsInitialized ? "Initialized" : "Stopped")}";
         AvatarStatusText.Text = $"Avatar: {(hasAvatar ? "Loaded" : "None")}";
-        RenderStatusText.Text = $"Render: {session.LastRenderRc}";
+        RenderStatusText.Text = $"Render: {session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
         OutputStatusText.Text = $"Outputs: Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
     }
 
@@ -262,6 +283,7 @@ public sealed partial class MainWindow : Window
         var runtimeSb = new StringBuilder();
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
+        runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
@@ -339,5 +361,23 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Xaml.XamlRoot? GetXamlRoot()
     {
         return Content is FrameworkElement element ? element.XamlRoot : null;
+    }
+
+    private void UpdateRenderMetricsFromHost()
+    {
+        var metrics = GetRenderMetrics();
+        _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
+    }
+
+    private (uint pixelWidth, uint pixelHeight, double logicalWidth, double logicalHeight, double dpiScaleX, double dpiScaleY) GetRenderMetrics()
+    {
+        var logicalWidth = Math.Max(1.0, RenderHost.ActualWidth);
+        var logicalHeight = Math.Max(1.0, RenderHost.ActualHeight);
+        var scale = RenderHost.XamlRoot?.RasterizationScale ?? 1.0;
+        var dpiScaleX = scale > 0.0 ? scale : 1.0;
+        var dpiScaleY = dpiScaleX;
+        var pixelWidth = (uint)Math.Max(1.0, Math.Round(logicalWidth * dpiScaleX));
+        var pixelHeight = (uint)Math.Max(1.0, Math.Round(logicalHeight * dpiScaleY));
+        return (pixelWidth, pixelHeight, logicalWidth, logicalHeight, dpiScaleX, dpiScaleY);
     }
 }
