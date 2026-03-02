@@ -208,3 +208,24 @@ Current status after this iteration:
 - Build remains stable.
 - Fixed sample report execution is stable.
 - Current sample baseline still reports `META_DECODE_FAILED`, so object table extraction remains blocked.
+
+## Recent implementation summary (2026-03-02, phase 2 metadata candidate/refinement pass)
+
+Implemented a focused refinement pass to move failure downstream from metadata decode to data-block reconstruction:
+
+- `UnityFsReader` metadata candidate logic updated:
+  - metadata offset candidates are now merged from both primary offset and header-adjacent offset roots
+  - tail-window aligned scanning is included for metadata-at-end ambiguity
+- metadata decode strategy attempts expanded:
+  - prefix brute-force path (`prefix-0` through `prefix-32`)
+  - existing whole/hash-prefix/raw-direct strategies kept as fallbacks
+- reconstruction stage wiring corrected:
+  - reconstruction now uses the actual parsed metadata offset (`probe.metadata_offset`)
+  - reconstruction start candidates now include `metadata_offset + compressed_metadata_size`
+  - candidate offsets are deduplicated before decode attempts
+
+Validation outcome:
+
+- Metadata parse now succeeds on baseline samples (`decode strategy=prefix-0`, metadata offset discovered).
+- Pipeline advances to reconstruction stage consistently.
+- Current blocker has shifted to data-block decode mismatch (`raw block size mismatch` / read failure), which is now explicitly visible in diagnostics.

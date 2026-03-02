@@ -192,6 +192,40 @@ Expanded metadata decode instrumentation and probing strategies to better isolat
 - Despite broader probing and fallback paths, metadata decode for current `.vsfavatar` samples still fails in the in-house decoder path.
 - This continues to block `object_table_parsed` on baseline samples.
 
+## 2026-03-02 - VSFAvatar phase 2 metadata candidate refinement
+
+### Summary
+
+Refined metadata offset selection and reconstruction candidate wiring so sample bundles progress past metadata decode into reconstruction diagnostics.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - merged metadata candidate sets from:
+    - primary metadata offset root
+    - header-adjacent offset root
+  - added aligned tail-window metadata scanning in candidate generation
+  - expanded metadata decode prefix attempts (`prefix-0..32`)
+  - fixed reconstruction call to use actual parsed metadata offset (`probe.metadata_offset`)
+  - added reconstruction candidates based on parsed metadata location:
+    - `metadata_offset + compressed_metadata_size`
+    - aligned variant
+  - deduplicated reconstruction candidates before attempts
+
+- `README.md`
+  - added phase-2 refinement summary and updated blocker state
+
+### Verified
+
+- Release build succeeded after refinement.
+- Fixed sample report regenerated successfully.
+- Baseline samples now consistently reach metadata parse stage and fail at reconstruction stage with explicit errors.
+
+### Current blocker
+
+- Data block reconstruction still fails (`raw block size mismatch` / read failure) on baseline samples.
+- `object_table_parsed` remains blocked until block decode interpretation is corrected.
+
 ## 2026-03-02 - NativeCore foundation + avatar pipeline extension
 
 ### Summary

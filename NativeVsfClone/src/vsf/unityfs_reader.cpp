@@ -493,6 +493,13 @@ std::vector<std::uint64_t> BuildMetadataOffsetCandidates(std::uint64_t primary_o
     return std::vector<std::uint64_t>(unique.begin(), unique.end());
 }
 
+std::vector<std::uint64_t> MergeOffsets(const std::vector<std::uint64_t>& a, const std::vector<std::uint64_t>& b) {
+    std::set<std::uint64_t> s;
+    s.insert(a.begin(), a.end());
+    s.insert(b.begin(), b.end());
+    return std::vector<std::uint64_t>(s.begin(), s.end());
+}
+
 bool ParseMetadataBlock(std::ifstream& in,
                         std::uint64_t metadata_offset,
                         const UnityFsHeader& header,
@@ -555,32 +562,38 @@ bool ParseMetadataBlock(std::ifstream& in,
         }
     }
 
-    // Attempt 2: first 16 bytes are raw hash prefix, tail is compressed.
+    // Attempt 2: raw prefix + compressed tail. Try multiple prefix sizes.
     if (!probe.metadata_parsed) {
-        constexpr std::size_t kHashPrefix = 16U;
-        if (header.uncompressed_metadata_size >= kHashPrefix &&
-            header.compressed_metadata_size >= kHashPrefix) {
+        const std::array<std::size_t, 9> prefixes {0U, 4U, 8U, 12U, 16U, 20U, 24U, 28U, 32U};
+        for (const auto prefix : prefixes) {
+            if (probe.metadata_parsed) {
+                break;
+            }
+            if (header.uncompressed_metadata_size < prefix || header.compressed_metadata_size < prefix) {
+                continue;
+            }
             std::vector<unsigned char> tail_src(
-                compressed.begin() + static_cast<std::ptrdiff_t>(kHashPrefix),
+                compressed.begin() + static_cast<std::ptrdiff_t>(prefix),
                 compressed.end());
             for (const auto m : mode_candidates) {
                 std::vector<unsigned char> tail_decoded;
                 std::string dec_err;
                 if (DecompressByMode(
                         tail_src,
-                        static_cast<std::size_t>(header.uncompressed_metadata_size - kHashPrefix),
+                        static_cast<std::size_t>(header.uncompressed_metadata_size - prefix),
                         m,
                         tail_decoded,
                         dec_err)) {
                     std::vector<unsigned char> decoded;
                     decoded.reserve(header.uncompressed_metadata_size);
-                    decoded.insert(decoded.end(), compressed.begin(), compressed.begin() + static_cast<std::ptrdiff_t>(kHashPrefix));
+                    decoded.insert(decoded.end(), compressed.begin(), compressed.begin() + static_cast<std::ptrdiff_t>(prefix));
                     decoded.insert(decoded.end(), tail_decoded.begin(), tail_decoded.end());
-                    if (TryDecoded(decoded, "hash-prefix", m)) {
+                    const std::string label = "prefix-" + std::to_string(prefix);
+                    if (TryDecoded(decoded, label.c_str(), m)) {
                         break;
                     }
                 } else {
-                    errs += "hash-prefix(mode=" + std::to_string(m) + "): " + dec_err + "; ";
+                    errs += "prefix-" + std::to_string(prefix) + "(mode=" + std::to_string(m) + "): " + dec_err + "; ";
                 }
             }
         }
@@ -683,17 +696,26 @@ bool TryReconstructDataStream(std::ifstream& in,
         total_compressed += b.compressed_size;
     }
 
-    std::vector<std::uint64_t> candidates;
-    candidates.push_back(after_header);
-    candidates.push_back((after_header + 15ULL) & ~15ULL);
-    candidates.push_back(after_header + header.compressed_metadata_size);
-    candidates.push_back(((after_header + header.compressed_metadata_size) + 15ULL) & ~15ULL);
+    std::set<std::uint64_t> candidate_set;
+    const auto add_candidate = [&](std::uint64_t v) {
+        if (v < header.bundle_file_size) {
+            candidate_set.insert(v);
+        }
+    };
+
+    add_candidate(after_header);
+    add_candidate((after_header + 15ULL) & ~15ULL);
+    add_candidate(after_header + header.compressed_metadata_size);
+    add_candidate(((after_header + header.compressed_metadata_size) + 15ULL) & ~15ULL);
+    add_candidate(metadata_offset + header.compressed_metadata_size);
+    add_candidate(((metadata_offset + header.compressed_metadata_size) + 15ULL) & ~15ULL);
     if (metadata_at_end) {
         if (metadata_offset >= total_compressed) {
-            candidates.push_back(metadata_offset - total_compressed);
-            candidates.push_back((metadata_offset - total_compressed) & ~15ULL);
+            add_candidate(metadata_offset - total_compressed);
+            add_candidate((metadata_offset - total_compressed) & ~15ULL);
         }
     }
+    std::vector<std::uint64_t> candidates(candidate_set.begin(), candidate_set.end());
 
     std::string attempt_errors;
     probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
@@ -801,10 +823,16 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
     ParsedMetadata metadata;
     std::string meta_err;
     bool metadata_ok = false;
-    const auto metadata_candidates = BuildMetadataOffsetCandidates(
+    auto metadata_candidates = BuildMetadataOffsetCandidates(
         primary_metadata_offset,
         probe.header.bundle_file_size,
         probe.header.compressed_metadata_size);
+    // Always include header-adjacent candidates because sample bundles may diverge from flag semantics.
+    const auto header_candidates = BuildMetadataOffsetCandidates(
+        after_header,
+        probe.header.bundle_file_size,
+        probe.header.compressed_metadata_size);
+    metadata_candidates = MergeOffsets(metadata_candidates, header_candidates);
     std::size_t err_count = 0U;
     for (const auto candidate : metadata_candidates) {
         std::string candidate_err;
@@ -842,7 +870,7 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
                 probe.header,
                 metadata,
                 after_header,
-                primary_metadata_offset,
+                probe.metadata_offset > 0U ? probe.metadata_offset : primary_metadata_offset,
                 metadata_at_end,
                 probe,
                 stream,
