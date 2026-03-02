@@ -24,10 +24,36 @@ public sealed record OutputState(
     ushort OscBindPort,
     string OscPublishAddress);
 
+public enum RenderCameraMode
+{
+    AutoFitFull = 0,
+    AutoFitBust = 1,
+    Manual = 2,
+}
+
+public enum BackgroundPreset
+{
+    DarkBlue = 0,
+    NeutralGray = 1,
+    GreenScreen = 2,
+}
+
+public sealed record RenderUiState(
+    bool BroadcastMode,
+    RenderCameraMode CameraMode,
+    float FramingTarget,
+    float Headroom,
+    float YawDeg,
+    float FovDeg,
+    BackgroundPreset BackgroundPreset,
+    bool ShowDebugOverlay,
+    bool MirrorMode);
+
 public sealed record DiagnosticsSnapshot(
     DateTimeOffset TimestampUtc,
     HostSessionState Session,
     OutputState Outputs,
+    RenderUiState Render,
     DiagnosticsModel Runtime,
     NcAvatarInfo? AvatarInfo,
     NcResultCode LastRenderRc);

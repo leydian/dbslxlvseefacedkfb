@@ -1813,6 +1813,34 @@ NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time_seconds) {
 #endif
 }
 
+NcResultCode nc_set_render_quality_options(const NcRenderQualityOptions* options) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (options == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "options must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::SanitizeRenderQualityOptions(*options);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_options == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "out_options must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    *out_options = vsfclone::nativecore::SanitizeRenderQualityOptions(vsfclone::nativecore::g_state.render_quality);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
 NcResultCode nc_start_spout(const NcSpoutOptions* options) {
     std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
     if (!vsfclone::nativecore::EnsureInitialized()) {
