@@ -2,6 +2,30 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - NativeCore render quality API contract sync
+
+### Summary
+
+Exposed render quality controls in the public native C header so the ABI now matches existing runtime capabilities.
+
+### Changed
+
+- `include/vsfclone/nativecore/api.h`
+  - Added public enum:
+    - `NcCameraMode`
+      - `NC_CAMERA_MODE_AUTO_FIT_FULL`
+      - `NC_CAMERA_MODE_AUTO_FIT_BUST`
+      - `NC_CAMERA_MODE_MANUAL`
+  - Added public options struct:
+    - `NcRenderQualityOptions`
+      - framing/camera/background/overlay controls
+  - Added API declarations:
+    - `nc_set_render_quality_options`
+    - `nc_get_render_quality_options`
+
+- `docs/reports/nativecore_render_quality_api_sync_2026-03-02.md` (new)
+  - Added detailed contract sync notes and compatibility impact summary.
+
 ## 2026-03-03 - XAV2 payload expansion + signature dispatch fallback + VSFAvatar probe hardening
 
 ### Summary
