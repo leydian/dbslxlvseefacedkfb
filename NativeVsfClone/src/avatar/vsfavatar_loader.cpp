@@ -478,6 +478,12 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     if (!recon_summary.empty()) {
         pkg.warnings.push_back("W_RECON_SUMMARY: " + recon_summary);
     }
+    const auto block0_hypothesis = GetJsonString(output, "selected_block0_hypothesis");
+    if (!block0_hypothesis.empty()) {
+        const auto block0_attempt_count = GetJsonU32(output, "block0_attempt_count");
+        pkg.warnings.push_back("W_BLOCK0: hypothesis=" + block0_hypothesis +
+                               ", attempts=" + std::to_string(block0_attempt_count));
+    }
     const auto warning_items = GetJsonStringArray(output, "warnings");
     for (const auto& w : warning_items) {
         pkg.warnings.push_back(w);
@@ -537,6 +543,10 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
         }
         if (!probe.value.selected_reconstruction_layout.empty()) {
             meta << ", recon layout=" << probe.value.selected_reconstruction_layout;
+        }
+        if (!probe.value.selected_block0_hypothesis.empty()) {
+            meta << ", block0 hypothesis=" << probe.value.selected_block0_hypothesis
+                 << ", block0 attempts=" << probe.value.block0_attempt_count;
         }
         if (!probe.value.reconstruction_failure_summary_code.empty()) {
             meta << ", recon summary code=" << probe.value.reconstruction_failure_summary_code;

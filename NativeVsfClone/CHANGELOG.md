@@ -50,6 +50,52 @@ Refined VSFAvatar diagnostics into explicit probe stages and primary-error codes
 - Sidecar direct execution now returns compact schema-v3 diagnostics with truncation-safe warning payloads.
 - Baseline samples remain `Compat: partial`, `Meshes: 0`; primary blocker is still `DATA_BLOCK_READ_FAILED` on block 0.
 
+## 2026-03-03 - VSFAvatar block-0 hypothesis instrumentation pass
+
+### Summary
+
+Implemented a block-0 focused reconstruction hypothesis pass and surfaced its outcomes through sidecar/report diagnostics.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added block-0 diagnostics:
+    - `selected_block0_hypothesis`
+    - `block0_attempt_count`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Extended block decode variants for block-0:
+    - `orig-trim16`
+    - `orig-trim32`
+    - `orig-clamp-range`
+  - Added block-0 attempt counting and selected-hypothesis capture.
+  - Preserved best-partial block-0 diagnostics when full reconstruction does not succeed.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added sidecar JSON fields:
+    - `selected_block0_hypothesis`
+    - `block0_attempt_count`
+  - Added warning line:
+    - `W_BLOCK0: hypothesis=..., attempts=...`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Mapped sidecar block-0 diagnostics into loader warnings (`W_BLOCK0`).
+  - Included block-0 hypothesis and attempt count in in-house `W_META` warning output.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added sidecar invocation per sample and appended parsed JSON diagnostics:
+    - probe stage / primary error / block layout / offset family / block0 hypothesis / block0 attempts
+
+### Verified
+
+- `Release` build succeeded after instrumentation changes.
+- Fixed-set report regenerated:
+  - `build/reports/vsfavatar_probe_latest_block0_hypothesis.txt`
+- Baseline remains blocked at reconstruction:
+  - `Compat: partial`, `Meshes: 0`
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - `SidecarBlock0Hypothesis=swap-size-flags` (current dominant failed hypothesis path)
+
 ## 2026-03-02 - VSFAvatar parser pivot: sidecar-first loading path
 
 ### Summary

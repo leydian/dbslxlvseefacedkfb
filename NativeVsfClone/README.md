@@ -110,6 +110,9 @@ Sidecar diagnostics semantics (schema v3):
 - `selected_offset_family`:
   - indicates which reconstruction offset candidate family won (or best-partial family on failure)
   - examples: `tail-packed`, `window-after-header`
+- `selected_block0_hypothesis` / `block0_attempt_count`:
+  - records which block-0 hypothesis variant was selected (or last/best-partial failed hypothesis)
+  - reports how many block-0 hypothesis attempts were executed
 - `reconstruction_summary`:
   - dominant failure class aggregated across reconstruction attempts
   - currently converges to `DATA_BLOCK_READ_FAILED` on fixed baseline samples
@@ -139,6 +142,23 @@ Latest behavior notes (2026-03-03):
 - Result did not change yet for fixed baseline:
   - all 4 samples still end at `Compat: partial`, `Meshes: 0`
   - dominant blocker still `DATA_BLOCK_READ_FAILED` at block 0
+
+Latest behavior notes (2026-03-03, block-0 hypothesis pass):
+
+- Added block-0 focused decode hypotheses in the reconstruction stage:
+  - `orig-trim16`, `orig-trim32`, `orig-clamp-range` (alongside existing size/flag swap variants)
+- Added block-0 observability fields:
+  - `selected_block0_hypothesis`
+  - `block0_attempt_count`
+- Sample report script now appends sidecar diagnostics per sample:
+  - `SidecarProbeStage`
+  - `SidecarPrimaryError`
+  - `SidecarBlockLayout`
+  - `SidecarOffsetFamily`
+  - `SidecarBlock0Hypothesis`
+  - `SidecarBlock0Attempts`
+- Fixed baseline remains blocked after this pass:
+  - all 4 fixed samples still report `failed-reconstruction`, `DATA_BLOCK_READ_FAILED`, `Meshes: 0`
 
 ## Repository layout
 

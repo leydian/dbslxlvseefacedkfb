@@ -996,6 +996,8 @@ bool ReconstructStreamAt(std::ifstream& in,
     probe.failed_block_expected_size = 0U;
     probe.failed_block_error_code.clear();
     probe.selected_reconstruction_layout.clear();
+    probe.selected_block0_hypothesis.clear();
+    probe.block0_attempt_count = 0U;
     std::uint32_t block_index = 0U;
     std::uint64_t offset = data_start;
     for (const auto& b : metadata.blocks) {
@@ -1007,12 +1009,26 @@ bool ReconstructStreamAt(std::ifstream& in,
             std::int32_t score = 0;
         };
         std::vector<BlockVariant> variants;
-        variants.reserve(4);
+        variants.reserve(8);
         const auto swapped_flags = static_cast<std::uint16_t>((b.flags >> 8U) | (b.flags << 8U));
         variants.push_back({b.uncompressed_size, b.compressed_size, b.flags, "orig", 0});
         variants.push_back({b.compressed_size, b.uncompressed_size, b.flags, "swap-size", -1});
         variants.push_back({b.uncompressed_size, b.compressed_size, swapped_flags, "swap-flags", -2});
         variants.push_back({b.compressed_size, b.uncompressed_size, swapped_flags, "swap-size-flags", -3});
+        if (block_index == 0U) {
+            if (b.compressed_size > 16U) {
+                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 16U), b.flags, "orig-trim16", 3});
+            }
+            if (b.compressed_size > 32U) {
+                variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(b.compressed_size - 32U), b.flags, "orig-trim32", 2});
+            }
+            if (offset < header.bundle_file_size) {
+                const auto remaining = header.bundle_file_size - offset;
+                if (remaining > 0U && remaining <= std::numeric_limits<std::uint32_t>::max()) {
+                    variants.push_back({b.uncompressed_size, static_cast<std::uint32_t>(remaining), b.flags, "orig-clamp-range", 1});
+                }
+            }
+        }
         std::stable_sort(variants.begin(), variants.end(), [](const BlockVariant& lhs, const BlockVariant& rhs) {
             return lhs.score > rhs.score;
         });
@@ -1025,6 +1041,9 @@ bool ReconstructStreamAt(std::ifstream& in,
         std::string chosen_variant;
         std::uint8_t chosen_mode = 0U;
         for (const auto& v : variants) {
+            if (block_index == 0U) {
+                ++probe.block0_attempt_count;
+            }
             if (v.compressed_size == 0U || v.uncompressed_size == 0U) {
                 continue;
             }
@@ -1061,6 +1080,9 @@ bool ReconstructStreamAt(std::ifstream& in,
             const auto header_mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
             const auto candidates = BuildModeCandidates(mode, header_mode);
             for (const auto m : candidates) {
+                if (block_index == 0U) {
+                    ++probe.block0_attempt_count;
+                }
                 std::string local_err;
                 if (DecompressByMode(compressed, v.uncompressed_size, m, decoded, local_err)) {
                     probe.failed_block_mode = static_cast<std::uint32_t>(mode);
@@ -1085,6 +1107,12 @@ bool ReconstructStreamAt(std::ifstream& in,
             probe.failed_block_mode = static_cast<std::uint32_t>(b.flags & 0x3FU);
             probe.failed_block_expected_size = b.uncompressed_size;
             probe.failed_block_error_code = ClassifyFailureCode(last_err);
+            if (block_index == 0U && probe.selected_block0_hypothesis.empty()) {
+                const auto at = last_err.find(':');
+                if (at != std::string::npos && at > 0U) {
+                    probe.selected_block0_hypothesis = last_err.substr(0U, at);
+                }
+            }
             error = "data block decode failed: block=" + std::to_string(block_index) +
                     ", mode=" + std::to_string(probe.failed_block_mode) +
                     ", expected=" + std::to_string(b.uncompressed_size) +
@@ -1095,6 +1123,7 @@ bool ReconstructStreamAt(std::ifstream& in,
         offset = next_offset;
         if (block_index == 0U && !chosen_variant.empty()) {
             probe.selected_reconstruction_layout = chosen_variant + "/mode=" + std::to_string(chosen_mode);
+            probe.selected_block0_hypothesis = probe.selected_reconstruction_layout;
         }
         out_stream.insert(out_stream.end(), decoded.begin(), decoded.end());
         ++block_index;
@@ -1188,6 +1217,8 @@ bool TryReconstructDataStream(std::ifstream& in,
     std::uint32_t best_partial_blocks = 0U;
     std::uint64_t best_partial_start = 0U;
     std::string best_partial_family;
+    std::string best_partial_block0_hypothesis;
+    std::uint32_t best_partial_block0_attempt_count = 0U;
     probe.reconstruction_best_partial_blocks = 0U;
     probe.reconstruction_failure_summary_code.clear();
     probe.selected_offset_family.clear();
@@ -1203,10 +1234,13 @@ bool TryReconstructDataStream(std::ifstream& in,
             if (!code.empty()) {
                 ++failure_code_hits[code];
             }
-            if (decoded_block_count > best_partial_blocks) {
+            if (decoded_block_count > best_partial_blocks ||
+                (decoded_block_count == best_partial_blocks && best_partial_family.empty())) {
                 best_partial_blocks = decoded_block_count;
                 best_partial_start = start;
                 best_partial_family = candidate.family;
+                best_partial_block0_hypothesis = probe.selected_block0_hypothesis;
+                best_partial_block0_attempt_count = probe.block0_attempt_count;
                 probe.reconstruction_best_partial_blocks = decoded_block_count;
             }
             if (attempt_errors.size() < 4096U) {
@@ -1239,6 +1273,12 @@ bool TryReconstructDataStream(std::ifstream& in,
     }
     if (!best_partial_family.empty()) {
         probe.selected_offset_family = best_partial_family;
+        if (probe.selected_block0_hypothesis.empty()) {
+            probe.selected_block0_hypothesis = best_partial_block0_hypothesis;
+        }
+        if (probe.block0_attempt_count == 0U) {
+            probe.block0_attempt_count = best_partial_block0_attempt_count;
+        }
     }
     error = "failed to reconstruct uncompressed bundle data stream. " + attempt_errors;
     if (best_partial_blocks > 0U) {

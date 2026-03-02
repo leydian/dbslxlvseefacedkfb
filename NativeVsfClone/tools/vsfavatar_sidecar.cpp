@@ -121,6 +121,10 @@ int main(int argc, char** argv) {
               << ", code=" << p.failed_block_error_code;
         warnings.push_back("W_RECON: " + block.str());
     }
+    if (!p.selected_block0_hypothesis.empty()) {
+        warnings.push_back("W_BLOCK0: hypothesis=" + p.selected_block0_hypothesis +
+                           ", attempts=" + std::to_string(p.block0_attempt_count));
+    }
     if (!p.object_table_parsed || mesh_count == 0U) {
         missing_features.push_back("mesh/material object discovery");
     } else {
@@ -148,6 +152,8 @@ int main(int argc, char** argv) {
               << "\"mesh_count\":" << mesh_count << ","
               << "\"material_count\":" << material_count << ","
               << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","
+              << "\"selected_block0_hypothesis\":\"" << EscapeJson(p.selected_block0_hypothesis) << "\","
+              << "\"block0_attempt_count\":" << p.block0_attempt_count << ","
               << "\"selected_offset_family\":\"" << EscapeJson(p.selected_offset_family) << "\","
               << "\"reconstruction_summary\":\"" << EscapeJson(p.reconstruction_failure_summary_code) << "\","
               << "\"warnings\":" << JoinJsonStringArray(warnings) << ","

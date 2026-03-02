@@ -1,6 +1,7 @@
 param(
     [string]$SampleDir = "..\\sample",
     [string]$AvatarToolPath = ".\\build\\Release\\avatar_tool.exe",
+    [string]$SidecarPath = ".\\build\\Release\\vsfavatar_sidecar.exe",
     [string]$OutputPath = ".\\build\\reports\\vsfavatar_probe.txt",
     [int]$MaxFiles = 20,
     [switch]$UseFixedSet,
@@ -16,6 +17,10 @@ $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path $AvatarToolPath)) {
     throw "avatar_tool not found at $AvatarToolPath"
+}
+
+if (-not (Test-Path $SidecarPath)) {
+    throw "vsfavatar_sidecar not found at $SidecarPath"
 }
 
 if (-not (Test-Path $SampleDir)) {
@@ -54,6 +59,18 @@ if ($files.Count -eq 0) {
 foreach ($f in $files) {
     "---- $($f.Name)" | Add-Content -Path $OutputPath
     & $AvatarToolPath $f.FullName | Add-Content -Path $OutputPath
+    $sidecarRaw = & $SidecarPath $f.FullName
+    try {
+        $sidecar = $sidecarRaw | ConvertFrom-Json
+        "  SidecarProbeStage: $($sidecar.probe_stage)" | Add-Content -Path $OutputPath
+        "  SidecarPrimaryError: $($sidecar.primary_error_code)" | Add-Content -Path $OutputPath
+        "  SidecarBlockLayout: $($sidecar.selected_block_layout)" | Add-Content -Path $OutputPath
+        "  SidecarOffsetFamily: $($sidecar.selected_offset_family)" | Add-Content -Path $OutputPath
+        "  SidecarBlock0Hypothesis: $($sidecar.selected_block0_hypothesis)" | Add-Content -Path $OutputPath
+        "  SidecarBlock0Attempts: $($sidecar.block0_attempt_count)" | Add-Content -Path $OutputPath
+    } catch {
+        "  SidecarParseError: failed to parse JSON output" | Add-Content -Path $OutputPath
+    }
     "" | Add-Content -Path $OutputPath
 }
 

@@ -56,6 +56,8 @@ struct UnityFsProbe {
     std::string metadata_decode_error_code;
     std::string selected_block_layout;
     std::string selected_reconstruction_layout;
+    std::string selected_block0_hypothesis;
+    std::uint32_t block0_attempt_count = 0;
     std::string selected_offset_family;
     std::string reconstruction_failure_summary_code;
     std::uint64_t total_block_compressed_size = 0;
