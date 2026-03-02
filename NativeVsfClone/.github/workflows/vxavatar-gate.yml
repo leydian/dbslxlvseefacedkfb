@@ -1,0 +1,71 @@
+name: vxavatar-gate
+
+on:
+  pull_request:
+    paths:
+      - "src/avatar/**"
+      - "src/nativecore/**"
+      - "include/vsfclone/avatar/**"
+      - "include/vsfclone/nativecore/**"
+      - "tools/vxavatar_*"
+      - ".github/workflows/vxavatar-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  quick-gate:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+        working-directory: NativeVsfClone
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run Quick Gate
+        run: powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick
+
+      - name: Upload Quick Gate Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vxavatar-quick-reports
+          path: |
+            NativeVsfClone/build/reports/vxavatar_probe_latest.txt
+            NativeVsfClone/build/reports/vxavatar_gate_summary.txt
+            NativeVsfClone/build/reports/vxavatar_gate_summary.json
+
+  full-gate:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+        working-directory: NativeVsfClone
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run Full Gate
+        run: powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -Profile full
+
+      - name: Upload Full Gate Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vxavatar-full-reports
+          path: |
+            NativeVsfClone/build/reports/vxavatar_probe_latest.txt
+            NativeVsfClone/build/reports/vxavatar_gate_summary.txt
+            NativeVsfClone/build/reports/vxavatar_gate_summary.json

@@ -4,7 +4,10 @@ param(
     [string]$ReportScriptPath = ".\\tools\\vxavatar_sample_report.ps1",
     [string]$ReportPath = ".\\build\\reports\\vxavatar_probe_latest.txt",
     [string]$SummaryPath = ".\\build\\reports\\vxavatar_gate_summary.txt",
+    [string]$SummaryJsonPath = ".\\build\\reports\\vxavatar_gate_summary.json",
+    [ValidateSet("quick", "full")][string]$Profile = "quick",
     [switch]$UseFixedSet,
+    [switch]$RequireRealFullSamples,
     [string[]]$FixedVxSamples = @(
         "demo_mvp.vxavatar"
     ),
@@ -98,20 +101,14 @@ if (-not (Test-Path $ReportScriptPath)) {
     throw "report script not found: $ReportScriptPath"
 }
 
-if ($UseFixedSet) {
-    & $ReportScriptPath `
-        -SampleDir $SampleDir `
-        -AvatarToolPath $AvatarToolPath `
-        -OutputPath $ReportPath `
-        -UseFixedSet `
-        -FixedVxSamples $FixedVxSamples `
-        -FixedVxa2Samples $FixedVxa2Samples
-} else {
-    & $ReportScriptPath `
-        -SampleDir $SampleDir `
-        -AvatarToolPath $AvatarToolPath `
-        -OutputPath $ReportPath
-}
+& $ReportScriptPath `
+    -SampleDir $SampleDir `
+    -AvatarToolPath $AvatarToolPath `
+    -OutputPath $ReportPath `
+    -Profile $Profile `
+    -UseFixedSet:$UseFixedSet `
+    -FixedVxSamples $FixedVxSamples `
+    -FixedVxa2Samples $FixedVxa2Samples
 
 $current = Parse-Report -Path $ReportPath
 $sampleNames = $current.Order
@@ -120,6 +117,7 @@ $gateA = $true
 $gateB = $true
 $gateC = $true
 $gateD = $true
+$gateE = $true
 $failReasons = @()
 
 $requiredFields = @("InputKind", "InputTag", "Format", "Compat", "ParserStage", "PrimaryError")
@@ -128,6 +126,7 @@ $foundFixedVx = 0
 $foundCorruptVx = 0
 $foundFixedVxa2 = 0
 $foundCorruptVxa2 = 0
+$foundRealFull = 0
 
 foreach ($name in $sampleNames) {
     $sample = $current.Samples[$name]
@@ -200,6 +199,14 @@ foreach ($name in $sampleNames) {
             $failReasons += "GateC: $name expected primary VXA2_SECTION_TRUNCATED|VXA2_SCHEMA_INVALID but got $primary"
         }
     }
+
+    if ($Profile -eq "full" -and $tag -eq "real-full") {
+        $foundRealFull++
+        if ([string]::IsNullOrWhiteSpace($format) -or [string]::IsNullOrWhiteSpace($compat)) {
+            $gateE = $false
+            $failReasons += "GateE: $name real-full row has empty format/compat"
+        }
+    }
 }
 
 if ($foundFixedVx -eq 0) {
@@ -218,17 +225,23 @@ if ($foundCorruptVxa2 -eq 0) {
     $gateC = $false
     $failReasons += "GateC: no synthetic-corrupt-vxa2 sample found"
 }
+if ($Profile -eq "full" -and $RequireRealFullSamples -and $foundRealFull -eq 0) {
+    $gateE = $false
+    $failReasons += "GateE: no real-full sample rows found in full profile"
+}
 
-$overallPass = $gateA -and $gateB -and $gateC -and $gateD
+$overallPass = $gateA -and $gateB -and $gateC -and $gateD -and $gateE
 $gateAStatus = if ($gateA) { "PASS" } else { "FAIL" }
 $gateBStatus = if ($gateB) { "PASS" } else { "FAIL" }
 $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
 $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
+$gateEStatus = if ($gateE) { "PASS" } else { "FAIL" }
 
 $summary = @()
 $summary += "VXAvatar/VXA2 Quality Gate Summary"
 $summary += "Generated: $(Get-Date -Format s)"
 $summary += "ReportPath: $ReportPath"
+$summary += "Profile: $Profile"
 $summary += "UseFixedSet: $UseFixedSet"
 $summary += ""
 $summary += "Gate Results"
@@ -236,6 +249,7 @@ $summary += "- GateA (fixed VXAvatar success contract): $gateAStatus"
 $summary += "- GateB (synthetic VXAvatar corruption handling): $gateBStatus"
 $summary += "- GateC (VXA2 fixed + corruption checks): $gateCStatus"
 $summary += "- GateD (required output fields): $gateDStatus"
+$summary += "- GateE (full profile real-sample contract): $gateEStatus"
 $summary += "- Overall: $(if ($overallPass) { 'PASS' } else { 'FAIL' })"
 $summary += ""
 $summary += "Sample Coverage"
@@ -243,6 +257,7 @@ $summary += "- FixedVX: $foundFixedVx"
 $summary += "- CorruptVX: $foundCorruptVx"
 $summary += "- FixedVXA2: $foundFixedVxa2"
 $summary += "- CorruptVXA2: $foundCorruptVxa2"
+$summary += "- RealFull: $foundRealFull"
 
 if ($failReasons.Count -gt 0) {
     $summary += ""
@@ -259,6 +274,31 @@ if (-not (Test-Path $summaryDir)) {
 
 $summary | Set-Content -Path $SummaryPath
 $summary | ForEach-Object { Write-Host $_ }
+
+$jsonSummary = [ordered]@{
+    generated = (Get-Date -Format s)
+    report_path = $ReportPath
+    profile = $Profile
+    use_fixed_set = [bool]$UseFixedSet
+    gates = [ordered]@{
+        gate_a = $gateAStatus
+        gate_b = $gateBStatus
+        gate_c = $gateCStatus
+        gate_d = $gateDStatus
+        gate_e = $gateEStatus
+        overall = if ($overallPass) { "PASS" } else { "FAIL" }
+    }
+    coverage = [ordered]@{
+        fixed_vx = $foundFixedVx
+        corrupt_vx = $foundCorruptVx
+        fixed_vxa2 = $foundFixedVxa2
+        corrupt_vxa2 = $foundCorruptVxa2
+        real_full = $foundRealFull
+    }
+    failure_reasons = $failReasons
+}
+
+$jsonSummary | ConvertTo-Json -Depth 5 | Set-Content -Path $SummaryJsonPath
 
 if ($overallPass) {
     exit 0

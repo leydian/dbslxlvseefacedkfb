@@ -2,7 +2,9 @@ param(
     [string]$SampleDir = "..\\sample",
     [string]$AvatarToolPath = ".\\build\\Release\\avatar_tool.exe",
     [string]$OutputPath = ".\\build\\reports\\vxavatar_probe_latest.txt",
+    [ValidateSet("quick", "full")][string]$Profile = "quick",
     [int]$MaxFiles = 20,
+    [int]$FullMaxFiles = 200,
     [switch]$UseFixedSet,
     [string[]]$FixedVxSamples = @(
         "demo_mvp.vxavatar"
@@ -131,6 +133,28 @@ function Build-SyntheticFiles {
     return $out
 }
 
+function Add-Entry {
+    param(
+        [System.Collections.Generic.List[object]]$Entries,
+        [hashtable]$SeenPaths,
+        [string]$Name,
+        [string]$Path,
+        [string]$Kind,
+        [string]$Tag
+    )
+    $fullPath = [System.IO.Path]::GetFullPath($Path).ToLowerInvariant()
+    if ($SeenPaths.ContainsKey($fullPath)) {
+        return
+    }
+    $SeenPaths[$fullPath] = $true
+    $Entries.Add([PSCustomObject]@{
+        Name = $Name
+        Path = [System.IO.Path]::GetFullPath($Path)
+        Kind = $Kind
+        Tag = $Tag
+    })
+}
+
 if (-not (Test-Path $AvatarToolPath)) {
     throw "avatar_tool not found at $AvatarToolPath"
 }
@@ -144,68 +168,55 @@ if (-not (Test-Path $outDir)) {
 }
 
 $entries = New-Object System.Collections.Generic.List[object]
+$seenPaths = @{}
 $baseVxPath = $null
 $baseVxa2Path = $null
+$isFullProfile = $Profile -eq "full"
+$discoverLimit = if ($isFullProfile) { $FullMaxFiles } else { $MaxFiles }
 
-if ($UseFixedSet) {
+if ($UseFixedSet -or $isFullProfile) {
     foreach ($name in $FixedVxSamples) {
         $p = Join-Path $SampleDir $name
         if (Test-Path $p) {
-            $entries.Add([PSCustomObject]@{
-                Name = [System.IO.Path]::GetFileName($p)
-                Path = (Resolve-Path $p).Path
-                Kind = "VXAvatar"
-                Tag = "fixed-valid"
-            })
-            if ($null -eq $baseVxPath) { $baseVxPath = (Resolve-Path $p).Path }
+            $rp = (Resolve-Path $p).Path
+            Add-Entry -Entries $entries -SeenPaths $seenPaths -Name ([System.IO.Path]::GetFileName($rp)) -Path $rp -Kind "VXAvatar" -Tag "fixed-valid"
+            if ($null -eq $baseVxPath) { $baseVxPath = $rp }
         }
     }
 
     foreach ($name in $FixedVxa2Samples) {
         $p = Join-Path $SampleDir $name
         if (Test-Path $p) {
-            $entries.Add([PSCustomObject]@{
-                Name = [System.IO.Path]::GetFileName($p)
-                Path = (Resolve-Path $p).Path
-                Kind = "VXA2"
-                Tag = "fixed-valid"
-            })
-            if ($null -eq $baseVxa2Path) { $baseVxa2Path = (Resolve-Path $p).Path }
+            $rp = (Resolve-Path $p).Path
+            Add-Entry -Entries $entries -SeenPaths $seenPaths -Name ([System.IO.Path]::GetFileName($rp)) -Path $rp -Kind "VXA2" -Tag "fixed-valid"
+            if ($null -eq $baseVxa2Path) { $baseVxa2Path = $rp }
         }
     }
-} else {
-    $vxFiles = Get-ChildItem -Path $SampleDir -Filter *.vxavatar | Select-Object -First $MaxFiles
+}
+
+if ((-not $UseFixedSet) -or $isFullProfile) {
+    $vxFiles = Get-ChildItem -Path $SampleDir -Filter *.vxavatar | Select-Object -First $discoverLimit
     foreach ($f in $vxFiles) {
-        $entries.Add([PSCustomObject]@{
-            Name = $f.Name
-            Path = $f.FullName
-            Kind = "VXAvatar"
-            Tag = "discovered"
-        })
+        if ($null -eq $baseVxPath) {
+            $baseVxPath = $f.FullName
+        }
+        $tag = if ($isFullProfile) { "real-full" } else { "discovered" }
+        Add-Entry -Entries $entries -SeenPaths $seenPaths -Name $f.Name -Path $f.FullName -Kind "VXAvatar" -Tag $tag
     }
 
-    $vxa2Files = Get-ChildItem -Path $SampleDir -Filter *.vxa2 | Select-Object -First $MaxFiles
+    $vxa2Files = Get-ChildItem -Path $SampleDir -Filter *.vxa2 | Select-Object -First $discoverLimit
     foreach ($f in $vxa2Files) {
-        $entries.Add([PSCustomObject]@{
-            Name = $f.Name
-            Path = $f.FullName
-            Kind = "VXA2"
-            Tag = "discovered"
-        })
-    }
-
-    if ($vxFiles.Count -gt 0) {
-        $baseVxPath = $vxFiles[0].FullName
-    }
-    if ($vxa2Files.Count -gt 0) {
-        $baseVxa2Path = $vxa2Files[0].FullName
+        if ($null -eq $baseVxa2Path) {
+            $baseVxa2Path = $f.FullName
+        }
+        $tag = if ($isFullProfile) { "real-full" } else { "discovered" }
+        Add-Entry -Entries $entries -SeenPaths $seenPaths -Name $f.Name -Path $f.FullName -Kind "VXA2" -Tag $tag
     }
 }
 
 if ($entries.Count -eq 0) {
     throw "no sample files selected under $SampleDir"
 }
-
 if ($null -eq $baseVxPath) {
     throw "could not locate base .vxavatar sample for synthetic cases"
 }
@@ -216,30 +227,16 @@ if ($null -eq $baseVxa2Path) {
 $tmpDir = Join-Path (Split-Path -Parent $OutputPath) "..\\tmp_vx"
 $synthetic = Build-SyntheticFiles -TmpDir $tmpDir -BaseVxPath $baseVxPath -BaseVxa2Path $baseVxa2Path
 
-$entries.Add([PSCustomObject]@{
-    Name = [System.IO.Path]::GetFileName($synthetic["vx_truncated"])
-    Path = $synthetic["vx_truncated"]
-    Kind = "VXAvatar"
-    Tag = "synthetic-corrupt-vxavatar"
-})
-$entries.Add([PSCustomObject]@{
-    Name = [System.IO.Path]::GetFileName($synthetic["vx_mismatch"])
-    Path = $synthetic["vx_mismatch"]
-    Kind = "VXAvatar"
-    Tag = "synthetic-corrupt-vxavatar"
-})
-$entries.Add([PSCustomObject]@{
-    Name = [System.IO.Path]::GetFileName($synthetic["vxa2_truncated"])
-    Path = $synthetic["vxa2_truncated"]
-    Kind = "VXA2"
-    Tag = "synthetic-corrupt-vxa2"
-})
+Add-Entry -Entries $entries -SeenPaths $seenPaths -Name ([System.IO.Path]::GetFileName($synthetic["vx_truncated"])) -Path $synthetic["vx_truncated"] -Kind "VXAvatar" -Tag "synthetic-corrupt-vxavatar"
+Add-Entry -Entries $entries -SeenPaths $seenPaths -Name ([System.IO.Path]::GetFileName($synthetic["vx_mismatch"])) -Path $synthetic["vx_mismatch"] -Kind "VXAvatar" -Tag "synthetic-corrupt-vxavatar"
+Add-Entry -Entries $entries -SeenPaths $seenPaths -Name ([System.IO.Path]::GetFileName($synthetic["vxa2_truncated"])) -Path $synthetic["vxa2_truncated"] -Kind "VXA2" -Tag "synthetic-corrupt-vxa2"
 
 "VXAvatar/VXA2 probe report" | Set-Content -Path $OutputPath
-"GateInputVersion: 1" | Add-Content -Path $OutputPath
+"GateInputVersion: 2" | Add-Content -Path $OutputPath
 "Generated: $(Get-Date -Format s)" | Add-Content -Path $OutputPath
 "SampleDir: $(Resolve-Path $SampleDir)" | Add-Content -Path $OutputPath
 "UseFixedSet: $UseFixedSet" | Add-Content -Path $OutputPath
+"Profile: $Profile" | Add-Content -Path $OutputPath
 "FileCount: $($entries.Count)" | Add-Content -Path $OutputPath
 "" | Add-Content -Path $OutputPath
 

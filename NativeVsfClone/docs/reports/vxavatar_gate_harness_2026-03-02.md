@@ -91,3 +91,8 @@ Representative per-sample outcomes:
 
 This harness is intentionally CLI-output contract focused.
 It does not replace future unit/integration tests and is intended as a deterministic regression safety net while parser behavior evolves.
+
+Profile/CI expansion note:
+
+- As of 2026-03-03, profile-based gate operation (`quick`/`full`) and CI wiring are documented in:
+  - `docs/reports/vxavatar_gate_ci_expansion_2026-03-03.md`
