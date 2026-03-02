@@ -90,6 +90,22 @@ Runtime checks performed by script:
 - publish output directory validation for both hosts
 - executable path discovery and report serialization
 
+CI smoke validation:
+
+- Workflow: `.github/workflows/host-publish.yml`
+- Runner: `windows-latest`
+- Sequence:
+  1. `cmake -S . -B build -G "Visual Studio 17 2022" -A x64`
+  2. `cmake --build build --config Release`
+  3. `tools/publish_hosts.ps1 -SkipNativeBuild`
+  4. Required artifact assertions:
+     - `dist/wpf/WpfHost.exe`
+     - `dist/wpf/nativecore.dll`
+     - `dist/winui/WinUiHost.exe`
+     - `dist/winui/nativecore.dll`
+     - `build/reports/host_publish_latest.txt`
+  5. Upload artifact bundle (`host-publish-outputs`)
+
 ## Known Limitations
 
 - Host publish is currently Windows-focused (`win-x64`) in defaults.
@@ -98,6 +114,5 @@ Runtime checks performed by script:
 
 ## Next Steps
 
-- Add CI job for `tools/publish_hosts.ps1` dry validation on Windows runner.
 - Add optional checksum/signature output for `dist/*` artifacts.
 - Add optional packaging mode (`zip`) per host output folder.

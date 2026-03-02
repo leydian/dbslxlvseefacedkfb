@@ -2,6 +2,38 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host publish CI smoke workflow and artifact contract checks
+
+### Summary
+
+Added a dedicated Windows CI workflow for host publish so WPF/WinUI distribution outputs are validated automatically on host-related changes.
+
+### Changed
+
+- `.github/workflows/host-publish.yml` (new)
+  - Added trigger paths for host/nativecore/publish-script changes.
+  - Added Windows CI job (`publish-hosts`) with:
+    - CMake configure (`VS 2022`, `x64`)
+    - Release native build
+    - host publish script execution (`tools/publish_hosts.ps1 -SkipNativeBuild`)
+    - required artifact assertions for both host tracks and publish report
+    - artifact upload bundle (`host-publish-outputs`)
+
+- `docs/reports/host_exe_publish_2026-03-02.md`
+  - Added CI smoke validation section and artifact assertion contract.
+  - Updated next-step list by removing already-implemented CI item.
+
+### Verified
+
+- CI workflow definition exists at:
+  - `NativeVsfClone/.github/workflows/host-publish.yml`
+- Workflow validates required deliverables:
+  - `dist/wpf/WpfHost.exe`
+  - `dist/wpf/nativecore.dll`
+  - `dist/winui/WinUiHost.exe`
+  - `dist/winui/nativecore.dll`
+  - `build/reports/host_publish_latest.txt`
+
 ## 2026-03-03 - Host publish documentation refresh and index normalization
 
 ### Summary
