@@ -19,7 +19,9 @@ public sealed partial class MainWindow : Window
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private readonly DispatcherQueueTimer _timer;
     private readonly DispatcherQueueTimer _resizeTimer;
+    private readonly DispatcherQueueTimer _renderApplyTimer;
     private bool _isSyncingRenderUi;
+    private bool _isSyncingPresetUi;
     private readonly IntPtr _hwnd;
 
     public MainWindow()
@@ -33,6 +35,10 @@ public sealed partial class MainWindow : Window
         _resizeTimer.Interval = TimeSpan.FromMilliseconds(90.0);
         _resizeTimer.IsRepeating = false;
         _resizeTimer.Tick += ResizeTimer_Tick;
+        _renderApplyTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _renderApplyTimer.Interval = TimeSpan.FromMilliseconds(100.0);
+        _renderApplyTimer.IsRepeating = false;
+        _renderApplyTimer.Tick += RenderApplyTimer_Tick;
         Closed += MainWindow_Closed;
         RenderHost.SizeChanged += RenderHost_SizeChanged;
 
@@ -47,6 +53,7 @@ public sealed partial class MainWindow : Window
     {
         _timer.Stop();
         _resizeTimer.Stop();
+        _renderApplyTimer.Stop();
         _ = _controller.Shutdown();
     }
 
@@ -207,7 +214,16 @@ public sealed partial class MainWindow : Window
         }
 
         _ = _controller.SetBroadcastMode(BroadcastModeCheckBox.IsChecked == true);
-        _ = PushRenderUiState();
+        QueueRenderApply();
+    }
+
+    private void CameraMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        QueueRenderApply();
     }
 
     private void FramingSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -217,7 +233,37 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        _ = PushRenderUiState();
+        QueueRenderApply();
+    }
+
+    private void HeadroomSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        HeadroomValueText.Text = HeadroomSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void YawSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        YawValueText.Text = YawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void FovSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        FovValueText.Text = FovSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        QueueRenderApply();
     }
 
     private void BackgroundPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -226,7 +272,16 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        _ = PushRenderUiState();
+        QueueRenderApply();
+    }
+
+    private void MirrorMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingRenderUi)
+        {
+            return;
+        }
+        QueueRenderApply();
     }
 
     private void DebugOverlay_Changed(object sender, RoutedEventArgs e)
@@ -235,7 +290,66 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
+        QueueRenderApply();
+    }
+
+    private async void SavePreset_Click(object sender, RoutedEventArgs e)
+    {
+        var name = PresetNameTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            await ShowMessageAsync("Invalid Input", "Preset name is required.");
+            return;
+        }
+
+        if (_controller.SaveOrUpdateRenderPreset(name))
+        {
+            SyncPresetControlsFromState();
+        }
+    }
+
+    private void ApplyPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (PresetComboBox.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        _ = _controller.ApplyRenderPreset(name);
+        SyncPresetControlsFromState();
+    }
+
+    private async void DeletePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (PresetComboBox.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (!_controller.DeleteRenderPreset(name))
+        {
+            await ShowMessageAsync("Delete Blocked", "Cannot delete preset. At least one preset must remain.");
+            return;
+        }
+
+        SyncPresetControlsFromState();
+    }
+
+    private void ResetRender_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ResetRenderDefaults();
+        SyncPresetControlsFromState();
+    }
+
+    private void RenderApplyTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
         _ = PushRenderUiState();
+    }
+
+    private void QueueRenderApply()
+    {
+        _renderApplyTimer.Stop();
+        _renderApplyTimer.Start();
     }
 
     private void RenderHost_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -307,12 +421,29 @@ public sealed partial class MainWindow : Window
         StopSpoutButton.IsEnabled = outputs.SpoutActive;
         StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive;
         StopOscButton.IsEnabled = outputs.OscActive;
+        var renderControlsEnabled = session.IsInitialized;
+        BroadcastModeCheckBox.IsEnabled = renderControlsEnabled;
+        CameraModeComboBox.IsEnabled = renderControlsEnabled;
+        FramingSlider.IsEnabled = renderControlsEnabled;
+        HeadroomSlider.IsEnabled = renderControlsEnabled;
+        YawSlider.IsEnabled = renderControlsEnabled;
+        FovSlider.IsEnabled = renderControlsEnabled;
+        BackgroundPresetComboBox.IsEnabled = renderControlsEnabled;
+        MirrorModeCheckBox.IsEnabled = renderControlsEnabled;
+        DebugOverlayCheckBox.IsEnabled = renderControlsEnabled;
+        SavePresetButton.IsEnabled = renderControlsEnabled;
+        ApplyPresetButton.IsEnabled = renderControlsEnabled;
+        DeletePresetButton.IsEnabled = renderControlsEnabled;
+        ResetRenderButton.IsEnabled = renderControlsEnabled;
+        PresetNameTextBox.IsEnabled = renderControlsEnabled;
+        PresetComboBox.IsEnabled = renderControlsEnabled;
 
         SessionStatusText.Text = $"Session: {(session.IsInitialized ? "Initialized" : "Stopped")}";
         AvatarStatusText.Text = $"Avatar: {(hasAvatar ? "Loaded" : "None")}";
         RenderStatusText.Text = $"Render: {session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
         OutputStatusText.Text = $"Outputs: Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
         SyncRenderControlsFromState();
+        SyncPresetControlsFromState();
     }
 
     private void UpdateDiagnostics()
@@ -328,7 +459,7 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
-        runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, bg={snapshot.Render.BackgroundPreset}, debug={snapshot.Render.ShowDebugOverlay}");
+        runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
@@ -433,16 +564,69 @@ public sealed partial class MainWindow : Window
         var render = _controller.RenderState;
         _isSyncingRenderUi = true;
         BroadcastModeCheckBox.IsChecked = render.BroadcastMode;
+        CameraModeComboBox.SelectedIndex = render.CameraMode switch
+        {
+            RenderCameraMode.AutoFitFull => 0,
+            RenderCameraMode.Manual => 2,
+            _ => 1,
+        };
         FramingSlider.Value = render.FramingTarget;
         FramingValueText.Text = render.FramingTarget.ToString("F2", CultureInfo.InvariantCulture);
+        HeadroomSlider.Value = render.Headroom;
+        HeadroomValueText.Text = render.Headroom.ToString("F2", CultureInfo.InvariantCulture);
+        YawSlider.Value = render.YawDeg;
+        YawValueText.Text = render.YawDeg.ToString("F0", CultureInfo.InvariantCulture);
+        FovSlider.Value = render.FovDeg;
+        FovValueText.Text = render.FovDeg.ToString("F0", CultureInfo.InvariantCulture);
         BackgroundPresetComboBox.SelectedIndex = render.BackgroundPreset switch
         {
             BackgroundPreset.NeutralGray => 1,
             BackgroundPreset.GreenScreen => 2,
             _ => 0,
         };
+        MirrorModeCheckBox.IsChecked = render.MirrorMode;
         DebugOverlayCheckBox.IsChecked = render.ShowDebugOverlay;
         _isSyncingRenderUi = false;
+    }
+
+    private void SyncPresetControlsFromState()
+    {
+        if (_isSyncingPresetUi)
+        {
+            return;
+        }
+
+        _isSyncingPresetUi = true;
+        var selectedName = _controller.SelectedRenderPresetName ?? string.Empty;
+        PresetComboBox.Items.Clear();
+        foreach (var preset in _controller.RenderPresets)
+        {
+            PresetComboBox.Items.Add(preset.Name);
+        }
+
+        var matched = false;
+        foreach (var item in PresetComboBox.Items)
+        {
+            if (item is string name &&
+                string.Equals(name, selectedName, StringComparison.OrdinalIgnoreCase))
+            {
+                PresetComboBox.SelectedItem = item;
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched && PresetComboBox.Items.Count > 0)
+        {
+            PresetComboBox.SelectedIndex = 0;
+            selectedName = PresetComboBox.SelectedItem as string ?? selectedName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedName))
+        {
+            PresetNameTextBox.Text = selectedName;
+        }
+        _isSyncingPresetUi = false;
     }
 
     private NcResultCode PushRenderUiState()
@@ -453,11 +637,22 @@ public sealed partial class MainWindow : Window
             2 => BackgroundPreset.GreenScreen,
             _ => BackgroundPreset.DarkBlue,
         };
+        var cameraMode = CameraModeComboBox.SelectedIndex switch
+        {
+            0 => RenderCameraMode.AutoFitFull,
+            2 => RenderCameraMode.Manual,
+            _ => RenderCameraMode.AutoFitBust,
+        };
         var state = _controller.RenderState with
         {
             BroadcastMode = BroadcastModeCheckBox.IsChecked == true,
+            CameraMode = cameraMode,
             FramingTarget = (float)FramingSlider.Value,
+            Headroom = (float)HeadroomSlider.Value,
+            YawDeg = (float)YawSlider.Value,
+            FovDeg = (float)FovSlider.Value,
             BackgroundPreset = preset,
+            MirrorMode = MirrorModeCheckBox.IsChecked == true,
             ShowDebugOverlay = DebugOverlayCheckBox.IsChecked == true,
         };
         return _controller.ApplyRenderUiState(state);

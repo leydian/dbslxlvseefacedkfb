@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace HostCore;
 
@@ -10,28 +11,38 @@ public sealed class HostController
     private readonly IAvatarSessionService _sessionService;
     private readonly IRenderLoopService _renderLoopService;
     private readonly IOutputService _outputService;
+    private readonly IRenderPresetStore _presetStore;
     private readonly Queue<HostLogEntry> _logs = new();
+    private RenderPresetStoreModel _presetStoreModel;
     private NcRenderQualityOptions _renderOptions;
     private bool _windowAttached;
     private IntPtr _windowHandle = IntPtr.Zero;
 
     public HostController()
-        : this(new AvatarSessionService(), new RenderLoopService(), new OutputService())
+        : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore())
     {
     }
 
     public HostController(
         IAvatarSessionService sessionService,
         IRenderLoopService renderLoopService,
-        IOutputService outputService)
+        IOutputService outputService,
+        IRenderPresetStore presetStore)
     {
         _sessionService = sessionService;
         _renderLoopService = renderLoopService;
         _outputService = outputService;
+        _presetStore = presetStore;
         _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
+        _presetStoreModel = EnsurePresetStoreModel(_presetStore.Load());
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
         Outputs = new OutputState(false, false, "VsfClone", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
         RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
+        if (TryGetSelectedPreset(out var selectedPreset))
+        {
+            RenderState = ToRenderUiState(selectedPreset);
+            _renderOptions = ToNativeOptions(RenderState);
+        }
         LastSnapshot = BuildSnapshot();
     }
 
@@ -45,6 +56,8 @@ public sealed class HostController
     public event EventHandler<HostLogEntry>? ErrorRaised;
 
     public IReadOnlyCollection<HostLogEntry> LogEntries => _logs.ToArray();
+    public IReadOnlyList<RenderPresetModel> RenderPresets => _presetStoreModel.Presets;
+    public string? SelectedRenderPresetName => _presetStoreModel.LastSelectedPresetName;
 
     public NcResultCode Initialize()
     {
@@ -200,10 +213,16 @@ public sealed class HostController
 
     public NcResultCode SetBroadcastMode(bool enabled)
     {
-        var preferredPreset = RenderState.BackgroundPreset;
+        var current = RenderState;
         _renderOptions = enabled ? NativeCoreInterop.BuildBroadcastPreset() : NativeCoreInterop.BuildDebugPreset();
-        ApplyBackgroundPreset(ref _renderOptions, preferredPreset);
-        RenderState = BuildRenderUiState(_renderOptions, enabled, preferredPreset, RenderState.MirrorMode);
+        _renderOptions.CameraMode = ToNativeCameraMode(current.CameraMode);
+        _renderOptions.FramingTarget = Clamp(current.FramingTarget, 0.35f, 0.95f);
+        _renderOptions.Headroom = Clamp(current.Headroom, 0.0f, 0.5f);
+        _renderOptions.YawDeg = Clamp(current.YawDeg, -45.0f, 45.0f);
+        _renderOptions.FovDeg = Clamp(current.FovDeg, 20.0f, 70.0f);
+        _renderOptions.ShowDebugOverlay = current.ShowDebugOverlay ? 1U : 0U;
+        ApplyBackgroundPreset(ref _renderOptions, current.BackgroundPreset);
+        RenderState = current with { BroadcastMode = enabled };
         var rc = ApplyRenderOptionsInternal("SetBroadcastMode");
         RefreshState();
         return rc;
@@ -211,20 +230,101 @@ public sealed class HostController
 
     public NcResultCode ApplyRenderUiState(RenderUiState state)
     {
-        _renderOptions = new NcRenderQualityOptions
-        {
-            CameraMode = ToNativeCameraMode(state.CameraMode),
-            FramingTarget = state.FramingTarget,
-            Headroom = state.Headroom,
-            YawDeg = state.YawDeg,
-            FovDeg = state.FovDeg,
-            ShowDebugOverlay = state.ShowDebugOverlay ? 1U : 0U,
-        };
-        ApplyBackgroundPreset(ref _renderOptions, state.BackgroundPreset);
-        RenderState = state;
+        var normalized = NormalizeRenderState(state);
+        _renderOptions = ToNativeOptions(normalized);
+        RenderState = normalized;
         var rc = ApplyRenderOptionsInternal("ApplyRenderUiState");
         RefreshState();
         return rc;
+    }
+
+    public RenderPresetModel CreatePreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        return new RenderPresetModel(
+            normalizedName,
+            RenderState.BroadcastMode,
+            RenderState.CameraMode,
+            RenderState.FramingTarget,
+            RenderState.Headroom,
+            RenderState.YawDeg,
+            RenderState.FovDeg,
+            RenderState.BackgroundPreset,
+            RenderState.ShowDebugOverlay,
+            RenderState.MirrorMode);
+    }
+
+    public bool SaveOrUpdateRenderPreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        if (string.IsNullOrEmpty(normalizedName))
+        {
+            return false;
+        }
+
+        var preset = CreatePreset(normalizedName);
+        var index = _presetStoreModel.Presets.FindIndex(
+            p => string.Equals(p.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            _presetStoreModel.Presets[index] = preset;
+        }
+        else
+        {
+            _presetStoreModel.Presets.Add(preset);
+        }
+
+        _presetStoreModel.LastSelectedPresetName = preset.Name;
+        PersistPresetStore();
+        RefreshState();
+        return true;
+    }
+
+    public NcResultCode ApplyRenderPreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var preset = _presetStoreModel.Presets.FirstOrDefault(
+            p => string.Equals(p.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (preset is null)
+        {
+            return NcResultCode.InvalidArgument;
+        }
+
+        _presetStoreModel.LastSelectedPresetName = preset.Name;
+        PersistPresetStore();
+        return ApplyRenderUiState(ToRenderUiState(preset));
+    }
+
+    public bool DeleteRenderPreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var index = _presetStoreModel.Presets.FindIndex(
+            p => string.Equals(p.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (index < 0 || _presetStoreModel.Presets.Count <= 1)
+        {
+            return false;
+        }
+
+        var removedName = _presetStoreModel.Presets[index].Name;
+        _presetStoreModel.Presets.RemoveAt(index);
+        if (string.Equals(_presetStoreModel.LastSelectedPresetName, removedName, StringComparison.OrdinalIgnoreCase))
+        {
+            _presetStoreModel.LastSelectedPresetName = _presetStoreModel.Presets[0].Name;
+        }
+
+        PersistPresetStore();
+        RefreshState();
+        return true;
+    }
+
+    public NcResultCode ResetRenderDefaults()
+    {
+        var defaultPreset = _presetStoreModel.Presets.FirstOrDefault(
+            p => string.Equals(p.Name, "Broadcast Default", StringComparison.OrdinalIgnoreCase))
+            ?? _presetStoreModel.Presets.First();
+        _presetStoreModel.LastSelectedPresetName = defaultPreset.Name;
+        PersistPresetStore();
+        return ApplyRenderUiState(ToRenderUiState(defaultPreset));
     }
 
     public NcResultCode Tick(float deltaTimeSeconds)
@@ -349,6 +449,21 @@ public sealed class HostController
         return rc;
     }
 
+    private static NcRenderQualityOptions ToNativeOptions(RenderUiState state)
+    {
+        var options = new NcRenderQualityOptions
+        {
+            CameraMode = ToNativeCameraMode(state.CameraMode),
+            FramingTarget = Clamp(state.FramingTarget, 0.35f, 0.95f),
+            Headroom = Clamp(state.Headroom, 0.0f, 0.5f),
+            YawDeg = Clamp(state.YawDeg, -45.0f, 45.0f),
+            FovDeg = Clamp(state.FovDeg, 20.0f, 70.0f),
+            ShowDebugOverlay = state.ShowDebugOverlay ? 1U : 0U,
+        };
+        ApplyBackgroundPreset(ref options, state.BackgroundPreset);
+        return options;
+    }
+
     private static NcCameraMode ToNativeCameraMode(RenderCameraMode mode)
     {
         return mode switch
@@ -426,6 +541,81 @@ public sealed class HostController
             preset,
             options.ShowDebugOverlay != 0U,
             mirrorMode);
+    }
+
+    private static RenderUiState ToRenderUiState(RenderPresetModel preset)
+    {
+        return NormalizeRenderState(
+            new RenderUiState(
+                preset.BroadcastMode,
+                preset.CameraMode,
+                preset.FramingTarget,
+                preset.Headroom,
+                preset.YawDeg,
+                preset.FovDeg,
+                preset.BackgroundPreset,
+                preset.ShowDebugOverlay,
+                preset.MirrorMode));
+    }
+
+    private static RenderUiState NormalizeRenderState(RenderUiState state)
+    {
+        return state with
+        {
+            FramingTarget = Clamp(state.FramingTarget, 0.35f, 0.95f),
+            Headroom = Clamp(state.Headroom, 0.0f, 0.5f),
+            YawDeg = Clamp(state.YawDeg, -45.0f, 45.0f),
+            FovDeg = Clamp(state.FovDeg, 20.0f, 70.0f),
+        };
+    }
+
+    private static RenderPresetStoreModel EnsurePresetStoreModel(RenderPresetStoreModel store)
+    {
+        if (store.Presets.Count == 0)
+        {
+            return RenderPresetStoreModel.CreateDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(store.LastSelectedPresetName))
+        {
+            store.LastSelectedPresetName = store.Presets[0].Name;
+        }
+        return store;
+    }
+
+    private bool TryGetSelectedPreset(out RenderPresetModel preset)
+    {
+        var selectedName = _presetStoreModel.LastSelectedPresetName;
+        preset = _presetStoreModel.Presets.First();
+        if (string.IsNullOrWhiteSpace(selectedName))
+        {
+            return false;
+        }
+
+        var found = _presetStoreModel.Presets.FirstOrDefault(
+            p => string.Equals(p.Name, selectedName, StringComparison.OrdinalIgnoreCase));
+        if (found is null)
+        {
+            return false;
+        }
+
+        preset = found;
+        return true;
+    }
+
+    private static string NormalizePresetName(string name)
+    {
+        return string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim();
+    }
+
+    private void PersistPresetStore()
+    {
+        _presetStore.Save(_presetStoreModel);
+    }
+
+    private static float Clamp(float value, float min, float max)
+    {
+        return Math.Min(max, Math.Max(min, value));
     }
 
     private void TrackResult(string source, NcResultCode rc)

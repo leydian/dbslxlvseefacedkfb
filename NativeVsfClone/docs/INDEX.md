@@ -18,6 +18,7 @@ Entry point for `NativeVsfClone` documentation.
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report
 - [ui_host_operation_redesign_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_operation_redesign_2026-03-03.md): WPF/WinUI operation-focused host UI redesign and shared HostCore state controller report
 - [ui_host_auto_quality_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_auto_quality_2026-03-03.md): DPI-aware render sizing, resize debounce, and Spout auto-reconfigure quality pass report
+- [ui_render_advanced_controls_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_render_advanced_controls_2026-03-03.md): WPF/WinUI advanced render composition controls and local preset persistence update report
 - [host_exe_publish_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_exe_publish_2026-03-02.md): WPF/WinUI self-contained EXE publish pipeline report
 - [vxavatar_mvp_update_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vxavatar_mvp_update_2026-03-02.md): `.vxavatar` MVP update report
 - [vxa2_tlv_update_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vxa2_tlv_update_2026-03-02.md): `.vxa2` TLV decode MVP report

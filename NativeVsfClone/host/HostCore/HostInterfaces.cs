@@ -29,3 +29,9 @@ public interface IOutputService
     NcResultCode StartOsc(ushort bindPort, string publishAddress);
     NcResultCode StopOsc();
 }
+
+public interface IRenderPresetStore
+{
+    RenderPresetStoreModel Load();
+    void Save(RenderPresetStoreModel store);
+}

@@ -42,11 +42,53 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
                                 <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Camera" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="1" x:Name="CameraModeComboBox" SelectionChanged="CameraMode_SelectionChanged">
+                                <ComboBoxItem Content="Auto Fit Full"/>
+                                <ComboBoxItem Content="Auto Fit Bust"/>
+                                <ComboBoxItem Content="Manual"/>
+                            </ComboBox>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="50"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="Framing" VerticalAlignment="Center"/>
                             <Slider Grid.Column="1" x:Name="FramingSlider" Minimum="0.35" Maximum="0.95" Value="0.72" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="FramingSlider_ValueChanged"/>
                             <TextBlock Grid.Column="2" x:Name="FramingValueText" Text="0.72" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="50"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Headroom" VerticalAlignment="Center"/>
+                            <Slider Grid.Column="1" x:Name="HeadroomSlider" Minimum="0.00" Maximum="0.50" Value="0.10" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="HeadroomSlider_ValueChanged"/>
+                            <TextBlock Grid.Column="2" x:Name="HeadroomValueText" Text="0.10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="50"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
+                            <Slider Grid.Column="1" x:Name="YawSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="YawSlider_ValueChanged"/>
+                            <TextBlock Grid.Column="2" x:Name="YawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="50"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="FOV" VerticalAlignment="Center"/>
+                            <Slider Grid.Column="1" x:Name="FovSlider" Minimum="20" Maximum="70" Value="35" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="FovSlider_ValueChanged"/>
+                            <TextBlock Grid.Column="2" x:Name="FovValueText" Text="35" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                         </Grid>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
@@ -60,7 +102,22 @@
                                 <ComboBoxItem Content="Green Screen"/>
                             </ComboBox>
                         </Grid>
+                        <CheckBox x:Name="MirrorModeCheckBox" Content="Mirror Mode" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
                         <CheckBox x:Name="DebugOverlayCheckBox" Content="Show Debug Overlay" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
+                        <Separator Margin="0,10,0,10"/>
+                        <TextBlock Text="Presets" FontWeight="SemiBold"/>
+                        <DockPanel Margin="0,4,0,8">
+                            <Button x:Name="SavePresetButton" Content="Save" Width="74" Click="SavePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                            <TextBox x:Name="PresetNameTextBox" Text="My Preset"/>
+                        </DockPanel>
+                        <DockPanel Margin="0,0,0,8">
+                            <WrapPanel DockPanel.Dock="Right">
+                                <Button x:Name="ApplyPresetButton" Content="Apply" Width="74" Margin="8,0,0,0" Click="ApplyPreset_Click"/>
+                                <Button x:Name="DeletePresetButton" Content="Delete" Width="74" Margin="8,0,0,0" Click="DeletePreset_Click"/>
+                            </WrapPanel>
+                            <ComboBox x:Name="PresetComboBox"/>
+                        </DockPanel>
+                        <Button x:Name="ResetRenderButton" Content="Reset To Default" Width="132" Click="ResetRender_Click"/>
                     </StackPanel>
                 </GroupBox>
 

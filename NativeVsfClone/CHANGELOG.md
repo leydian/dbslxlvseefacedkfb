@@ -49,6 +49,8 @@ Expanded host render UX with manual composition controls and reusable local pres
 
 - `docs/reports/ui_render_benchmark_plan_2026-03-02.md`
   - Added advanced-controls implementation update and KPI status refinement.
+- `docs/reports/ui_render_advanced_controls_2026-03-03.md` (new)
+  - Added detailed implementation summary, behavior notes, and verification snapshot for advanced controls + preset persistence.
 
 ## 2026-03-03 - XAV2 Unity SDK diagnostics API + VRM-derived fixed sample generation
 

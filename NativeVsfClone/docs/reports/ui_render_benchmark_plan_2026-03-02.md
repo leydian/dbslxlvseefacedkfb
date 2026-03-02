@@ -73,6 +73,24 @@ Render quality controls exposed from `nativecore` are now wired end-to-end throu
 
 Current verification scope confirms HostCore compile integrity and host UI wiring consistency by code inspection plus diagnostics path alignment. Full WPF/WinUI compile validation remains pending in a network-enabled environment.
 
+## Implementation Summary (2026-03-03 advanced controls update)
+
+Advanced render controls and local preset persistence are now integrated across both host apps.
+
+- Added advanced controls to WPF/WinUI Render panel:
+  - `Camera Mode` (`Auto Fit Full`, `Auto Fit Bust`, `Manual`)
+  - `Headroom` slider (`0.00-0.50`)
+  - `Yaw` slider (`-45 to 45`)
+  - `FOV` slider (`20-70`)
+  - `Mirror Mode` toggle
+- Added render apply debounce (`~100ms`) for slider-heavy interactions to reduce native apply churn.
+- Added preset workflow:
+  - Save/Apply/Delete/Reset in both hosts
+  - HostCore-managed preset CRUD APIs
+  - local JSON persistence via `RenderPresetStore` under user local app data.
+
+This closes the "manual composition control" and "reusable operator presets" gap from the prior benchmark plan.
+
 ## KPI Checklist
 
 1. Framing
@@ -83,7 +101,7 @@ Current verification scope confirms HostCore compile integrity and host UI wirin
 2. Face Visibility
 - Target: face occupies 25-40% of viewport height in bust mode.
 - Method: bust-mode render capture and measurement.
-- Status: In Progress.
+- Status: In Progress (advanced controls available; measurement capture pending).
 
 3. Startup Pose Perception
 - Target: no visible startup T-pose in default broadcast mode.
@@ -108,7 +126,7 @@ Current verification scope confirms HostCore compile integrity and host UI wirin
 7. Performance Regression
 - Target: <=10% frame-time increase at 1080p.
 - Method: compare `LastFrameMs` before/after render option changes.
-- Status: Pending.
+- Status: In Progress (debounce added; quantitative capture pending).
 
 ## Runtime Acceptance Scenarios
 
