@@ -581,8 +581,19 @@ bool DecompressByMode(const std::vector<unsigned char>& src, std::size_t expecte
             if (!Lz4DecompressRawExact(src, expected_size, dst)) {
                 if (!Lz4DecompressFrame(src, expected_size, dst) &&
                     !Lz4DecompressSizePrefixed(src, expected_size, dst)) {
-                    error = "LZ4 decompression failed";
-                    return false;
+                    constexpr std::size_t kHardCap = 256U * 1024U * 1024U;
+                    std::size_t fallback_cap = expected_size;
+                    if (fallback_cap < src.size()) {
+                        fallback_cap = src.size() * 8U;
+                    } else {
+                        fallback_cap = std::min(kHardCap, expected_size + (src.size() * 4U));
+                    }
+                    fallback_cap = std::max<std::size_t>(fallback_cap, src.size() * 2U);
+                    fallback_cap = std::min(kHardCap, fallback_cap);
+                    if (!Lz4DecompressRawBounded(src, fallback_cap, dst) || dst.empty()) {
+                        error = "LZ4 decompression failed";
+                        return false;
+                    }
                 }
             }
             return true;
@@ -768,6 +779,12 @@ bool ParseMetadataBlock(std::ifstream& in,
     probe.metadata_offset = metadata_offset;
     probe.block_count = static_cast<std::uint32_t>(metadata.blocks.size());
     probe.node_count = static_cast<std::uint32_t>(metadata.nodes.size());
+    probe.total_block_compressed_size = 0U;
+    probe.total_block_uncompressed_size = 0U;
+    for (const auto& b : metadata.blocks) {
+        probe.total_block_compressed_size += b.compressed_size;
+        probe.total_block_uncompressed_size += b.uncompressed_size;
+    }
     if (!metadata.nodes.empty()) {
         probe.first_node_path = metadata.nodes.front().path;
     }
@@ -841,6 +858,12 @@ std::int64_t ScoreMetadataCandidate(const UnityFsHeader& header,
                                     std::uint64_t primary_metadata_offset,
                                     bool metadata_at_end) {
     std::int64_t score = 0;
+    std::uint64_t total_compressed = 0U;
+    std::uint64_t total_uncompressed = 0U;
+    for (const auto& b : metadata.blocks) {
+        total_compressed += b.compressed_size;
+        total_uncompressed += b.uncompressed_size;
+    }
 
     if (metadata_offset >= after_header) {
         score += 2;
@@ -865,6 +888,27 @@ std::int64_t ScoreMetadataCandidate(const UnityFsHeader& header,
 
     if (!metadata.nodes.empty() && metadata.nodes.front().path.rfind("CAB-", 0U) == 0U) {
         score += 4;
+    }
+    if (total_uncompressed > 0U) {
+        score += 1;
+    }
+    if (metadata_at_end) {
+        if (total_compressed <= metadata_offset) {
+            score += 8;
+        } else {
+            score -= 12;
+        }
+    } else {
+        const auto data_after_meta = metadata_offset + header.compressed_metadata_size;
+        if (data_after_meta <= header.bundle_file_size &&
+            data_after_meta + total_compressed <= header.bundle_file_size) {
+            score += 8;
+        } else {
+            score -= 8;
+        }
+    }
+    if (total_compressed > header.bundle_file_size) {
+        score -= 24;
     }
     return score;
 }
@@ -906,6 +950,7 @@ bool ReconstructStreamAt(std::ifstream& in,
 
         bool decoded_ok = false;
         std::string last_err;
+        std::string variant_errors;
         std::vector<unsigned char> decoded;
         std::uint64_t next_offset = offset;
         for (const auto& v : variants) {
@@ -914,6 +959,9 @@ bool ReconstructStreamAt(std::ifstream& in,
             }
             if (offset + v.compressed_size > header.bundle_file_size) {
                 last_err = std::string(v.label) + ": compressed size out of bundle range";
+                if (variant_errors.size() < 512U) {
+                    variant_errors += last_err + " | ";
+                }
                 continue;
             }
 
@@ -932,6 +980,9 @@ bool ReconstructStreamAt(std::ifstream& in,
             in.read(reinterpret_cast<char*>(compressed.data()), static_cast<std::streamsize>(compressed.size()));
             if (static_cast<std::size_t>(in.gcount()) != compressed.size()) {
                 last_err = std::string(v.label) + ": failed to read data block";
+                if (variant_errors.size() < 512U) {
+                    variant_errors += last_err + " | ";
+                }
                 continue;
             }
 
@@ -948,6 +999,9 @@ bool ReconstructStreamAt(std::ifstream& in,
                     break;
                 }
                 last_err = std::string(v.label) + ": " + local_err;
+                if (variant_errors.size() < 512U) {
+                    variant_errors += std::string(v.label) + "/mode=" + std::to_string(m) + ": " + local_err + " | ";
+                }
             }
             if (decoded_ok) {
                 break;
@@ -973,7 +1027,7 @@ bool ReconstructStreamAt(std::ifstream& in,
                     ", mode=" + std::to_string(probe.failed_block_mode) +
                     ", expected=" + std::to_string(b.uncompressed_size) +
                     ", code=" + probe.failed_block_error_code +
-                    ", detail=" + last_err;
+                    ", detail=" + (variant_errors.empty() ? last_err : variant_errors);
             return false;
         }
         offset = next_offset;
@@ -1013,6 +1067,15 @@ bool TryReconstructDataStream(std::ifstream& in,
             candidate_set.insert(v);
         }
     };
+    const auto add_window = [&](std::uint64_t anchor) {
+        constexpr std::int64_t kWindow = 256;
+        for (std::int64_t d = -kWindow; d <= kWindow; d += 16) {
+            const auto value = static_cast<std::int64_t>(anchor) + d;
+            if (value >= 0) {
+                add_candidate(static_cast<std::uint64_t>(value));
+            }
+        }
+    };
 
     add_candidate(after_header);
     add_candidate((after_header + 15ULL) & ~15ULL);
@@ -1020,17 +1083,31 @@ bool TryReconstructDataStream(std::ifstream& in,
     add_candidate(((after_header + header.compressed_metadata_size) + 15ULL) & ~15ULL);
     add_candidate(metadata_offset + header.compressed_metadata_size);
     add_candidate(((metadata_offset + header.compressed_metadata_size) + 15ULL) & ~15ULL);
+    if (total_compressed <= header.bundle_file_size) {
+        add_candidate(header.bundle_file_size - total_compressed);
+        add_candidate((header.bundle_file_size - total_compressed) & ~15ULL);
+    }
     if (metadata_at_end) {
         if (metadata_offset >= total_compressed) {
             add_candidate(metadata_offset - total_compressed);
             add_candidate((metadata_offset - total_compressed) & ~15ULL);
         }
     }
+    add_window(after_header);
+    add_window(after_header + header.compressed_metadata_size);
+    add_window(metadata_offset + header.compressed_metadata_size);
+    if (total_compressed <= header.bundle_file_size) {
+        add_window(header.bundle_file_size - total_compressed);
+    }
+    if (metadata_offset >= total_compressed) {
+        add_window(metadata_offset - total_compressed);
+    }
     std::vector<std::uint64_t> candidates(candidate_set.begin(), candidate_set.end());
 
     std::string attempt_errors;
     std::uint32_t best_partial_blocks = 0U;
     std::uint64_t best_partial_start = 0U;
+    probe.reconstruction_best_partial_blocks = 0U;
     probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
     for (const auto start : candidates) {
         std::vector<unsigned char> reconstructed;
@@ -1040,6 +1117,7 @@ bool TryReconstructDataStream(std::ifstream& in,
             if (decoded_block_count > best_partial_blocks) {
                 best_partial_blocks = decoded_block_count;
                 best_partial_start = start;
+                probe.reconstruction_best_partial_blocks = decoded_block_count;
             }
             if (attempt_errors.size() < 4096U) {
                 attempt_errors += "start=" + std::to_string(start) + ": " + local_err + "; ";

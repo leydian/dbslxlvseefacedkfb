@@ -311,3 +311,37 @@ From `build/reports/vsfavatar_probe_latest.txt`:
   - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=125513796, code=DATA_BLOCK_READ_FAILED`
 - `VRM dkdlrh.vsfavatar`
   - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=402596, code=DATA_BLOCK_READ_FAILED`
+
+## Recent implementation summary (2026-03-02, reconstruction window expansion + block-total diagnostics)
+
+Implemented an additional reconstruction diagnostics pass:
+
+- Added new probe fields:
+  - `total_block_compressed_size`
+  - `total_block_uncompressed_size`
+  - `reconstruction_best_partial_blocks`
+- Expanded reconstruction start-offset candidates:
+  - existing anchors + aligned variants
+  - `+/-256` byte windows (16-byte steps) around key anchors
+  - tail-packed anchor (`bundle_file_size - total_compressed`)
+- Added bounded variant-level decode error aggregation for block-level diagnostics.
+- Added LZ4 bounded fallback path after exact/frame/size-prefixed attempts fail.
+
+Current status after this pass:
+
+- Metadata diagnostics now show block totals and best partial reconstruction count.
+- Fixed sample set still reports `Compat: partial`, `Meshes: 0`.
+- Block-0 failure remains consistent across fixed samples (`mode=0`, `DATA_BLOCK_READ_FAILED`).
+
+### Fixed-sample snapshot (2026-03-02T23:30:48)
+
+From `build/reports/vsfavatar_probe_latest.txt`:
+
+- `NewOnYou.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=74890067, code=DATA_BLOCK_READ_FAILED`
+- `Character vywjd.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=88135067, code=DATA_BLOCK_READ_FAILED`
+- `PPU (2).vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=125513796, code=DATA_BLOCK_READ_FAILED`
+- `VRM dkdlrh.vsfavatar`
+  - `Compat: partial`, `Meshes: 0`, `LastWarning: index=0, mode=0, expected=402596, code=DATA_BLOCK_READ_FAILED`

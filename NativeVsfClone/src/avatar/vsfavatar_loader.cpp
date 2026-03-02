@@ -51,7 +51,12 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
         std::ostringstream meta;
         meta << "metadata parsed: blocks=" << probe.value.block_count
              << ", nodes=" << probe.value.node_count
+             << ", block compressed total=" << probe.value.total_block_compressed_size
+             << ", block uncompressed total=" << probe.value.total_block_uncompressed_size
              << ", reconstruct attempts=" << probe.value.reconstruction_attempts;
+        if (probe.value.reconstruction_best_partial_blocks > 0U) {
+            meta << ", best partial blocks=" << probe.value.reconstruction_best_partial_blocks;
+        }
         if (!probe.value.metadata_decode_strategy.empty()) {
             meta << ", decode strategy=" << probe.value.metadata_decode_strategy
                  << ", decode mode=" << probe.value.metadata_decode_mode;

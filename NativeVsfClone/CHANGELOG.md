@@ -2,6 +2,43 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar reconstruction window expansion and block-total diagnostics
+
+### Summary
+
+Added another reconstruction-focused diagnostics pass to improve candidate scoring and expose per-attempt decode evidence.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added additional reconstruction diagnostics:
+    - `total_block_compressed_size`
+    - `total_block_uncompressed_size`
+    - `reconstruction_best_partial_blocks`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Updated metadata candidate scoring with block-total plausibility checks against bundle layout.
+  - Added reconstruction start-offset expansion:
+    - anchor windows (`+/-256`, 16-byte step) around key offsets
+    - tail-packed anchor (`bundle_file_size - total_compressed`)
+  - Added bounded variant-level decode failure aggregation for block diagnostics.
+  - Added LZ4 bounded fallback path when exact-size/frame/size-prefixed decoding all fail.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Metadata warning now includes:
+    - block compressed/uncompressed totals
+    - best partial reconstructed block count
+
+### Verified
+
+- `Release` build succeeded.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`, generated `2026-03-02T23:30:48`).
+- Current baseline is still `Compat: partial` / `Meshes: 0` for all fixed samples.
+- Block-0 diagnostics remain consistent on fixed set:
+  - `mode=0`
+  - `code=DATA_BLOCK_READ_FAILED`
+  - expected sizes: `74890067`, `88135067`, `125513796`, `402596`
+
 ## 2026-03-02 - VSFAvatar block-layout candidate expansion and reconstruction scoring
 
 ### Summary

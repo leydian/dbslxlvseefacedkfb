@@ -52,6 +52,9 @@ struct UnityFsProbe {
     std::uint32_t metadata_decode_mode = 0;
     std::string metadata_decode_error_code;
     std::string selected_block_layout;
+    std::uint64_t total_block_compressed_size = 0;
+    std::uint64_t total_block_uncompressed_size = 0;
+    std::uint32_t reconstruction_best_partial_blocks = 0;
     std::uint32_t failed_block_index = 0;
     std::uint32_t failed_block_mode = 0;
     std::uint32_t failed_block_expected_size = 0;
