@@ -36,6 +36,14 @@ struct UnityFsProbe {
     std::uint32_t block_count = 0;
     std::uint32_t node_count = 0;
     std::string first_node_path;
+    bool object_table_parsed = false;
+    std::uint32_t object_count = 0;
+    std::uint32_t mesh_object_count = 0;
+    std::uint32_t material_object_count = 0;
+    std::uint32_t texture_object_count = 0;
+    std::uint32_t game_object_count = 0;
+    std::uint32_t skinned_mesh_renderer_count = 0;
+    std::string major_types_found;
     std::string metadata_error;
 };
 

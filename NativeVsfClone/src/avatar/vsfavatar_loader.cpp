@@ -32,7 +32,15 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
     pkg.compat_level = AvatarCompatLevel::Partial;
     pkg.source_path = path;
     pkg.display_name = fs::path(path).stem().string();
-    pkg.materials.push_back({"Default", "MToon (placeholder)"});
+    for (std::uint32_t i = 0; i < probe.value.mesh_object_count; ++i) {
+        pkg.meshes.push_back({"Mesh_" + std::to_string(i), 0, 0});
+    }
+    for (std::uint32_t i = 0; i < probe.value.material_object_count; ++i) {
+        pkg.materials.push_back({"Material_" + std::to_string(i), "UnityShader (placeholder)"}); 
+    }
+    if (pkg.materials.empty()) {
+        pkg.materials.push_back({"Default", "MToon (placeholder)"});
+    }
 
     std::ostringstream warn;
     warn << "UnityFS " << probe.value.header.engine_version
@@ -47,8 +55,24 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
             meta << ", first node=" << probe.value.first_node_path;
         }
         pkg.warnings.push_back(meta.str());
-    } else if (!probe.value.metadata_error.empty()) {
-        pkg.warnings.push_back("metadata parse failed: " + probe.value.metadata_error);
+    }
+    if (!probe.value.metadata_error.empty()) {
+        if (probe.value.metadata_parsed) {
+            pkg.warnings.push_back("metadata/serialized diagnostic: " + probe.value.metadata_error);
+        } else {
+            pkg.warnings.push_back("metadata parse failed: " + probe.value.metadata_error);
+        }
+    }
+    if (probe.value.object_table_parsed) {
+        std::ostringstream obj;
+        obj << "object table parsed: objects=" << probe.value.object_count
+            << ", meshes=" << probe.value.mesh_object_count
+            << ", materials=" << probe.value.material_object_count;
+        if (!probe.value.major_types_found.empty()) {
+            obj << ", types={" << probe.value.major_types_found << "}";
+        }
+        pkg.warnings.push_back(obj.str());
+        pkg.warnings.push_back("payload decode pending: mesh vertex/index and material parameter extraction.");
     }
     if (!probe.value.has_cab_token) {
         pkg.warnings.push_back("CAB token not found in first probe window.");
@@ -56,8 +80,14 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
     if (!probe.value.metadata_parsed) {
         pkg.missing_features.push_back("UnityFS metadata decompression");
     }
-    pkg.missing_features.push_back("SerializedFile object table decode");
-    pkg.missing_features.push_back("mesh/material extraction");
+    if (!probe.value.object_table_parsed) {
+        pkg.missing_features.push_back("SerializedFile object table decode");
+    }
+    if (probe.value.mesh_object_count == 0 && probe.value.material_object_count == 0) {
+        pkg.missing_features.push_back("mesh/material object discovery");
+    } else {
+        pkg.missing_features.push_back("mesh/material payload extraction");
+    }
 
     return core::Result<AvatarPackage>::Ok(pkg);
 }

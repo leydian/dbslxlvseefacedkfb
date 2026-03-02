@@ -134,3 +134,27 @@ Started the `.vsfavatar` compatibility deepening track by extending UnityFS pars
 
 - SerializedFile object table decode is still pending.
 - Mesh/material/texture extraction from parsed Unity asset objects is still pending.
+
+## Recent implementation summary (2026-03-02, phase 2 continuation)
+
+Implemented the first full pipeline attempt for VSFAvatar object discovery:
+
+- Added `SerializedFileReader` module (`include/vsfclone/vsf/serialized_file_reader.h`, `src/vsf/serialized_file_reader.cpp`).
+- Extended `UnityFsProbe` with object-table diagnostics:
+  - `object_table_parsed`, `object_count`
+  - `mesh_object_count`, `material_object_count`, `texture_object_count`
+  - `game_object_count`, `skinned_mesh_renderer_count`
+  - `major_types_found`
+- Extended `UnityFsReader` pipeline:
+  - metadata table parse -> data block reconstruction attempt -> serialized node parse attempt.
+- Updated `VsfAvatarLoader` diagnostics:
+  - always reports metadata/serialized diagnostic failures when present.
+  - maps discovered object counts into placeholder mesh/material entries when available.
+  - `missing_features` now distinguishes object-discovery and payload-extraction stages.
+- Added sample report script:
+  - `tools/vsfavatar_sample_report.ps1`
+
+Current status:
+
+- Metadata parsing is stable on tested samples.
+- Object table parsing path is wired but blocked by bundle data decompression failure on current samples (`LZ4 decode failed` on reconstructed data candidates).

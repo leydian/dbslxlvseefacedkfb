@@ -46,6 +46,58 @@ Started the second implementation track for `.vsfavatar` compatibility by moving
 - SerializedFile object table decode is not implemented.
 - Mesh/Material/Texture extraction is not implemented.
 
+## 2026-03-02 - VSFAvatar phase 2 continuation (object-table pipeline wiring)
+
+### Summary
+
+Wired the full VSFAvatar object-table extraction path after metadata parse, including serialized file parser scaffolding and sample report automation.
+
+### Added
+
+- `include/vsfclone/vsf/serialized_file_reader.h`
+- `src/vsf/serialized_file_reader.cpp`
+  - Added `SerializedFileReader::ParseObjectSummary`:
+    - parses SerializedFile metadata/object table in a best-effort mode
+    - extracts object counts and major Unity class distributions
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Runs `avatar_tool.exe` against sample `.vsfavatar` files
+  - writes report to `build/reports/vsfavatar_probe.txt`
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Extended `UnityFsProbe` with object-table fields:
+    - `object_table_parsed`, `object_count`
+    - `mesh_object_count`, `material_object_count`, `texture_object_count`
+    - `game_object_count`, `skinned_mesh_renderer_count`
+    - `major_types_found`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added metadata table structs (`BlockInfo`, `NodeInfo`) and parsing
+  - Added data-stream reconstruction attempt from parsed block table
+  - Added node-level SerializedFile summary extraction attempts
+  - Added detailed reconstruction diagnostics by offset candidate
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Updated warning output to include serialized diagnostics
+  - Updated mesh/material placeholder population from discovered object counts
+  - Refined missing-feature messages for staged progress
+
+- `CMakeLists.txt`
+  - Added `src/vsf/serialized_file_reader.cpp` to `vsfclone_core`
+
+### Verified
+
+- Release build succeeded after integration.
+- Sample probe script executed successfully on sample `.vsfavatar` files.
+- Metadata parse remains successful; object-table path is now executed and emits diagnostics.
+
+### Current blocker
+
+- Current sample set fails during bundle data block decompression in reconstruction stage (`LZ4 decode failed`).
+- As a result, object table summary extraction does not complete on those samples yet.
+
 ## 2026-03-02 - NativeCore foundation + avatar pipeline extension
 
 ### Summary

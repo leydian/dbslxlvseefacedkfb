@@ -13,6 +13,7 @@ add_library(vsfclone_core STATIC
     src/avatar/vxavatar_loader.cpp
     src/avatar/vsfavatar_loader.cpp
     src/vsf/unityfs_reader.cpp
+    src/vsf/serialized_file_reader.cpp
     src/stream/spout_sender_stub.cpp
     src/osc/osc_endpoint_stub.cpp
 )
