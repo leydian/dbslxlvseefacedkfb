@@ -98,6 +98,7 @@ struct CoreState {
     stream::SpoutSender spout;
     osc::OscEndpoint osc;
     NcTrackingFrame latest_tracking {};
+    NcRenderQualityOptions render_quality {};
     float last_frame_ms = 0.0f;
 
 #if defined(_WIN32)
@@ -110,6 +111,37 @@ struct CoreState {
     std::string last_error_message;
     bool last_error_recoverable = true;
 };
+
+NcRenderQualityOptions MakeDefaultRenderQualityOptions() {
+    NcRenderQualityOptions options {};
+    options.camera_mode = NC_CAMERA_MODE_AUTO_FIT_BUST;
+    options.framing_target = 0.72f;
+    options.headroom = 0.12f;
+    options.yaw_deg = 192.0f;
+    options.fov_deg = 45.0f;
+    options.background_rgba[0] = 0.08f;
+    options.background_rgba[1] = 0.12f;
+    options.background_rgba[2] = 0.18f;
+    options.background_rgba[3] = 1.0f;
+    options.show_debug_overlay = 0U;
+    return options;
+}
+
+NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions& options) {
+    NcRenderQualityOptions out = options;
+    if (out.camera_mode < NC_CAMERA_MODE_AUTO_FIT_FULL || out.camera_mode > NC_CAMERA_MODE_MANUAL) {
+        out.camera_mode = NC_CAMERA_MODE_AUTO_FIT_BUST;
+    }
+    out.framing_target = std::max(0.35f, std::min(0.95f, out.framing_target));
+    out.headroom = std::max(0.0f, std::min(0.40f, out.headroom));
+    out.yaw_deg = std::max(0.0f, std::min(360.0f, out.yaw_deg));
+    out.fov_deg = std::max(20.0f, std::min(80.0f, out.fov_deg));
+    for (int i = 0; i < 4; ++i) {
+        out.background_rgba[i] = std::max(0.0f, std::min(1.0f, out.background_rgba[i]));
+    }
+    out.show_debug_overlay = out.show_debug_overlay > 0U ? 1U : 0U;
+    return out;
+}
 
 CoreState g_state;
 std::mutex g_mutex;
@@ -901,18 +933,24 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
     return true;
 }
 
-DirectX::XMMATRIX ComputeViewMatrix() {
+DirectX::XMMATRIX ComputeViewMatrix(
+    float camera_distance,
+    float look_at_y,
+    float yaw_deg) {
     using namespace DirectX;
-    const XMVECTOR eye = XMVectorSet(0.35f, 0.22f, 3.2f, 1.0f);
-    const XMVECTOR at = XMVectorSet(0.0f, 0.05f, 0.0f, 1.0f);
+    const float yaw_rad = XMConvertToRadians(yaw_deg);
+    const float eye_x = std::sin(yaw_rad) * camera_distance;
+    const float eye_z = std::cos(yaw_rad) * camera_distance;
+    const XMVECTOR eye = XMVectorSet(eye_x, look_at_y + 0.08f, eye_z, 1.0f);
+    const XMVECTOR at = XMVectorSet(0.0f, look_at_y, 0.0f, 1.0f);
     const XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     return XMMatrixLookAtRH(eye, at, up);
 }
 
-DirectX::XMMATRIX ComputeProjectionMatrix(std::uint32_t width, std::uint32_t height) {
+DirectX::XMMATRIX ComputeProjectionMatrix(std::uint32_t width, std::uint32_t height, float fov_deg) {
     using namespace DirectX;
     const float aspect = static_cast<float>(width) / static_cast<float>(std::max<std::uint32_t>(height, 1U));
-    return XMMatrixPerspectiveFovRH(XM_PIDIV4, aspect, 0.01f, 100.0f);
+    return XMMatrixPerspectiveFovRH(XMConvertToRadians(fov_deg), aspect, 0.01f, 100.0f);
 }
 
 bool CaptureRtvBgra(
@@ -1043,7 +1081,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         return NC_ERROR_INTERNAL;
     }
 
-    const float clear_color[4] = {0.08f, 0.12f, 0.18f, 1.0f};
+    const auto quality = SanitizeRenderQualityOptions(g_state.render_quality);
+    const float clear_color[4] = {
+        quality.background_rgba[0],
+        quality.background_rgba[1],
+        quality.background_rgba[2],
+        quality.background_rgba[3]};
     device_ctx->OMSetRenderTargets(1, &rtv, renderer.depth_dsv);
     device_ctx->ClearRenderTargetView(rtv, clear_color);
     device_ctx->ClearDepthStencilView(renderer.depth_dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0U);
@@ -1077,8 +1120,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     std::vector<DrawItem> opaque_draws;
     std::vector<DrawItem> blend_draws;
     std::uint32_t frame_draw_calls = 0U;
-    const auto view = ComputeViewMatrix();
-    const auto proj = ComputeProjectionMatrix(ctx->width, ctx->height);
+    const float fov_deg = quality.fov_deg;
+    const float tan_half_fov = std::tan(DirectX::XMConvertToRadians(fov_deg) * 0.5f);
+    const float camera_distance =
+        (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST) ? 2.7f : 3.2f;
+    const float look_at_y = quality.headroom * 0.6f;
+    const auto view = ComputeViewMatrix(camera_distance, look_at_y, quality.yaw_deg);
+    const auto proj = ComputeProjectionMatrix(ctx->width, ctx->height, fov_deg);
     std::uint32_t avatar_slot = 0U;
     for (const auto handle : g_state.render_ready_avatars) {
         auto it = g_state.avatars.find(handle);
@@ -1121,17 +1169,30 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float extent_y = std::max(avatar_bmax.y - avatar_bmin.y, 0.0001f);
         const float extent_z = std::max(avatar_bmax.z - avatar_bmin.z, 0.0001f);
         const float max_extent = std::max(extent_x, std::max(extent_y, extent_z));
-        const float fit_scale = 1.4f / max_extent;
+        float fit_scale = 1.4f / max_extent;
+        if (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_FULL || quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST) {
+            const float fit_basis_height =
+                (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
+                    ? std::max(extent_y * 0.58f, 0.0001f)
+                    : extent_y;
+            const float desired = quality.framing_target;
+            fit_scale = (desired * 2.0f * camera_distance * std::max(0.01f, tan_half_fov)) / fit_basis_height;
+        }
+        fit_scale = std::max(0.05f, std::min(50.0f, fit_scale));
         const float cx = (avatar_bmin.x + avatar_bmax.x) * 0.5f;
         const float cy = (avatar_bmin.y + avatar_bmax.y) * 0.5f;
         const float cz = (avatar_bmin.z + avatar_bmax.z) * 0.5f;
+        const float focus_y =
+            (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
+                ? (avatar_bmin.y + extent_y * (0.68f + quality.headroom * 0.2f))
+                : cy;
         const float x_offset = static_cast<float>(avatar_slot) * 1.8f;
-        const float preview_yaw = DirectX::XM_PI + DirectX::XMConvertToRadians(12.0f);
+        const float preview_yaw = DirectX::XM_PI;
         const auto world =
-            DirectX::XMMatrixTranslation(-cx, -cy, -cz) *
+            DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *
             DirectX::XMMatrixRotationY(preview_yaw) *
             DirectX::XMMatrixScaling(fit_scale, fit_scale, fit_scale) *
-            DirectX::XMMatrixTranslation(x_offset, 0.0f, 0.0f);
+            DirectX::XMMatrixTranslation(x_offset, -look_at_y, 0.0f);
         ++avatar_slot;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
@@ -1303,6 +1364,7 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.next_avatar_handle = 1;
     vsfclone::nativecore::g_state.avatars.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
+    vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.last_frame_ms = 0.0f;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -1326,6 +1388,7 @@ NcResultCode nc_shutdown(void) {
 #endif
     vsfclone::nativecore::g_state.avatars.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
+    vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.initialized = false;
     vsfclone::nativecore::ClearError();
     return NC_OK;
