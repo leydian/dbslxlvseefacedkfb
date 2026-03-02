@@ -100,6 +100,22 @@ typedef struct NcRenderContext {
     float delta_time_seconds;
 } NcRenderContext;
 
+typedef enum NcCameraMode {
+    NC_CAMERA_MODE_AUTO_FIT_FULL = 0,
+    NC_CAMERA_MODE_AUTO_FIT_BUST = 1,
+    NC_CAMERA_MODE_MANUAL = 2
+} NcCameraMode;
+
+typedef struct NcRenderQualityOptions {
+    NcCameraMode camera_mode;
+    float framing_target;
+    float headroom;
+    float yaw_deg;
+    float fov_deg;
+    float background_rgba[4];
+    uint32_t show_debug_overlay;
+} NcRenderQualityOptions;
+
 typedef struct NcSpoutOptions {
     uint32_t width;
     uint32_t height;
@@ -147,6 +163,8 @@ VSFCLONE_API NcResultCode nc_create_window_render_target(const NcWindowRenderTar
 VSFCLONE_API NcResultCode nc_resize_window_render_target(const NcWindowRenderTarget* target);
 VSFCLONE_API NcResultCode nc_destroy_window_render_target(void* hwnd);
 VSFCLONE_API NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time_seconds);
+VSFCLONE_API NcResultCode nc_set_render_quality_options(const NcRenderQualityOptions* options);
+VSFCLONE_API NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options);
 
 VSFCLONE_API NcResultCode nc_start_spout(const NcSpoutOptions* options);
 VSFCLONE_API NcResultCode nc_stop_spout(void);
