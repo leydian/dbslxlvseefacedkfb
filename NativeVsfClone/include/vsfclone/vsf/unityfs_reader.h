@@ -32,6 +32,11 @@ struct UnityFsProbe {
     UnityFsHeader header;
     bool has_cab_token = false;
     std::uint32_t vrm_token_hits = 0;
+    bool metadata_parsed = false;
+    std::uint32_t block_count = 0;
+    std::uint32_t node_count = 0;
+    std::string first_node_path;
+    std::string metadata_error;
 };
 
 class UnityFsReader {
@@ -40,4 +45,3 @@ class UnityFsReader {
 };
 
 }  // namespace vsfclone::vsf
-

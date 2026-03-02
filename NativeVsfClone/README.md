@@ -97,3 +97,40 @@ This repository was upgraded from a loader-only scaffold to a first executable r
 
 - Full `Release` build completed successfully with MSVC/CMake.
 - `avatar_tool.exe` was executed against a real `.vsfavatar` file and returned expected `partial` compatibility diagnostics.
+
+## Recent implementation summary (2026-03-02, phase 2 start)
+
+Started the `.vsfavatar` compatibility deepening track by extending UnityFS parsing beyond simple header probing.
+
+### What changed
+
+- Extended `UnityFsProbe` with metadata diagnostics:
+  - `metadata_parsed`
+  - `block_count`
+  - `node_count`
+  - `first_node_path`
+  - `metadata_error`
+- Added metadata block parsing flow in `UnityFsReader`:
+  - metadata offset resolution (`header-end` and `end-of-file` flag path)
+  - LZ4/LZ4HC raw decompression for metadata
+  - block info table parsing
+  - node table parsing
+  - first node path extraction
+- Updated `VsfAvatarLoader` warning logic:
+  - reports parsed metadata summary (`blocks`, `nodes`, `first node`)
+  - reports metadata parse failure reason when unavailable
+  - removes metadata decompression from `missing_features` when metadata is parsed successfully
+
+### Validation with sample dataset
+
+- Rebuilt `Release` successfully.
+- Ran `avatar_tool.exe` on multiple files in `D:\dbslxlvseefacedkfb\sample`.
+- Confirmed metadata parse diagnostics for tested samples:
+  - `blocks=1`
+  - `nodes=2`
+  - first node path observed as `CAB-...`
+
+### Current remaining gap in this track
+
+- SerializedFile object table decode is still pending.
+- Mesh/material/texture extraction from parsed Unity asset objects is still pending.

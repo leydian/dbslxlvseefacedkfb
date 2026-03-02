@@ -2,6 +2,50 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - VSFAvatar phase 2 kickoff (UnityFS metadata deep parse)
+
+### Summary
+
+Started the second implementation track for `.vsfavatar` compatibility by moving from header-level probing to metadata-level parsing.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Extended `UnityFsProbe` with metadata diagnostics:
+    - `metadata_parsed`
+    - `block_count`
+    - `node_count`
+    - `first_node_path`
+    - `metadata_error`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Implemented metadata offset resolution logic for UnityFS bundle variants.
+  - Added metadata decompression path for `LZ4` and `LZ4HC`.
+  - Added UnityFS metadata table parsing:
+    - block info table
+    - node table
+    - first node path extraction
+  - Added structured metadata parse failure reporting.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added loader warning output for parsed metadata summary.
+  - Added loader warning output for metadata parse failure reasons.
+  - Updated `missing_features` behavior to avoid reporting metadata decompression as missing when parse succeeds.
+
+### Verified
+
+- Release rebuild succeeded after parser changes.
+- `avatar_tool.exe` executed against multiple files in `D:\dbslxlvseefacedkfb\sample`.
+- Confirmed metadata diagnostics in runtime output:
+  - parsed metadata status true on tested samples
+  - `blocks=1`, `nodes=2`
+  - first node path reported as `CAB-...`
+
+### Remaining gap after this update
+
+- SerializedFile object table decode is not implemented.
+- Mesh/Material/Texture extraction is not implemented.
+
 ## 2026-03-02 - NativeCore foundation + avatar pipeline extension
 
 ### Summary

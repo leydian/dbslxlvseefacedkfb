@@ -39,10 +39,23 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
          << ", compression mode=" << static_cast<int>(probe.value.header.compression_mode)
          << ", VRM token hits=" << probe.value.vrm_token_hits;
     pkg.warnings.push_back(warn.str());
+    if (probe.value.metadata_parsed) {
+        std::ostringstream meta;
+        meta << "metadata parsed: blocks=" << probe.value.block_count
+             << ", nodes=" << probe.value.node_count;
+        if (!probe.value.first_node_path.empty()) {
+            meta << ", first node=" << probe.value.first_node_path;
+        }
+        pkg.warnings.push_back(meta.str());
+    } else if (!probe.value.metadata_error.empty()) {
+        pkg.warnings.push_back("metadata parse failed: " + probe.value.metadata_error);
+    }
     if (!probe.value.has_cab_token) {
         pkg.warnings.push_back("CAB token not found in first probe window.");
     }
-    pkg.missing_features.push_back("UnityFS metadata decompression");
+    if (!probe.value.metadata_parsed) {
+        pkg.missing_features.push_back("UnityFS metadata decompression");
+    }
     pkg.missing_features.push_back("SerializedFile object table decode");
     pkg.missing_features.push_back("mesh/material extraction");
 
