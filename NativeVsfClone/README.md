@@ -7,7 +7,8 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - `.vxa2` input path handling (manifest + TLV section decode MVP)
 - `.vsfavatar` probing via UnityFS header parser (implemented)
 - `nativecore.dll` C ABI for host/UI integration
-- streaming and OSC interfaces (`Spout2`, `OSC`) as stubs for wiring
+- streaming and OSC runtime output path (`shared-memory frame sender`, `UDP OSC`)
+- host app skeletons (`host/WpfHost`, `host/WinUiHost`) via shared `host/HostCore`
 
 ## VSFAvatar parser mode (current default)
 
@@ -35,9 +36,14 @@ If `sidecar` mode fails to execute:
   - init/shutdown
   - avatar load/query/unload
   - tracking frame submission
-  - render tick (minimal D3D11 clear + lifecycle validation)
-  - Spout/OSC start-stop stubs
+  - render tick (D3D11 clear + window-target render path)
+  - Spout/OSC start-stop with runtime backends
+  - runtime stats retrieval (`nc_get_runtime_stats`)
   - last error retrieval
+- `host/HostCore` wraps C ABI calls for WPF/WinUI hosts.
+- `host/HostApps.sln` groups `HostCore`, `WpfHost`, and `WinUiHost`.
+- Detailed implementation report:
+  - `docs/reports/ui_host_runtime_integration_2026-03-02.md`
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
 - `vsfavatar_sidecar` is built as an external parser process.
 
@@ -48,8 +54,8 @@ If `sidecar` mode fails to execute:
 - Full VRM feature coverage (full MToon, SpringBone, expressions)
 - `.vxavatar` manifest/material override parse/apply
 - `.vxa2` streaming payload unpack optimization
-- DirectX11 renderer and WinUI/WPF host integration
-- Real Spout2 and OSC runtime bindings
+- Full mesh/material draw path (current render is clear-path + output hooks)
+- Full Spout2 SDK interop compatibility (current sender uses internal shared memory transport)
 
 ## Build (Windows)
 
@@ -57,6 +63,7 @@ Prerequisites:
 
 - Visual Studio 2022 Build Tools (MSVC)
 - CMake 3.20+
+- .NET 8 SDK (for `host/*` projects)
 
 Commands:
 
@@ -118,10 +125,16 @@ Outputs:
 
 ## VRM quality gate
 
-Run 5-sample VRM quality gate:
+Run fixed profile (recommended default):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5
+```
+
+Run auto profile (sorted discovery top-5):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile auto5
 ```
 
 Gate rules:
@@ -135,6 +148,8 @@ Gate rules:
 - Gate C: each sample must satisfy:
   - `MaterialPayloads > 0`
   - `TexturePayloads > 0`
+- Gate D: each sample must satisfy:
+  - `ExpressionCount > 0`
 
 Exit code:
 
@@ -143,8 +158,12 @@ Exit code:
 
 Outputs:
 
-- probe report: `build/reports/vrm_probe_latest.txt`
-- gate summary: `build/reports/vrm_gate_summary.txt`
+- `fixed5`:
+  - probe report: `build/reports/vrm_probe_fixed5.txt`
+  - gate summary: `build/reports/vrm_gate_fixed5.txt`
+- `auto5`:
+  - probe report: `build/reports/vrm_probe_auto5.txt`
+  - gate summary: `build/reports/vrm_gate_auto5.txt`
 
 ## VXAvatar/VXA2 quality gate
 

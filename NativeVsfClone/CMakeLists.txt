@@ -15,8 +15,8 @@ add_library(vsfclone_core STATIC
     src/avatar/vsfavatar_loader.cpp
     src/vsf/unityfs_reader.cpp
     src/vsf/serialized_file_reader.cpp
-    src/stream/spout_sender_stub.cpp
-    src/osc/osc_endpoint_stub.cpp
+    src/stream/spout_sender.cpp
+    src/osc/osc_endpoint.cpp
     src/common/miniz_impl.cpp
 )
 
@@ -32,7 +32,7 @@ add_library(nativecore SHARED
 )
 target_link_libraries(nativecore PRIVATE vsfclone_core)
 if(WIN32)
-    target_link_libraries(nativecore PRIVATE d3d11)
+    target_link_libraries(nativecore PRIVATE d3d11 dxgi ws2_32)
 endif()
 target_include_directories(nativecore
     PUBLIC

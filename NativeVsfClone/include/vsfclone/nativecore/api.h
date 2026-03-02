@@ -68,10 +68,13 @@ typedef struct NcAvatarInfo {
     uint32_t format_unknown_section_count;
     uint32_t warning_count;
     uint32_t missing_feature_count;
+    uint32_t expression_count;
+    uint32_t last_render_draw_calls;
     char display_name[128];
     char source_path[260];
     char parser_stage[32];
     char primary_error_code[64];
+    char last_expression_summary[128];
     char last_warning[256];
     char last_missing_feature[256];
 } NcAvatarInfo;
@@ -108,6 +111,19 @@ typedef struct NcOscOptions {
     const char* publish_address;
 } NcOscOptions;
 
+typedef struct NcWindowRenderTarget {
+    void* hwnd;
+    uint32_t width;
+    uint32_t height;
+} NcWindowRenderTarget;
+
+typedef struct NcRuntimeStats {
+    uint32_t render_ready_avatar_count;
+    uint32_t spout_active;
+    uint32_t osc_active;
+    float last_frame_ms;
+} NcRuntimeStats;
+
 typedef struct NcErrorInfo {
     NcResultCode code;
     char subsystem[32];
@@ -126,6 +142,10 @@ VSFCLONE_API NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame);
 VSFCLONE_API NcResultCode nc_create_render_resources(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_destroy_render_resources(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_render_frame(const NcRenderContext* ctx);
+VSFCLONE_API NcResultCode nc_create_window_render_target(const NcWindowRenderTarget* target);
+VSFCLONE_API NcResultCode nc_resize_window_render_target(const NcWindowRenderTarget* target);
+VSFCLONE_API NcResultCode nc_destroy_window_render_target(void* hwnd);
+VSFCLONE_API NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time_seconds);
 
 VSFCLONE_API NcResultCode nc_start_spout(const NcSpoutOptions* options);
 VSFCLONE_API NcResultCode nc_stop_spout(void);
@@ -134,6 +154,7 @@ VSFCLONE_API NcResultCode nc_start_osc(const NcOscOptions* options);
 VSFCLONE_API NcResultCode nc_stop_osc(void);
 
 VSFCLONE_API NcResultCode nc_get_last_error(NcErrorInfo* out_error);
+VSFCLONE_API NcResultCode nc_get_runtime_stats(NcRuntimeStats* out_stats);
 
 #ifdef __cplusplus
 }

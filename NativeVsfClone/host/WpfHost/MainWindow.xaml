@@ -1,0 +1,39 @@
+<Window x:Class="WpfHost.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WPF Host" Height="720" Width="1200">
+    <Grid Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="320"/>
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+            <TextBlock Text="Avatar Path" FontWeight="Bold"/>
+            <TextBox x:Name="AvatarPathTextBox" Margin="0,4,0,8" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm"/>
+
+            <WrapPanel Margin="0,0,0,8">
+                <Button Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0"/>
+                <Button Content="Load" Click="Load_Click" Margin="0,0,8,0"/>
+                <Button Content="Unload" Click="Unload_Click"/>
+            </WrapPanel>
+
+            <TextBlock Text="Spout" FontWeight="Bold" Margin="0,8,0,0"/>
+            <WrapPanel Margin="0,4,0,8">
+                <Button Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0"/>
+                <Button Content="Stop Spout" Click="StopSpout_Click"/>
+            </WrapPanel>
+
+            <TextBlock Text="OSC" FontWeight="Bold" Margin="0,8,0,0"/>
+            <WrapPanel Margin="0,4,0,8">
+                <Button Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0"/>
+                <Button Content="Stop OSC" Click="StopOsc_Click"/>
+            </WrapPanel>
+
+            <TextBlock Text="Diagnostics" FontWeight="Bold" Margin="0,8,0,0"/>
+            <TextBox x:Name="DiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Height="360"/>
+        </StackPanel>
+
+        <Border Grid.Column="1" x:Name="RenderHost" Background="#111722" BorderBrush="#304050" BorderThickness="1"/>
+    </Grid>
+</Window>

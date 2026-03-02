@@ -1,0 +1,33 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostCore", "HostCore\HostCore.csproj", "{4D7D4B4F-7D5F-43E8-95F9-0A7A6C2B29C1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfHost", "WpfHost\WpfHost.csproj", "{3DA83FB6-5E70-4DF8-A928-8E7B0A9BCF34}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinUiHost", "WinUiHost\WinUiHost.csproj", "{1ED54F0D-385A-4787-B8BB-EA71E844E16A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4D7D4B4F-7D5F-43E8-95F9-0A7A6C2B29C1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D7D4B4F-7D5F-43E8-95F9-0A7A6C2B29C1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D7D4B4F-7D5F-43E8-95F9-0A7A6C2B29C1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D7D4B4F-7D5F-43E8-95F9-0A7A6C2B29C1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3DA83FB6-5E70-4DF8-A928-8E7B0A9BCF34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3DA83FB6-5E70-4DF8-A928-8E7B0A9BCF34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3DA83FB6-5E70-4DF8-A928-8E7B0A9BCF34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3DA83FB6-5E70-4DF8-A928-8E7B0A9BCF34}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1ED54F0D-385A-4787-B8BB-EA71E844E16A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1ED54F0D-385A-4787-B8BB-EA71E844E16A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1ED54F0D-385A-4787-B8BB-EA71E844E16A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1ED54F0D-385A-4787-B8BB-EA71E844E16A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

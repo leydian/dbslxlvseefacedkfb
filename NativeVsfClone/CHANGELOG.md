@@ -2,6 +2,125 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-02 - UI host foundation + native window render path + runtime Spout/OSC backends
+
+### Summary
+
+Implemented the UI integration foundation by adding shared HostCore + WPF/WinUI host projects, and expanded `nativecore.dll` with a window-bound render path and runtime output backends for Spout/OSC workflows.
+
+### Changed
+
+- `include/vsfclone/nativecore/api.h`
+  - Added window-render API:
+    - `nc_create_window_render_target`
+    - `nc_resize_window_render_target`
+    - `nc_destroy_window_render_target`
+    - `nc_render_frame_to_window`
+  - Added runtime stats API:
+    - `NcRuntimeStats`
+    - `nc_get_runtime_stats`
+
+- `src/nativecore/native_core.cpp`
+  - Replaced stub backend wiring with runtime classes:
+    - `stream::SpoutSender`
+    - `osc::OscEndpoint`
+  - Added D3D11 swapchain-per-window lifecycle management.
+  - Added shared render pipeline path used by both external-context and window-target rendering.
+  - Added render-time output hooks:
+    - frame capture from RTV to streaming backend
+    - tracking frame publish to OSC addresses (`/VsfClone/Tracking/*`)
+  - Added runtime diagnostics updates (`last_frame_ms`, spout/osc active status).
+
+- `include/vsfclone/stream/spout_sender.h`
+- `src/stream/spout_sender.cpp`
+  - Added shared-memory based BGRA frame sender implementation (channel-scoped mapped file).
+
+- `include/vsfclone/osc/osc_endpoint.h`
+- `src/osc/osc_endpoint.cpp`
+  - Added Winsock UDP OSC endpoint implementation with float packet encoding and destination parsing.
+
+- `CMakeLists.txt`
+  - Switched core sources from stub files to runtime files.
+  - Linked nativecore against `d3d11`, `dxgi`, `ws2_32` on Windows.
+
+- `host/HostCore/*`
+  - Added .NET interop and services:
+    - `NativeCoreInterop`
+    - `AvatarSessionService`
+    - `RenderLoopService`
+    - `OutputService`
+    - `DiagnosticsModel`
+
+- `host/WpfHost/*`
+  - Added runnable WPF host shell for:
+    - initialize/load/unload
+    - render tick loop
+    - spout/osc start-stop
+    - runtime diagnostics panel
+
+- `host/WinUiHost/*`
+  - Added WinUI host shell with parity controls and diagnostics over shared HostCore.
+
+- `host/HostApps.sln`
+  - Added host-focused solution file grouping HostCore/WpfHost/WinUiHost.
+
+## 2026-03-03 - VRM expression wiring + fixed/auto gate profiles + render diagnostics
+
+### Summary
+
+Advanced the VRM quality track by adding expression extraction/runtime mapping, exposing expression/render diagnostics through NativeCore, and splitting VRM quality gate execution into deterministic `fixed5` and exploratory `auto5` profiles.
+
+### Changed
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Added expression/runtime state container:
+    - `ExpressionState`
+    - `AvatarPackage.expressions`
+    - `AvatarPackage.last_expression_summary`
+    - `AvatarPackage.last_render_draw_calls`
+
+- `include/vsfclone/nativecore/api.h`
+  - Extended `NcAvatarInfo` tail fields:
+    - `expression_count`
+    - `last_render_draw_calls`
+    - `last_expression_summary`
+
+- `src/nativecore/native_core.cpp`
+  - `nc_set_tracking_frame` now applies minimal expression runtime mapping for extracted expressions:
+    - `blink` -> average blink
+    - `viseme_aa` -> `mouth_open`
+    - `joy` -> mouth-driven proxy weight
+  - `nc_render_frame` now tracks and stores per-avatar draw-call counts (mesh payload count proxy).
+  - `FillAvatarInfo` now surfaces expression/render diagnostics into `NcAvatarInfo`.
+
+- `tools/avatar_tool.cpp`
+  - Prints new diagnostics:
+    - `ExpressionCount`
+    - `LastRenderDrawCalls`
+    - `LastExpressionSummary`
+
+- `src/avatar/vrm_loader.cpp`
+  - Added VRM expression extraction:
+    - `extensions.VRMC_vrm.expressions.preset/custom`
+    - legacy `extensions.VRM.blendShapeMaster.blendShapeGroups`
+  - Added expression mapping tags (`blink`, `viseme_aa`, `joy`, `none`).
+  - Added warnings/feature flags for expression fallback visibility.
+
+- `tools/vrm_quality_gate.ps1`
+  - Added gate profiles:
+    - `-Profile fixed5` (default)
+    - `-Profile auto5`
+  - Added Gate D (`ExpressionCount > 0` per sample).
+  - Profile-specific outputs:
+    - `fixed5`: `vrm_probe_fixed5.txt`, `vrm_gate_fixed5.txt`
+    - `auto5`: `vrm_probe_auto5.txt`, `vrm_gate_auto5.txt`
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Added per-sample Gate D unmet diagnostics (`stage/object_table_parsed/primary`) to failure reasons.
+
+- `README.md`
+  - Updated VRM gate section for profile-based execution and Gate D expression visibility.
+
 ## 2026-03-03 - VRM material/texture payload quality pass + 5-sample gate harness
 
 ### Summary

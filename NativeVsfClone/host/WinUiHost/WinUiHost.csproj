@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HostCore\HostCore.csproj" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240802000" />
+  </ItemGroup>
+
+  <Target Name="CopyNativeCore" AfterTargets="Build">
+    <ItemGroup>
+      <NativeCoreCandidate Include="..\..\build\Release\nativecore.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NativeCoreCandidate)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(NativeCoreCandidate.Identity)')" />
+  </Target>
+</Project>
