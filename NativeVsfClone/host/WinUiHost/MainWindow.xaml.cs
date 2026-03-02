@@ -100,7 +100,7 @@ public sealed partial class MainWindow : Window
     {
         var d = DiagnosticsModel.Capture();
         var sb = new StringBuilder();
-        sb.AppendLine($"AvatarHandle: {_session.ActiveAvatarHandle?.ToString() ?? \"none\"}");
+        sb.AppendLine($"AvatarHandle: {_session.ActiveAvatarHandle?.ToString() ?? "none"}");
         if (_session.ActiveAvatarInfo.HasValue)
         {
             var info = _session.ActiveAvatarInfo.Value;
