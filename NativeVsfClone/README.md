@@ -158,3 +158,23 @@ Current status:
 
 - Metadata parsing is stable on tested samples.
 - Object table parsing path is wired but blocked by bundle data decompression failure on current samples (`LZ4 decode failed` on reconstructed data candidates).
+
+## Recent implementation summary (2026-03-02, phase 2 decompression hardening)
+
+Implemented additional decompression hardening and diagnostics for the VSFAvatar pipeline:
+
+- Added multi-strategy metadata decompression attempts:
+  - whole blob decode attempt
+  - hash-prefix (16-byte) + compressed tail attempt
+  - mode fallback tries (`header/block`, `LZ4`, `LZ4HC`, `raw`)
+- Added LZ4 frame decode fallback path in addition to raw block decode.
+- Added pipeline diagnostics fields in `UnityFsProbe`:
+  - `reconstruction_attempts`
+  - `reconstruction_success_offset`
+  - `serialized_parse_error_code`
+- Updated loader warning output to include reconstruction attempts/offset and serialized parse code.
+
+Current blocker after hardening:
+
+- Metadata decompression for current `.vsfavatar` samples still fails under current in-house LZ4 decoder logic.
+- This blocks downstream `object_table_parsed` from turning true on those samples.

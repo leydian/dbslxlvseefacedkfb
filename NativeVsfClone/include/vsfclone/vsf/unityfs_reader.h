@@ -44,6 +44,9 @@ struct UnityFsProbe {
     std::uint32_t game_object_count = 0;
     std::uint32_t skinned_mesh_renderer_count = 0;
     std::string major_types_found;
+    std::uint32_t reconstruction_attempts = 0;
+    std::uint64_t reconstruction_success_offset = 0;
+    std::string serialized_parse_error_code;
     std::string metadata_error;
 };
 

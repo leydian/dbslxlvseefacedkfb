@@ -98,6 +98,44 @@ Wired the full VSFAvatar object-table extraction path after metadata parse, incl
 - Current sample set fails during bundle data block decompression in reconstruction stage (`LZ4 decode failed`).
 - As a result, object table summary extraction does not complete on those samples yet.
 
+## 2026-03-02 - VSFAvatar phase 2 decompression hardening
+
+### Summary
+
+Hardened UnityFS metadata/data decompression and expanded diagnostics to accelerate blocker resolution.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Updated metadata-at-end detection to support sample variant flag usage.
+  - Added LZ4 frame fallback decode path alongside raw LZ4 decode.
+  - Added multi-mode decompression attempts (`block/header/LZ4/LZ4HC/raw`) for metadata and data blocks.
+  - Added multi-strategy metadata handling:
+    - whole compressed metadata attempt
+    - 16-byte hash-prefix + compressed tail attempt
+  - Added reconstruction diagnostics:
+    - candidate attempt count
+    - successful reconstruction offset
+    - serialized parse fallback error code propagation
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added diagnostic fields:
+    - `reconstruction_attempts`
+    - `reconstruction_success_offset`
+    - `serialized_parse_error_code`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added warnings for reconstruction attempts/success offset and serialized parse code.
+
+- `README.md`
+  - Added phase-2 decompression hardening summary and current blocker status.
+
+### Verified
+
+- Release build succeeded after decompression hardening.
+- Sample probe report regenerated successfully (`build/reports/vsfavatar_probe.txt`).
+- Current sample set still fails metadata decompression under in-house LZ4 logic, with improved explicit diagnostics.
+
 ## 2026-03-02 - NativeCore foundation + avatar pipeline extension
 
 ### Summary

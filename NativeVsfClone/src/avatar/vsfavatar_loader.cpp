@@ -50,7 +50,11 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
     if (probe.value.metadata_parsed) {
         std::ostringstream meta;
         meta << "metadata parsed: blocks=" << probe.value.block_count
-             << ", nodes=" << probe.value.node_count;
+             << ", nodes=" << probe.value.node_count
+             << ", reconstruct attempts=" << probe.value.reconstruction_attempts;
+        if (probe.value.reconstruction_success_offset > 0U) {
+            meta << ", reconstruct success offset=" << probe.value.reconstruction_success_offset;
+        }
         if (!probe.value.first_node_path.empty()) {
             meta << ", first node=" << probe.value.first_node_path;
         }
@@ -73,6 +77,8 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
         }
         pkg.warnings.push_back(obj.str());
         pkg.warnings.push_back("payload decode pending: mesh vertex/index and material parameter extraction.");
+    } else if (!probe.value.serialized_parse_error_code.empty()) {
+        pkg.warnings.push_back("serialized parse code: " + probe.value.serialized_parse_error_code);
     }
     if (!probe.value.has_cab_token) {
         pkg.warnings.push_back("CAB token not found in first probe window.");

@@ -170,12 +170,12 @@ std::uint32_t CountNeedle(const std::vector<char>& buffer, const char* needle, s
     return count;
 }
 
-bool Lz4DecompressRaw(const std::vector<unsigned char>& src, std::size_t expected_size, std::vector<unsigned char>& dst) {
+bool Lz4DecompressRawBounded(const std::vector<unsigned char>& src, std::size_t max_output_size, std::vector<unsigned char>& dst) {
     dst.clear();
-    dst.reserve(expected_size);
+    dst.reserve(max_output_size);
 
     std::size_t ip = 0U;
-    while (ip < src.size() && dst.size() < expected_size) {
+    while (ip < src.size()) {
         const std::uint8_t token = src[ip++];
         std::size_t literal_len = static_cast<std::size_t>(token >> 4U);
         if (literal_len == 15U) {
@@ -188,7 +188,7 @@ bool Lz4DecompressRaw(const std::vector<unsigned char>& src, std::size_t expecte
             }
             literal_len += src[ip++];
         }
-        if (ip + literal_len > src.size() || dst.size() + literal_len > expected_size) {
+        if (ip + literal_len > src.size() || dst.size() + literal_len > max_output_size) {
             return false;
         }
         dst.insert(dst.end(), src.begin() + static_cast<std::ptrdiff_t>(ip), src.begin() + static_cast<std::ptrdiff_t>(ip + literal_len));
@@ -217,7 +217,7 @@ bool Lz4DecompressRaw(const std::vector<unsigned char>& src, std::size_t expecte
             }
             match_len += src[ip++];
         }
-        if (dst.size() + match_len > expected_size) {
+        if (dst.size() + match_len > max_output_size) {
             return false;
         }
 
@@ -226,6 +226,134 @@ bool Lz4DecompressRaw(const std::vector<unsigned char>& src, std::size_t expecte
             dst.push_back(dst[copy_from + i]);
         }
     }
+    return true;
+}
+
+bool Lz4DecompressRawExact(const std::vector<unsigned char>& src, std::size_t expected_size, std::vector<unsigned char>& dst) {
+    if (!Lz4DecompressRawBounded(src, expected_size, dst)) {
+        return false;
+    }
+    return dst.size() == expected_size;
+}
+
+std::uint32_t ReadU32LE(const std::vector<unsigned char>& buf, std::size_t at) {
+    return static_cast<std::uint32_t>(buf[at]) |
+           (static_cast<std::uint32_t>(buf[at + 1U]) << 8U) |
+           (static_cast<std::uint32_t>(buf[at + 2U]) << 16U) |
+           (static_cast<std::uint32_t>(buf[at + 3U]) << 24U);
+}
+
+bool Lz4DecompressFrame(const std::vector<unsigned char>& src, std::size_t expected_size, std::vector<unsigned char>& dst) {
+    // Minimal LZ4 frame decoder for independent blocks.
+    if (src.size() < 7U) {
+        return false;
+    }
+    if (!(src[0] == 0x04U && src[1] == 0x22U && src[2] == 0x4DU && src[3] == 0x18U)) {
+        return false;
+    }
+
+    std::size_t at = 4U;
+    const std::uint8_t flg = src[at++];
+    const std::uint8_t bd = src[at++];
+
+    const bool has_content_size = (flg & 0x08U) != 0U;
+    const bool has_dict_id = (flg & 0x01U) != 0U;
+    const bool has_block_checksum = (flg & 0x10U) != 0U;
+    const bool has_content_checksum = (flg & 0x04U) != 0U;
+
+    if (has_content_size) {
+        if (at + 8U > src.size()) {
+            return false;
+        }
+        at += 8U;
+    }
+    if (has_dict_id) {
+        if (at + 4U > src.size()) {
+            return false;
+        }
+        at += 4U;
+    }
+
+    // Header checksum byte.
+    if (at + 1U > src.size()) {
+        return false;
+    }
+    at += 1U;
+
+    const std::uint8_t block_max_code = static_cast<std::uint8_t>((bd >> 4U) & 0x7U);
+    std::size_t max_block_size = 4U * 1024U * 1024U;
+    switch (block_max_code) {
+        case 4:
+            max_block_size = 64U * 1024U;
+            break;
+        case 5:
+            max_block_size = 256U * 1024U;
+            break;
+        case 6:
+            max_block_size = 1024U * 1024U;
+            break;
+        case 7:
+            max_block_size = 4U * 1024U * 1024U;
+            break;
+        default:
+            break;
+    }
+
+    dst.clear();
+    dst.reserve(expected_size);
+
+    while (true) {
+        if (at + 4U > src.size()) {
+            return false;
+        }
+        std::uint32_t block_size = ReadU32LE(src, at);
+        at += 4U;
+        if (block_size == 0U) {
+            break;
+        }
+
+        const bool uncompressed = (block_size & 0x80000000U) != 0U;
+        block_size &= 0x7FFFFFFFU;
+        if (at + block_size > src.size()) {
+            return false;
+        }
+
+        if (uncompressed) {
+            if (dst.size() + block_size > expected_size) {
+                return false;
+            }
+            dst.insert(dst.end(), src.begin() + static_cast<std::ptrdiff_t>(at), src.begin() + static_cast<std::ptrdiff_t>(at + block_size));
+        } else {
+            std::vector<unsigned char> decoded_block;
+            const std::size_t remaining = expected_size - dst.size();
+            const std::size_t max_out = std::min(max_block_size, remaining);
+            const std::vector<unsigned char> compressed(src.begin() + static_cast<std::ptrdiff_t>(at),
+                                                        src.begin() + static_cast<std::ptrdiff_t>(at + block_size));
+            if (!Lz4DecompressRawBounded(compressed, max_out, decoded_block)) {
+                return false;
+            }
+            if (dst.size() + decoded_block.size() > expected_size) {
+                return false;
+            }
+            dst.insert(dst.end(), decoded_block.begin(), decoded_block.end());
+        }
+        at += block_size;
+
+        if (has_block_checksum) {
+            if (at + 4U > src.size()) {
+                return false;
+            }
+            at += 4U;
+        }
+    }
+
+    if (has_content_checksum) {
+        if (at + 4U > src.size()) {
+            return false;
+        }
+        at += 4U;
+    }
+
     return dst.size() == expected_size;
 }
 
@@ -291,9 +419,11 @@ bool DecompressByMode(const std::vector<unsigned char>& src, std::size_t expecte
             return true;
         case 2:
         case 3:
-            if (!Lz4DecompressRaw(src, expected_size, dst)) {
-                error = "LZ4 decompression failed";
-                return false;
+            if (!Lz4DecompressRawExact(src, expected_size, dst)) {
+                if (!Lz4DecompressFrame(src, expected_size, dst)) {
+                    error = "LZ4 decompression failed";
+                    return false;
+                }
             }
             return true;
         case 1:
@@ -303,6 +433,21 @@ bool DecompressByMode(const std::vector<unsigned char>& src, std::size_t expecte
             error = "unsupported compression mode";
             return false;
     }
+}
+
+std::vector<std::uint8_t> BuildModeCandidates(std::uint8_t primary, std::uint8_t secondary) {
+    std::vector<std::uint8_t> out;
+    auto add_unique = [&](std::uint8_t m) {
+        if (std::find(out.begin(), out.end(), m) == out.end()) {
+            out.push_back(m);
+        }
+    };
+    add_unique(primary);
+    add_unique(secondary);
+    add_unique(2U);
+    add_unique(3U);
+    add_unique(0U);
+    return out;
 }
 
 bool ParseMetadataBlock(std::ifstream& in,
@@ -330,13 +475,75 @@ bool ParseMetadataBlock(std::ifstream& in,
         return false;
     }
 
-    std::vector<unsigned char> decoded;
     const auto mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
-    if (!DecompressByMode(compressed, header.uncompressed_metadata_size, mode, decoded, error)) {
-        return false;
+    std::string errs;
+    const auto mode_candidates = BuildModeCandidates(mode, mode);
+
+    auto TryDecoded = [&](const std::vector<unsigned char>& decoded, const char* label) -> bool {
+        if (decoded.size() != header.uncompressed_metadata_size) {
+            errs += std::string(label) + ": metadata size mismatch; ";
+            return false;
+        }
+        std::string parse_err;
+        ParsedMetadata parsed {};
+        if (!ParseMetadataTables(decoded, parsed, parse_err)) {
+            errs += std::string(label) + ": " + parse_err + "; ";
+            return false;
+        }
+        metadata = std::move(parsed);
+        return true;
+    };
+
+    // Attempt 1: whole metadata blob is compressed.
+    for (const auto m : mode_candidates) {
+        {
+            std::vector<unsigned char> decoded;
+            std::string dec_err;
+            if (DecompressByMode(compressed, header.uncompressed_metadata_size, m, decoded, dec_err)) {
+                if (TryDecoded(decoded, "whole")) {
+                    probe.metadata_parsed = true;
+                    break;
+                }
+            } else {
+                errs += "whole(mode=" + std::to_string(m) + "): " + dec_err + "; ";
+            }
+        }
     }
 
-    if (!ParseMetadataTables(decoded, metadata, error)) {
+    // Attempt 2: first 16 bytes are raw hash prefix, tail is compressed.
+    if (!probe.metadata_parsed) {
+        constexpr std::size_t kHashPrefix = 16U;
+        if (header.uncompressed_metadata_size >= kHashPrefix &&
+            header.compressed_metadata_size >= kHashPrefix) {
+            std::vector<unsigned char> tail_src(
+                compressed.begin() + static_cast<std::ptrdiff_t>(kHashPrefix),
+                compressed.end());
+            for (const auto m : mode_candidates) {
+                std::vector<unsigned char> tail_decoded;
+                std::string dec_err;
+                if (DecompressByMode(
+                        tail_src,
+                        static_cast<std::size_t>(header.uncompressed_metadata_size - kHashPrefix),
+                        m,
+                        tail_decoded,
+                        dec_err)) {
+                    std::vector<unsigned char> decoded;
+                    decoded.reserve(header.uncompressed_metadata_size);
+                    decoded.insert(decoded.end(), compressed.begin(), compressed.begin() + static_cast<std::ptrdiff_t>(kHashPrefix));
+                    decoded.insert(decoded.end(), tail_decoded.begin(), tail_decoded.end());
+                    if (TryDecoded(decoded, "hash-prefix")) {
+                        probe.metadata_parsed = true;
+                        break;
+                    }
+                } else {
+                    errs += "hash-prefix(mode=" + std::to_string(m) + "): " + dec_err + "; ";
+                }
+            }
+        }
+    }
+
+    if (!probe.metadata_parsed && metadata.blocks.empty() && metadata.nodes.empty()) {
+        error = errs.empty() ? "metadata decompression failed" : errs;
         return false;
     }
 
@@ -375,15 +582,21 @@ bool ReconstructStreamAt(std::ifstream& in,
 
         std::vector<unsigned char> decoded;
         const auto mode = static_cast<std::uint8_t>(b.flags & 0x3FU);
-        std::string local_err;
-        if (!DecompressByMode(compressed, b.uncompressed_size, mode, decoded, local_err)) {
-            // Some bundles carry block flags that don't map cleanly in this scaffold parser.
-            // Fall back to the header compression mode before failing hard.
-            const auto header_mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
-            if (!DecompressByMode(compressed, b.uncompressed_size, header_mode, decoded, local_err)) {
-                error = "data block decode failed: " + local_err;
-                return false;
+        const auto header_mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
+        const auto candidates = BuildModeCandidates(mode, header_mode);
+        bool decoded_ok = false;
+        std::string last_err;
+        for (const auto m : candidates) {
+            std::string local_err;
+            if (DecompressByMode(compressed, b.uncompressed_size, m, decoded, local_err)) {
+                decoded_ok = true;
+                break;
             }
+            last_err = local_err;
+        }
+        if (!decoded_ok) {
+            error = "data block decode failed: " + last_err;
+            return false;
         }
         out_stream.insert(out_stream.end(), decoded.begin(), decoded.end());
     }
@@ -405,6 +618,7 @@ bool TryReconstructDataStream(std::ifstream& in,
                               std::uint64_t after_header,
                               std::uint64_t metadata_offset,
                               bool metadata_at_end,
+                              UnityFsProbe& probe,
                               std::vector<unsigned char>& out_stream,
                               std::string& error) {
     std::uint64_t total_compressed = 0;
@@ -425,6 +639,7 @@ bool TryReconstructDataStream(std::ifstream& in,
     }
 
     std::string attempt_errors;
+    probe.reconstruction_attempts = static_cast<std::uint32_t>(candidates.size());
     for (const auto start : candidates) {
         std::vector<unsigned char> reconstructed;
         std::string local_err;
@@ -437,6 +652,7 @@ bool TryReconstructDataStream(std::ifstream& in,
             continue;
         }
         out_stream = std::move(reconstructed);
+        probe.reconstruction_success_offset = start;
         return true;
     }
 
@@ -464,6 +680,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         std::vector<unsigned char> file_bytes(begin, end);
         auto parsed = serialized.ParseObjectSummary(file_bytes);
         if (!parsed.ok) {
+            probe.serialized_parse_error_code = parsed.error;
             continue;
         }
         if (!probe.object_table_parsed || parsed.value.object_count > best.object_count) {
@@ -515,7 +732,9 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
     probe.header.compression_mode = ParseCompressionMode(probe.header.flags);
 
     const auto after_header = static_cast<std::uint64_t>(in.tellg());
-    const bool metadata_at_end = (probe.header.flags & 0x80U) != 0U;
+    // UnityFS bundles in the sample set use 0x40 for "block info at end".
+    // Some variants also use 0x80, so treat either as metadata-at-end.
+    const bool metadata_at_end = (probe.header.flags & 0x40U) != 0U || (probe.header.flags & 0x80U) != 0U;
     const std::uint64_t primary_metadata_offset =
         metadata_at_end ? (probe.header.bundle_file_size - probe.header.compressed_metadata_size) : after_header;
 
@@ -542,6 +761,7 @@ core::Result<UnityFsProbe> UnityFsReader::Probe(const std::string& path) const {
                 after_header,
                 primary_metadata_offset,
                 metadata_at_end,
+                probe,
                 stream,
                 stream_err)) {
             std::string serialized_err;
