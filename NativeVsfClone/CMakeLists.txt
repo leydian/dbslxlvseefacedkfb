@@ -31,6 +31,9 @@ add_library(nativecore SHARED
     src/nativecore/native_core.cpp
 )
 target_link_libraries(nativecore PRIVATE vsfclone_core)
+if(WIN32)
+    target_link_libraries(nativecore PRIVATE d3d11)
+endif()
 target_include_directories(nativecore
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include

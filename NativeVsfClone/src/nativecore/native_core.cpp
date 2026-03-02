@@ -11,6 +11,12 @@
 #include "vsfclone/avatar/avatar_package.h"
 #include "vsfclone/osc/osc_endpoint_stub.h"
 #include "vsfclone/stream/spout_sender_stub.h"
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <d3d11.h>
+#endif
 
 namespace vsfclone::nativecore {
 
@@ -253,6 +259,14 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
         vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "unknown avatar handle", true);
         return NC_ERROR_INVALID_ARGUMENT;
     }
+    if (it->second.mesh_payloads.empty()) {
+        vsfclone::nativecore::SetError(
+            NC_ERROR_UNSUPPORTED,
+            "render",
+            "avatar has no renderable mesh payloads",
+            true);
+        return NC_ERROR_UNSUPPORTED;
+    }
 
     vsfclone::nativecore::g_state.render_ready_avatars.insert(handle);
     vsfclone::nativecore::ClearError();
@@ -297,7 +311,21 @@ NcResultCode nc_render_frame(const NcRenderContext* ctx) {
         vsfclone::nativecore::SetError(NC_ERROR_UNSUPPORTED, "render", "no avatar has render resources", true);
         return NC_ERROR_UNSUPPORTED;
     }
-    // Placeholder render loop gate: validates full context + resource lifecycle wiring.
+#if defined(_WIN32)
+    auto* device_ctx = reinterpret_cast<ID3D11DeviceContext*>(ctx->d3d11_device_context);
+    auto* rtv = reinterpret_cast<ID3D11RenderTargetView*>(ctx->d3d11_rtv);
+    if (device_ctx == nullptr || rtv == nullptr) {
+        vsfclone::nativecore::SetError(
+            NC_ERROR_INVALID_ARGUMENT,
+            "render",
+            "invalid d3d11 context pointers",
+            true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    const float clear_color[4] = {0.08f, 0.12f, 0.18f, 1.0f};
+    device_ctx->OMSetRenderTargets(1, &rtv, nullptr);
+    device_ctx->ClearRenderTargetView(rtv, clear_color);
+#endif
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }

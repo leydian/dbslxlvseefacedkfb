@@ -2,7 +2,7 @@
 
 Native C++ scaffold for a standalone VTuber-style runtime with:
 
-- `.vrm` input path handling (scaffold)
+- `.vrm` input path handling (GLB/mesh payload MVP)
 - `.vxavatar` input path handling (MVP parser + payload)
 - `.vxa2` input path handling (manifest + TLV section decode MVP)
 - `.vsfavatar` probing via UnityFS header parser (implemented)
@@ -35,7 +35,7 @@ If `sidecar` mode fails to execute:
   - init/shutdown
   - avatar load/query/unload
   - tracking frame submission
-  - render tick (placeholder)
+  - render tick (minimal D3D11 clear + lifecycle validation)
   - Spout/OSC start-stop stubs
   - last error retrieval
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
@@ -45,7 +45,7 @@ If `sidecar` mode fails to execute:
 
 - Full UnityFS block decompression and object table reconstruction
 - SerializedFile class parsing (`GameObject`, `Mesh`, `Material`, etc.)
-- Real VRM import pipeline (glTF/VRM decode and MToon binding)
+- Full VRM feature coverage (full MToon, SpringBone, expressions)
 - `.vxavatar` manifest/material override parse/apply
 - `.vxa2` streaming payload unpack optimization
 - DirectX11 renderer and WinUI/WPF host integration
@@ -345,6 +345,24 @@ Latest behavior notes (2026-03-03, VSFAvatar serialized-candidate expansion + Ga
 - Fixed-set report generation now hard-fails on incomplete fixed sample set.
 - Sample report now emits `SidecarObjectTableParsed` and serialized diagnostics per sample.
 - Quality gate now enforces Gate D (`complete + object_table_parsed + no primary error`) as strict fail criteria.
+
+Latest behavior notes (2026-03-03, VRM minimal runtime-ready slice):
+
+- `.vrm` loader moved from scaffold-only behavior to a minimal GLB payload path:
+  - GLB v2 header/chunk parse (`JSON` + `BIN`)
+  - glTF mesh extraction for `POSITION` + `indices`
+  - runtime payload population into:
+    - `mesh_payloads`
+    - `material_payloads` (minimal placeholder material)
+- Parser diagnostics now use staged contract:
+  - `parse -> resolve -> payload -> runtime-ready`
+  - `VRM_SCHEMA_INVALID`, `VRM_ASSET_MISSING`, `NONE`
+- NativeCore render path is no longer pure placeholder:
+  - `nc_create_render_resources` now validates mesh payload availability
+  - `nc_render_frame` performs minimal D3D11 clear on provided RTV
+- Sample validation snapshot:
+  - `sample/개인작08.vrm`: `Compat=full`, `ParserStage=runtime-ready`, `MeshPayloads=9`
+  - `sample/Kikyo_FT Variant.vrm`: `Compat=full`, `ParserStage=runtime-ready`, `MeshPayloads=22`
 
 Latest behavior notes (2026-03-02, VXA2 TLV section decode MVP):
 

@@ -2,6 +2,55 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VRM minimal runtime-ready slice + native render clear path
+
+### Summary
+
+Implemented the first functional VRM vertical slice from file parse to runtime payload readiness, and upgraded native render path from pure placeholder validation to minimal D3D11 render execution (`ClearRenderTargetView`).
+
+### Changed
+
+- `src/avatar/vrm_loader.cpp`
+  - Replaced scaffold-only loader with minimal GLB v2 parser flow:
+    - header + chunk validation (`JSON`, `BIN`)
+    - in-loader lightweight JSON parse
+    - accessor/bufferView decode for:
+      - `POSITION` (`FLOAT VEC3`)
+      - `indices` (`U8/U16/U32`, fallback sequential indices)
+  - Added payload population:
+    - `mesh_payloads`
+    - `materials` / `material_payloads` (minimal placeholder)
+  - Added parser stage + error code contract:
+    - stages: `parse -> resolve -> payload -> runtime-ready`
+    - errors: `VRM_SCHEMA_INVALID`, `VRM_ASSET_MISSING`, `NONE`
+
+- `src/nativecore/native_core.cpp`
+  - `nc_create_render_resources` now rejects avatars with no mesh payloads.
+  - `nc_render_frame` now executes minimal D3D11 frame action:
+    - bind RTV
+    - clear RTV with a fixed color
+  - Added `NOMINMAX` guard for Windows macro conflicts with STL.
+
+- `CMakeLists.txt`
+  - Linked `nativecore` against `d3d11` on Windows.
+
+### Verified
+
+- Configure/build:
+  - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64`
+  - `cmake --build build --config Release`
+- VRM sample runtime checks via `avatar_tool`:
+  - `sample/개인작08.vrm`
+    - `Format=VRM`
+    - `Compat=full`
+    - `ParserStage=runtime-ready`
+    - `MeshPayloads=9`
+  - `sample/Kikyo_FT Variant.vrm`
+    - `Format=VRM`
+    - `Compat=full`
+    - `ParserStage=runtime-ready`
+    - `MeshPayloads=22`
+
 ## 2026-03-03 - VXAvatar/VXA2 gate profiles + CI strict enforcement
 
 ### Summary

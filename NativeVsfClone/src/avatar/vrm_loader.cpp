@@ -1,13 +1,305 @@
 #include "vrm_loader.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <limits>
+#include <optional>
+#include <sstream>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 
 namespace fs = std::filesystem;
 
 namespace vsfclone::avatar {
+
+namespace {
+
+struct JsonValue {
+    enum class Type { Null, Bool, Number, String, Array, Object };
+    Type type = Type::Null;
+    bool bool_value = false;
+    double number_value = 0.0;
+    std::string string_value;
+    std::vector<JsonValue> array_value;
+    std::unordered_map<std::string, JsonValue> object_value;
+};
+
+class JsonParser {
+  public:
+    explicit JsonParser(std::string_view input) : input_(input) {}
+
+    bool Parse(JsonValue* out_value, std::string* out_error) {
+        SkipWs();
+        if (!ParseValue(out_value, out_error)) {
+            return false;
+        }
+        SkipWs();
+        if (pos_ != input_.size()) {
+            if (out_error != nullptr) {
+                *out_error = "trailing characters after JSON document";
+            }
+            return false;
+        }
+        return true;
+    }
+
+  private:
+    bool ParseValue(JsonValue* out_value, std::string* out_error) {
+        if (pos_ >= input_.size()) {
+            if (out_error != nullptr) {
+                *out_error = "unexpected end of JSON";
+            }
+            return false;
+        }
+        const char c = input_[pos_];
+        if (c == '"') {
+            out_value->type = JsonValue::Type::String;
+            return ParseString(&out_value->string_value, out_error);
+        }
+        if (c == '{') {
+            out_value->type = JsonValue::Type::Object;
+            return ParseObject(out_value, out_error);
+        }
+        if (c == '[') {
+            out_value->type = JsonValue::Type::Array;
+            return ParseArray(out_value, out_error);
+        }
+        if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) {
+            out_value->type = JsonValue::Type::Number;
+            return ParseNumber(out_value, out_error);
+        }
+        if (StartsWith("true")) {
+            pos_ += 4;
+            out_value->type = JsonValue::Type::Bool;
+            out_value->bool_value = true;
+            return true;
+        }
+        if (StartsWith("false")) {
+            pos_ += 5;
+            out_value->type = JsonValue::Type::Bool;
+            out_value->bool_value = false;
+            return true;
+        }
+        if (StartsWith("null")) {
+            pos_ += 4;
+            out_value->type = JsonValue::Type::Null;
+            return true;
+        }
+        if (out_error != nullptr) {
+            *out_error = "unsupported JSON token";
+        }
+        return false;
+    }
+
+    bool ParseString(std::string* out, std::string* out_error) {
+        if (input_[pos_] != '"') {
+            if (out_error != nullptr) {
+                *out_error = "expected opening quote";
+            }
+            return false;
+        }
+        ++pos_;
+        out->clear();
+        while (pos_ < input_.size()) {
+            const char c = input_[pos_++];
+            if (c == '"') {
+                return true;
+            }
+            if (c == '\\') {
+                if (pos_ >= input_.size()) {
+                    if (out_error != nullptr) {
+                        *out_error = "unterminated escape sequence";
+                    }
+                    return false;
+                }
+                const char esc = input_[pos_++];
+                switch (esc) {
+                    case '"':
+                    case '\\':
+                    case '/':
+                        out->push_back(esc);
+                        break;
+                    case 'b':
+                        out->push_back('\b');
+                        break;
+                    case 'f':
+                        out->push_back('\f');
+                        break;
+                    case 'n':
+                        out->push_back('\n');
+                        break;
+                    case 'r':
+                        out->push_back('\r');
+                        break;
+                    case 't':
+                        out->push_back('\t');
+                        break;
+                    case 'u':
+                        // Keep parser minimal: skip exact 4 hex digits and emit placeholder.
+                        if (pos_ + 4 > input_.size()) {
+                            if (out_error != nullptr) {
+                                *out_error = "invalid unicode escape";
+                            }
+                            return false;
+                        }
+                        pos_ += 4;
+                        out->push_back('?');
+                        break;
+                    default:
+                        if (out_error != nullptr) {
+                            *out_error = "unsupported escape character";
+                        }
+                        return false;
+                }
+                continue;
+            }
+            out->push_back(c);
+        }
+        if (out_error != nullptr) {
+            *out_error = "unterminated string";
+        }
+        return false;
+    }
+
+    bool ParseNumber(JsonValue* out_value, std::string* out_error) {
+        std::size_t start = pos_;
+        if (input_[pos_] == '-') {
+            ++pos_;
+        }
+        while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+            ++pos_;
+        }
+        if (pos_ < input_.size() && input_[pos_] == '.') {
+            ++pos_;
+            while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+                ++pos_;
+            }
+        }
+        if (pos_ < input_.size() && (input_[pos_] == 'e' || input_[pos_] == 'E')) {
+            ++pos_;
+            if (pos_ < input_.size() && (input_[pos_] == '+' || input_[pos_] == '-')) {
+                ++pos_;
+            }
+            while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
+                ++pos_;
+            }
+        }
+        const auto token = input_.substr(start, pos_ - start);
+        try {
+            out_value->number_value = std::stod(std::string(token));
+            return true;
+        } catch (...) {
+            if (out_error != nullptr) {
+                *out_error = "invalid number";
+            }
+            return false;
+        }
+    }
+
+    bool ParseArray(JsonValue* out_value, std::string* out_error) {
+        ++pos_;
+        SkipWs();
+        if (pos_ < input_.size() && input_[pos_] == ']') {
+            ++pos_;
+            return true;
+        }
+        while (true) {
+            JsonValue item;
+            if (!ParseValue(&item, out_error)) {
+                return false;
+            }
+            out_value->array_value.push_back(std::move(item));
+            SkipWs();
+            if (pos_ >= input_.size()) {
+                if (out_error != nullptr) {
+                    *out_error = "unterminated array";
+                }
+                return false;
+            }
+            const char c = input_[pos_++];
+            if (c == ']') {
+                return true;
+            }
+            if (c != ',') {
+                if (out_error != nullptr) {
+                    *out_error = "expected ',' or ']'";
+                }
+                return false;
+            }
+            SkipWs();
+        }
+    }
+
+    bool ParseObject(JsonValue* out_value, std::string* out_error) {
+        ++pos_;
+        SkipWs();
+        if (pos_ < input_.size() && input_[pos_] == '}') {
+            ++pos_;
+            return true;
+        }
+        while (true) {
+            std::string key;
+            if (!ParseString(&key, out_error)) {
+                return false;
+            }
+            SkipWs();
+            if (pos_ >= input_.size() || input_[pos_] != ':') {
+                if (out_error != nullptr) {
+                    *out_error = "expected ':' in object";
+                }
+                return false;
+            }
+            ++pos_;
+            SkipWs();
+            JsonValue value;
+            if (!ParseValue(&value, out_error)) {
+                return false;
+            }
+            out_value->object_value[key] = std::move(value);
+            SkipWs();
+            if (pos_ >= input_.size()) {
+                if (out_error != nullptr) {
+                    *out_error = "unterminated object";
+                }
+                return false;
+            }
+            const char c = input_[pos_++];
+            if (c == '}') {
+                return true;
+            }
+            if (c != ',') {
+                if (out_error != nullptr) {
+                    *out_error = "expected ',' or '}'";
+                }
+                return false;
+            }
+            SkipWs();
+        }
+    }
+
+    void SkipWs() {
+        while (pos_ < input_.size() && std::isspace(static_cast<unsigned char>(input_[pos_]))) {
+            ++pos_;
+        }
+    }
+
+    bool StartsWith(std::string_view token) const {
+        if (pos_ + token.size() > input_.size()) {
+            return false;
+        }
+        return input_.substr(pos_, token.size()) == token;
+    }
+
+    std::string_view input_;
+    std::size_t pos_ = 0;
+};
 
 static std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -15,6 +307,272 @@ static std::string ToLower(std::string s) {
     });
     return s;
 }
+
+const JsonValue* FindKey(const JsonValue& root, const std::string& key) {
+    if (root.type != JsonValue::Type::Object) {
+        return nullptr;
+    }
+    const auto it = root.object_value.find(key);
+    if (it == root.object_value.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+bool TryGetString(const JsonValue& root, const std::string& key, std::string* out) {
+    const auto* v = FindKey(root, key);
+    if (v == nullptr || v->type != JsonValue::Type::String) {
+        return false;
+    }
+    *out = v->string_value;
+    return true;
+}
+
+bool TryGetNumber(const JsonValue& root, const std::string& key, double* out) {
+    const auto* v = FindKey(root, key);
+    if (v == nullptr || v->type != JsonValue::Type::Number) {
+        return false;
+    }
+    *out = v->number_value;
+    return true;
+}
+
+bool TryGetIndex(const JsonValue& root, const std::string& key, std::size_t* out) {
+    double n = 0.0;
+    if (!TryGetNumber(root, key, &n)) {
+        return false;
+    }
+    if (n < 0.0 || n > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
+        return false;
+    }
+    *out = static_cast<std::size_t>(static_cast<std::uint32_t>(n));
+    return true;
+}
+
+std::uint32_t ReadU32Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    return static_cast<std::uint32_t>(bytes[offset]) |
+           (static_cast<std::uint32_t>(bytes[offset + 1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[offset + 2]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[offset + 3]) << 24U);
+}
+
+float ReadF32Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    const auto u = ReadU32Le(bytes, offset);
+    float f = 0.0f;
+    std::memcpy(&f, &u, sizeof(float));
+    return f;
+}
+
+struct GlbChunk {
+    std::uint32_t type = 0U;
+    std::vector<std::uint8_t> bytes;
+};
+
+bool ParseGlb(const std::vector<std::uint8_t>& file_bytes, GlbChunk* out_json, GlbChunk* out_bin, std::string* out_error) {
+    if (file_bytes.size() < 20U) {
+        *out_error = "GLB file is too small";
+        return false;
+    }
+    if (ReadU32Le(file_bytes, 0U) != 0x46546C67U) {  // 'glTF'
+        *out_error = "invalid GLB magic";
+        return false;
+    }
+    const auto version = ReadU32Le(file_bytes, 4U);
+    if (version != 2U) {
+        *out_error = "unsupported GLB version";
+        return false;
+    }
+    const auto total_length = ReadU32Le(file_bytes, 8U);
+    if (total_length > file_bytes.size()) {
+        *out_error = "declared GLB length exceeds file size";
+        return false;
+    }
+
+    std::size_t cursor = 12U;
+    while (cursor + 8U <= total_length) {
+        const auto chunk_len = ReadU32Le(file_bytes, cursor);
+        const auto chunk_type = ReadU32Le(file_bytes, cursor + 4U);
+        cursor += 8U;
+        if (cursor + chunk_len > total_length) {
+            *out_error = "chunk length out of range";
+            return false;
+        }
+        GlbChunk chunk;
+        chunk.type = chunk_type;
+        chunk.bytes.insert(chunk.bytes.end(), file_bytes.begin() + static_cast<std::ptrdiff_t>(cursor),
+                           file_bytes.begin() + static_cast<std::ptrdiff_t>(cursor + chunk_len));
+        if (chunk_type == 0x4E4F534AU) {  // JSON
+            *out_json = std::move(chunk);
+        } else if (chunk_type == 0x004E4942U) {  // BIN
+            *out_bin = std::move(chunk);
+        }
+        cursor += chunk_len;
+    }
+
+    if (out_json->bytes.empty()) {
+        *out_error = "GLB JSON chunk missing";
+        return false;
+    }
+    if (out_bin->bytes.empty()) {
+        *out_error = "GLB BIN chunk missing";
+        return false;
+    }
+    return true;
+}
+
+struct BufferViewMeta {
+    std::size_t buffer = 0U;
+    std::uint32_t byte_offset = 0U;
+    std::uint32_t byte_length = 0U;
+    std::uint32_t byte_stride = 0U;
+};
+
+struct AccessorMeta {
+    std::size_t buffer_view = 0U;
+    std::uint32_t byte_offset = 0U;
+    std::uint32_t count = 0U;
+    std::uint32_t component_type = 0U;
+    std::string type;
+};
+
+bool LoadAccessorMeta(const JsonValue& accessor_obj, AccessorMeta* out) {
+    double count_num = 0.0;
+    double ctype_num = 0.0;
+    if (!TryGetIndex(accessor_obj, "bufferView", &out->buffer_view) ||
+        !TryGetNumber(accessor_obj, "count", &count_num) ||
+        !TryGetNumber(accessor_obj, "componentType", &ctype_num) ||
+        !TryGetString(accessor_obj, "type", &out->type)) {
+        return false;
+    }
+    out->count = static_cast<std::uint32_t>(count_num);
+    out->component_type = static_cast<std::uint32_t>(ctype_num);
+    std::size_t accessor_off = 0U;
+    if (TryGetIndex(accessor_obj, "byteOffset", &accessor_off)) {
+        out->byte_offset = static_cast<std::uint32_t>(accessor_off);
+    }
+    return true;
+}
+
+bool LoadBufferViewMeta(const JsonValue& view_obj, BufferViewMeta* out) {
+    std::size_t bo = 0U;
+    std::size_t bl = 0U;
+    if (!TryGetIndex(view_obj, "buffer", &out->buffer) || !TryGetIndex(view_obj, "byteLength", &bl)) {
+        return false;
+    }
+    out->byte_length = static_cast<std::uint32_t>(bl);
+    if (TryGetIndex(view_obj, "byteOffset", &bo)) {
+        out->byte_offset = static_cast<std::uint32_t>(bo);
+    }
+    std::size_t bs = 0U;
+    if (TryGetIndex(view_obj, "byteStride", &bs)) {
+        out->byte_stride = static_cast<std::uint32_t>(bs);
+    }
+    return true;
+}
+
+bool ExtractPositions(const std::vector<std::uint8_t>& bin,
+                      const std::vector<AccessorMeta>& accessors,
+                      const std::vector<BufferViewMeta>& views,
+                      std::size_t accessor_index,
+                      std::vector<std::uint8_t>* out_vertex_blob,
+                      std::uint32_t* out_vertex_count,
+                      std::string* out_error) {
+    if (accessor_index >= accessors.size()) {
+        *out_error = "position accessor index out of range";
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.component_type != 5126U || a.type != "VEC3") {
+        *out_error = "POSITION accessor must be FLOAT VEC3";
+        return false;
+    }
+    if (a.buffer_view >= views.size()) {
+        *out_error = "position bufferView index out of range";
+        return false;
+    }
+    const auto& bv = views[a.buffer_view];
+    const std::size_t start = static_cast<std::size_t>(bv.byte_offset) + static_cast<std::size_t>(a.byte_offset);
+    const std::size_t stride = bv.byte_stride > 0U ? bv.byte_stride : 12U;
+    const std::size_t needed = start + (static_cast<std::size_t>(a.count) - 1U) * stride + 12U;
+    if (a.count == 0U || needed > bin.size()) {
+        *out_error = "position accessor data out of range";
+        return false;
+    }
+    out_vertex_blob->clear();
+    out_vertex_blob->reserve(static_cast<std::size_t>(a.count) * 12U);
+    for (std::uint32_t i = 0U; i < a.count; ++i) {
+        const std::size_t base = start + static_cast<std::size_t>(i) * stride;
+        const float px = ReadF32Le(bin, base);
+        const float py = ReadF32Le(bin, base + 4U);
+        const float pz = ReadF32Le(bin, base + 8U);
+        const std::array<float, 3U> v = {px, py, pz};
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(v.data());
+        out_vertex_blob->insert(out_vertex_blob->end(), bytes, bytes + sizeof(v));
+    }
+    *out_vertex_count = a.count;
+    return true;
+}
+
+bool ExtractIndices(const std::vector<std::uint8_t>& bin,
+                    const std::vector<AccessorMeta>& accessors,
+                    const std::vector<BufferViewMeta>& views,
+                    std::size_t accessor_index,
+                    std::vector<std::uint32_t>* out_indices,
+                    std::string* out_error) {
+    if (accessor_index >= accessors.size()) {
+        *out_error = "index accessor index out of range";
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.type != "SCALAR") {
+        *out_error = "index accessor must be SCALAR";
+        return false;
+    }
+    if (a.buffer_view >= views.size()) {
+        *out_error = "index bufferView index out of range";
+        return false;
+    }
+    const auto& bv = views[a.buffer_view];
+    const std::size_t start = static_cast<std::size_t>(bv.byte_offset) + static_cast<std::size_t>(a.byte_offset);
+    std::size_t comp_size = 0U;
+    switch (a.component_type) {
+        case 5121U:
+            comp_size = 1U;
+            break;  // U8
+        case 5123U:
+            comp_size = 2U;
+            break;  // U16
+        case 5125U:
+            comp_size = 4U;
+            break;  // U32
+        default:
+            *out_error = "unsupported index component type";
+            return false;
+    }
+    const std::size_t stride = bv.byte_stride > 0U ? bv.byte_stride : comp_size;
+    const std::size_t needed = start + (static_cast<std::size_t>(a.count) - 1U) * stride + comp_size;
+    if (a.count == 0U || needed > bin.size()) {
+        *out_error = "index accessor data out of range";
+        return false;
+    }
+    out_indices->clear();
+    out_indices->reserve(a.count);
+    for (std::uint32_t i = 0U; i < a.count; ++i) {
+        const std::size_t base = start + static_cast<std::size_t>(i) * stride;
+        std::uint32_t idx = 0U;
+        if (comp_size == 1U) {
+            idx = bin[base];
+        } else if (comp_size == 2U) {
+            idx = static_cast<std::uint32_t>(bin[base]) | (static_cast<std::uint32_t>(bin[base + 1U]) << 8U);
+        } else {
+            idx = ReadU32Le(bin, base);
+        }
+        out_indices->push_back(idx);
+    }
+    return true;
+}
+
+}  // namespace
 
 bool VrmLoader::CanLoadPath(const std::string& path) const {
     const auto ext = ToLower(fs::path(path).extension().string());
@@ -29,12 +587,145 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
     AvatarPackage pkg;
     pkg.source_type = AvatarSourceType::Vrm;
-    pkg.compat_level = AvatarCompatLevel::Partial;
+    pkg.compat_level = AvatarCompatLevel::Failed;
+    pkg.parser_stage = "parse";
+    pkg.primary_error_code = "NONE";
     pkg.source_path = path;
     pkg.display_name = fs::path(path).stem().string();
-    pkg.warnings.push_back("VRM parser is scaffold only. glTF/VRM decode not wired yet.");
-    pkg.missing_features.push_back("glTF/VRM scene decode");
-    pkg.missing_features.push_back("MToon parameter binding");
+
+    std::vector<std::uint8_t> file_bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    GlbChunk json_chunk;
+    GlbChunk bin_chunk;
+    std::string glb_error;
+    if (!ParseGlb(file_bytes, &json_chunk, &bin_chunk, &glb_error)) {
+        pkg.primary_error_code = "VRM_SCHEMA_INVALID";
+        pkg.warnings.push_back("E_PARSE: VRM_SCHEMA_INVALID: " + glb_error);
+        return core::Result<AvatarPackage>::Ok(pkg);
+    }
+
+    std::string json_text(reinterpret_cast<const char*>(json_chunk.bytes.data()), json_chunk.bytes.size());
+    JsonValue root;
+    std::string json_error;
+    JsonParser parser(json_text);
+    if (!parser.Parse(&root, &json_error)) {
+        pkg.primary_error_code = "VRM_SCHEMA_INVALID";
+        pkg.warnings.push_back("E_PARSE: VRM_SCHEMA_INVALID: glTF JSON parse failed: " + json_error);
+        return core::Result<AvatarPackage>::Ok(pkg);
+    }
+
+    const auto* accessors_v = FindKey(root, "accessors");
+    const auto* views_v = FindKey(root, "bufferViews");
+    const auto* meshes_v = FindKey(root, "meshes");
+    if (accessors_v == nullptr || views_v == nullptr || meshes_v == nullptr ||
+        accessors_v->type != JsonValue::Type::Array || views_v->type != JsonValue::Type::Array ||
+        meshes_v->type != JsonValue::Type::Array) {
+        pkg.primary_error_code = "VRM_SCHEMA_INVALID";
+        pkg.warnings.push_back("E_PARSE: VRM_SCHEMA_INVALID: required arrays accessors/bufferViews/meshes missing");
+        return core::Result<AvatarPackage>::Ok(pkg);
+    }
+
+    std::vector<AccessorMeta> accessors;
+    accessors.reserve(accessors_v->array_value.size());
+    for (const auto& item : accessors_v->array_value) {
+        if (item.type != JsonValue::Type::Object) {
+            continue;
+        }
+        AccessorMeta a;
+        if (LoadAccessorMeta(item, &a)) {
+            accessors.push_back(a);
+        } else {
+            accessors.push_back(AccessorMeta{});
+        }
+    }
+
+    std::vector<BufferViewMeta> views;
+    views.reserve(views_v->array_value.size());
+    for (const auto& item : views_v->array_value) {
+        if (item.type != JsonValue::Type::Object) {
+            continue;
+        }
+        BufferViewMeta v;
+        if (LoadBufferViewMeta(item, &v)) {
+            views.push_back(v);
+        } else {
+            views.push_back(BufferViewMeta{});
+        }
+    }
+
+    pkg.parser_stage = "resolve";
+    std::size_t mesh_added = 0U;
+    for (const auto& mesh : meshes_v->array_value) {
+        if (mesh.type != JsonValue::Type::Object) {
+            continue;
+        }
+        const auto* prims_v = FindKey(mesh, "primitives");
+        if (prims_v == nullptr || prims_v->type != JsonValue::Type::Array || prims_v->array_value.empty()) {
+            continue;
+        }
+        const auto& prim = prims_v->array_value.front();
+        if (prim.type != JsonValue::Type::Object) {
+            continue;
+        }
+        const auto* attrs_v = FindKey(prim, "attributes");
+        if (attrs_v == nullptr || attrs_v->type != JsonValue::Type::Object) {
+            continue;
+        }
+        const auto* pos_v = FindKey(*attrs_v, "POSITION");
+        if (pos_v == nullptr || pos_v->type != JsonValue::Type::Number) {
+            continue;
+        }
+        const std::size_t pos_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(pos_v->number_value));
+
+        MeshRenderPayload mesh_payload;
+        std::string mesh_name;
+        if (!TryGetString(mesh, "name", &mesh_name)) {
+            mesh_name = "Mesh" + std::to_string(mesh_added);
+        }
+        mesh_payload.name = mesh_name;
+        std::uint32_t vtx_count = 0U;
+        std::string read_error;
+        if (!ExtractPositions(bin_chunk.bytes, accessors, views, pos_accessor, &mesh_payload.vertex_blob, &vtx_count, &read_error)) {
+            pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: " + read_error);
+            continue;
+        }
+
+        std::size_t idx_accessor = std::numeric_limits<std::size_t>::max();
+        if (TryGetIndex(prim, "indices", &idx_accessor)) {
+            if (!ExtractIndices(bin_chunk.bytes, accessors, views, idx_accessor, &mesh_payload.indices, &read_error)) {
+                pkg.warnings.push_back("W_PAYLOAD: VRM_INDEX_READ_FAILED: " + read_error);
+                mesh_payload.indices.clear();
+            }
+        }
+        if (mesh_payload.indices.empty()) {
+            mesh_payload.indices.reserve(vtx_count);
+            for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                mesh_payload.indices.push_back(i);
+            }
+        }
+
+        pkg.mesh_payloads.push_back(std::move(mesh_payload));
+        pkg.meshes.push_back(MeshAssetSummary{mesh_name, vtx_count, static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size())});
+        ++mesh_added;
+    }
+
+    pkg.parser_stage = "payload";
+    if (pkg.mesh_payloads.empty()) {
+        pkg.primary_error_code = "VRM_ASSET_MISSING";
+        pkg.compat_level = AvatarCompatLevel::Failed;
+        pkg.warnings.push_back("E_PAYLOAD: VRM_ASSET_MISSING: no mesh payload extracted.");
+        pkg.missing_features.push_back("glTF mesh primitive extraction");
+        return core::Result<AvatarPackage>::Ok(pkg);
+    }
+
+    pkg.materials.push_back({"Default", "MToon (minimal)"});
+    pkg.material_payloads.push_back({"Default", "MToon (minimal)", ""});
+    pkg.missing_features.push_back("MToon full parameter binding");
+    pkg.missing_features.push_back("SpringBone and expression support");
+
+    pkg.parser_stage = "runtime-ready";
+    pkg.compat_level = AvatarCompatLevel::Full;
+    pkg.primary_error_code = "NONE";
+    pkg.warnings.push_back("W_STAGE: runtime-ready");
     return core::Result<AvatarPackage>::Ok(pkg);
 }
 
