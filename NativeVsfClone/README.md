@@ -181,6 +181,12 @@ Notes:
 
 ## VSFAvatar quality gate
 
+Run smoke probe + gate evaluation (fast loop):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseSmoke -SmokeMaxFiles 2
+```
+
 Run fixed-set probe + gate evaluation:
 
 ```powershell
@@ -201,15 +207,24 @@ Gate rules:
   - `SidecarObjectTableParsed=True`
   - `SidecarPrimaryError` is `NONE` or empty
 
+Track split:
+
+- Parser Track DoD: `GateA && GateB && GateC && GateD`
+- Host Track DoD: WinUI/XAML runtime parity path ready (`HostTrackStatus=READY`)
+
 Exit code:
 
-- `0`: all gates pass
+- `0`: pass by mode
+  - smoke mode: `GateA && GateB && GateC`
+  - fixed/default mode: `GateA && GateB && GateC && GateD`
 - `1`: at least one gate fails (including Gate D strict fail)
 
 Outputs:
 
 - probe report: `build/reports/vsfavatar_probe_latest_after_gate.txt`
 - gate summary: `build/reports/vsfavatar_gate_summary.txt`
+- aggregate csv: `build/reports/vsfavatar_gate_aggregate.csv`
+- aggregate summary: `build/reports/vsfavatar_gate_aggregate.txt`
 - baseline compare input (default): `build/reports/vsfavatar_probe_fixed.txt`
 
 ## VRM quality gate
@@ -540,6 +555,12 @@ Latest behavior notes (2026-03-02, VXA2 TLV section decode MVP):
 - `src/stream`, `src/osc`: integration stubs
 - `src/main.cpp`: facade CLI entrypoint
 - `tools/avatar_tool.cpp`: `nativecore.dll` sanity CLI
+
+## Gate work commit hygiene
+
+- Keep code changes and docs/report updates in separate commits.
+- Use `docs(...)` prefix for report/changelog-only commits.
+- Include the validation command used for the change in the code commit message body.
 
 ## Recent implementation summary (2026-03-02)
 

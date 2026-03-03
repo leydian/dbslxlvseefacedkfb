@@ -16,10 +16,15 @@ Current outcome:
 - Gate A: PASS
 - Gate B: PASS
 - Gate C: PASS
-- Gate D: FAIL
-- Overall: FAIL
+- Gate D: PASS
+- Overall: PASS
 
-Gate D remains the active blocker.
+Gate D blocker is resolved for the fixed sample set.
+
+## DoD Status
+
+- [x] Parser Track DoD (`GateA && GateB && GateC && GateD`)
+- [ ] Host Track DoD (`HostTrackStatus=READY` and WinUI parity runtime validation complete)
 
 ## Goals and Decisions
 
@@ -165,23 +170,101 @@ Observed result:
 - GateA=PASS
 - GateB=PASS
 - GateC=PASS
-- GateD=FAIL
-- Overall=FAIL
+- GateD=PASS
+- Overall=PASS
 
 Summary source:
 
 - `build/reports/vsfavatar_gate_summary.txt`
 
-Fixed-set report regeneration:
+Fixed-set and aggregate outputs:
 
-- re-generated `build/reports/vsfavatar_probe_latest_after_scoring.txt` to restore full 4-sample output + gate block consistency.
+- `build/reports/vsfavatar_probe_latest_after_gate.txt`
+- `build/reports/vsfavatar_gate_summary.txt`
+- `build/reports/vsfavatar_gate_aggregate.csv`
+- `build/reports/vsfavatar_gate_aggregate.txt`
 
-## Current Blocker
+## Current Status
 
-- No fixed sample has reached:
-  - `probe_stage=complete`
-  - `object_table_parsed=true`
-  - `primary_error_code=NONE|empty`
+- Parser track milestones for this pass are complete.
+- Remaining open item is host-track runtime parity after WinUI XAML compiler unblocking.
 
-This remains the single blocker for Gate D and for the “first complete sample” milestone.
+## Final Implementation Snapshot (2026-03-03)
 
+### Added operational mode split
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - added smoke mode for fast loops:
+    - `-UseSmoke`
+    - `-SmokeMaxFiles <N>`
+  - mode-based gate blocking:
+    - smoke: `GateA && GateB && GateC` required
+    - fixed/default: `GateA && GateB && GateC && GateD` required
+  - parser/host track summary lines:
+    - `ParserTrack_DoD`
+    - `HostTrack_DoD`
+    - `HostTrackStatus`
+  - aggregate artifacts:
+    - `build/reports/vsfavatar_gate_aggregate.csv`
+    - `build/reports/vsfavatar_gate_aggregate.txt`
+
+- `tools/vsfavatar_sample_report.ps1`
+  - added output fields:
+    - `HostTrackStatus`
+    - `ParserTrack_DoD`
+    - `HostTrack_DoD`
+    - `RunDurationSec`
+
+### Parse and report robustness improvements
+
+- report parser now guards against false sample-header detection in tool output body:
+  - sample section detection constrained by:
+    - `FileCount` upper bound
+    - header pattern `---- <name>.vsfavatar`
+  - accepts both shapes after a sample header:
+    - `Load ...`
+    - `Sidecar...`-first output
+
+- baseline handling:
+  - missing baseline no longer hard-fails the gate script
+  - warning emitted and diff baseline treated as empty
+
+### Verification replay (actual run outputs)
+
+- smoke run:
+  - command:
+    - `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseSmoke -SmokeMaxFiles 1`
+  - observed:
+    - `GateA=PASS`
+    - `GateB=PASS`
+    - `GateC=PASS`
+    - `GateD=PASS` (reported, non-blocking in smoke mode)
+    - `Overall=PASS`
+    - `RunDurationSec=167.817`
+    - `SerializedAttempts_Avg=148`
+    - `SerializedAttempts_Max=148`
+
+- fixed-set run:
+  - command:
+    - `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - observed:
+    - `GateA=PASS`
+    - `GateB=PASS`
+    - `GateC=PASS`
+    - `GateD=PASS`
+    - `Overall=PASS`
+    - `RunDurationSec=421.558`
+    - `SerializedAttempts_Avg=126`
+    - `SerializedAttempts_Max=148`
+    - `ObjectTableParsed_True=4`
+    - `ObjectTableParsed_False=0`
+
+### Files updated in this pass
+
+- `src/vsf/serialized_file_reader.cpp`
+- `src/vsf/unityfs_reader.cpp`
+- `tools/vsfavatar_sample_report.ps1`
+- `tools/vsfavatar_quality_gate.ps1`
+- `README.md`
+- `CHANGELOG.md`
+- `docs/reports/vsfavatar_serialized_gateD_update_2026-03-03.md`

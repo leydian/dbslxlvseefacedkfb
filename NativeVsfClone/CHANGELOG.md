@@ -2,6 +2,39 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VSFAvatar gate reporting split (parser/host) + aggregate diagnostics
+
+### Summary
+
+Improved VSFAvatar gate operations by splitting Parser/Host track status, adding aggregate diagnostics outputs, and formalizing DoD-oriented reporting fields for iterative GateD work.
+
+### Changed
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added `HostTrackStatus` input and report header output.
+  - Added `ParserTrack_DoD` / `HostTrack_DoD` summary lines.
+  - Added `RunDurationSec` output for run-to-run timing comparison.
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Added Parser/Host track split in gate summary.
+  - Added smoke mode (`-UseSmoke -SmokeMaxFiles N`) for fast pre-gate loops.
+  - Added run metrics:
+    - `RunDurationSec`
+    - `SerializedAttempts_Avg`
+    - `SerializedAttempts_Max`
+  - Added aggregate outputs:
+    - `build/reports/vsfavatar_gate_aggregate.csv`
+    - `build/reports/vsfavatar_gate_aggregate.txt`
+  - Added stage/primary/object-table distributions for failure triage.
+  - Baseline report is now optional (missing baseline continues with empty diff base).
+
+- `README.md`
+  - Updated VSFAvatar quality-gate section with track split and new aggregate outputs.
+  - Added gate-work commit hygiene guidance.
+
+- `docs/reports/vsfavatar_serialized_gateD_update_2026-03-03.md`
+  - Added DoD status checklist for Parser/Host tracks.
+
 ## 2026-03-03 - Render/preset busy-gating parity follow-up for WPF and WinUI
 
 ### Summary
