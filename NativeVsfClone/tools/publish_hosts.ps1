@@ -3,6 +3,7 @@ param(
     [string]$RuntimeIdentifier = "win-x64",
     [switch]$SkipNativeBuild,
     [switch]$IncludeWinUi,
+    [switch]$NoRestore,
     [bool]$CollectWinUiDiagnostics = $true,
     [string]$WinUiDiagDir = ".\build\reports\winui"
 )
@@ -30,14 +31,26 @@ function Stop-IfRunning {
     }
 }
 
+function Invoke-DotNetCommand {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Args,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    & dotnet @Args | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Description failed with exit code $LASTEXITCODE (dotnet $($Args -join ' '))"
+    }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repoRoot "build"
 $buildHotfixDir = Join-Path $repoRoot "build_hotfix"
 $reportDir = Join-Path $buildDir "reports"
 $resolvedWinUiDiagDir = if ([System.IO.Path]::IsPathRooted($WinUiDiagDir)) {
-    $WinUiDiagDir
+    [System.IO.Path]::GetFullPath($WinUiDiagDir)
 } else {
-    Join-Path $repoRoot $WinUiDiagDir
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $WinUiDiagDir))
 }
 $distRoot = Join-Path $repoRoot "dist"
 $wpfDist = Join-Path $distRoot "wpf"
@@ -54,6 +67,7 @@ $log.Add("Host publish run: $(Get-Date -Format o)")
 $log.Add("Configuration: $Configuration")
 $log.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $log.Add("IncludeWinUi: $IncludeWinUi")
+$log.Add("NoRestore: $NoRestore")
 $log.Add("CollectWinUiDiagnostics: $CollectWinUiDiagnostics")
 $log.Add("WinUiDiagDir: $resolvedWinUiDiagDir")
 
@@ -172,6 +186,9 @@ function Collect-WinUiDiagnostics {
         "-v:diag",
         "-bl:$binlogPath"
     )
+    if ($NoRestore) {
+        $diagArgs += "--no-restore"
+    }
     $diagCommandText = "dotnet " + ($diagArgs -join " ")
 
     & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
@@ -198,35 +215,64 @@ function Collect-WinUiDiagnostics {
     $log.Add("WinUI diagnostics obj dump: $objDumpPath")
 }
 
-Write-Step "Publishing WPF host to dist/wpf..."
-dotnet publish $wpfProject `
-    -c $Configuration `
-    -r $RuntimeIdentifier `
-    --self-contained true `
-    /p:PublishSingleFile=true `
-    /p:PublishTrimmed=false `
-    -o $wpfDist | Out-Host
+$wpfPublishFailed = $false
+$wpfPublishErrorText = ""
+try {
+    Write-Step "Publishing WPF host to dist/wpf..."
+    $wpfPublishArgs = @(
+        "publish",
+        $wpfProject,
+        "-c", $Configuration,
+        "-r", $RuntimeIdentifier,
+        "--self-contained", "true",
+        "/p:PublishSingleFile=true",
+        "/p:PublishTrimmed=false",
+        "-o", $wpfDist
+    )
+    if ($NoRestore) {
+        $wpfPublishArgs += "--no-restore"
+    }
+    Invoke-DotNetCommand -Description "WPF publish" -Args $wpfPublishArgs
 
-if (-not (Test-Path (Join-Path $wpfDist "WpfHost.exe"))) {
-    throw "WPF publish output not found: $wpfDist"
+    if (-not (Test-Path (Join-Path $wpfDist "WpfHost.exe"))) {
+        throw "WPF publish output not found: $wpfDist"
+    }
+
+    Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
+    $log.Add("WPF dist: $wpfDist")
+    $log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
+} catch {
+    $wpfPublishFailed = $true
+    $wpfPublishErrorText = ($_ | Out-String).Trim()
+    $log.Add("WPF publish: failed")
+    $log.Add("WPF publish error: $wpfPublishErrorText")
+    if ($IncludeWinUi) {
+        Write-Step "WPF publish failed; continuing to WinUI publish for additional diagnostics."
+    } else {
+        $log | Set-Content -Path $logPath -Encoding UTF8
+        throw
+    }
 }
-
-Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
-$log.Add("WPF dist: $wpfDist")
-$log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
 
 if ($IncludeWinUi) {
     try {
         Write-Step "Publishing WinUI host to dist/winui..."
-        dotnet publish $winUiProject `
-            -c $Configuration `
-            -r $RuntimeIdentifier `
-            --self-contained true `
-            -p:Platform=x64 `
-            /p:PublishSingleFile=false `
-            /p:PublishTrimmed=false `
-            /p:WindowsAppSDKSelfContained=true `
-            -o $winUiDist | Out-Host
+        $winUiPublishArgs = @(
+            "publish",
+            $winUiProject,
+            "-c", $Configuration,
+            "-r", $RuntimeIdentifier,
+            "--self-contained", "true",
+            "-p:Platform=x64",
+            "/p:PublishSingleFile=false",
+            "/p:PublishTrimmed=false",
+            "/p:WindowsAppSDKSelfContained=true",
+            "-o", $winUiDist
+        )
+        if ($NoRestore) {
+            $winUiPublishArgs += "--no-restore"
+        }
+        Invoke-DotNetCommand -Description "WinUI publish" -Args $winUiPublishArgs
 
         if (-not (Test-Path (Join-Path $winUiDist "WinUiHost.exe"))) {
             throw "WinUI publish output not found: $winUiDist"
@@ -255,6 +301,12 @@ if ($IncludeWinUi) {
 }
 
 $log.Add("NativeCore copy: $nativeCoreDll")
+$log | Set-Content -Path $logPath -Encoding UTF8
+
+if ($wpfPublishFailed) {
+    throw "WPF publish failed: $wpfPublishErrorText"
+}
+
 $log | Set-Content -Path $logPath -Encoding UTF8
 
 Write-Step "Done."

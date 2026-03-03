@@ -2,6 +2,36 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host publish script hardening for restore/network-failure diagnostics
+
+### Summary
+
+Hardened host publish behavior to fail on real `dotnet` exit codes, preserve WinUI diagnostics even when WPF publish fails first, and support explicit no-restore validation runs.
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added `-NoRestore` switch.
+  - Added `Invoke-DotNetCommand` helper to enforce non-zero exit failure handling for `dotnet publish`.
+  - Normalized `WinUiDiagDir` to absolute path.
+  - Updated flow so WPF publish failure is logged but does not block WinUI diagnostic capture when `-IncludeWinUi` is enabled.
+  - WinUI diagnostic build now mirrors `--no-restore` when selected.
+
+- `docs/reports/host_stabilization_round_2026-03-03.md` (new)
+  - Added host stabilization execution report including command outcomes and blocker status.
+
+- `docs/INDEX.md`
+  - Added link to host stabilization round report.
+
+### Verification
+
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`
+  - PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 --no-restore`
+  - FAIL (`NU1301`, `api.nuget.org:443` access blocked)
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -NoRestore`
+  - FAIL (expected in current environment), but WinUI diagnostics files generated successfully under `build/reports/winui`.
+
 ## 2026-03-03 - WinUI publish failure diagnostics + VSFAvatar serialized failure-detail propagation
 
 ### Summary
