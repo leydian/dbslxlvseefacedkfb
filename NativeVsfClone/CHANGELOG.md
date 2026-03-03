@@ -2,6 +2,48 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Render/preset busy-gating parity follow-up for WPF and WinUI
+
+### Summary
+
+Completed a follow-up pass to enforce busy-state safety on render and preset interactions, aligning WPF and WinUI behavior with the same host operation gating contract.
+
+### Changed
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added `ShouldSkipRenderInteraction()` helper (`_isSyncingRenderUi || OperationState.IsBusy`).
+  - Applied busy-aware guard to render interaction handlers:
+    - `BroadcastMode_Changed`
+    - `CameraMode_SelectionChanged`
+    - slider/preset background/mirror/debug handlers
+  - Added busy guard for preset actions:
+    - `SavePreset_Click`
+    - `ApplyPreset_Click`
+    - `DeletePreset_Click`
+    - `ResetRender_Click`
+  - Updated render control enable rules:
+    - `Yaw`/`FOV` enabled only in `Manual` camera mode.
+  - Updated camera mode change flow to refresh UI enable state immediately before queued apply.
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added same `ShouldSkipRenderInteraction()` helper and handler coverage as WPF.
+  - Added same preset busy guards as WPF.
+  - Updated render control enable rules with same manual-mode condition for `Yaw`/`FOV`.
+  - Updated camera mode change flow to refresh UI enable state before queued apply.
+
+- `docs/reports/ui_render_busy_gating_parity_2026-03-03.md` (new)
+  - Added implementation and parity behavior report for this follow-up.
+
+- `docs/INDEX.md`
+  - Added link to the new render busy-gating parity report.
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release`
+  - PASS
+- WPF/WinUI host build:
+  - not re-validated in this follow-up run due environment network dependency for restore/package resolution.
+
 ## 2026-03-03 - Host UI input validation/busy-state gating + WinUI diagnostic environment snapshot
 
 ### Summary

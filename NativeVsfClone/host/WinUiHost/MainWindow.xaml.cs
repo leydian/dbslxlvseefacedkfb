@@ -274,7 +274,7 @@ public sealed partial class MainWindow : Window
 
     private void BroadcastMode_Changed(object sender, RoutedEventArgs e)
     {
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -285,10 +285,11 @@ public sealed partial class MainWindow : Window
 
     private void CameraMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
+        UpdateUiState();
         QueueRenderApply();
     }
 
@@ -298,7 +299,7 @@ public sealed partial class MainWindow : Window
         {
             FramingValueText.Text = FramingSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
         }
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -311,7 +312,7 @@ public sealed partial class MainWindow : Window
         {
             HeadroomValueText.Text = HeadroomSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
         }
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -324,7 +325,7 @@ public sealed partial class MainWindow : Window
         {
             YawValueText.Text = YawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
         }
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -337,7 +338,7 @@ public sealed partial class MainWindow : Window
         {
             FovValueText.Text = FovSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
         }
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -346,7 +347,7 @@ public sealed partial class MainWindow : Window
 
     private void BackgroundPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -355,7 +356,7 @@ public sealed partial class MainWindow : Window
 
     private void MirrorMode_Changed(object sender, RoutedEventArgs e)
     {
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -364,7 +365,7 @@ public sealed partial class MainWindow : Window
 
     private void DebugOverlay_Changed(object sender, RoutedEventArgs e)
     {
-        if (_isSyncingRenderUi)
+        if (ShouldSkipRenderInteraction())
         {
             return;
         }
@@ -373,6 +374,11 @@ public sealed partial class MainWindow : Window
 
     private async void SavePreset_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         var name = PresetNameTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -388,6 +394,11 @@ public sealed partial class MainWindow : Window
 
     private void ApplyPreset_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (PresetComboBox.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
         {
             return;
@@ -399,6 +410,11 @@ public sealed partial class MainWindow : Window
 
     private async void DeletePreset_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (PresetComboBox.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
         {
             return;
@@ -415,6 +431,11 @@ public sealed partial class MainWindow : Window
 
     private void ResetRender_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         _ = _controller.ResetRenderDefaults();
         SyncPresetControlsFromState();
     }
@@ -503,12 +524,13 @@ public sealed partial class MainWindow : Window
         StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive && !isBusy && _validationState.OscBindPortValid && _validationState.OscPublishAddressValid;
         StopOscButton.IsEnabled = outputs.OscActive && !isBusy;
         var renderControlsEnabled = session.IsInitialized && !isBusy;
+        var manualCameraMode = CameraModeComboBox.SelectedIndex == 2 || _controller.RenderState.CameraMode == RenderCameraMode.Manual;
         BroadcastModeCheckBox.IsEnabled = renderControlsEnabled;
         CameraModeComboBox.IsEnabled = renderControlsEnabled;
         FramingSlider.IsEnabled = renderControlsEnabled;
         HeadroomSlider.IsEnabled = renderControlsEnabled;
-        YawSlider.IsEnabled = renderControlsEnabled;
-        FovSlider.IsEnabled = renderControlsEnabled;
+        YawSlider.IsEnabled = renderControlsEnabled && manualCameraMode;
+        FovSlider.IsEnabled = renderControlsEnabled && manualCameraMode;
         BackgroundPresetComboBox.IsEnabled = renderControlsEnabled;
         MirrorModeCheckBox.IsEnabled = renderControlsEnabled;
         DebugOverlayCheckBox.IsEnabled = renderControlsEnabled;
@@ -526,6 +548,11 @@ public sealed partial class MainWindow : Window
         BusyStatusText.Text = $"Busy: {(isBusy ? operation.CurrentOperation : "Idle")}";
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
+    }
+
+    private bool ShouldSkipRenderInteraction()
+    {
+        return _isSyncingRenderUi || _controller.OperationState.IsBusy;
     }
 
     private void RefreshValidationState()
