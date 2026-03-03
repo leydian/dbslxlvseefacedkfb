@@ -2,6 +2,52 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VXAvatar/VXA2/XAV2 Gate H expansion for XAV2 policy contract
+
+### Summary
+
+Extended the VXAvatar/VXA2/XAV2 gate harness with a new Gate H to continuously validate native XAV2 unknown-section policy behavior and warning-code count contract (`warn|ignore|fail`) in both local runs and CI.
+
+### Changed
+
+- `tools/vxavatar_sample_report.ps1`
+  - Added policy probe fields for XAV2 rows:
+    - `Xav2PolicyWarn_PrimaryError`
+    - `Xav2PolicyWarn_WarningCodes`
+    - `Xav2PolicyIgnore_PrimaryError`
+    - `Xav2PolicyIgnore_WarningCodes`
+    - `Xav2PolicyFail_PrimaryError`
+    - `Xav2PolicyFail_WarningCodes`
+
+- `tools/vxavatar_quality_gate.ps1`
+  - Added Gate H (`XAV2 unknown-section policy contract`).
+  - Added policy field presence checks and numeric parsing checks.
+  - Added policy assertions:
+    - `warn/ignore` primary error must be `NONE`.
+    - `ignore` warning-code count must be `<= warn`.
+    - `fail` primary error must be `NONE|XAV2_UNKNOWN_SECTION_NOT_ALLOWED`.
+  - Included `gate_h` in summary text/JSON and overall pass condition.
+
+- `.github/workflows/vxavatar-gate.yml`
+  - Added trigger paths:
+    - `tools/avatar_tool.cpp`
+    - `CMakeLists.txt`
+  - Updated quick/full step labels to explicit `(A-H)`.
+
+- `README.md`
+  - Added Gate H rule description in VXAvatar/VXA2/XAV2 quality gate section.
+
+- `docs/reports/xav2_policy_gateH_ci_2026-03-03.md` (new)
+  - Added implementation and expected verification output summary.
+
+- `docs/INDEX.md`
+  - Added link to Gate H expansion report.
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - PASS
+
 ## 2026-03-03 - XAV2 native parity for unknown-section policy + structured warning codes
 
 ### Summary

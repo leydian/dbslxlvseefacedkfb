@@ -253,6 +253,55 @@ function Add-GeneratedXav2FromVrm {
     }
 }
 
+function Parse-AvatarToolOutput {
+    param(
+        [string[]]$Lines
+    )
+
+    $fields = @{}
+    foreach ($line in $Lines) {
+        if ($line -match '^\s+([^:]+):\s*(.*)$') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            $fields[$key] = $value
+        }
+    }
+    return $fields
+}
+
+function Emit-Xav2PolicyLines {
+    param(
+        [string]$AvatarToolPath,
+        [string]$AvatarPath,
+        [string]$OutputPath
+    )
+
+    $policyRows = @(
+        @{ Name = "Warn"; Value = "warn" },
+        @{ Name = "Ignore"; Value = "ignore" },
+        @{ Name = "Fail"; Value = "fail" }
+    )
+
+    foreach ($policy in $policyRows) {
+        $rawOutput = & $AvatarToolPath $AvatarPath "--xav2-unknown-section-policy=$($policy.Value)" 2>&1
+        $exitCode = $LASTEXITCODE
+        $lines = @($rawOutput | ForEach-Object { "$_" })
+        $parsed = Parse-AvatarToolOutput -Lines $lines
+
+        if ($exitCode -ne 0) {
+            "  Xav2Policy$($policy.Name)_PrimaryError: TOOL_EXEC_FAILED(exit=$exitCode)" | Add-Content -Path $OutputPath
+            "  Xav2Policy$($policy.Name)_WarningCodes: -1" | Add-Content -Path $OutputPath
+            continue
+        }
+
+        $primary = if ($parsed.ContainsKey("PrimaryError")) { $parsed["PrimaryError"] } else { "MISSING" }
+        $warningCodes = if ($parsed.ContainsKey("WarningCodes")) { $parsed["WarningCodes"] } else { "-1" }
+
+        "  Xav2Policy$($policy.Name)_PrimaryError: $primary" | Add-Content -Path $OutputPath
+        "  Xav2Policy$($policy.Name)_WarningCodes: $warningCodes" | Add-Content -Path $OutputPath
+    }
+}
+
 if (-not (Test-Path $AvatarToolPath)) {
     throw "avatar_tool not found at $AvatarToolPath"
 }
@@ -410,6 +459,9 @@ foreach ($entry in $entries) {
     "  InputTag: $($entry.Tag)" | Add-Content -Path $OutputPath
     "  SourcePath: $($entry.Path)" | Add-Content -Path $OutputPath
     & $AvatarToolPath $entry.Path | Add-Content -Path $OutputPath
+    if ($entry.Kind -eq "XAV2") {
+        Emit-Xav2PolicyLines -AvatarToolPath $AvatarToolPath -AvatarPath $entry.Path -OutputPath $OutputPath
+    }
     "" | Add-Content -Path $OutputPath
 }
 

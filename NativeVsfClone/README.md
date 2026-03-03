@@ -280,6 +280,11 @@ Gate rules:
   - Optional strict mode: `-RequireRealFullSamples` to fail when no `real-full` rows are present.
 - Gate F: fixed `.xav2` sample must satisfy `Format=XAV2`, `ParserStage=runtime-ready`, and `Compat!=failed`.
 - Gate G: synthetic corrupted `.xav2` samples must classify as `XAV2_SCHEMA_INVALID|XAV2_SECTION_TRUNCATED`.
+- Gate H: fixed `.xav2` unknown-section policy contract:
+  - policy probe fields must exist in report (`Xav2PolicyWarn/Ignore/Fail_*`)
+  - `warn` and `ignore` policy runs must keep `PrimaryError=NONE`
+  - `ignore` warning-code count must be `<= warn`
+  - `fail` primary error must be `NONE|XAV2_UNKNOWN_SECTION_NOT_ALLOWED`
 - Fixed XAV2 sample policy:
   - allowlist-first deterministic generation from VRM (`-FixedXav2FromVrmAllowlist`)
   - default allowlist size target: 5 files (`-FixedXav2FromVrmCount 5`)

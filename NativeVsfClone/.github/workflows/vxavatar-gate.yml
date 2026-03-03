@@ -8,6 +8,8 @@ on:
       - "include/vsfclone/avatar/**"
       - "include/vsfclone/nativecore/**"
       - "tools/vxavatar_*"
+      - "tools/avatar_tool.cpp"
+      - "CMakeLists.txt"
       - ".github/workflows/vxavatar-gate.yml"
   workflow_dispatch:
 
@@ -28,7 +30,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Run Quick Gate
+      - name: Run Quick Gate (A-H)
         run: powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick
 
       - name: Upload Quick Gate Reports
@@ -57,7 +59,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Run Full Gate
+      - name: Run Full Gate (A-H)
         run: powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -Profile full
 
       - name: Upload Full Gate Reports

@@ -109,6 +109,24 @@ function To-Int {
     return 0
 }
 
+function Try-ParseIntField {
+    param(
+        [hashtable]$Sample,
+        [string]$Field,
+        [ref]$OutValue
+    )
+
+    if (-not $Sample.ContainsKey($Field)) {
+        return $false
+    }
+    [int]$parsed = 0
+    if (-not [int]::TryParse($Sample[$Field], [ref]$parsed)) {
+        return $false
+    }
+    $OutValue.Value = $parsed
+    return $true
+}
+
 if (-not (Test-Path $ReportScriptPath)) {
     throw "report script not found: $ReportScriptPath"
 }
@@ -136,6 +154,7 @@ $gateD = $true
 $gateE = $true
 $gateF = $true
 $gateG = $true
+$gateH = $true
 $failReasons = @()
 
 $requiredFields = @("InputKind", "InputTag", "Format", "Compat", "ParserStage", "PrimaryError")
@@ -234,6 +253,64 @@ foreach ($name in $sampleNames) {
             $gateF = $false
             $failReasons += "GateF: $name expected compat not failed but got $compat"
         }
+
+        $requiredPolicyFields = @(
+            "Xav2PolicyWarn_PrimaryError",
+            "Xav2PolicyWarn_WarningCodes",
+            "Xav2PolicyIgnore_PrimaryError",
+            "Xav2PolicyIgnore_WarningCodes",
+            "Xav2PolicyFail_PrimaryError",
+            "Xav2PolicyFail_WarningCodes"
+        )
+        $policyFieldsOk = $true
+        foreach ($policyField in $requiredPolicyFields) {
+            if (-not (Require-Field -Sample $sample -Field $policyField)) {
+                $gateH = $false
+                $policyFieldsOk = $false
+                $failReasons += "GateH: $name missing policy field '$policyField'"
+            }
+        }
+
+        if (-not $policyFieldsOk) {
+            continue
+        }
+
+        $warnPrimary = $sample["Xav2PolicyWarn_PrimaryError"]
+        $ignorePrimary = $sample["Xav2PolicyIgnore_PrimaryError"]
+        $failPrimary = $sample["Xav2PolicyFail_PrimaryError"]
+
+        if ($warnPrimary -ne "NONE") {
+            $gateH = $false
+            $failReasons += "GateH: $name warn policy expected PrimaryError=NONE but got $warnPrimary"
+        }
+        if ($ignorePrimary -ne "NONE") {
+            $gateH = $false
+            $failReasons += "GateH: $name ignore policy expected PrimaryError=NONE but got $ignorePrimary"
+        }
+        if (-not (Is-OneOf -Value $failPrimary -Allowed @("NONE", "XAV2_UNKNOWN_SECTION_NOT_ALLOWED"))) {
+            $gateH = $false
+            $failReasons += "GateH: $name fail policy expected NONE|XAV2_UNKNOWN_SECTION_NOT_ALLOWED but got $failPrimary"
+        }
+
+        [int]$warnCodes = 0
+        [int]$ignoreCodes = 0
+        [int]$failCodes = 0
+        if (-not (Try-ParseIntField -Sample $sample -Field "Xav2PolicyWarn_WarningCodes" -OutValue ([ref]$warnCodes))) {
+            $gateH = $false
+            $failReasons += "GateH: $name invalid warn warning-code count '$($sample["Xav2PolicyWarn_WarningCodes"])'"
+        }
+        if (-not (Try-ParseIntField -Sample $sample -Field "Xav2PolicyIgnore_WarningCodes" -OutValue ([ref]$ignoreCodes))) {
+            $gateH = $false
+            $failReasons += "GateH: $name invalid ignore warning-code count '$($sample["Xav2PolicyIgnore_WarningCodes"])'"
+        }
+        if (-not (Try-ParseIntField -Sample $sample -Field "Xav2PolicyFail_WarningCodes" -OutValue ([ref]$failCodes))) {
+            $gateH = $false
+            $failReasons += "GateH: $name invalid fail warning-code count '$($sample["Xav2PolicyFail_WarningCodes"])'"
+        }
+        if ($ignoreCodes -gt $warnCodes) {
+            $gateH = $false
+            $failReasons += "GateH: $name expected ignore warning codes <= warn (ignore=$ignoreCodes, warn=$warnCodes)"
+        }
     }
 
     if ($kind -eq "XAV2" -and $tag -eq "synthetic-corrupt-xav2") {
@@ -282,7 +359,7 @@ if ($Profile -eq "full" -and $RequireRealFullSamples -and $foundRealFull -eq 0) 
     $failReasons += "GateE: no real-full sample rows found in full profile"
 }
 
-$overallPass = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateG
+$overallPass = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateG -and $gateH
 $gateAStatus = if ($gateA) { "PASS" } else { "FAIL" }
 $gateBStatus = if ($gateB) { "PASS" } else { "FAIL" }
 $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
@@ -290,6 +367,7 @@ $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
 $gateEStatus = if ($gateE) { "PASS" } else { "FAIL" }
 $gateFStatus = if ($gateF) { "PASS" } else { "FAIL" }
 $gateGStatus = if ($gateG) { "PASS" } else { "FAIL" }
+$gateHStatus = if ($gateH) { "PASS" } else { "FAIL" }
 
 $summary = @()
 $summary += "VXAvatar/VXA2/XAV2 Quality Gate Summary"
@@ -306,6 +384,7 @@ $summary += "- GateD (required output fields): $gateDStatus"
 $summary += "- GateE (full profile real-sample contract): $gateEStatus"
 $summary += "- GateF (fixed XAV2 success contract): $gateFStatus"
 $summary += "- GateG (synthetic XAV2 corruption handling): $gateGStatus"
+$summary += "- GateH (XAV2 unknown-section policy contract): $gateHStatus"
 $summary += "- Overall: $(if ($overallPass) { 'PASS' } else { 'FAIL' })"
 $summary += ""
 $summary += "Sample Coverage"
@@ -346,6 +425,7 @@ $jsonSummary = [ordered]@{
         gate_e = $gateEStatus
         gate_f = $gateFStatus
         gate_g = $gateGStatus
+        gate_h = $gateHStatus
         overall = if ($overallPass) { "PASS" } else { "FAIL" }
     }
     coverage = [ordered]@{
