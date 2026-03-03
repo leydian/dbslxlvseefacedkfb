@@ -119,7 +119,8 @@ function Write-WinUiDiagnosticManifest {
         [string]$BinlogPath,
         [string]$DiagLogPath,
         [string]$DiagStderrPath,
-        [string]$ObjDumpPath
+        [string]$ObjDumpPath,
+        [hashtable]$EnvironmentSummary
     )
 
     $manifest = [ordered]@{
@@ -134,8 +135,45 @@ function Write-WinUiDiagnosticManifest {
             stderr_log = $DiagStderrPath
             obj_dump_dir = $ObjDumpPath
         }
+        environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
+}
+
+function Get-WinUiEnvironmentSummary {
+    $summary = [ordered]@{
+        os_version = [System.Environment]::OSVersion.VersionString
+        dotnet_sdks = @()
+        dotnet_runtimes = @()
+        visual_studio = @()
+    }
+
+    try {
+        $summary.dotnet_sdks = (& dotnet --list-sdks 2>$null)
+    } catch {
+        $summary.dotnet_sdks = @("unavailable")
+    }
+
+    try {
+        $summary.dotnet_runtimes = (& dotnet --list-runtimes 2>$null)
+    } catch {
+        $summary.dotnet_runtimes = @("unavailable")
+    }
+
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        try {
+            $summary.visual_studio = (& $vswhere -all -products * -format json | ConvertFrom-Json | ForEach-Object {
+                "$($_.displayName) $($_.catalog.productDisplayVersion)"
+            })
+        } catch {
+            $summary.visual_studio = @("vswhere parse failed")
+        }
+    } else {
+        $summary.visual_studio = @("vswhere not found")
+    }
+
+    return $summary
 }
 
 function Copy-WinUiObjDiagnostics {
@@ -190,6 +228,7 @@ function Collect-WinUiDiagnostics {
         $diagArgs += "--no-restore"
     }
     $diagCommandText = "dotnet " + ($diagArgs -join " ")
+    $envSummary = Get-WinUiEnvironmentSummary
 
     & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
     $diagExitCode = $LASTEXITCODE
@@ -204,7 +243,8 @@ function Collect-WinUiDiagnostics {
         -BinlogPath $binlogPath `
         -DiagLogPath $diagLogPath `
         -DiagStderrPath $diagStderrPath `
-        -ObjDumpPath $objDumpPath
+        -ObjDumpPath $objDumpPath `
+        -EnvironmentSummary $envSummary
 
     $log.Add("WinUI diagnostics command: $diagCommandText")
     $log.Add("WinUI diagnostics exit code: $diagExitCode")

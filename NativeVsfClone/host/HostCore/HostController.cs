@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace HostCore;
@@ -43,12 +44,14 @@ public sealed class HostController
             RenderState = ToRenderUiState(selectedPreset);
             _renderOptions = ToNativeOptions(RenderState);
         }
+        OperationState = new HostOperationState(false, string.Empty);
         LastSnapshot = BuildSnapshot();
     }
 
     public HostSessionState SessionState { get; private set; }
     public OutputState Outputs { get; private set; }
     public RenderUiState RenderState { get; private set; }
+    public HostOperationState OperationState { get; private set; }
     public DiagnosticsSnapshot LastSnapshot { get; private set; }
 
     public event EventHandler? StateChanged;
@@ -61,187 +64,227 @@ public sealed class HostController
 
     public NcResultCode Initialize()
     {
-        var rc = _sessionService.Initialize();
-        TrackResult("Initialize", rc);
-        if (rc == NcResultCode.Ok)
+        return ExecuteOperation("Initialize", () =>
         {
-            ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
-        }
-        RefreshState();
-        return rc;
+            var rc = _sessionService.Initialize();
+            TrackResult("Initialize", rc);
+            if (rc == NcResultCode.Ok)
+            {
+                ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
+            }
+
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode Shutdown()
     {
-        if (_windowAttached)
+        return ExecuteOperation("Shutdown", () =>
         {
-            TrackResult("DetachWindow", _renderLoopService.DetachWindow());
-            _windowAttached = false;
-            _windowHandle = IntPtr.Zero;
-        }
+            if (_windowAttached)
+            {
+                TrackResult("DetachWindow", _renderLoopService.DetachWindow());
+                _windowAttached = false;
+                _windowHandle = IntPtr.Zero;
+            }
 
-        if (Outputs.SpoutActive)
-        {
-            TrackResult("StopSpout", _outputService.StopSpout());
-            Outputs = Outputs with { SpoutActive = false };
-        }
+            if (Outputs.SpoutActive)
+            {
+                TrackResult("StopSpout", _outputService.StopSpout());
+                Outputs = Outputs with { SpoutActive = false };
+            }
 
-        if (Outputs.OscActive)
-        {
-            TrackResult("StopOsc", _outputService.StopOsc());
-            Outputs = Outputs with { OscActive = false };
-        }
+            if (Outputs.OscActive)
+            {
+                TrackResult("StopOsc", _outputService.StopOsc());
+                Outputs = Outputs with { OscActive = false };
+            }
 
-        if (_sessionService.ActiveAvatarHandle.HasValue)
-        {
-            TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
-        }
+            if (_sessionService.ActiveAvatarHandle.HasValue)
+            {
+                TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
+            }
 
-        var rc = _sessionService.Shutdown();
-        TrackResult("Shutdown", rc);
-        _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
-        RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
-        SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
-        PublishDiagnostics();
-        StateChanged?.Invoke(this, EventArgs.Empty);
-        return rc;
+            var rc = _sessionService.Shutdown();
+            TrackResult("Shutdown", rc);
+            _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
+            RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
+            SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
+            PublishDiagnostics();
+            StateChanged?.Invoke(this, EventArgs.Empty);
+            return rc;
+        });
     }
 
     public NcResultCode AttachWindow(IntPtr hwnd, uint width, uint height)
     {
-        _windowHandle = hwnd;
-        var rc = _renderLoopService.AttachWindow(hwnd, width, height);
-        _windowAttached = rc == NcResultCode.Ok;
-        TrackResult("AttachWindow", rc);
-        if (rc == NcResultCode.Ok)
+        return ExecuteOperation("AttachWindow", () =>
         {
-            ApplyRenderOptionsInternal("ApplyRenderOptionsAttach");
-        }
-        RefreshState();
-        return rc;
+            _windowHandle = hwnd;
+            var rc = _renderLoopService.AttachWindow(hwnd, width, height);
+            _windowAttached = rc == NcResultCode.Ok;
+            TrackResult("AttachWindow", rc);
+            if (rc == NcResultCode.Ok)
+            {
+                ApplyRenderOptionsInternal("ApplyRenderOptionsAttach");
+            }
+
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode ResizeWindow(uint width, uint height)
     {
-        if (!_windowAttached)
+        return ExecuteOperation("ResizeWindow", () =>
         {
-            return NcResultCode.InvalidArgument;
-        }
+            if (!_windowAttached)
+            {
+                return NcResultCode.InvalidArgument;
+            }
 
-        var rc = _renderLoopService.Resize(width, height);
-        TrackResult("ResizeWindow", rc);
-        if (rc == NcResultCode.Ok)
-        {
-            ApplyRenderOptionsInternal("ApplyRenderOptionsResize");
-        }
-        if (rc == NcResultCode.Ok && Outputs.SpoutActive)
-        {
-            AutoReconfigureSpout(width, height);
-        }
-        RefreshState();
-        return rc;
+            var rc = _renderLoopService.Resize(width, height);
+            TrackResult("ResizeWindow", rc);
+            if (rc == NcResultCode.Ok)
+            {
+                ApplyRenderOptionsInternal("ApplyRenderOptionsResize");
+            }
+            if (rc == NcResultCode.Ok && Outputs.SpoutActive)
+            {
+                AutoReconfigureSpout(width, height);
+            }
+
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode LoadAvatar(string path)
     {
-        if (_sessionService.ActiveAvatarHandle.HasValue)
+        return ExecuteOperation("LoadAvatar", () =>
         {
-            TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
-        }
+            if (_sessionService.ActiveAvatarHandle.HasValue)
+            {
+                TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
+            }
 
-        var rc = _sessionService.LoadAvatar(path);
-        TrackResult("LoadAvatar", rc);
-        if (rc == NcResultCode.Ok)
-        {
-            // Re-apply host-side render controls after avatar load in case
-            // the native side resets camera/quality state during load.
-            ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
-        }
-        RefreshState();
-        return rc;
+            var rc = _sessionService.LoadAvatar(path);
+            TrackResult("LoadAvatar", rc);
+            if (rc == NcResultCode.Ok)
+            {
+                // Re-apply host-side render controls after avatar load in case
+                // the native side resets camera/quality state during load.
+                ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
+            }
+
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode UnloadAvatar()
     {
-        var rc = _sessionService.UnloadAvatar();
-        TrackResult("UnloadAvatar", rc);
-        RefreshState();
-        return rc;
+        return ExecuteOperation("UnloadAvatar", () =>
+        {
+            var rc = _sessionService.UnloadAvatar();
+            TrackResult("UnloadAvatar", rc);
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode StartSpout(uint width, uint height, uint fps, string channelName)
     {
-        var rc = _outputService.StartSpout(width, height, fps, channelName);
-        TrackResult("StartSpout", rc);
-        Outputs = Outputs with
+        return ExecuteOperation("StartSpout", () =>
         {
-            SpoutActive = rc == NcResultCode.Ok,
-            SpoutChannelName = channelName,
-            SpoutWidthPx = width,
-            SpoutHeightPx = height,
-            SpoutFps = fps,
-        };
-        RefreshState();
-        return rc;
+            var rc = _outputService.StartSpout(width, height, fps, channelName);
+            TrackResult("StartSpout", rc);
+            Outputs = Outputs with
+            {
+                SpoutActive = rc == NcResultCode.Ok,
+                SpoutChannelName = channelName,
+                SpoutWidthPx = width,
+                SpoutHeightPx = height,
+                SpoutFps = fps,
+            };
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode StopSpout()
     {
-        var rc = _outputService.StopSpout();
-        TrackResult("StopSpout", rc);
-        Outputs = Outputs with { SpoutActive = false };
-        RefreshState();
-        return rc;
+        return ExecuteOperation("StopSpout", () =>
+        {
+            var rc = _outputService.StopSpout();
+            TrackResult("StopSpout", rc);
+            Outputs = Outputs with { SpoutActive = false };
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode StartOsc(ushort bindPort, string publishAddress)
     {
-        var rc = _outputService.StartOsc(bindPort, publishAddress);
-        TrackResult("StartOsc", rc);
-        Outputs = Outputs with
+        return ExecuteOperation("StartOsc", () =>
         {
-            OscActive = rc == NcResultCode.Ok,
-            OscBindPort = bindPort,
-            OscPublishAddress = publishAddress,
-        };
-        RefreshState();
-        return rc;
+            var rc = _outputService.StartOsc(bindPort, publishAddress);
+            TrackResult("StartOsc", rc);
+            Outputs = Outputs with
+            {
+                OscActive = rc == NcResultCode.Ok,
+                OscBindPort = bindPort,
+                OscPublishAddress = publishAddress,
+            };
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode StopOsc()
     {
-        var rc = _outputService.StopOsc();
-        TrackResult("StopOsc", rc);
-        Outputs = Outputs with { OscActive = false };
-        RefreshState();
-        return rc;
+        return ExecuteOperation("StopOsc", () =>
+        {
+            var rc = _outputService.StopOsc();
+            TrackResult("StopOsc", rc);
+            Outputs = Outputs with { OscActive = false };
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode SetBroadcastMode(bool enabled)
     {
-        var current = RenderState;
-        _renderOptions = enabled ? NativeCoreInterop.BuildBroadcastPreset() : NativeCoreInterop.BuildDebugPreset();
-        _renderOptions.CameraMode = ToNativeCameraMode(current.CameraMode);
-        _renderOptions.FramingTarget = Clamp(current.FramingTarget, 0.35f, 0.95f);
-        _renderOptions.Headroom = Clamp(current.Headroom, 0.0f, 0.5f);
-        _renderOptions.YawDeg = Clamp(current.YawDeg, -45.0f, 45.0f);
-        _renderOptions.FovDeg = Clamp(current.FovDeg, 20.0f, 70.0f);
-        _renderOptions.ShowDebugOverlay = current.ShowDebugOverlay ? 1U : 0U;
-        ApplyBackgroundPreset(ref _renderOptions, current.BackgroundPreset);
-        RenderState = current with { BroadcastMode = enabled };
-        var rc = ApplyRenderOptionsInternal("SetBroadcastMode");
-        RefreshState();
-        return rc;
+        return ExecuteOperation("SetBroadcastMode", () =>
+        {
+            var current = RenderState;
+            _renderOptions = enabled ? NativeCoreInterop.BuildBroadcastPreset() : NativeCoreInterop.BuildDebugPreset();
+            _renderOptions.CameraMode = ToNativeCameraMode(current.CameraMode);
+            _renderOptions.FramingTarget = Clamp(current.FramingTarget, 0.35f, 0.95f);
+            _renderOptions.Headroom = Clamp(current.Headroom, 0.0f, 0.5f);
+            _renderOptions.YawDeg = Clamp(current.YawDeg, -45.0f, 45.0f);
+            _renderOptions.FovDeg = Clamp(current.FovDeg, 20.0f, 70.0f);
+            _renderOptions.ShowDebugOverlay = current.ShowDebugOverlay ? 1U : 0U;
+            ApplyBackgroundPreset(ref _renderOptions, current.BackgroundPreset);
+            RenderState = current with { BroadcastMode = enabled };
+            var rc = ApplyRenderOptionsInternal("SetBroadcastMode");
+            RefreshState();
+            return rc;
+        });
     }
 
     public NcResultCode ApplyRenderUiState(RenderUiState state)
     {
-        var normalized = NormalizeRenderState(state);
-        _renderOptions = ToNativeOptions(normalized);
-        RenderState = normalized;
-        var rc = ApplyRenderOptionsInternal("ApplyRenderUiState");
-        RefreshState();
-        return rc;
+        return ExecuteOperation("ApplyRenderUiState", () =>
+        {
+            var normalized = NormalizeRenderState(state);
+            _renderOptions = ToNativeOptions(normalized);
+            RenderState = normalized;
+            var rc = ApplyRenderOptionsInternal("ApplyRenderUiState");
+            RefreshState();
+            return rc;
+        });
     }
 
     public RenderPresetModel CreatePreset(string name)
@@ -331,6 +374,20 @@ public sealed class HostController
         _presetStoreModel.LastSelectedPresetName = defaultPreset.Name;
         PersistPresetStore();
         return ApplyRenderUiState(ToRenderUiState(defaultPreset));
+    }
+
+    public HostValidationState ValidateInputs(string avatarPath, string oscBindPortText, string oscPublishAddress)
+    {
+        var avatarValid = TryValidateAvatarPath(avatarPath, out var avatarError);
+        var bindPortValid = TryValidateOscBindPort(oscBindPortText, out var bindPortError);
+        var publishValid = TryValidateOscPublishAddress(oscPublishAddress, out var publishError);
+        return new HostValidationState(
+            avatarValid,
+            bindPortValid,
+            publishValid,
+            avatarError,
+            bindPortError,
+            publishError);
     }
 
     public NcResultCode Tick(float deltaTimeSeconds)
@@ -659,6 +716,91 @@ public sealed class HostController
         {
             ErrorRaised?.Invoke(this, entry);
         }
+    }
+
+    private NcResultCode ExecuteOperation(string operationName, Func<NcResultCode> action)
+    {
+        SetOperationState(true, operationName);
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            SetOperationState(false, string.Empty);
+        }
+    }
+
+    private void SetOperationState(bool isBusy, string operationName)
+    {
+        if (OperationState.IsBusy == isBusy &&
+            string.Equals(OperationState.CurrentOperation, operationName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        OperationState = new HostOperationState(isBusy, operationName);
+        PublishDiagnostics();
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static bool TryValidateAvatarPath(string path, out string error)
+    {
+        var trimmed = path?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            error = "Avatar path is required.";
+            return false;
+        }
+
+        var extension = Path.GetExtension(trimmed).ToLowerInvariant();
+        if (extension is not ".vrm" and not ".vxavatar" and not ".vsfavatar" and not ".vxa2")
+        {
+            error = "Unsupported avatar file extension.";
+            return false;
+        }
+
+        if (!File.Exists(trimmed))
+        {
+            error = "Avatar file does not exist.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateOscBindPort(string bindPortText, out string error)
+    {
+        var trimmed = bindPortText?.Trim() ?? string.Empty;
+        if (!ushort.TryParse(trimmed, out _))
+        {
+            error = "OSC bind port must be 0-65535.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryValidateOscPublishAddress(string publishAddress, out string error)
+    {
+        var trimmed = publishAddress?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            error = "OSC publish address is required.";
+            return false;
+        }
+
+        var parts = trimmed.Split(':', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || !ushort.TryParse(parts[1], out _))
+        {
+            error = "Use host:port format, for example 127.0.0.1:39540.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 
     private void AutoReconfigureSpout(uint width, uint height)

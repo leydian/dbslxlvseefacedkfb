@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private bool _isSyncingRenderUi;
     private bool _isSyncingPresetUi;
+    private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
 
     public MainWindow()
     {
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
+        RefreshValidationState();
         SyncRenderControlsFromState();
         RefreshAll();
     }
@@ -74,6 +76,11 @@ public partial class MainWindow : Window
 
     private void Initialize_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (_controller.SessionState.IsInitialized &&
             !Confirm("Session is already initialized. Reinitialize and reset active outputs/avatar?"))
         {
@@ -103,6 +110,11 @@ public partial class MainWindow : Window
 
     private void Shutdown_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (!Confirm("Shutdown runtime and stop rendering/outputs?"))
         {
             return;
@@ -127,11 +139,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private void InputTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        RefreshValidationState();
+        UpdateUiState();
+    }
+
     private void Load_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        RefreshValidationState();
         if (!_controller.SessionState.IsInitialized)
         {
             MessageBox.Show(this, "Initialize the session first.", "Load Blocked", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (!_validationState.AvatarPathValid)
+        {
+            MessageBox.Show(this, _validationState.AvatarPathError, "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -140,6 +169,11 @@ public partial class MainWindow : Window
 
     private void Unload_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (!Confirm("Unload active avatar?"))
         {
             return;
@@ -149,6 +183,11 @@ public partial class MainWindow : Window
 
     private void StartSpout_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (_controller.Outputs.SpoutActive &&
             !Confirm("Spout is active. Restart with current settings?"))
         {
@@ -173,6 +212,11 @@ public partial class MainWindow : Window
 
     private void StopSpout_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (!Confirm("Stop Spout output?"))
         {
             return;
@@ -182,6 +226,23 @@ public partial class MainWindow : Window
 
     private void StartOsc_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        RefreshValidationState();
+        if (!_validationState.OscBindPortValid)
+        {
+            MessageBox.Show(this, _validationState.OscBindPortError, "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (!_validationState.OscPublishAddressValid)
+        {
+            MessageBox.Show(this, _validationState.OscPublishAddressError, "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         if (!ushort.TryParse(OscBindPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var bindPort))
         {
             MessageBox.Show(this, "OSC bind port must be an integer between 0 and 65535.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -205,6 +266,11 @@ public partial class MainWindow : Window
 
     private void StopOsc_Click(object sender, RoutedEventArgs e)
     {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
         if (!Confirm("Stop OSC output?"))
         {
             return;
@@ -419,6 +485,7 @@ public partial class MainWindow : Window
     private void RefreshAll()
     {
         UpdateRenderMetricsFromHost();
+        RefreshValidationState();
         UpdateUiState();
         UpdateDiagnostics();
     }
@@ -427,18 +494,20 @@ public partial class MainWindow : Window
     {
         var session = _controller.SessionState;
         var outputs = _controller.Outputs;
+        var operation = _controller.OperationState;
         var hasAvatar = session.ActiveAvatarHandle.HasValue;
+        var isBusy = operation.IsBusy;
 
-        InitializeButton.IsEnabled = !session.IsInitialized;
-        ShutdownButton.IsEnabled = session.IsInitialized;
-        BrowseAvatarButton.IsEnabled = session.IsInitialized;
-        LoadButton.IsEnabled = session.IsInitialized;
-        UnloadButton.IsEnabled = session.IsInitialized && hasAvatar;
-        StartSpoutButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.SpoutActive;
-        StopSpoutButton.IsEnabled = outputs.SpoutActive;
-        StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive;
-        StopOscButton.IsEnabled = outputs.OscActive;
-        var renderControlsEnabled = session.IsInitialized;
+        InitializeButton.IsEnabled = !session.IsInitialized && !isBusy;
+        ShutdownButton.IsEnabled = session.IsInitialized && !isBusy;
+        BrowseAvatarButton.IsEnabled = session.IsInitialized && !isBusy;
+        LoadButton.IsEnabled = session.IsInitialized && !isBusy && _validationState.AvatarPathValid;
+        UnloadButton.IsEnabled = session.IsInitialized && hasAvatar && !isBusy;
+        StartSpoutButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.SpoutActive && !isBusy;
+        StopSpoutButton.IsEnabled = outputs.SpoutActive && !isBusy;
+        StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive && !isBusy && _validationState.OscBindPortValid && _validationState.OscPublishAddressValid;
+        StopOscButton.IsEnabled = outputs.OscActive && !isBusy;
+        var renderControlsEnabled = session.IsInitialized && !isBusy;
         BroadcastModeCheckBox.IsEnabled = renderControlsEnabled;
         CameraModeComboBox.IsEnabled = renderControlsEnabled;
         FramingSlider.IsEnabled = renderControlsEnabled;
@@ -459,8 +528,21 @@ public partial class MainWindow : Window
         AvatarStatusText.Text = hasAvatar ? "Loaded" : "None";
         RenderStatusText.Text = $"{session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
         OutputStatusText.Text = $"Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
+        BusyStatusText.Text = isBusy ? operation.CurrentOperation : "Idle";
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
+    }
+
+    private void RefreshValidationState()
+    {
+        _validationState = _controller.ValidateInputs(
+            AvatarPathTextBox.Text,
+            OscBindPortTextBox.Text,
+            OscPublishAddressTextBox.Text);
+
+        AvatarPathValidationText.Text = _validationState.AvatarPathValid ? string.Empty : _validationState.AvatarPathError;
+        OscBindValidationText.Text = _validationState.OscBindPortValid ? string.Empty : _validationState.OscBindPortError;
+        OscPublishValidationText.Text = _validationState.OscPublishAddressValid ? string.Empty : _validationState.OscPublishAddressError;
     }
 
     private void UpdateDiagnostics()

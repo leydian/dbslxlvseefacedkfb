@@ -63,3 +63,18 @@ public sealed record HostLogEntry(
     string Source,
     string Message,
     NcResultCode ResultCode);
+
+public sealed record HostOperationState(
+    bool IsBusy,
+    string CurrentOperation);
+
+public sealed record HostValidationState(
+    bool AvatarPathValid,
+    bool OscBindPortValid,
+    bool OscPublishAddressValid,
+    string AvatarPathError,
+    string OscBindPortError,
+    string OscPublishAddressError)
+{
+    public bool IsValid => AvatarPathValid && OscBindPortValid && OscPublishAddressValid;
+}

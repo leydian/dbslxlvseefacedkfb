@@ -2,6 +2,75 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - Host UI input validation/busy-state gating + WinUI diagnostic environment snapshot
+
+### Summary
+
+Improved host operation safety and observability across WPF/WinUI by adding shared HostCore validation and busy-operation contracts, wiring UI action gating to those contracts, and enriching WinUI publish-failure diagnostics with environment metadata for reproducible triage.
+
+### Changed
+
+- `host/HostCore/HostUiState.cs`
+  - Added:
+    - `HostOperationState` (`IsBusy`, `CurrentOperation`)
+    - `HostValidationState` (`AvatarPathValid`, `OscBindPortValid`, `OscPublishAddressValid`, error texts)
+
+- `host/HostCore/HostController.cs`
+  - Added:
+    - `OperationState` property
+    - `ValidateInputs(avatarPath, oscBindPortText, oscPublishAddress)` API
+    - centralized operation wrapper for busy-state transitions on mutating actions
+  - Added validation helpers:
+    - avatar path checks (required, supported extension, file existence)
+    - OSC bind port checks (`ushort`)
+    - OSC publish address checks (`host:port` + `ushort` port)
+
+- `host/WpfHost/MainWindow.xaml`
+  - Added inline validation text blocks for avatar path and OSC inputs.
+  - Added `TextChanged` hooks on avatar/OSC input text boxes.
+  - Added `Busy` field to status strip.
+  - Added horizontal scroll support for logs view.
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added live validation refresh and inline error rendering.
+  - Added busy-guard short-circuit on lifecycle/output actions.
+  - Updated action enable rules to include:
+    - session/avatar state
+    - validation state (`Load`, `Start OSC`)
+    - busy state (`!IsBusy`)
+
+- `host/WinUiHost/MainWindow.xaml`
+  - Added left-panel `ScrollViewer` for small-window operability.
+  - Added inline validation blocks + `TextChanged` hooks.
+  - Updated logs textbox to `NoWrap` + horizontal scroll.
+  - Added `Busy` status line.
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added live validation refresh and inline error rendering.
+  - Added busy-guard short-circuit on lifecycle/output actions.
+  - Updated action enable rules with same gate model as WPF.
+
+- `tools/publish_hosts.ps1`
+  - Extended WinUI diagnostic manifest with environment capture:
+    - OS version
+    - `.NET SDKs`/`runtimes`
+    - Visual Studio discovery (`vswhere`, when available)
+
+- `docs/reports/ui_host_validation_busy_and_winui_diag_2026-03-03.md` (new)
+  - Added detailed implementation and verification report.
+
+- `docs/INDEX.md`
+  - Added link to the new host validation/busy/diagnostics report.
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release`
+  - PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release`
+  - BLOCKED in this environment by NuGet/network access (`NU1301`/`NU1101`)
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+  - BLOCKED in this environment by NuGet/network access (`NU1301`/`NU1101`)
+
 ## 2026-03-03 - VXAvatar/VXA2/XAV2 Gate H expansion for XAV2 policy contract
 
 ### Summary

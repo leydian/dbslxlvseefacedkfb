@@ -12,13 +12,13 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Column="0">
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
@@ -41,9 +41,10 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBox Grid.Column="0" x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm"/>
+                        <TextBox Grid.Column="0" x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged"/>
                         <Button Grid.Column="1" x:Name="BrowseAvatarButton" Content="Browse..." Click="BrowseAvatar_Click" Margin="8,0,0,0"/>
                     </Grid>
+                    <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
                         <Button x:Name="LoadButton" Content="Load" Click="Load_Click" MinWidth="92"/>
                         <Button x:Name="UnloadButton" Content="Unload" Click="Unload_Click" MinWidth="92"/>
@@ -173,10 +174,12 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Bind Port" VerticalAlignment="Center"/>
-                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="OscBindPortTextBox" Text="39539"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="OscBindPortTextBox" Text="39539" TextChanged="InputTextChanged"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Publish" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="OscPublishAddressTextBox" Text="127.0.0.1:39540" Margin="0,8,0,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="OscPublishAddressTextBox" Text="127.0.0.1:39540" Margin="0,8,0,0" TextChanged="InputTextChanged"/>
                     </Grid>
+                    <TextBlock x:Name="OscBindValidationText" Foreground="#B03030" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="OscPublishValidationText" Foreground="#B03030" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
                         <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" MinWidth="110"/>
                         <Button x:Name="StopOscButton" Content="Stop OSC" Click="StopOsc_Click" MinWidth="110"/>
@@ -184,6 +187,7 @@
                 </StackPanel>
             </Border>
         </Grid>
+        </ScrollViewer>
 
         <Grid Grid.Column="1" Margin="12,0,0,0">
             <Grid.RowDefinitions>
@@ -223,7 +227,7 @@
                         <TextBlock Grid.Column="0" Text="Logs" VerticalAlignment="Center"/>
                         <Button Grid.Column="1" Content="Copy Logs" Click="CopyLogs_Click"/>
                     </Grid>
-                    <TextBox x:Name="LogsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"/>
+                    <TextBox x:Name="LogsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,4,0,0"/>
                 </StackPanel>
             </Grid>
 
@@ -234,6 +238,7 @@
                     <TextBlock x:Name="RenderStatusText"/>
                     <TextBlock x:Name="FrameStatusText"/>
                     <TextBlock x:Name="OutputStatusText"/>
+                    <TextBlock x:Name="BusyStatusText"/>
                     <TextBlock x:Name="ErrorStatusText"/>
                 </StackPanel>
             </Border>

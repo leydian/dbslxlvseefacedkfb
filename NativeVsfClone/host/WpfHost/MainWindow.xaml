@@ -27,8 +27,9 @@
                         <TextBlock Text="Avatar file path" FontWeight="SemiBold"/>
                         <DockPanel Margin="0,4,0,8">
                             <Button x:Name="BrowseAvatarButton" Content="Browse..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0"/>
-                            <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" />
+                            <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged" />
                         </DockPanel>
+                        <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
                             <Button x:Name="LoadButton" Content="Load" Click="Load_Click" Margin="0,0,8,0" MinWidth="92"/>
                             <Button x:Name="UnloadButton" Content="Unload" Click="Unload_Click" MinWidth="92"/>
@@ -149,10 +150,12 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Bind Port" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="OscBindPortTextBox" Text="39539"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="OscBindPortTextBox" Text="39539" TextChanged="InputTextChanged"/>
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Publish" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="OscPublishAddressTextBox" Text="127.0.0.1:39540" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="OscPublishAddressTextBox" Text="127.0.0.1:39540" Margin="0,8,0,0" TextChanged="InputTextChanged"/>
                         </Grid>
+                        <TextBlock x:Name="OscBindValidationText" Foreground="#B03030" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="OscPublishValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
                             <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
                             <Button x:Name="StopOscButton" Content="Stop OSC" Click="StopOsc_Click" MinWidth="110"/>
@@ -190,7 +193,7 @@
                 <TabItem Header="Logs">
                     <DockPanel>
                         <Button Content="Copy Logs" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyLogs_Click"/>
-                        <TextBox x:Name="LogsTextBox" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                        <TextBox x:Name="LogsTextBox" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
             </TabControl>
@@ -207,6 +210,8 @@
                     <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
                     <TextBlock Text="Outputs: " Foreground="#A7B7C7"/>
                     <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
+                    <TextBlock Text="Busy: " Foreground="#A7B7C7"/>
+                    <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
                     <TextBlock Text="LastError: " Foreground="#A7B7C7"/>
                     <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360"/>
                 </WrapPanel>
