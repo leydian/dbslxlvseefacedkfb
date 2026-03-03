@@ -527,6 +527,19 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     if (!serialized_best_candidate_path.empty()) {
         pkg.warnings.push_back("W_SERIALIZED_PATH: " + serialized_best_candidate_path);
     }
+    const auto serialized_detail_error_code = GetJsonString(output, "serialized_detail_error_code");
+    const auto serialized_last_failure_offset = GetJsonU64(output, "serialized_last_failure_offset");
+    const auto serialized_last_failure_window_size = GetJsonU64(output, "serialized_last_failure_window_size");
+    const auto serialized_last_failure_code = GetJsonString(output, "serialized_last_failure_code");
+    if (!serialized_detail_error_code.empty() ||
+        serialized_last_failure_offset > 0U ||
+        serialized_last_failure_window_size > 0U ||
+        !serialized_last_failure_code.empty()) {
+        pkg.warnings.push_back("W_SERIALIZED_DETAIL: code=" + serialized_detail_error_code +
+                               ", last-offset=" + std::to_string(serialized_last_failure_offset) +
+                               ", window=" + std::to_string(serialized_last_failure_window_size) +
+                               ", last-code=" + serialized_last_failure_code);
+    }
     const auto failed_read_offset = GetJsonU64(output, "failed_block_read_offset");
     const auto failed_csize = GetJsonU32(output, "failed_block_compressed_size");
     const auto failed_usize = GetJsonU32(output, "failed_block_uncompressed_size");

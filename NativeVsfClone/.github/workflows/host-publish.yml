@@ -40,7 +40,7 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Publish Hosts
-        run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild
+        run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
 
       - name: Validate Dist Artifacts
         run: |
@@ -72,3 +72,4 @@ jobs:
             NativeVsfClone/dist/wpf
             NativeVsfClone/dist/winui
             NativeVsfClone/build/reports/host_publish_latest.txt
+            NativeVsfClone/build/reports/winui

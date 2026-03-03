@@ -129,6 +129,15 @@ int main(int argc, char** argv) {
     warnings.push_back("W_SERIALIZED_META: candidates=" + std::to_string(p.serialized_candidate_count) +
                        ", attempts=" + std::to_string(p.serialized_attempt_count) +
                        ", best-score=" + std::to_string(p.serialized_best_candidate_score));
+    if (!p.serialized_detail_error_code.empty() ||
+        p.serialized_last_failure_offset > 0U ||
+        p.serialized_last_failure_window_size > 0U ||
+        !p.serialized_last_failure_code.empty()) {
+        warnings.push_back("W_SERIALIZED_DETAIL: code=" + p.serialized_detail_error_code +
+                           ", last-offset=" + std::to_string(p.serialized_last_failure_offset) +
+                           ", window=" + std::to_string(p.serialized_last_failure_window_size) +
+                           ", last-code=" + p.serialized_last_failure_code);
+    }
     if (!p.serialized_best_candidate_path.empty()) {
         warnings.push_back("W_SERIALIZED_PATH: " + p.serialized_best_candidate_path);
     }
@@ -195,6 +204,10 @@ int main(int argc, char** argv) {
               << "\"serialized_attempt_count\":" << p.serialized_attempt_count << ","
               << "\"serialized_best_candidate_path\":\"" << EscapeJson(p.serialized_best_candidate_path) << "\","
               << "\"serialized_best_candidate_score\":" << p.serialized_best_candidate_score << ","
+              << "\"serialized_detail_error_code\":\"" << EscapeJson(p.serialized_detail_error_code) << "\","
+              << "\"serialized_last_failure_offset\":" << p.serialized_last_failure_offset << ","
+              << "\"serialized_last_failure_window_size\":" << p.serialized_last_failure_window_size << ","
+              << "\"serialized_last_failure_code\":\"" << EscapeJson(p.serialized_last_failure_code) << "\","
               << "\"failed_block_read_offset\":" << p.failed_block_read_offset << ","
               << "\"failed_block_compressed_size\":" << p.failed_block_compressed_size << ","
               << "\"failed_block_uncompressed_size\":" << p.failed_block_uncompressed_size << ","

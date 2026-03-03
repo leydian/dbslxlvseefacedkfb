@@ -184,6 +184,10 @@ std::string ClassifySerializedParseError(const std::string& error) {
     if (error.find("too small") != std::string::npos) {
         return "SF_TOO_SMALL";
     }
+    if (error.find("metadata size exceeds current window") != std::string::npos ||
+        error.find("metadata window truncated") != std::string::npos) {
+        return "SF_METADATA_WINDOW_TRUNCATED";
+    }
     if (error.find("metadata size") != std::string::npos || error.find("metadata range") != std::string::npos) {
         return "SF_METADATA_RANGE_INVALID";
     }
@@ -213,7 +217,10 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
     const std::uint32_t metadata_size_be = ReadU32(bytes, 0U, Endian::Big);
     const std::uint32_t version_be = ReadU32(bytes, 8U, Endian::Big);
     if (metadata_size_be == 0U || metadata_size_be > bytes.size()) {
-        return core::Result<SerializedFileSummary>::Fail("invalid metadata size");
+        if (metadata_size_be == 0U) {
+            return core::Result<SerializedFileSummary>::Fail("invalid metadata size");
+        }
+        return core::Result<SerializedFileSummary>::Fail("metadata size exceeds current window");
     }
 
     if (version_be > 40U) {
@@ -225,7 +232,7 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
         header_size = 48U;
     }
     if (header_size + metadata_size_be > bytes.size()) {
-        return core::Result<SerializedFileSummary>::Fail("metadata range out of bounds");
+        return core::Result<SerializedFileSummary>::Fail("metadata window truncated");
     }
 
     std::vector<unsigned char> metadata(bytes.begin() + static_cast<std::ptrdiff_t>(header_size),
@@ -428,8 +435,7 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
         if (version_be == 0U || version_be > 40U) {
             return false;
         }
-        const std::size_t header_size = version_be >= 22U ? 48U : 20U;
-        return at + header_size + metadata_size_be <= bytes.size();
+        return true;
     };
     auto TryOffsetScan = [&](Endian metadata_endian, SerializedFileSummary* out_best) -> bool {
         if (out_best == nullptr || bytes.size() < 64U) {
@@ -440,7 +446,7 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
         std::int32_t best_groups = std::numeric_limits<std::int32_t>::min();
         const std::size_t scan_limit = std::min<std::size_t>(bytes.size(), 8U * 1024U * 1024U);
         std::size_t scan_hits = 0U;
-        for (std::size_t at = 8U; at + 64U <= scan_limit && scan_hits < 512U; at += 8U) {
+        for (std::size_t at = 4U; at + 64U <= scan_limit && scan_hits < 2048U; at += 4U) {
             if (!LooksLikeHeaderAt(at)) {
                 continue;
             }

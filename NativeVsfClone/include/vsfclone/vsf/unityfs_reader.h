@@ -42,6 +42,10 @@ struct UnityFsProbe {
     std::uint32_t serialized_attempt_count = 0;
     std::string serialized_best_candidate_path;
     std::int32_t serialized_best_candidate_score = 0;
+    std::string serialized_detail_error_code;
+    std::uint64_t serialized_last_failure_offset = 0;
+    std::uint64_t serialized_last_failure_window_size = 0;
+    std::string serialized_last_failure_code;
     bool object_table_parsed = false;
     std::uint32_t object_count = 0;
     std::uint32_t mesh_object_count = 0;

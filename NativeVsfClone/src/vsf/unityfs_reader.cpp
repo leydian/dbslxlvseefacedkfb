@@ -1665,6 +1665,16 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
                               UnityFsProbe& probe,
                               std::string& error) {
     SerializedFileReader serialized;
+    auto CompactSerializedErrorCode = [](const std::string& message) -> std::string {
+        if (message.empty()) {
+            return {};
+        }
+        const auto colon = message.find(':');
+        if (colon == std::string::npos) {
+            return message;
+        }
+        return message.substr(0U, colon);
+    };
     bool found_candidate = false;
     bool attempted_candidate = false;
     SerializedFileSummary best {};
@@ -1766,6 +1776,33 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         }
     }
 
+    // If node-derived candidates are scarce, widen around them to avoid header-alignment misses.
+    if (!candidates.empty() && candidates.size() <= 2U) {
+        const std::array<std::int64_t, 8U> expand_deltas = {-4096, -2048, -1024, -512, 512, 1024, 2048, 4096};
+        const auto base_candidates = candidates;
+        for (const auto& base : base_candidates) {
+            for (const auto delta : expand_deltas) {
+                if (delta < 0 && base.offset < static_cast<std::uint64_t>(-delta)) {
+                    continue;
+                }
+                const auto expanded_offset =
+                    static_cast<std::uint64_t>(static_cast<std::int64_t>(base.offset) + delta);
+                if (expanded_offset >= stream.size()) {
+                    continue;
+                }
+                const auto remaining = static_cast<std::uint64_t>(stream.size()) - expanded_offset;
+                const auto expanded_window = std::min<std::uint64_t>(
+                    remaining,
+                    std::max<std::uint64_t>(base.window_size + 64U * 1024U, 512U * 1024U));
+                AddCandidate(
+                    expanded_offset,
+                    expanded_window,
+                    base.label + "@expand" + std::to_string(delta),
+                    base.score - 1);
+            }
+        }
+    }
+
     // Fallback 2: if node-based selection still finds nothing, scan for SerializedFile-like headers.
     if (candidates.empty()) {
         auto ReadU32BEAt = [&](std::size_t at) -> std::uint32_t {
@@ -1819,7 +1856,14 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     probe.serialized_attempt_count = 0U;
     probe.serialized_best_candidate_path.clear();
     probe.serialized_best_candidate_score = std::numeric_limits<std::int32_t>::min();
-    std::string best_failure_error_code;
+    probe.serialized_detail_error_code.clear();
+    probe.serialized_last_failure_offset = 0U;
+    probe.serialized_last_failure_window_size = 0U;
+    probe.serialized_last_failure_code.clear();
+    std::string best_failure_error;
+    std::string best_failure_detail_code;
+    std::uint64_t best_failure_offset = 0U;
+    std::uint64_t best_failure_window_size = 0U;
     std::int32_t best_failure_score = std::numeric_limits<std::int32_t>::min();
     auto CountMajorTypeGroups = [](const SerializedFileSummary& summary) -> std::int32_t {
         std::int32_t groups = 0;
@@ -1849,9 +1893,13 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         }
         return score;
     };
-    const std::array<std::int64_t, 11U> node_offset_deltas = {0, 16, -16, 32, -32, 64, -64, 128, -128, 256, -256};
+    // Keep near offsets first, then expand to larger deltas for hard samples.
+    const std::array<std::int64_t, 27U> node_offset_deltas = {
+        0, 16, -16, 32, -32, 64, -64, 128, -128, 256, -256, 512, -512, 1024, -1024,
+        1536, -1536, 2048, -2048, 2560, -2560, 3072, -3072, 3584, -3584, 4096, -4096};
     std::unordered_set<std::uint64_t> tried_ranges;
     tried_ranges.reserve(candidates.size() * node_offset_deltas.size());
+    const std::uint64_t kMinParseWindow = 512U * 1024U;
 
     for (const auto& candidate : candidates) {
         found_candidate = true;
@@ -1864,7 +1912,8 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
                 continue;
             }
             const auto remaining = static_cast<std::uint64_t>(stream.size()) - adjusted_offset;
-            const auto window_size = std::min<std::uint64_t>(candidate.window_size, remaining);
+            const auto widened_window = std::max<std::uint64_t>(candidate.window_size, kMinParseWindow);
+            const auto window_size = std::min<std::uint64_t>(widened_window, remaining);
             if (window_size < 256U) {
                 continue;
             }
@@ -1883,7 +1932,10 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
                 const auto fail_score = static_cast<std::int32_t>(candidate.score);
                 if (fail_score >= best_failure_score) {
                     best_failure_score = fail_score;
-                    best_failure_error_code = parsed.error;
+                    best_failure_error = parsed.error;
+                    best_failure_detail_code = CompactSerializedErrorCode(parsed.error);
+                    best_failure_offset = adjusted_offset;
+                    best_failure_window_size = window_size;
                     probe.serialized_best_candidate_path =
                         candidate.label + "@offset=" + std::to_string(adjusted_offset);
                 }
@@ -1904,8 +1956,12 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     }
 
     if (!probe.object_table_parsed) {
-        if (!best_failure_error_code.empty()) {
-            probe.serialized_parse_error_code = best_failure_error_code;
+        if (!best_failure_error.empty()) {
+            probe.serialized_parse_error_code = best_failure_error;
+            probe.serialized_detail_error_code = best_failure_detail_code;
+            probe.serialized_last_failure_offset = best_failure_offset;
+            probe.serialized_last_failure_window_size = best_failure_window_size;
+            probe.serialized_last_failure_code = best_failure_detail_code;
         } else if (probe.serialized_parse_error_code.empty()) {
             if (!found_candidate) {
                 probe.serialized_parse_error_code = named_candidates > 0U
@@ -1916,6 +1972,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
             } else {
                 probe.serialized_parse_error_code = "SF_NO_VALID_NODE_PARSED";
             }
+            probe.serialized_detail_error_code = probe.serialized_parse_error_code;
         }
         probe.serialized_best_candidate_score = std::max(probe.serialized_best_candidate_score, 0);
         probe.probe_primary_error = probe.serialized_parse_error_code;
@@ -1929,6 +1986,10 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         probe.serialized_best_candidate_score = 0;
     }
     probe.serialized_parse_error_code.clear();
+    probe.serialized_detail_error_code.clear();
+    probe.serialized_last_failure_offset = 0U;
+    probe.serialized_last_failure_window_size = 0U;
+    probe.serialized_last_failure_code.clear();
     probe.object_count = best.object_count;
     probe.mesh_object_count = best.mesh_object_count;
     probe.material_object_count = best.material_object_count;
@@ -1941,6 +2002,16 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
 }
 
 bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std::string& error) {
+    auto CompactSerializedErrorCode = [](const std::string& message) -> std::string {
+        if (message.empty()) {
+            return {};
+        }
+        const auto colon = message.find(':');
+        if (colon == std::string::npos) {
+            return message;
+        }
+        return message.substr(0U, colon);
+    };
     const auto original_pos = in.tellg();
     in.clear();
     in.seekg(0, std::ios::end);
@@ -2027,6 +2098,9 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
     std::size_t attempts = 0U;
     std::size_t candidates = 0U;
     std::string best_error;
+    std::string best_error_code;
+    std::size_t best_error_offset = 0U;
+    std::size_t best_error_window = 0U;
     SerializedFileSummary best {};
     std::size_t best_offset = 0U;
     const std::size_t scan_limit = raw_bytes.size();
@@ -2049,6 +2123,9 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
         auto parsed = serialized.ParseObjectSummary(candidate_bytes);
         if (!parsed.ok) {
             best_error = parsed.error;
+            best_error_code = CompactSerializedErrorCode(parsed.error);
+            best_error_offset = at;
+            best_error_window = sample_window;
             continue;
         }
         const auto groups = CountMajorTypeGroups(parsed.value);
@@ -2067,6 +2144,18 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
     probe.serialized_attempt_count += static_cast<std::uint32_t>(attempts);
 
     if (!success) {
+        probe.serialized_last_failure_offset = best_error_offset;
+        probe.serialized_last_failure_window_size = best_error_window;
+        if (!best_error_code.empty()) {
+            probe.serialized_last_failure_code = best_error_code;
+            probe.serialized_detail_error_code = best_error_code;
+        } else if (candidates == 0U) {
+            probe.serialized_last_failure_code = "SF_NO_RAW_HEADER_CANDIDATE";
+            probe.serialized_detail_error_code = "SF_NO_RAW_HEADER_CANDIDATE";
+        } else {
+            probe.serialized_last_failure_code = "SF_RAW_PARSE_FAILED";
+            probe.serialized_detail_error_code = "SF_RAW_PARSE_FAILED";
+        }
         if (best_error.empty()) {
             error = "raw serialized scan: no valid serialized header candidates";
         } else {
@@ -2087,6 +2176,10 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
         std::max(probe.serialized_best_candidate_score, static_cast<std::int32_t>(best.object_count * 4U + best_groups * 15));
     probe.serialized_best_candidate_path = "raw-scan@offset=" + std::to_string(best_offset);
     probe.serialized_parse_error_code.clear();
+    probe.serialized_detail_error_code.clear();
+    probe.serialized_last_failure_offset = 0U;
+    probe.serialized_last_failure_window_size = 0U;
+    probe.serialized_last_failure_code.clear();
     probe.probe_primary_error.clear();
     error.clear();
     return true;

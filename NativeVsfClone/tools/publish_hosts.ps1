@@ -2,7 +2,9 @@ param(
     [string]$Configuration = "Release",
     [string]$RuntimeIdentifier = "win-x64",
     [switch]$SkipNativeBuild,
-    [switch]$IncludeWinUi
+    [switch]$IncludeWinUi,
+    [bool]$CollectWinUiDiagnostics = $true,
+    [string]$WinUiDiagDir = ".\build\reports\winui"
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +34,11 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repoRoot "build"
 $buildHotfixDir = Join-Path $repoRoot "build_hotfix"
 $reportDir = Join-Path $buildDir "reports"
+$resolvedWinUiDiagDir = if ([System.IO.Path]::IsPathRooted($WinUiDiagDir)) {
+    $WinUiDiagDir
+} else {
+    Join-Path $repoRoot $WinUiDiagDir
+}
 $distRoot = Join-Path $repoRoot "dist"
 $wpfDist = Join-Path $distRoot "wpf"
 $winUiDist = Join-Path $distRoot "winui"
@@ -47,6 +54,8 @@ $log.Add("Host publish run: $(Get-Date -Format o)")
 $log.Add("Configuration: $Configuration")
 $log.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $log.Add("IncludeWinUi: $IncludeWinUi")
+$log.Add("CollectWinUiDiagnostics: $CollectWinUiDiagnostics")
+$log.Add("WinUiDiagDir: $resolvedWinUiDiagDir")
 
 Assert-Command "cmake"
 Assert-Command "dotnet"
@@ -86,6 +95,109 @@ if (-not (Test-Path $nativeCoreDll)) {
 $wpfProject = Join-Path $repoRoot "host\WpfHost\WpfHost.csproj"
 $winUiProject = Join-Path $repoRoot "host\WinUiHost\WinUiHost.csproj"
 
+function Write-WinUiDiagnosticManifest {
+    param(
+        [string]$ManifestPath,
+        [string]$Reason,
+        [string]$PublishError,
+        [string]$DiagCommand,
+        [int]$DiagExitCode,
+        [string]$BinlogPath,
+        [string]$DiagLogPath,
+        [string]$DiagStderrPath,
+        [string]$ObjDumpPath
+    )
+
+    $manifest = [ordered]@{
+        generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+        reason = $Reason
+        publish_error = $PublishError
+        diagnostics_command = $DiagCommand
+        diagnostics_exit_code = $DiagExitCode
+        artifacts = [ordered]@{
+            binlog = $BinlogPath
+            diag_log = $DiagLogPath
+            stderr_log = $DiagStderrPath
+            obj_dump_dir = $ObjDumpPath
+        }
+    }
+    $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
+}
+
+function Copy-WinUiObjDiagnostics {
+    param(
+        [string]$ObjRoot,
+        [string]$ObjDumpRoot
+    )
+
+    if (-not (Test-Path $ObjRoot)) {
+        return
+    }
+
+    $candidates = Get-ChildItem -Path $ObjRoot -Recurse -File | Where-Object {
+        $_.Name -ieq "output.json" -or $_.Extension -in @(".log", ".err", ".wrn")
+    }
+
+    foreach ($file in $candidates) {
+        $relative = $file.FullName.Substring($ObjRoot.Length).TrimStart('\')
+        $dest = Join-Path $ObjDumpRoot $relative
+        $destDir = Split-Path -Parent $dest
+        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        Copy-Item -Path $file.FullName -Destination $dest -Force
+    }
+}
+
+function Collect-WinUiDiagnostics {
+    param(
+        [string]$Reason,
+        [string]$PublishError
+    )
+
+    New-Item -ItemType Directory -Force -Path $resolvedWinUiDiagDir | Out-Null
+
+    $binlogPath = Join-Path $resolvedWinUiDiagDir "winui_build.binlog"
+    $diagLogPath = Join-Path $resolvedWinUiDiagDir "winui_build_diag.log"
+    $diagStderrPath = Join-Path $resolvedWinUiDiagDir "winui_build_stderr.log"
+    $manifestPath = Join-Path $resolvedWinUiDiagDir "winui_diagnostic_manifest.json"
+    $objRoot = Join-Path $repoRoot "host\WinUiHost\obj"
+    $objDumpPath = Join-Path $resolvedWinUiDiagDir "obj-dump"
+
+    New-Item -ItemType Directory -Force -Path $objDumpPath | Out-Null
+
+    $diagArgs = @(
+        "build",
+        $winUiProject,
+        "-c", $Configuration,
+        "-p:Platform=x64",
+        "-v:diag",
+        "-bl:$binlogPath"
+    )
+    $diagCommandText = "dotnet " + ($diagArgs -join " ")
+
+    & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
+    $diagExitCode = $LASTEXITCODE
+
+    Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
+    Write-WinUiDiagnosticManifest `
+        -ManifestPath $manifestPath `
+        -Reason $Reason `
+        -PublishError $PublishError `
+        -DiagCommand $diagCommandText `
+        -DiagExitCode $diagExitCode `
+        -BinlogPath $binlogPath `
+        -DiagLogPath $diagLogPath `
+        -DiagStderrPath $diagStderrPath `
+        -ObjDumpPath $objDumpPath
+
+    $log.Add("WinUI diagnostics command: $diagCommandText")
+    $log.Add("WinUI diagnostics exit code: $diagExitCode")
+    $log.Add("WinUI diagnostics manifest: $manifestPath")
+    $log.Add("WinUI diagnostics binlog: $binlogPath")
+    $log.Add("WinUI diagnostics diag log: $diagLogPath")
+    $log.Add("WinUI diagnostics stderr log: $diagStderrPath")
+    $log.Add("WinUI diagnostics obj dump: $objDumpPath")
+}
+
 Write-Step "Publishing WPF host to dist/wpf..."
 dotnet publish $wpfProject `
     -c $Configuration `
@@ -104,23 +216,40 @@ $log.Add("WPF dist: $wpfDist")
 $log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
 
 if ($IncludeWinUi) {
-    Write-Step "Publishing WinUI host to dist/winui..."
-    dotnet publish $winUiProject `
-        -c $Configuration `
-        -r $RuntimeIdentifier `
-        --self-contained true `
-        -p:Platform=x64 `
-        /p:PublishSingleFile=false `
-        /p:PublishTrimmed=false `
-        /p:WindowsAppSDKSelfContained=true `
-        -o $winUiDist | Out-Host
+    try {
+        Write-Step "Publishing WinUI host to dist/winui..."
+        dotnet publish $winUiProject `
+            -c $Configuration `
+            -r $RuntimeIdentifier `
+            --self-contained true `
+            -p:Platform=x64 `
+            /p:PublishSingleFile=false `
+            /p:PublishTrimmed=false `
+            /p:WindowsAppSDKSelfContained=true `
+            -o $winUiDist | Out-Host
 
-    if (-not (Test-Path (Join-Path $winUiDist "WinUiHost.exe"))) {
-        throw "WinUI publish output not found: $winUiDist"
+        if (-not (Test-Path (Join-Path $winUiDist "WinUiHost.exe"))) {
+            throw "WinUI publish output not found: $winUiDist"
+        }
+        Copy-Item -Path $nativeCoreDll -Destination $winUiDist -Force
+        $log.Add("WinUI dist: $winUiDist")
+        $log.Add("WinUI exe: $(Join-Path $winUiDist 'WinUiHost.exe')")
+    } catch {
+        $publishErrorText = $_ | Out-String
+        $log.Add("WinUI publish: failed")
+        $log.Add("WinUI publish error: $($publishErrorText.Trim())")
+
+        if ($CollectWinUiDiagnostics) {
+            Write-Step "WinUI publish failed; collecting diagnostics..."
+            Collect-WinUiDiagnostics -Reason "winui publish failed" -PublishError $publishErrorText
+            Write-Step "WinUI diagnostics saved under: $resolvedWinUiDiagDir"
+        } else {
+            $log.Add("WinUI diagnostics: skipped (CollectWinUiDiagnostics=false)")
+        }
+
+        $log | Set-Content -Path $logPath -Encoding UTF8
+        throw
     }
-    Copy-Item -Path $nativeCoreDll -Destination $winUiDist -Force
-    $log.Add("WinUI dist: $winUiDist")
-    $log.Add("WinUI exe: $(Join-Path $winUiDist 'WinUiHost.exe')")
 } else {
     $log.Add("WinUI publish: skipped (use -IncludeWinUi)")
 }

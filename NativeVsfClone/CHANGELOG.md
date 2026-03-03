@@ -2,6 +2,88 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - WinUI publish failure diagnostics + VSFAvatar serialized failure-detail propagation
+
+### Summary
+
+Added deterministic WinUI publish failure diagnostics (local script + CI artifact path) and expanded VSFAvatar serialized parsing diagnostics to preserve compact failure code and last failure tuple (`offset/window/code`) across probe -> sidecar -> loader warning flow.
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added parameters:
+    - `CollectWinUiDiagnostics` (default: `true`)
+    - `WinUiDiagDir` (default: `.\build\reports\winui`)
+  - Wrapped WinUI publish in `try/catch`.
+  - On WinUI publish failure, now runs diagnostic build:
+    - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 -v:diag -bl:<binlog>`
+  - Collects and stores:
+    - `winui_build.binlog`
+    - `winui_build_diag.log`
+    - `winui_build_stderr.log`
+    - `winui_diagnostic_manifest.json`
+    - `obj-dump/**` copied from `host/WinUiHost/obj`
+  - Emits diagnostic artifact paths into `build/reports/host_publish_latest.txt`.
+
+- `.github/workflows/host-publish.yml`
+  - Updated publish step to include WinUI path:
+    - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi`
+  - Expanded artifact upload set to include:
+    - `NativeVsfClone/build/reports/winui`
+  - Kept `if: always()` artifact upload behavior.
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added error classification for truncated metadata windows:
+    - `SF_METADATA_WINDOW_TRUNCATED`
+  - Refined big-endian parse error messages to distinguish:
+    - invalid size (`invalid metadata size`)
+    - oversized-in-window (`metadata size exceeds current window`)
+    - range truncation (`metadata window truncated`)
+  - Relaxed raw header pre-check and widened scan:
+    - step `8 -> 4`
+    - max hits `512 -> 2048`
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added additive probe fields:
+    - `serialized_detail_error_code`
+    - `serialized_last_failure_offset`
+    - `serialized_last_failure_window_size`
+    - `serialized_last_failure_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded node-candidate fallback with bounded nearby expansion for sparse candidate sets.
+  - Increased node offset delta search set up to `±4096`.
+  - Added minimum parse window floor (`512 KiB`) for candidate attempts.
+  - Persisted best serialized failure tuple and compact detail code into probe fields.
+  - Mirrored the same detail tuple handling in raw bundle serialized scan path.
+  - Clears new serialized detail fields on successful parse for consistency.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added serialized detail warning line:
+    - `W_SERIALIZED_DETAIL: code=..., last-offset=..., window=..., last-code=...`
+  - Emitted additive JSON fields:
+    - `serialized_detail_error_code`
+    - `serialized_last_failure_offset`
+    - `serialized_last_failure_window_size`
+    - `serialized_last_failure_code`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Consumes new sidecar serialized detail fields and appends warning:
+    - `W_SERIALIZED_DETAIL: ...`
+
+- `docs/reports/winui_xaml_diagnostics_artifacts_2026-03-03.md` (new)
+  - Added WinUI diagnostic artifact map and triage order.
+
+- `docs/INDEX.md`
+  - Added link to the WinUI diagnostics artifact guide report.
+
+### Verification
+
+- Script syntax check:
+  - `tools/publish_hosts.ps1`: parse OK
+- Full WinUI publish success/failure runtime verification in this pass:
+  - not executed (pending environment run).
+
 ## 2026-03-03 - VSFAvatar GateD pass with UnityFS LZMA block decode and reconstruction scoring updates
 
 ### Summary
