@@ -4,7 +4,7 @@
 
 This round hardened host publish/build reliability under restore/network failure conditions and validated WinUI diagnostic artifact generation on failure paths.
 
-Primary environment blocker remains external package restore access to `https://api.nuget.org/v3/index.json` (`NU1301`), so runtime manual validation could not be completed in this run.
+Restore/network access is now available in this environment, but WinUI Release build/publish is still blocked by `XamlCompiler.exe` exit code `1` without line-level diagnostics.
 
 ## Changes
 
@@ -32,6 +32,15 @@ Generated and confirmed:
 Executed:
 
 ```powershell
+dotnet restore host/WpfHost/WpfHost.csproj -v minimal
+dotnet restore host/WinUiHost/WinUiHost.csproj -v minimal
+```
+
+- Result: PASS
+
+Executed:
+
+```powershell
 dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore
 ```
 
@@ -43,32 +52,44 @@ Executed:
 dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 --no-restore
 ```
 
-- Result: FAIL (`NU1301`, `api.nuget.org:443` access blocked)
+- Result: FAIL (`MSB3073`, `XamlCompiler.exe ... output.json`, exit code `1`)
 
 Executed:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -NoRestore
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
 ```
 
-- Result: FAIL (expected in this environment)
+- Result: FAIL (WinUI publish step)
 - Behavior check: PASS
-  - WPF publish failure logged
+  - WPF publish success
   - WinUI publish still attempted
   - WinUI diagnostics collected and manifest/log/binlog emitted
 
+Environment facts:
+
+- `dotnet --list-sdks`
+  - `9.0.311`
+
+Attempted remediations in this run:
+
+- Cleared WinUI `obj/bin` and re-ran clean build
+  - result: no change, `XamlCompiler.exe` still exits with code `1`
+- Ran `XamlCompiler.exe` directly with generated `input.json/output.json`
+  - result: reproducible non-zero exit without actionable line diagnostics
+- Inspected generated `output.json` / diagnostic logs
+  - result: no explicit `ErrorCode/File/Line` entries were emitted
+
 ## Current Blocker
 
-- External restore/network access is blocked for NuGet (`NU1301`), preventing full Release publish success and host runtime smoke execution in this environment.
+- WinUI XAML compile path fails at `XamlCompiler.exe` with exit code `1` and no actionable line-level error output from `output.json`/stderr.
 
 ## Next Steps
 
-1. Re-run in network-enabled environment:
-   - `dotnet build host/WpfHost/WpfHost.csproj -c Release`
-   - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+1. Re-run WinUI build with full tooling alignment (SDK/VS/Windows App SDK) and capture fresh `build/reports/winui/*` artifacts.
 2. Run host publish end-to-end:
    - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
-3. Execute manual smoke on both hosts:
+3. Execute manual smoke on both hosts (once WinUI build/publish succeeds):
    - initialize session
    - load avatar
    - toggle Spout/OSC on/off

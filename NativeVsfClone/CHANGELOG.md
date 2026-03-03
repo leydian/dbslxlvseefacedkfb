@@ -79,12 +79,18 @@ Hardened host publish behavior to fail on real `dotnet` exit codes, preserve Win
 
 ### Verification
 
+- `dotnet restore host/WpfHost/WpfHost.csproj -v minimal`
+  - PASS
+- `dotnet restore host/WinUiHost/WinUiHost.csproj -v minimal`
+  - PASS
 - `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`
   - PASS
 - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 --no-restore`
-  - FAIL (`NU1301`, `api.nuget.org:443` access blocked)
-- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -NoRestore`
-  - FAIL (expected in current environment), but WinUI diagnostics files generated successfully under `build/reports/winui`.
+  - FAIL (`MSB3073`, `XamlCompiler.exe ... output.json`, exit code `1`)
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi`
+  - FAIL (WinUI publish step), but WinUI diagnostics files generated successfully under `build/reports/winui`.
+- Additional mitigation attempts:
+  - WinUI `obj/bin` clean rebuild and direct `XamlCompiler.exe` run were both reproduced as fail (`exit=1`) without line-level diagnostics.
 
 ## 2026-03-03 - WinUI publish failure diagnostics + VSFAvatar serialized failure-detail propagation
 
