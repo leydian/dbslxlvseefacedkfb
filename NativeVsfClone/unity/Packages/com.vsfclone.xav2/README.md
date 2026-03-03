@@ -28,9 +28,15 @@ If a material in the export target set references a shader outside this list, ex
 - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics)`
   - non-throwing path with stage/error diagnostics
 - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics, options)`
-  - option-based path (`Xav2LoadOptions.StrictValidation`)
+  - option-based path (`Xav2LoadOptions.StrictValidation`, `Xav2LoadOptions.UnknownSectionPolicy`)
 - `Xav2LoadDiagnostics`
-  - `ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`
+  - `ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`, `WarningCodes`
+
+Unknown section policy:
+
+- `Warn` (default): append warning (`XAV2_UNKNOWN_SECTION`) and continue
+- `Ignore`: skip unknown section silently
+- `Fail`: stop with `UnknownSectionNotAllowed`
 
 ## Tests
 

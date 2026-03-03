@@ -132,6 +132,48 @@ namespace VsfClone.Xav2.Runtime.Tests
                 var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
                 Assert.That(ok, Is.True);
                 Assert.That(diagnostics.Warnings.Exists(w => w.Contains("XAV2_UNKNOWN_SECTION")), Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_UNKNOWN_SECTION"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_UnknownSection_IgnorePolicy_AllowsWithoutWarning()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addUnknownSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { UnknownSectionPolicy = Xav2UnknownSectionPolicy.Ignore });
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.Warnings.Exists(w => w.Contains("XAV2_UNKNOWN_SECTION")), Is.False);
+                Assert.That(diagnostics.WarningCodes, Does.Not.Contain("XAV2_UNKNOWN_SECTION"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_UnknownSection_FailPolicy_Fails()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addUnknownSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { UnknownSectionPolicy = Xav2UnknownSectionPolicy.Fail });
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.UnknownSectionNotAllowed));
             }
             finally
             {

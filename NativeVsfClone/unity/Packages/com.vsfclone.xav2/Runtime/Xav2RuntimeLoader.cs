@@ -203,7 +203,29 @@ namespace VsfClone.Xav2.Runtime
                 case SectionBlendShapePayload:
                     return TryParseBlendShape(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 default:
-                    return AddWarningOrFail(diagnostics, options, $"XAV2_UNKNOWN_SECTION: 0x{sectionType:X4}");
+                    return HandleUnknownSection(diagnostics, options, sectionType);
+            }
+        }
+
+        private static bool HandleUnknownSection(
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options,
+            ushort sectionType)
+        {
+            var warning = $"XAV2_UNKNOWN_SECTION: 0x{sectionType:X4}";
+            var policy = options?.UnknownSectionPolicy ?? Xav2UnknownSectionPolicy.Warn;
+            switch (policy)
+            {
+                case Xav2UnknownSectionPolicy.Ignore:
+                    return true;
+                case Xav2UnknownSectionPolicy.Fail:
+                    return Fail(
+                        diagnostics,
+                        Xav2LoadErrorCode.UnknownSectionNotAllowed,
+                        $"Unknown XAV2 section is not allowed by policy: 0x{sectionType:X4}");
+                case Xav2UnknownSectionPolicy.Warn:
+                default:
+                    return AddWarningOrFail(diagnostics, options, warning);
             }
         }
 
@@ -581,6 +603,7 @@ namespace VsfClone.Xav2.Runtime
 
         private static bool AddWarningOrFail(Xav2LoadDiagnostics diagnostics, Xav2LoadOptions options, string warning)
         {
+            AddWarningCode(diagnostics, warning);
             if (options != null && options.StrictValidation)
             {
                 return Fail(
@@ -590,6 +613,26 @@ namespace VsfClone.Xav2.Runtime
             }
             diagnostics.Warnings.Add(warning);
             return true;
+        }
+
+        private static void AddWarningCode(Xav2LoadDiagnostics diagnostics, string warning)
+        {
+            if (diagnostics == null || string.IsNullOrWhiteSpace(warning))
+            {
+                return;
+            }
+
+            var separator = warning.IndexOf(':');
+            if (separator <= 0)
+            {
+                return;
+            }
+
+            var code = warning.Substring(0, separator).Trim();
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                diagnostics.WarningCodes.Add(code);
+            }
         }
 
         private static bool Fail(Xav2LoadDiagnostics diagnostics, Xav2LoadErrorCode errorCode, string errorMessage)

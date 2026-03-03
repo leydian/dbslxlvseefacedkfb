@@ -15,12 +15,21 @@ namespace VsfClone.Xav2.Runtime
         SectionHeaderTruncated,
         SectionTruncated,
         SectionSchemaInvalid,
+        UnknownSectionNotAllowed,
         StrictValidationFailed
+    }
+
+    public enum Xav2UnknownSectionPolicy
+    {
+        Warn = 0,
+        Ignore,
+        Fail
     }
 
     public sealed class Xav2LoadOptions
     {
         public bool StrictValidation;
+        public Xav2UnknownSectionPolicy UnknownSectionPolicy = Xav2UnknownSectionPolicy.Warn;
     }
 
     public sealed class Xav2LoadDiagnostics
@@ -30,6 +39,7 @@ namespace VsfClone.Xav2.Runtime
         public string ParserStage = "header";
         public bool IsPartial;
         public List<string> Warnings = new();
+        public List<string> WarningCodes = new();
     }
 
     [Serializable]
