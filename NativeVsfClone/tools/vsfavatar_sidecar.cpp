@@ -140,6 +140,13 @@ int main(int argc, char** argv) {
         warnings.push_back("W_BLOCK0_META: offset=" + std::to_string(p.block0_selected_offset) +
                            ", mode-source=" + p.block0_selected_mode_source);
     }
+    if (p.lzma_decode_attempted || !p.lzma_decode_variant.empty()) {
+        warnings.push_back("W_LZMA: attempted=" + std::string(p.lzma_decode_attempted ? "true" : "false") +
+                           ", variant=" + p.lzma_decode_variant);
+    }
+    if (!p.recon_failure_detail_code.empty()) {
+        warnings.push_back("W_RECON_DETAIL: " + p.recon_failure_detail_code);
+    }
     if (!p.object_table_parsed) {
         missing_features.push_back("mesh/material object discovery");
     } else if (mesh_count == 0U) {
@@ -174,10 +181,14 @@ int main(int argc, char** argv) {
               << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","
               << "\"selected_block0_hypothesis\":\"" << EscapeJson(p.selected_block0_hypothesis) << "\","
               << "\"block0_attempt_count\":" << p.block0_attempt_count << ","
+              << "\"block0_mode_rank\":" << p.block0_mode_rank << ","
               << "\"block0_selected_offset\":" << p.block0_selected_offset << ","
               << "\"block0_selected_mode_source\":\"" << EscapeJson(p.block0_selected_mode_source) << "\","
+              << "\"lzma_decode_attempted\":" << (p.lzma_decode_attempted ? "true" : "false") << ","
+              << "\"lzma_decode_variant\":\"" << EscapeJson(p.lzma_decode_variant) << "\","
               << "\"selected_offset_family\":\"" << EscapeJson(p.selected_offset_family) << "\","
               << "\"reconstruction_summary\":\"" << EscapeJson(p.reconstruction_failure_summary_code) << "\","
+              << "\"recon_failure_detail_code\":\"" << EscapeJson(p.recon_failure_detail_code) << "\","
               << "\"reconstruction_candidate_count\":" << p.reconstruction_candidate_count << ","
               << "\"best_candidate_score\":" << p.best_candidate_score << ","
               << "\"serialized_candidate_count\":" << p.serialized_candidate_count << ","

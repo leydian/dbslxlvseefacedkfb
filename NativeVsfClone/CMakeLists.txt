@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(VsfCloneNative LANGUAGES CXX)
+project(VsfCloneNative LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +19,7 @@ add_library(vsfclone_core STATIC
     src/stream/spout_sender.cpp
     src/osc/osc_endpoint.cpp
     src/common/miniz_impl.cpp
+    third_party/LzmaDec.c
 )
 
 target_include_directories(vsfclone_core
@@ -26,6 +27,7 @@ target_include_directories(vsfclone_core
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
 add_library(nativecore SHARED

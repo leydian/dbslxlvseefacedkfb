@@ -61,10 +61,14 @@ struct UnityFsProbe {
     std::string selected_reconstruction_layout;
     std::string selected_block0_hypothesis;
     std::uint32_t block0_attempt_count = 0;
+    std::uint32_t block0_mode_rank = 0;
     std::uint64_t block0_selected_offset = 0;
     std::string block0_selected_mode_source;
+    bool lzma_decode_attempted = false;
+    std::string lzma_decode_variant;
     std::string selected_offset_family;
     std::string reconstruction_failure_summary_code;
+    std::string recon_failure_detail_code;
     std::uint32_t reconstruction_candidate_count = 0;
     std::int32_t best_candidate_score = 0;
     std::uint64_t total_block_compressed_size = 0;

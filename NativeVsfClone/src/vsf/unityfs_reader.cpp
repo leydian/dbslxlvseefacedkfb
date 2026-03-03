@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -14,6 +15,16 @@
 #include <vector>
 
 #include "vsfclone/vsf/serialized_file_reader.h"
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#ifdef __cplusplus
+extern "C" {
+#endif
+#include "LzmaDec.h"
+#ifdef __cplusplus
+}
+#endif
 
 namespace fs = std::filesystem;
 
@@ -389,6 +400,77 @@ bool Lz4DecompressFrame(const std::vector<unsigned char>& src, std::size_t expec
     return dst.size() == expected_size;
 }
 
+void* SzAllocForLzma(void* /*p*/, size_t size) {
+    if (size == 0U) {
+        return nullptr;
+    }
+    return std::malloc(size);
+}
+
+void SzFreeForLzma(void* /*p*/, void* address) {
+    std::free(address);
+}
+
+bool LzmaDecompressExact(const std::vector<unsigned char>& src,
+                         std::size_t expected_size,
+                         std::vector<unsigned char>& dst,
+                         std::string& variant_used,
+                         std::string& error) {
+    if (src.size() <= LZMA_PROPS_SIZE) {
+        error = "LZMA decompression failed: missing properties";
+        return false;
+    }
+
+    struct Attempt {
+        std::size_t src_offset = 0U;
+        const char* variant = "";
+    };
+    std::vector<Attempt> attempts;
+    attempts.push_back({LZMA_PROPS_SIZE, "props-only-header"});
+    if (src.size() > (LZMA_PROPS_SIZE + 8U)) {
+        attempts.push_back({LZMA_PROPS_SIZE + 8U, "props+size-header"});
+    }
+
+    ISzAlloc alloc {};
+    alloc.Alloc = SzAllocForLzma;
+    alloc.Free = SzFreeForLzma;
+
+    std::string last_err;
+    for (const auto& attempt : attempts) {
+        if (attempt.src_offset >= src.size()) {
+            continue;
+        }
+        variant_used = attempt.variant;
+        dst.assign(expected_size, 0U);
+        SizeT dest_len = static_cast<SizeT>(expected_size);
+        SizeT src_len = static_cast<SizeT>(src.size() - attempt.src_offset);
+        ELzmaStatus status = LZMA_STATUS_NOT_SPECIFIED;
+        const SRes res = LzmaDecode(
+            dst.data(),
+            &dest_len,
+            src.data() + attempt.src_offset,
+            &src_len,
+            src.data(),
+            LZMA_PROPS_SIZE,
+            LZMA_FINISH_END,
+            &status,
+            &alloc);
+        if (res == SZ_OK && dest_len == expected_size &&
+            (status == LZMA_STATUS_FINISHED_WITH_MARK || status == LZMA_STATUS_MAYBE_FINISHED_WITHOUT_MARK ||
+             status == LZMA_STATUS_NOT_FINISHED)) {
+            variant_used = attempt.variant;
+            return true;
+        }
+        last_err = "variant=" + std::string(attempt.variant) + ", res=" + std::to_string(res) +
+                   ", status=" + std::to_string(static_cast<int>(status)) +
+                   ", out=" + std::to_string(static_cast<std::size_t>(dest_len));
+    }
+
+    error = "LZMA decompression failed: " + last_err;
+    dst.clear();
+    return false;
+}
+
 std::int64_t ScoreBlockLayout(const std::vector<BlockInfo>& blocks) {
     if (blocks.empty()) {
         return std::numeric_limits<std::int64_t>::min() / 2;
@@ -396,7 +478,8 @@ std::int64_t ScoreBlockLayout(const std::vector<BlockInfo>& blocks) {
     std::int64_t score = 0;
     std::uint64_t total_compressed = 0U;
     std::uint64_t total_uncompressed = 0U;
-    for (const auto& b : blocks) {
+    for (std::size_t i = 0U; i < blocks.size(); ++i) {
+        const auto& b = blocks[i];
         if (b.compressed_size == 0U || b.uncompressed_size == 0U) {
             return std::numeric_limits<std::int64_t>::min() / 2;
         }
@@ -411,12 +494,28 @@ std::int64_t ScoreBlockLayout(const std::vector<BlockInfo>& blocks) {
                 score -= 10;
             }
         } else if (mode == 1U) {
-            score -= 2;
+            score -= 3;
         } else {
             score -= 8;
         }
+        if (i == 0U) {
+            if (mode == 2U || mode == 3U) {
+                score += 10;
+            } else if (mode == 1U) {
+                score -= 6;
+            }
+        }
         if (b.uncompressed_size >= b.compressed_size) {
             score += 1;
+            if (b.compressed_size > 0U) {
+                const double ratio =
+                    static_cast<double>(b.uncompressed_size) / static_cast<double>(b.compressed_size);
+                if (ratio >= 1.0 && ratio <= 4.0) {
+                    score += 1;
+                } else if (ratio > 10.0) {
+                    score -= 2;
+                }
+            }
         }
         if (b.uncompressed_size > (64U * 1024U * 1024U)) {
             score -= 4;
@@ -598,8 +697,20 @@ bool ParseMetadataTables(const std::vector<unsigned char>& metadata, ParsedMetad
     return true;
 }
 
-bool DecompressByMode(const std::vector<unsigned char>& src, std::size_t expected_size, std::uint8_t mode, std::vector<unsigned char>& dst, std::string& error) {
+bool DecompressByMode(const std::vector<unsigned char>& src,
+                      std::size_t expected_size,
+                      std::uint8_t mode,
+                      std::vector<unsigned char>& dst,
+                      std::string& error,
+                      bool* out_lzma_attempted = nullptr,
+                      std::string* out_lzma_variant = nullptr) {
     dst.clear();
+    if (out_lzma_attempted != nullptr) {
+        *out_lzma_attempted = false;
+    }
+    if (out_lzma_variant != nullptr) {
+        out_lzma_variant->clear();
+    }
     switch (mode) {
         case 0:
             if (src.size() != expected_size) {
@@ -630,8 +741,22 @@ bool DecompressByMode(const std::vector<unsigned char>& src, std::size_t expecte
             }
             return true;
         case 1:
-            error = "LZMA decompression is not implemented";
-            return false;
+            if (out_lzma_attempted != nullptr) {
+                *out_lzma_attempted = true;
+            }
+            {
+                std::string variant;
+                if (!LzmaDecompressExact(src, expected_size, dst, variant, error)) {
+                    if (out_lzma_variant != nullptr && !variant.empty()) {
+                        *out_lzma_variant = variant;
+                    }
+                    return false;
+                }
+                if (out_lzma_variant != nullptr && !variant.empty()) {
+                    *out_lzma_variant = variant;
+                }
+            }
+            return true;
         default:
             error = "unsupported compression mode";
             return false;
@@ -649,6 +774,7 @@ std::vector<std::uint8_t> BuildModeCandidates(std::uint8_t primary, std::uint8_t
     add_unique(secondary);
     add_unique(2U);
     add_unique(3U);
+    add_unique(1U);
     add_unique(0U);
     return out;
 }
@@ -663,27 +789,61 @@ std::vector<std::uint8_t> BuildBlockModeCandidates(std::uint8_t block_mode,
             out.push_back(m);
         }
     };
-    if (block0) {
-        // For block-0, bias toward header-derived and block-table-derived modes first.
-        add_unique(header_mode);
-        add_unique(block_mode);
-        add_unique(2U);
-        add_unique(3U);
-        add_unique(0U);
-        add_unique(1U);
-        // If a mode repeatedly fails, demote it to tail to reduce noisy retries.
-        std::stable_sort(out.begin(), out.end(), [&](std::uint8_t lhs, std::uint8_t rhs) {
-            const auto lhs_hits = mode_fail_hits.contains(lhs) ? mode_fail_hits.at(lhs) : 0U;
-            const auto rhs_hits = mode_fail_hits.contains(rhs) ? mode_fail_hits.at(rhs) : 0U;
-            return lhs_hits < rhs_hits;
-        });
-        return out;
-    }
     add_unique(block_mode);
     add_unique(header_mode);
     add_unique(2U);
     add_unique(3U);
+    add_unique(1U);
     add_unique(0U);
+
+    auto BasePriority = [&](std::uint8_t mode) -> std::uint32_t {
+        if (block0) {
+            if (mode == 2U) {
+                return 0U;
+            }
+            if (mode == 3U) {
+                return 1U;
+            }
+            if (mode == block_mode) {
+                return 2U;
+            }
+            if (mode == header_mode) {
+                return 3U;
+            }
+            if (mode == 1U) {
+                return 4U;
+            }
+            if (mode == 0U) {
+                return 5U;
+            }
+            return 6U;
+        }
+        if (mode == block_mode) {
+            return 0U;
+        }
+        if (mode == header_mode) {
+            return 1U;
+        }
+        if (mode == 2U || mode == 3U) {
+            return 2U;
+        }
+        if (mode == 1U) {
+            return 3U;
+        }
+        if (mode == 0U) {
+            return 4U;
+        }
+        return 5U;
+    };
+
+    std::stable_sort(out.begin(), out.end(), [&](std::uint8_t lhs, std::uint8_t rhs) {
+        const auto lhs_hits = mode_fail_hits.contains(lhs) ? mode_fail_hits.at(lhs) : 0U;
+        const auto rhs_hits = mode_fail_hits.contains(rhs) ? mode_fail_hits.at(rhs) : 0U;
+        if (lhs_hits != rhs_hits) {
+            return lhs_hits < rhs_hits;
+        }
+        return BasePriority(lhs) < BasePriority(rhs);
+    });
     return out;
 }
 
@@ -1003,8 +1163,13 @@ std::string ClassifyFailureCode(const std::string& detail) {
     if (detail.find("size implausible") != std::string::npos) {
         return "DATA_BLOCK_SIZE_IMPLAUSIBLE";
     }
-    if (detail.find("failed to read data block") != std::string::npos ||
-        detail.find("out of bundle range") != std::string::npos) {
+    if (detail.find("failed to seek data block") != std::string::npos) {
+        return "DATA_BLOCK_SEEK_FAILED";
+    }
+    if (detail.find("out of bundle range") != std::string::npos) {
+        return "DATA_BLOCK_RANGE_FAILED";
+    }
+    if (detail.find("failed to read data block") != std::string::npos) {
         return "DATA_BLOCK_READ_FAILED";
     }
     if (detail.find("raw block size mismatch") != std::string::npos) {
@@ -1013,8 +1178,17 @@ std::string ClassifyFailureCode(const std::string& detail) {
     if (detail.find("LZ4 decompression failed") != std::string::npos) {
         return "DATA_BLOCK_LZ4_FAIL";
     }
-    if (detail.find("LZMA decompression is not implemented") != std::string::npos) {
-        return "DATA_BLOCK_LZMA_UNIMPLEMENTED";
+    if (detail.find("LZMA decompression failed") != std::string::npos) {
+        if (detail.find("missing properties") != std::string::npos) {
+            return "DATA_BLOCK_LZMA_HEADER_INVALID";
+        }
+        return "DATA_BLOCK_LZMA_DECODE_FAILED";
+    }
+    if (detail.find("unsupported compression mode") != std::string::npos) {
+        return "DATA_BLOCK_MODE_UNSUPPORTED";
+    }
+    if (detail.find("decompression failed") != std::string::npos) {
+        return "DATA_BLOCK_DECOMPRESS_FAILED";
     }
     return "DATA_BLOCK_DECODE_FAILED";
 }
@@ -1039,8 +1213,12 @@ bool ReconstructStreamAt(std::ifstream& in,
     probe.selected_reconstruction_layout.clear();
     probe.selected_block0_hypothesis.clear();
     probe.block0_attempt_count = 0U;
+    probe.block0_mode_rank = 0U;
     probe.block0_selected_offset = 0U;
     probe.block0_selected_mode_source.clear();
+    probe.lzma_decode_attempted = false;
+    probe.lzma_decode_variant.clear();
+    probe.recon_failure_detail_code.clear();
     std::uint32_t block_index = 0U;
     std::uint64_t offset = data_start;
     for (const auto& b : metadata.blocks) {
@@ -1086,6 +1264,7 @@ bool ReconstructStreamAt(std::ifstream& in,
         std::uint64_t next_offset = offset;
         std::string chosen_variant;
         std::uint8_t chosen_mode = 0U;
+        std::uint32_t chosen_mode_rank = 0U;
         std::string chosen_mode_source;
         std::unordered_map<std::uint8_t, std::uint32_t> mode_fail_hits;
         for (const auto& v : variants) {
@@ -1135,12 +1314,22 @@ bool ReconstructStreamAt(std::ifstream& in,
             const auto mode = static_cast<std::uint8_t>(v.flags & 0x3FU);
             const auto header_mode = static_cast<std::uint8_t>(header.flags & 0x3FU);
             const auto candidates = BuildBlockModeCandidates(mode, header_mode, block_index == 0U, mode_fail_hits);
-            for (const auto m : candidates) {
+            for (std::size_t mode_rank = 0U; mode_rank < candidates.size(); ++mode_rank) {
+                const auto m = candidates[mode_rank];
                 if (block_index == 0U) {
                     ++probe.block0_attempt_count;
                 }
                 std::string local_err;
-                if (DecompressByMode(compressed, v.uncompressed_size, m, decoded, local_err)) {
+                bool lzma_attempted = false;
+                std::string lzma_variant;
+                if (DecompressByMode(
+                        compressed,
+                        v.uncompressed_size,
+                        m,
+                        decoded,
+                        local_err,
+                        &lzma_attempted,
+                        &lzma_variant)) {
                     probe.failed_block_mode = static_cast<std::uint32_t>(mode);
                     probe.failed_block_expected_size = v.uncompressed_size;
                     probe.failed_block_read_offset = read_offset;
@@ -1150,6 +1339,7 @@ bool ReconstructStreamAt(std::ifstream& in,
                     next_offset = read_offset + v.compressed_size;
                     chosen_variant = v.label;
                     chosen_mode = m;
+                    chosen_mode_rank = static_cast<std::uint32_t>(mode_rank + 1U);
                     if (m == header_mode) {
                         chosen_mode_source = "header-derived";
                     } else if (m == mode) {
@@ -1158,6 +1348,12 @@ bool ReconstructStreamAt(std::ifstream& in,
                         chosen_mode_source = "fallback";
                     }
                     break;
+                }
+                if (lzma_attempted) {
+                    probe.lzma_decode_attempted = true;
+                    if (!lzma_variant.empty()) {
+                        probe.lzma_decode_variant = lzma_variant;
+                    }
                 }
                 ++mode_fail_hits[m];
                 last_err = std::string(v.label) + ": " + local_err;
@@ -1177,6 +1373,7 @@ bool ReconstructStreamAt(std::ifstream& in,
             probe.failed_block_compressed_size = b.compressed_size;
             probe.failed_block_uncompressed_size = b.uncompressed_size;
             probe.failed_block_error_code = ClassifyFailureCode(last_err);
+            probe.recon_failure_detail_code = probe.failed_block_error_code;
             if (block_index == 0U && probe.selected_block0_hypothesis.empty()) {
                 const auto at = last_err.find(':');
                 if (at != std::string::npos && at > 0U) {
@@ -1196,6 +1393,7 @@ bool ReconstructStreamAt(std::ifstream& in,
         if (block_index == 0U && !chosen_variant.empty()) {
             probe.selected_reconstruction_layout = chosen_variant + "/mode=" + std::to_string(chosen_mode);
             probe.selected_block0_hypothesis = probe.selected_reconstruction_layout;
+            probe.block0_mode_rank = chosen_mode_rank;
             probe.block0_selected_offset = data_start;
             probe.block0_selected_mode_source = chosen_mode_source;
         }
@@ -1243,9 +1441,8 @@ bool TryReconstructDataStream(std::ifstream& in,
             candidate_map.emplace(v, family);
         }
     };
-    const auto add_window = [&](std::uint64_t anchor, const char* family) {
-        constexpr std::int64_t kWindow = 4096;
-        for (std::int64_t d = -kWindow; d <= kWindow; d += 16) {
+    const auto add_window = [&](std::uint64_t anchor, const char* family, std::int64_t window, std::int64_t step) {
+        for (std::int64_t d = -window; d <= window; d += step) {
             const auto value = static_cast<std::int64_t>(anchor) + d;
             if (value >= 0) {
                 add_candidate(static_cast<std::uint64_t>(value), family);
@@ -1261,15 +1458,19 @@ bool TryReconstructDataStream(std::ifstream& in,
     if (total_compressed <= header.bundle_file_size) {
         add_candidate(header.bundle_file_size - total_compressed, "tail-packed");
     }
-    add_window(after_metadata, "after-metadata");
-    add_window(aligned_after_metadata, "aligned-after-metadata");
-    add_window(after_header, "header-window");
+    // Coarse pass for broad start offsets, then local fine pass around preferred anchors.
+    add_window(after_metadata, "after-metadata", 4096, 128);
+    add_window(aligned_after_metadata, "aligned-after-metadata", 4096, 128);
+    add_window(after_header, "header-window", 4096, 128);
     if (total_compressed <= header.bundle_file_size) {
-        add_window(header.bundle_file_size - total_compressed, "tail-window");
+        add_window(header.bundle_file_size - total_compressed, "tail-window", 4096, 128);
     }
     if (metadata_at_end && metadata_offset >= total_compressed) {
-        add_window(metadata_offset - total_compressed, "tail-window");
+        add_window(metadata_offset - total_compressed, "tail-window", 4096, 128);
     }
+    add_window(after_metadata, "after-metadata", 512, 16);
+    add_window(aligned_after_metadata, "aligned-after-metadata", 512, 16);
+    add_window(metadata_offset + header.compressed_metadata_size, "after-metadata", 512, 16);
     std::vector<CandidateStart> candidates;
     candidates.reserve(candidate_map.size());
     for (const auto& [offset, family] : candidate_map) {
@@ -1323,17 +1524,26 @@ bool TryReconstructDataStream(std::ifstream& in,
         }
         return -1;
     };
-    const auto ComputeCandidateScore = [&](std::uint32_t decoded_blocks, bool nodes_ok, const std::string& mode_source) -> std::int32_t {
+    const auto ComputeCandidateScore = [&](std::uint32_t decoded_blocks,
+                                           bool nodes_ok,
+                                           const std::string& mode_source) -> std::int32_t {
         std::int32_t score = 0;
         const auto total_blocks = static_cast<std::uint32_t>(metadata.blocks.size());
         if (total_blocks > 0U) {
-            score += static_cast<std::int32_t>((40U * decoded_blocks) / total_blocks);
+            const auto ratio_score = static_cast<std::int32_t>((100U * decoded_blocks) / total_blocks);
+            score += ratio_score;
+            if (decoded_blocks > 0U) {
+                score += static_cast<std::int32_t>((40U * decoded_blocks * decoded_blocks) /
+                                                   (total_blocks * total_blocks));
+            }
         }
         if (nodes_ok) {
-            score += 30;
+            score += 45;
+        } else if (decoded_blocks > 0U) {
+            score += 10;
         }
         if (mode_source == "header-derived" || mode_source == "block-flag") {
-            score += 30;
+            score += 15;
         } else if (!mode_source.empty()) {
             score += 10;
         }
@@ -1419,6 +1629,7 @@ bool TryReconstructDataStream(std::ifstream& in,
     }
     if (!probe.reconstruction_failure_summary_code.empty()) {
         probe.probe_primary_error = probe.reconstruction_failure_summary_code;
+        probe.recon_failure_detail_code = probe.reconstruction_failure_summary_code;
     }
     if (probe.best_candidate_score == std::numeric_limits<std::int32_t>::min()) {
         probe.best_candidate_score = 0;
@@ -1819,7 +2030,7 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
     SerializedFileSummary best {};
     std::size_t best_offset = 0U;
     const std::size_t scan_limit = raw_bytes.size();
-    for (std::size_t at = 0U; at + 64U <= scan_limit && candidates < 4096U; at += 8U) {
+    for (std::size_t at = 0U; at + 64U <= scan_limit && candidates < 20000U; at += 4U) {
         std::uint32_t metadata_size = 0U;
         std::uint32_t version = 0U;
         if (!LooksLikeSerializedHeader(at, &metadata_size, &version)) {
@@ -1829,9 +2040,12 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
         ++attempts;
         const std::size_t header_size = version >= 22U ? 48U : 20U;
         const std::size_t needed_size = header_size + static_cast<std::size_t>(metadata_size);
+        const std::size_t sample_window = std::min<std::size_t>(
+            static_cast<std::size_t>(raw_bytes.size() - at),
+            std::max<std::size_t>(needed_size, 4U * 1024U * 1024U));
         std::vector<unsigned char> candidate_bytes(
             raw_bytes.begin() + static_cast<std::ptrdiff_t>(at),
-            raw_bytes.begin() + static_cast<std::ptrdiff_t>(at + needed_size));
+            raw_bytes.begin() + static_cast<std::ptrdiff_t>(at + sample_window));
         auto parsed = serialized.ParseObjectSummary(candidate_bytes);
         if (!parsed.ok) {
             best_error = parsed.error;

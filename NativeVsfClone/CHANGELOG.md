@@ -2,6 +2,61 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VSFAvatar GateD pass with UnityFS LZMA block decode and reconstruction scoring updates
+
+### Summary
+
+Lifted VSFAvatar fixed-set quality gate from GateD FAIL to PASS by implementing `mode=1` (LZMA) UnityFS block decode, adjusting block0 candidate/ranking logic, and extending sidecar/loader diagnostics in an additive-compatible way.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added UnityFS `mode=1` LZMA decode path via integrated `LzmaDecode` one-call API.
+  - Added LZMA variant attempts (`props-only-header`, `props+size-header`) with strict output-size validation.
+  - Updated block0 mode candidate ordering to reduce over-bias toward header/block flag and include fail-hit demotion.
+  - Updated reconstruction candidate window generation to coarse + fine passes (reduced noisy search explosion).
+  - Reweighted reconstruction scoring (decoded-block ratio + continuity + node-range pass weight).
+  - Split reconstruction failure classification (`SEEK`, `READ`, `RANGE`, `LZ4`, `LZMA`, `MODE_UNSUPPORTED`, etc.).
+  - Expanded raw serialized fallback scan stride/window to improve candidate discovery.
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added additive probe fields:
+    - `lzma_decode_attempted`
+    - `lzma_decode_variant`
+    - `block0_mode_rank`
+    - `recon_failure_detail_code`
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Emitted new optional schema v3 additive fields above.
+  - Added matching warning lines (`W_LZMA`, `W_RECON_DETAIL`).
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Consumed new optional sidecar fields as warnings only (no contract break).
+  - Extended in-house metadata warning summary with new diagnostics.
+
+- `CMakeLists.txt`
+  - Enabled C language for build.
+  - Added `third_party/LzmaDec.c` to `vsfclone_core` sources.
+  - Added `third_party` include path for LZMA headers.
+
+- `third_party/LzmaDec.c` (new)
+- `third_party/LzmaDec.h` (new)
+- `third_party/Types.h` (new)
+  - Imported public-domain LZMA decoder components (Igor Pavlov) used by UnityFS mode=1 decode path.
+
+### Verification
+
+- `tools/vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - GateA: PASS
+  - GateB: PASS
+  - GateC: PASS
+  - GateD: PASS
+  - Overall: PASS
+- `tools/vrm_quality_gate.ps1`
+  - Overall: PASS
+- `tools/vxavatar_quality_gate.ps1`
+  - FAIL due to missing fixed-valid VX/VXA2 samples in current quick profile dataset (not a parser regression from this change set).
+
 ## 2026-03-03 - Host render advanced controls and local preset persistence
 
 ### Summary

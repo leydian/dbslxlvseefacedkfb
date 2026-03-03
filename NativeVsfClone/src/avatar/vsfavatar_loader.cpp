@@ -547,6 +547,19 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.warnings.push_back("W_BLOCK0_META: offset=" + std::to_string(block0_selected_offset) +
                                ", mode-source=" + block0_mode_source);
     }
+    const auto block0_mode_rank = GetJsonU32(output, "block0_mode_rank");
+    if (block0_mode_rank > 0U) {
+        pkg.warnings.push_back("W_BLOCK0_RANK: " + std::to_string(block0_mode_rank));
+    }
+    bool lzma_decode_attempted = false;
+    if (TryGetJsonBool(output, "lzma_decode_attempted", &lzma_decode_attempted) && lzma_decode_attempted) {
+        const auto lzma_decode_variant = GetJsonString(output, "lzma_decode_variant");
+        pkg.warnings.push_back("W_LZMA: attempted=true, variant=" + lzma_decode_variant);
+    }
+    const auto recon_failure_detail_code = GetJsonString(output, "recon_failure_detail_code");
+    if (!recon_failure_detail_code.empty()) {
+        pkg.warnings.push_back("W_RECON_DETAIL: " + recon_failure_detail_code);
+    }
     const auto warning_items = GetJsonStringArray(output, "warnings");
     for (const auto& w : warning_items) {
         pkg.warnings.push_back(w);
@@ -617,13 +630,23 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadInHouse(const std::string& path
         if (!probe.value.selected_block0_hypothesis.empty()) {
             meta << ", block0 hypothesis=" << probe.value.selected_block0_hypothesis
                  << ", block0 attempts=" << probe.value.block0_attempt_count;
+            if (probe.value.block0_mode_rank > 0U) {
+                meta << ", block0 mode rank=" << probe.value.block0_mode_rank;
+            }
         }
         if (probe.value.block0_selected_offset > 0U || !probe.value.block0_selected_mode_source.empty()) {
             meta << ", block0 offset=" << probe.value.block0_selected_offset
                  << ", block0 mode-source=" << probe.value.block0_selected_mode_source;
         }
+        if (probe.value.lzma_decode_attempted || !probe.value.lzma_decode_variant.empty()) {
+            meta << ", lzma attempted=" << (probe.value.lzma_decode_attempted ? "true" : "false")
+                 << ", lzma variant=" << probe.value.lzma_decode_variant;
+        }
         if (!probe.value.reconstruction_failure_summary_code.empty()) {
             meta << ", recon summary code=" << probe.value.reconstruction_failure_summary_code;
+            if (!probe.value.recon_failure_detail_code.empty()) {
+                meta << ", recon detail code=" << probe.value.recon_failure_detail_code;
+            }
         }
         if (probe.value.metadata_offset > 0U) {
             meta << ", metadata offset=" << probe.value.metadata_offset;
