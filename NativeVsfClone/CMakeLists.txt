@@ -48,7 +48,7 @@ if(VSFCLONE_BUILD_CONSOLE)
     target_link_libraries(vsfclone_cli PRIVATE vsfclone_core)
 
     add_executable(avatar_tool tools/avatar_tool.cpp)
-    target_link_libraries(avatar_tool PRIVATE nativecore)
+    target_link_libraries(avatar_tool PRIVATE vsfclone_core)
 
     add_executable(vrm_to_xav2 tools/vrm_to_xav2.cpp)
     target_link_libraries(vrm_to_xav2 PRIVATE vsfclone_core)

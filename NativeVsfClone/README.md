@@ -167,7 +167,11 @@ Notes:
     - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics)` (non-throwing path)
     - `Xav2RuntimeLoader.TryLoad(path, out payload, out diagnostics, options)` (option-based validation path)
     - `Xav2LoadOptions.StrictValidation` (default `false`; warning-level issues are upgraded to fail when `true`)
-    - `Xav2LoadDiagnostics` (`ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`)
+    - `Xav2LoadOptions.UnknownSectionPolicy` (`Warn|Ignore|Fail`, default `Warn`)
+    - `Xav2LoadDiagnostics` (`ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`, `WarningCodes`)
+  - native `.xav2` loader parity:
+    - `AvatarLoadOptions.xav2_unknown_section_policy` (`Warn|Ignore|Fail`)
+    - `AvatarPackage.warning_codes[]` normalized warning-code list
   - editor exporter path (`Scene AvatarRoot -> .xav2`) with strict shader policy list:
     - `lilToon`, `Poiyomi`, `potatoon`, `realtoon`
   - skin/blendshape section support (`0x0013`, `0x0014`)

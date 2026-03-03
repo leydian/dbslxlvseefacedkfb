@@ -22,6 +22,12 @@ enum class AvatarCompatLevel {
     Failed,
 };
 
+enum class Xav2UnknownSectionPolicy {
+    Warn = 0,
+    Ignore,
+    Fail,
+};
+
 struct MeshAssetSummary {
     std::string name;
     std::uint32_t vertex_count = 0;
@@ -108,6 +114,7 @@ struct AvatarPackage {
     std::uint32_t format_decoded_section_count = 0;
     std::uint32_t format_unknown_section_count = 0;
     std::vector<std::string> warnings;
+    std::vector<std::string> warning_codes;
     std::vector<std::string> missing_features;
 };
 

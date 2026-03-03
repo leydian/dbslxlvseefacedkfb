@@ -1,51 +1,77 @@
+#include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <string>
 
-#include "vsfclone/nativecore/api.h"
+#include "vsfclone/avatar/avatar_loader_facade.h"
+#include "vsfclone/avatar/avatar_package.h"
 
 namespace {
 
-const char* ToFormatName(NcAvatarFormatHint fmt) {
+const char* ToFormatName(vsfclone::avatar::AvatarSourceType fmt) {
+    using vsfclone::avatar::AvatarSourceType;
     switch (fmt) {
-        case NC_AVATAR_FORMAT_VRM:
+        case AvatarSourceType::Vrm:
             return "VRM";
-        case NC_AVATAR_FORMAT_VXAVATAR:
+        case AvatarSourceType::VxAvatar:
             return "VXAvatar";
-        case NC_AVATAR_FORMAT_VSFAVATAR:
+        case AvatarSourceType::VsfAvatar:
             return "VSFAvatar";
-        case NC_AVATAR_FORMAT_VXA2:
+        case AvatarSourceType::Vxa2:
             return "VXA2";
-        case NC_AVATAR_FORMAT_XAV2:
+        case AvatarSourceType::Xav2:
             return "XAV2";
         default:
             return "Unknown";
     }
 }
 
-const char* ToCompatName(NcCompatLevel compat) {
+const char* ToCompatName(vsfclone::avatar::AvatarCompatLevel compat) {
+    using vsfclone::avatar::AvatarCompatLevel;
     switch (compat) {
-        case NC_COMPAT_FULL:
+        case AvatarCompatLevel::Full:
             return "full";
-        case NC_COMPAT_PARTIAL:
+        case AvatarCompatLevel::Partial:
             return "partial";
-        case NC_COMPAT_FAILED:
+        case AvatarCompatLevel::Failed:
             return "failed";
         default:
             return "unknown";
     }
 }
 
-void PrintUsage() {
-    std::cout << "Usage:\n"
-              << "  avatar_tool <path_to_avatar_file>\n";
+std::string ToLower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
 }
 
-void PrintLastError() {
-    NcErrorInfo err {};
-    if (nc_get_last_error(&err) == NC_OK) {
-        std::cerr << "error subsystem=" << err.subsystem << ", code=" << static_cast<int>(err.code)
-                  << ", message=" << err.message << "\n";
+bool TryParsePolicy(
+    const std::string& raw,
+    vsfclone::avatar::Xav2UnknownSectionPolicy* out_policy) {
+    if (out_policy == nullptr) {
+        return false;
     }
+    const std::string policy = ToLower(raw);
+    if (policy == "warn") {
+        *out_policy = vsfclone::avatar::Xav2UnknownSectionPolicy::Warn;
+        return true;
+    }
+    if (policy == "ignore") {
+        *out_policy = vsfclone::avatar::Xav2UnknownSectionPolicy::Ignore;
+        return true;
+    }
+    if (policy == "fail") {
+        *out_policy = vsfclone::avatar::Xav2UnknownSectionPolicy::Fail;
+        return true;
+    }
+    return false;
+}
+
+void PrintUsage() {
+    std::cout << "Usage:\n"
+              << "  avatar_tool <path_to_avatar_file> [--xav2-unknown-section-policy=warn|ignore|fail]\n";
 }
 
 }  // namespace
@@ -56,57 +82,72 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    NcInitOptions init {};
-    init.api_version = 1;
-    if (nc_initialize(&init) != NC_OK) {
-        PrintLastError();
-        return 2;
+    std::string path;
+    vsfclone::avatar::AvatarLoadOptions load_options {};
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        constexpr const char* kPolicyArg = "--xav2-unknown-section-policy=";
+        if (arg.rfind(kPolicyArg, 0) == 0) {
+            const std::string raw = arg.substr(std::char_traits<char>::length(kPolicyArg));
+            if (!TryParsePolicy(raw, &load_options.xav2_unknown_section_policy)) {
+                std::cerr << "invalid policy: " << raw << " (expected warn|ignore|fail)\n";
+                return 1;
+            }
+            continue;
+        }
+        if (path.empty()) {
+            path = arg;
+            continue;
+        }
+        std::cerr << "unexpected argument: " << arg << "\n";
+        PrintUsage();
+        return 1;
+    }
+    if (path.empty()) {
+        PrintUsage();
+        return 1;
     }
 
-    NcAvatarLoadRequest req {};
-    req.path = argv[1];
-    req.format_hint = NC_AVATAR_FORMAT_AUTO;
-
-    NcAvatarHandle handle = 0;
-    NcAvatarInfo info {};
-    const auto rc = nc_load_avatar(&req, &handle, &info);
-    if (rc != NC_OK) {
-        PrintLastError();
-        nc_shutdown();
+    vsfclone::avatar::AvatarLoaderFacade loader;
+    const auto loaded = loader.Load(path, load_options);
+    if (!loaded.ok) {
+        std::cerr << "Load failed: " << loaded.error << "\n";
         return 3;
     }
+    const auto& info = loaded.value;
 
     std::cout << "Load succeeded\n";
-    std::cout << "  Handle: " << handle << "\n";
     std::cout << "  DisplayName: " << info.display_name << "\n";
     std::cout << "  SourcePath: " << info.source_path << "\n";
-    std::cout << "  Format: " << ToFormatName(info.detected_format) << "\n";
+    std::cout << "  Format: " << ToFormatName(info.source_type) << "\n";
     std::cout << "  Compat: " << ToCompatName(info.compat_level) << "\n";
     std::cout << "  ParserStage: " << info.parser_stage << "\n";
     std::cout << "  PrimaryError: " << info.primary_error_code << "\n";
-    std::cout << "  Meshes: " << info.mesh_count << "\n";
-    std::cout << "  Materials: " << info.material_count << "\n";
-    std::cout << "  MeshPayloads: " << info.mesh_payload_count << "\n";
-    std::cout << "  MaterialPayloads: " << info.material_payload_count << "\n";
-    std::cout << "  TexturePayloads: " << info.texture_payload_count << "\n";
-    std::cout << "  ExpressionCount: " << info.expression_count << "\n";
+    std::cout << "  Meshes: " << info.meshes.size() << "\n";
+    std::cout << "  Materials: " << info.materials.size() << "\n";
+    std::cout << "  MeshPayloads: " << info.mesh_payloads.size() << "\n";
+    std::cout << "  MaterialPayloads: " << info.material_payloads.size() << "\n";
+    std::cout << "  TexturePayloads: " << info.texture_payloads.size() << "\n";
+    std::cout << "  ExpressionCount: " << info.expressions.size() << "\n";
     std::cout << "  LastRenderDrawCalls: " << info.last_render_draw_calls << "\n";
     std::cout << "  FormatSections: " << info.format_section_count << "\n";
     std::cout << "  FormatDecodedSections: " << info.format_decoded_section_count << "\n";
     std::cout << "  FormatUnknownSections: " << info.format_unknown_section_count << "\n";
-    std::cout << "  Warnings: " << info.warning_count << "\n";
-    if (info.last_warning[0] != '\0') {
-        std::cout << "  LastWarning: " << info.last_warning << "\n";
+    std::cout << "  Warnings: " << info.warnings.size() << "\n";
+    std::cout << "  WarningCodes: " << info.warning_codes.size() << "\n";
+    if (!info.warning_codes.empty()) {
+        std::cout << "  LastWarningCode: " << info.warning_codes.back() << "\n";
     }
-    if (info.last_expression_summary[0] != '\0') {
+    if (!info.warnings.empty()) {
+        std::cout << "  LastWarning: " << info.warnings.back() << "\n";
+    }
+    if (!info.last_expression_summary.empty()) {
         std::cout << "  LastExpressionSummary: " << info.last_expression_summary << "\n";
     }
-    std::cout << "  MissingFeatures: " << info.missing_feature_count << "\n";
-    if (info.last_missing_feature[0] != '\0') {
-        std::cout << "  LastMissingFeature: " << info.last_missing_feature << "\n";
+    std::cout << "  MissingFeatures: " << info.missing_features.size() << "\n";
+    if (!info.missing_features.empty()) {
+        std::cout << "  LastMissingFeature: " << info.missing_features.back() << "\n";
     }
 
-    nc_unload_avatar(handle);
-    nc_shutdown();
     return 0;
 }

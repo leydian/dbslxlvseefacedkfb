@@ -115,5 +115,9 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 ## Loader behavior in this repository
 
 - Recognized extension: `.xav2`
-- Unknown section types are skipped with warnings.
+- Unknown section policy:
+  - `Warn` (default): unknown sections are skipped and warning `XAV2_UNKNOWN_SECTION` is emitted.
+  - `Ignore`: unknown sections are skipped without warning.
+  - `Fail`: load terminates with primary error `XAV2_UNKNOWN_SECTION_NOT_ALLOWED`.
+- Loader diagnostics include both raw `warnings[]` and normalized `warning_codes[]`.
 - Missing referenced payloads produce `XAV2_ASSET_MISSING` and `Compat: partial`.

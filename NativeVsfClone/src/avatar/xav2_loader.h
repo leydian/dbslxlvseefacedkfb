@@ -9,6 +9,7 @@ class Xav2Loader final : public IAvatarLoader {
     bool CanLoadPath(const std::string& path) const override;
     bool CanLoadBytes(const std::vector<std::uint8_t>& head) const override;
     core::Result<AvatarPackage> Load(const std::string& path) const override;
+    core::Result<AvatarPackage> Load(const std::string& path, Xav2UnknownSectionPolicy unknown_section_policy) const;
 };
 
 }  // namespace vsfclone::avatar

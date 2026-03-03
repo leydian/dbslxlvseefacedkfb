@@ -38,9 +38,16 @@ AvatarLoaderFacade::AvatarLoaderFacade() {
 }
 
 core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path) const {
+    return Load(path, AvatarLoadOptions {});
+}
+
+core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path, const AvatarLoadOptions& options) const {
     for (const auto& loader : loaders_) {
         if (!loader->CanLoadPath(path)) {
             continue;
+        }
+        if (auto* xav2_loader = dynamic_cast<Xav2Loader*>(loader.get()); xav2_loader != nullptr) {
+            return xav2_loader->Load(path, options.xav2_unknown_section_policy);
         }
         return loader->Load(path);
     }
@@ -52,6 +59,9 @@ core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path) co
     for (const auto& loader : loaders_) {
         if (!loader->CanLoadBytes(head)) {
             continue;
+        }
+        if (auto* xav2_loader = dynamic_cast<Xav2Loader*>(loader.get()); xav2_loader != nullptr) {
+            return xav2_loader->Load(path, options.xav2_unknown_section_policy);
         }
         return loader->Load(path);
     }

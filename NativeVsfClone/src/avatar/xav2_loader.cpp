@@ -524,6 +524,28 @@ bool ParseMaterialShaderParamsSection(
     return cursor == end;
 }
 
+void AppendWarningCode(AvatarPackage* pkg, const std::string& warning) {
+    if (pkg == nullptr) {
+        return;
+    }
+    const std::size_t sep = warning.find(':');
+    if (sep == std::string::npos || sep == 0U) {
+        return;
+    }
+    const std::string code = warning.substr(0U, sep);
+    if (!code.empty()) {
+        pkg->warning_codes.push_back(code);
+    }
+}
+
+void PushWarning(AvatarPackage* pkg, const std::string& warning) {
+    if (pkg == nullptr) {
+        return;
+    }
+    pkg->warnings.push_back(warning);
+    AppendWarningCode(pkg, warning);
+}
+
 }  // namespace
 
 bool Xav2Loader::CanLoadPath(const std::string& path) const {
@@ -536,6 +558,12 @@ bool Xav2Loader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
 }
 
 core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
+    return Load(path, Xav2UnknownSectionPolicy::Warn);
+}
+
+core::Result<AvatarPackage> Xav2Loader::Load(
+    const std::string& path,
+    Xav2UnknownSectionPolicy unknown_section_policy) const {
     std::vector<std::uint8_t> bytes;
     if (!ReadFileBytes(path, &bytes)) {
         return core::Result<AvatarPackage>::Fail("could not open xav2 file");
@@ -554,21 +582,21 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
 
     if (!(bytes[0] == 'X' && bytes[1] == 'A' && bytes[2] == 'V' && bytes[3] == '2')) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-        pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: magic header mismatch.");
+        PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: magic header mismatch.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
     const auto version = ReadU16Le(bytes, 4U);
     const auto manifest_size = ReadU32Le(bytes, 6U);
     if (!version || !manifest_size || *version != 1U) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-        pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: unsupported version.");
+        PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: unsupported version.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
     const std::size_t manifest_offset = 10U;
     const std::size_t manifest_end = manifest_offset + static_cast<std::size_t>(*manifest_size);
     if (manifest_end > bytes.size()) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-        pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: manifest section out of range.");
+        PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: manifest section out of range.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
 
@@ -578,14 +606,15 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
     if (!HasJsonKey(manifest, "avatarId") || !HasJsonKey(manifest, "meshRefs") || !HasJsonKey(manifest, "materialRefs") ||
         !HasJsonKey(manifest, "textureRefs")) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-        pkg.warnings.push_back(
+        PushWarning(
+            &pkg,
             "E_PARSE: XAV2_SCHEMA_INVALID: required keys avatarId/meshRefs/materialRefs/textureRefs are missing.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
     if (const auto display_name = ExtractStringField(manifest, "displayName"); display_name && !display_name->empty()) {
         pkg.display_name = *display_name;
     }
-    pkg.warnings.push_back("W_STAGE: parse");
+    PushWarning(&pkg, "W_STAGE: parse");
 
     pkg.parser_stage = "resolve";
     std::vector<std::string> mesh_refs;
@@ -594,10 +623,10 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
     if (!ParseStringArray(manifest, "meshRefs", &mesh_refs) || !ParseStringArray(manifest, "materialRefs", &material_refs) ||
         !ParseStringArray(manifest, "textureRefs", &texture_refs)) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-        pkg.warnings.push_back("E_RESOLVE: XAV2_SCHEMA_INVALID: invalid reference array values.");
+        PushWarning(&pkg, "E_RESOLVE: XAV2_SCHEMA_INVALID: invalid reference array values.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
-    pkg.warnings.push_back("W_STAGE: resolve");
+    PushWarning(&pkg, "W_STAGE: resolve");
 
     for (const std::string& mesh_ref : mesh_refs) {
         pkg.meshes.push_back({mesh_ref, 0U, 0U});
@@ -621,7 +650,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
         const auto sec_size = ReadU32Le(bytes, cursor + 4U);
         if (!type || !flags || !sec_size) {
             pkg.primary_error_code = "XAV2_SECTION_TRUNCATED";
-            pkg.warnings.push_back("E_PARSE: XAV2_SECTION_TRUNCATED: section header is truncated.");
+            PushWarning(&pkg, "E_PARSE: XAV2_SECTION_TRUNCATED: section header is truncated.");
             return core::Result<AvatarPackage>::Ok(pkg);
         }
 
@@ -630,20 +659,20 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
         const std::size_t section_end = payload_offset + payload_size;
         if (payload_offset > bytes.size() || section_end > bytes.size()) {
             pkg.primary_error_code = "XAV2_SECTION_TRUNCATED";
-            pkg.warnings.push_back("E_PARSE: XAV2_SECTION_TRUNCATED: section payload range out of file.");
+            PushWarning(&pkg, "E_PARSE: XAV2_SECTION_TRUNCATED: section payload range out of file.");
             return core::Result<AvatarPackage>::Ok(pkg);
         }
 
         ++pkg.format_section_count;
         if (*flags != 0U) {
-            pkg.warnings.push_back("W_PARSE: XAV2_SECTION_FLAGS_NONZERO: type=" + std::to_string(*type));
+            PushWarning(&pkg, "W_PARSE: XAV2_SECTION_FLAGS_NONZERO: type=" + std::to_string(*type));
         }
 
         if (*type == kSectionMeshRenderPayload) {
             MeshRenderPayload mesh_payload;
             if (!ParseMeshRenderPayloadSection(bytes, payload_offset, payload_size, &mesh_payload)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-                pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: invalid mesh render payload section.");
+                PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid mesh render payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             mesh_render_sections[NormalizeRefKey(mesh_payload.name)] = std::move(mesh_payload);
@@ -653,7 +682,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             std::vector<std::uint8_t> blob;
             if (!ParseBinaryPayloadSection(bytes, payload_offset, payload_size, &name, &blob)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-                pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: invalid binary payload section.");
+                PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid binary payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             if (*type == kSectionMeshBlobLegacy) {
@@ -666,7 +695,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             MaterialRenderPayload material_payload;
             if (!ParseMaterialOverrideSection(bytes, payload_offset, payload_size, &material_payload)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-                pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: invalid material section.");
+                PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid material section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             material_sections[NormalizeRefKey(material_payload.name)] = std::move(material_payload);
@@ -676,7 +705,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             std::string params_json;
             if (!ParseMaterialShaderParamsSection(bytes, payload_offset, payload_size, &material_name, &params_json)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
-                pkg.warnings.push_back("E_PARSE: XAV2_SCHEMA_INVALID: invalid material shader params section.");
+                PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid material shader params section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             material_params_sections[NormalizeRefKey(material_name)] = std::move(params_json);
@@ -685,7 +714,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             SkinRenderPayload skin_payload;
             if (!ParseSkinPayloadSection(bytes, payload_offset, payload_size, &skin_payload)) {
                 pkg.primary_error_code = "XAV2_SKIN_SCHEMA_INVALID";
-                pkg.warnings.push_back("E_PARSE: XAV2_SKIN_SCHEMA_INVALID: invalid skin payload section.");
+                PushWarning(&pkg, "E_PARSE: XAV2_SKIN_SCHEMA_INVALID: invalid skin payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             skin_sections[NormalizeRefKey(skin_payload.mesh_name)] = std::move(skin_payload);
@@ -694,14 +723,20 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
             BlendShapeRenderPayload blendshape_payload;
             if (!ParseBlendShapePayloadSection(bytes, payload_offset, payload_size, &blendshape_payload)) {
                 pkg.primary_error_code = "XAV2_BLENDSHAPE_SCHEMA_INVALID";
-                pkg.warnings.push_back("E_PARSE: XAV2_BLENDSHAPE_SCHEMA_INVALID: invalid blendshape payload section.");
+                PushWarning(&pkg, "E_PARSE: XAV2_BLENDSHAPE_SCHEMA_INVALID: invalid blendshape payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             blendshape_sections[NormalizeRefKey(blendshape_payload.mesh_name)] = std::move(blendshape_payload);
             ++pkg.format_decoded_section_count;
         } else {
             ++pkg.format_unknown_section_count;
-            pkg.warnings.push_back("W_PARSE: XAV2_UNKNOWN_SECTION: type=" + std::to_string(*type));
+            if (unknown_section_policy == Xav2UnknownSectionPolicy::Warn) {
+                PushWarning(&pkg, "W_PARSE: XAV2_UNKNOWN_SECTION: type=" + std::to_string(*type));
+            } else if (unknown_section_policy == Xav2UnknownSectionPolicy::Fail) {
+                pkg.primary_error_code = "XAV2_UNKNOWN_SECTION_NOT_ALLOWED";
+                PushWarning(&pkg, "E_PARSE: XAV2_UNKNOWN_SECTION_NOT_ALLOWED: type=" + std::to_string(*type));
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
         }
 
         cursor = section_end;
@@ -774,10 +809,11 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
     }
 
     if (pkg.format_section_count == 0U) {
-        pkg.warnings.push_back("W_PAYLOAD: XAV2 has no section table entries.");
+        PushWarning(&pkg, "W_PAYLOAD: XAV2 has no section table entries.");
     }
     if (mesh_refs.size() != matched_mesh_payloads || texture_refs.size() != matched_texture_payloads) {
-        pkg.warnings.push_back(
+        PushWarning(
+            &pkg,
             "E_PAYLOAD: XAV2_ASSET_MISSING: ref/payload mismatch (mesh=" + std::to_string(matched_mesh_payloads) + "/" +
             std::to_string(mesh_refs.size()) + ", texture=" + std::to_string(matched_texture_payloads) + "/" +
             std::to_string(texture_refs.size()) + ").");
@@ -792,19 +828,21 @@ core::Result<AvatarPackage> Xav2Loader::Load(const std::string& path) const {
         pkg.missing_features.push_back("XAV2 texture section payload decode coverage");
     }
     if (!skin_sections.empty() && pkg.skin_payloads.size() != mesh_refs.size()) {
-        pkg.warnings.push_back(
+        PushWarning(
+            &pkg,
             "W_PAYLOAD: XAV2_SKIN_PARTIAL: skin sections=" + std::to_string(skin_sections.size()) +
             ", mesh refs=" + std::to_string(mesh_refs.size()));
     }
     if (!blendshape_sections.empty() && pkg.blendshape_payloads.size() != mesh_refs.size()) {
-        pkg.warnings.push_back(
+        PushWarning(
+            &pkg,
             "W_PAYLOAD: XAV2_BLENDSHAPE_PARTIAL: blendshape sections=" + std::to_string(blendshape_sections.size()) +
             ", mesh refs=" + std::to_string(mesh_refs.size()));
     }
-    pkg.warnings.push_back("W_STAGE: payload");
+    PushWarning(&pkg, "W_STAGE: payload");
 
     pkg.parser_stage = "runtime-ready";
-    pkg.warnings.push_back("W_STAGE: runtime-ready");
+    PushWarning(&pkg, "W_STAGE: runtime-ready");
     const bool fully_matched =
         mesh_refs.size() == matched_mesh_payloads && texture_refs.size() == matched_texture_payloads;
     pkg.compat_level = fully_matched ? AvatarCompatLevel::Full : AvatarCompatLevel::Partial;

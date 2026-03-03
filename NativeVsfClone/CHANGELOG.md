@@ -2,6 +2,60 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - XAV2 native parity for unknown-section policy + structured warning codes
+
+### Summary
+
+Aligned native C++ XAV2 loader diagnostics with the Unity SDK policy model by introducing configurable unknown-section handling (`Warn|Ignore|Fail`) and normalized warning-code surfaces.
+
+### Changed
+
+- `include/vsfclone/avatar/avatar_package.h`
+  - Added `Xav2UnknownSectionPolicy` enum.
+  - Added `AvatarPackage.warning_codes`.
+
+- `include/vsfclone/avatar/avatar_loader_facade.h`
+  - Added `AvatarLoadOptions` with `xav2_unknown_section_policy`.
+  - Added `Load(path, options)` overload (existing `Load(path)` preserved).
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Routed XAV2 loader calls through policy-aware overload while keeping non-XAV2 behavior unchanged.
+
+- `src/avatar/xav2_loader.h`
+  - Added `Load(path, Xav2UnknownSectionPolicy)` overload.
+
+- `src/avatar/xav2_loader.cpp`
+  - Added warning-code extraction and accumulation into `warning_codes`.
+  - Added unknown-section policy behavior:
+    - `Warn`: emit `XAV2_UNKNOWN_SECTION` warning.
+    - `Ignore`: skip warning.
+    - `Fail`: stop with `XAV2_UNKNOWN_SECTION_NOT_ALLOWED`.
+  - Kept default `Load(path)` behavior by delegating to `Warn`.
+
+- `tools/avatar_tool.cpp`
+  - Switched to `AvatarLoaderFacade` direct load path.
+  - Added CLI option:
+    - `--xav2-unknown-section-policy=warn|ignore|fail`
+  - Added diagnostics output fields:
+    - `WarningCodes`
+    - `LastWarningCode`
+
+- `CMakeLists.txt`
+  - Updated `avatar_tool` link target from `nativecore` to `vsfclone_core`.
+
+- `docs/formats/xav2.md`
+  - Documented native unknown-section policy and `warning_codes[]`.
+
+- `README.md`
+  - Updated Unity/native XAV2 diagnostics section to include unknown-section policy + warning-code fields.
+
+### Verification
+
+- `cmake --build build --config Release --target avatar_tool`
+  - PASS
+- `.\build\Release\avatar_tool.exe .\build\tmp_vx\demo_mvp.xav2 --xav2-unknown-section-policy=warn`
+  - PASS
+
 ## 2026-03-03 - Host publish script hardening for restore/network-failure diagnostics
 
 ### Summary
