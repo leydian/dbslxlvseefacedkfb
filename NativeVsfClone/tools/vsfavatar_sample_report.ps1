@@ -5,6 +5,7 @@ param(
     [string]$OutputPath = ".\\build\\reports\\vsfavatar_probe.txt",
     [int]$MaxFiles = 20,
     [switch]$UseFixedSet,
+    [string]$HostTrackStatus = "BLOCKED_XAML_COMPILER",
     [string[]]$FixedSamples = @(
         "NewOnYou.vsfavatar",
         "Character vywjd.vsfavatar",
@@ -14,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$runStart = Get-Date
 
 if (-not (Test-Path $AvatarToolPath)) {
     throw "avatar_tool not found at $AvatarToolPath"
@@ -61,6 +63,7 @@ if ($files.Count -eq 0) {
 "SampleDir: $(Resolve-Path $SampleDir)" | Add-Content -Path $OutputPath
 "UseFixedSet: $UseFixedSet" | Add-Content -Path $OutputPath
 "FileCount: $($files.Count)" | Add-Content -Path $OutputPath
+"HostTrackStatus: $HostTrackStatus" | Add-Content -Path $OutputPath
 "" | Add-Content -Path $OutputPath
 
 $gateRows = @()
@@ -167,5 +170,9 @@ foreach ($r in $gateRows) {
 "GateC_ReadFailureHasOffsetModeSizeEvidence: $(if($gateC){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
 "GateD_AtLeastOneCompleteWithObjectTable: $(if($gateD){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
 "GateRows: $($gateRows.Count)" | Add-Content -Path $OutputPath
+"ParserTrack_DoD: $(if($gateA -and $gateB -and $gateC -and $gateD){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
+"HostTrack_DoD: $(if($HostTrackStatus -eq 'READY'){ 'PASS' } else { 'PENDING' })" | Add-Content -Path $OutputPath
+$elapsedSec = [Math]::Round(((Get-Date) - $runStart).TotalSeconds, 3)
+"RunDurationSec: $elapsedSec" | Add-Content -Path $OutputPath
 
 Write-Host "Report written: $OutputPath"

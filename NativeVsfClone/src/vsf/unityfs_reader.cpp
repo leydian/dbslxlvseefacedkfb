@@ -1893,10 +1893,15 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         }
         return score;
     };
-    // Keep near offsets first, then expand to larger deltas for hard samples.
-    const std::array<std::int64_t, 27U> node_offset_deltas = {
-        0, 16, -16, 32, -32, 64, -64, 128, -128, 256, -256, 512, -512, 1024, -1024,
-        1536, -1536, 2048, -2048, 2560, -2560, 3072, -3072, 3584, -3584, 4096, -4096};
+    // Keep near offsets first. Use extended sweep only when candidate count is low.
+    const std::vector<std::int64_t> node_offset_deltas = (candidates.size() <= 8U)
+                                                              ? std::vector<std::int64_t> {
+                                                                    0, 16,  -16, 32,   -32,  64,   -64,
+                                                                    128, -128, 256,  -256, 512,  -512, 1024,
+                                                                    -1024, 1536, -1536, 2048, -2048, 2560,
+                                                                    -2560, 3072, -3072, 3584, -3584, 4096, -4096}
+                                                              : std::vector<std::int64_t> {
+                                                                    0, 16, -16, 32, -32, 64, -64, 128, -128, 256, -256};
     std::unordered_set<std::uint64_t> tried_ranges;
     tried_ranges.reserve(candidates.size() * node_offset_deltas.size());
     const std::uint64_t kMinParseWindow = 512U * 1024U;

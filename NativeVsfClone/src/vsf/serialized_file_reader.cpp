@@ -423,8 +423,8 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
         return big;
     }
 
-    auto LooksLikeHeaderAt = [&](std::size_t at) -> bool {
-        if (at + 20U > bytes.size()) {
+    auto LooksLikeHeaderAt = [&](std::size_t at, std::uint32_t* out_metadata_size, std::uint32_t* out_version) -> bool {
+        if (at + 20U > bytes.size() || out_metadata_size == nullptr || out_version == nullptr) {
             return false;
         }
         const auto metadata_size_be = ReadU32(bytes, at, Endian::Big);
@@ -435,6 +435,8 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
         if (version_be == 0U || version_be > 40U) {
             return false;
         }
+        *out_metadata_size = metadata_size_be;
+        *out_version = version_be;
         return true;
     };
     auto TryOffsetScan = [&](Endian metadata_endian, SerializedFileSummary* out_best) -> bool {
@@ -444,14 +446,27 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
         bool found = false;
         std::uint32_t best_objects = 0U;
         std::int32_t best_groups = std::numeric_limits<std::int32_t>::min();
-        const std::size_t scan_limit = std::min<std::size_t>(bytes.size(), 8U * 1024U * 1024U);
+        const bool large_window = bytes.size() > (1024U * 1024U);
+        const std::size_t scan_limit =
+            std::min<std::size_t>(bytes.size(), large_window ? (4U * 1024U * 1024U) : (8U * 1024U * 1024U));
+        const std::size_t scan_step = large_window ? 16U : 4U;
+        const std::size_t scan_hit_limit = large_window ? 96U : 512U;
         std::size_t scan_hits = 0U;
-        for (std::size_t at = 4U; at + 64U <= scan_limit && scan_hits < 2048U; at += 4U) {
-            if (!LooksLikeHeaderAt(at)) {
+        for (std::size_t at = scan_step; at + 64U <= scan_limit && scan_hits < scan_hit_limit; at += scan_step) {
+            std::uint32_t metadata_size = 0U;
+            std::uint32_t version = 0U;
+            if (!LooksLikeHeaderAt(at, &metadata_size, &version)) {
                 continue;
             }
             ++scan_hits;
-            std::vector<unsigned char> sliced(bytes.begin() + static_cast<std::ptrdiff_t>(at), bytes.end());
+            const std::size_t header_size = version >= 22U ? 48U : 20U;
+            const std::size_t needed_size = header_size + static_cast<std::size_t>(metadata_size);
+            const auto remaining = static_cast<std::size_t>(bytes.size() - at);
+            const std::size_t sample_window =
+                std::min<std::size_t>(remaining, std::max<std::size_t>(needed_size, large_window ? (1U * 1024U * 1024U) : (2U * 1024U * 1024U)));
+            std::vector<unsigned char> sliced(
+                bytes.begin() + static_cast<std::ptrdiff_t>(at),
+                bytes.begin() + static_cast<std::ptrdiff_t>(at + sample_window));
             auto parsed = ParseWithMetadataEndian(sliced, metadata_endian);
             if (!parsed.ok) {
                 continue;

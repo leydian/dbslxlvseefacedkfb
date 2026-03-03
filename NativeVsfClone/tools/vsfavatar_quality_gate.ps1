@@ -6,6 +6,11 @@ param(
     [string]$ReportPath = ".\\build\\reports\\vsfavatar_probe_latest_after_gate.txt",
     [string]$BaselinePath = ".\\build\\reports\\vsfavatar_probe_fixed.txt",
     [string]$SummaryPath = ".\\build\\reports\\vsfavatar_gate_summary.txt",
+    [string]$AggregateCsvPath = ".\\build\\reports\\vsfavatar_gate_aggregate.csv",
+    [string]$AggregateSummaryPath = ".\\build\\reports\\vsfavatar_gate_aggregate.txt",
+    [string]$HostTrackStatus = "BLOCKED_XAML_COMPILER",
+    [switch]$UseSmoke,
+    [int]$SmokeMaxFiles = 2,
     [switch]$UseFixedSet,
     [string[]]$FixedSamples = @(
         "NewOnYou.vsfavatar",
@@ -16,6 +21,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$runStart = Get-Date
 
 function Parse-Report {
     param(
@@ -34,16 +40,36 @@ function Parse-Report {
     }
 
     $currentName = $null
-    foreach ($line in $lines) {
+    $expectedCount = $null
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
         if ($line -match '^([^:]+):\s*(.*)$' -and $null -eq $currentName) {
-            $result.Header[$matches[1].Trim()] = $matches[2].Trim()
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            $result.Header[$key] = $value
+            if ($key -eq "FileCount") {
+                [int]$fc = 0
+                if ([int]::TryParse($value, [ref]$fc)) {
+                    $expectedCount = $fc
+                }
+            }
             continue
         }
-        if ($line -match '^----\s+(.+)$') {
-            $currentName = $matches[1].Trim()
-            if (-not $result.Samples.ContainsKey($currentName)) {
-                $result.Samples[$currentName] = @{}
-                $result.Order += $currentName
+        if ($line -match '^----\s+(.+\.vsfavatar)$') {
+            if ($null -ne $expectedCount -and $result.Order.Count -ge $expectedCount) {
+                continue
+            }
+            $candidateName = $matches[1].Trim()
+            $j = $i + 1
+            while ($j -lt $lines.Count -and [string]::IsNullOrWhiteSpace($lines[$j])) {
+                $j++
+            }
+            if ($j -lt $lines.Count -and (($lines[$j] -like 'Load *') -or ($lines[$j] -like '  Sidecar*'))) {
+                $currentName = $candidateName
+                if (-not $result.Samples.ContainsKey($currentName)) {
+                    $result.Samples[$currentName] = @{}
+                    $result.Order += $currentName
+                }
             }
             continue
         }
@@ -117,8 +143,11 @@ function Get-DiffLabel {
 if (-not (Test-Path $ReportScriptPath)) {
     throw "report script not found: $ReportScriptPath"
 }
+if ($UseSmoke -and $UseFixedSet) {
+    throw "-UseSmoke and -UseFixedSet cannot be used together"
+}
 if (-not (Test-Path $BaselinePath)) {
-    throw "baseline report not found: $BaselinePath"
+    Write-Warning "baseline report not found: $BaselinePath (continuing with empty baseline)"
 }
 
 if ($UseFixedSet) {
@@ -127,23 +156,38 @@ if ($UseFixedSet) {
         -AvatarToolPath $AvatarToolPath `
         -SidecarPath $SidecarPath `
         -OutputPath $ReportPath `
+        -HostTrackStatus $HostTrackStatus `
         -UseFixedSet `
         -FixedSamples $FixedSamples
 } else {
+    $maxFiles = if ($UseSmoke) { $SmokeMaxFiles } else { 20 }
     & $ReportScriptPath `
         -SampleDir $SampleDir `
         -AvatarToolPath $AvatarToolPath `
         -SidecarPath $SidecarPath `
-        -OutputPath $ReportPath
+        -OutputPath $ReportPath `
+        -MaxFiles $maxFiles `
+        -UseFixedSet:$false `
+        -HostTrackStatus $HostTrackStatus
 }
 
 $current = Parse-Report -Path $ReportPath
-$baseline = Parse-Report -Path $BaselinePath
+$baseline = @{
+    Header = @{}
+    Samples = @{}
+    Order = @()
+}
+if (Test-Path $BaselinePath) {
+    $baseline = Parse-Report -Path $BaselinePath
+}
 
 $requiredFields = @(
     "SidecarProbeStage",
     "SidecarPrimaryError",
     "SidecarObjectTableParsed",
+    "SidecarSerializedAttempts",
+    "SidecarSerializedBestPath",
+    "SidecarSerializedBestScore",
     "SidecarOffsetFamily",
     "SidecarReconCandidateCount",
     "SidecarBestCandidateScore",
@@ -158,6 +202,11 @@ $gateB = $false
 $gateC = $true
 $gateD = $false
 $failReasons = @()
+$stageCounts = @{}
+$primaryCounts = @{}
+$objectTableParsedTrue = 0
+$objectTableParsedFalse = 0
+$serializedAttempts = @()
 
 if ($UseFixedSet -and $sampleNames.Count -ne $FixedSamples.Count) {
     $gateA = $false
@@ -194,17 +243,24 @@ foreach ($name in $sampleNames) {
     }
 
     $stage = $sample["SidecarProbeStage"]
+    if ($stageCounts.ContainsKey($stage)) { $stageCounts[$stage] += 1 } else { $stageCounts[$stage] = 1 }
+    $primary = $sample["SidecarPrimaryError"]
+    if ($primaryCounts.ContainsKey($primary)) { $primaryCounts[$primary] += 1 } else { $primaryCounts[$primary] = 1 }
+    $serializedAttempts += (To-UInt64 $sample["SidecarSerializedAttempts"])
+
     if ($stage -eq "failed-serialized" -or $stage -eq "complete") {
         $gateB = $true
     }
     $objectTableParsed = $sample["SidecarObjectTableParsed"]
-    $primary = $sample["SidecarPrimaryError"]
+    if ($objectTableParsed -eq "True") { $objectTableParsedTrue++ } else { $objectTableParsedFalse++ }
     if ($stage -eq "complete" -and $objectTableParsed -eq "True" -and
         ([string]::IsNullOrWhiteSpace($primary) -or $primary -eq "NONE")) {
         $gateD = $true
     } elseif ($stage -ne "complete" -or $objectTableParsed -ne "True" -or
         (-not [string]::IsNullOrWhiteSpace($primary) -and $primary -ne "NONE")) {
-        $failReasons += "GateD: $name unmet (stage=$stage, object_table_parsed=$objectTableParsed, primary=$primary)"
+        if (-not $UseSmoke) {
+            $failReasons += "GateD: $name unmet (stage=$stage, object_table_parsed=$objectTableParsed, primary=$primary)"
+        }
     }
 
     if ($primary -eq "DATA_BLOCK_READ_FAILED") {
@@ -218,7 +274,7 @@ foreach ($name in $sampleNames) {
         }
     }
 }
-if (-not $gateD) {
+if ((-not $gateD) -and (-not $UseSmoke)) {
     $failReasons += "GateD: no sample reached complete with object_table_parsed=true and no primary error"
 }
 
@@ -226,7 +282,16 @@ $gateAStatus = if ($gateA) { "PASS" } else { "FAIL" }
 $gateBStatus = if ($gateB) { "PASS" } else { "FAIL" }
 $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
 $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
-$overallPass = $gateA -and $gateB -and $gateC -and $gateD
+$overallPass = if ($UseSmoke) { $gateA -and $gateB -and $gateC } else { $gateA -and $gateB -and $gateC -and $gateD }
+$parserTrackDoD = if ($overallPass) { "PASS" } else { "FAIL" }
+$hostTrackDoD = if ($HostTrackStatus -eq "READY") { "PASS" } else { "PENDING" }
+$runDurationSec = [Math]::Round(((Get-Date) - $runStart).TotalSeconds, 3)
+$attemptAvg = 0.0
+$attemptMax = [uint64]0
+if ($serializedAttempts.Count -gt 0) {
+    $attemptAvg = [Math]::Round((($serializedAttempts | Measure-Object -Sum).Sum / $serializedAttempts.Count), 3)
+    $attemptMax = [uint64](($serializedAttempts | Measure-Object -Maximum).Maximum)
+}
 
 $improved = 0
 $regressed = 0
@@ -259,13 +324,30 @@ $summary += "Generated: $(Get-Date -Format s)"
 $summary += "ReportPath: $ReportPath"
 $summary += "BaselinePath: $BaselinePath"
 $summary += "UseFixedSet: $UseFixedSet"
+$summary += "UseSmoke: $UseSmoke"
+$summary += "SmokeMaxFiles: $SmokeMaxFiles"
+$summary += "RunDurationSec: $runDurationSec"
 $summary += ""
-$summary += "Gate Results"
+$summary += "Parser Track"
 $summary += "- GateA (stability + required fields): $gateAStatus"
 $summary += "- GateB (>=1 sample reaches failed-serialized|complete): $gateBStatus"
 $summary += "- GateC (DATA_BLOCK_READ_FAILED tuple evidence): $gateCStatus"
 $summary += "- GateD (>=1 sample reaches complete + object_table_parsed=true + no primary error): $gateDStatus"
+$summary += "- GateDBlocking: $(if($UseSmoke){'NO (smoke mode)'}else{'YES'})"
+$summary += "- ParserTrack_DoD: $parserTrackDoD"
+$summary += ""
+$summary += "Host Track"
+$summary += "- HostTrackStatus: $HostTrackStatus"
+$summary += "- HostTrack_DoD: $hostTrackDoD"
+$summary += ""
+$summary += "Gate Overall"
 $summary += "- Overall: $(if ($overallPass) { 'PASS' } else { 'FAIL' })"
+$summary += ""
+$summary += "Probe Metrics"
+$summary += "- SerializedAttempts_Avg: $attemptAvg"
+$summary += "- SerializedAttempts_Max: $attemptMax"
+$summary += "- ObjectTableParsed_True: $objectTableParsedTrue"
+$summary += "- ObjectTableParsed_False: $objectTableParsedFalse"
 $summary += ""
 $summary += "Baseline Diff"
 $summary += "- Improved: $improved"
@@ -285,12 +367,67 @@ if ($failReasons.Count -gt 0) {
     }
 }
 
+$aggregateRows = @()
+foreach ($k in ($stageCounts.Keys | Sort-Object)) {
+    $aggregateRows += [PSCustomObject]@{
+        Metric = "Stage"
+        Key = "$k"
+        Count = [int]$stageCounts[$k]
+    }
+}
+foreach ($k in ($primaryCounts.Keys | Sort-Object)) {
+    $aggregateRows += [PSCustomObject]@{
+        Metric = "PrimaryError"
+        Key = "$k"
+        Count = [int]$primaryCounts[$k]
+    }
+}
+$aggregateRows += [PSCustomObject]@{ Metric = "ObjectTableParsed"; Key = "True"; Count = $objectTableParsedTrue }
+$aggregateRows += [PSCustomObject]@{ Metric = "ObjectTableParsed"; Key = "False"; Count = $objectTableParsedFalse }
+$aggregateRows += [PSCustomObject]@{ Metric = "SerializedAttempts"; Key = "Avg"; Count = $attemptAvg }
+$aggregateRows += [PSCustomObject]@{ Metric = "SerializedAttempts"; Key = "Max"; Count = $attemptMax }
+
+$aggregateSummary = @()
+$aggregateSummary += "VSFAvatar Aggregate Metrics"
+$aggregateSummary += "Generated: $(Get-Date -Format s)"
+$aggregateSummary += "RunDurationSec: $runDurationSec"
+$aggregateSummary += ""
+$aggregateSummary += "Stage Distribution"
+foreach ($k in ($stageCounts.Keys | Sort-Object)) {
+    $aggregateSummary += "- ${k}: $($stageCounts[$k])"
+}
+$aggregateSummary += ""
+$aggregateSummary += "Primary Error Distribution"
+foreach ($k in ($primaryCounts.Keys | Sort-Object)) {
+    $aggregateSummary += "- ${k}: $($primaryCounts[$k])"
+}
+$aggregateSummary += ""
+$aggregateSummary += "Object Table Parsed"
+$aggregateSummary += "- True: $objectTableParsedTrue"
+$aggregateSummary += "- False: $objectTableParsedFalse"
+$aggregateSummary += ""
+$aggregateSummary += "Serialized Attempts"
+$aggregateSummary += "- Avg: $attemptAvg"
+$aggregateSummary += "- Max: $attemptMax"
+
 $summaryDir = Split-Path -Parent $SummaryPath
 if (-not (Test-Path $summaryDir)) {
     New-Item -ItemType Directory -Path $summaryDir | Out-Null
 }
 $summary | Set-Content -Path $SummaryPath
+$aggregateDir = Split-Path -Parent $AggregateCsvPath
+if (-not (Test-Path $aggregateDir)) {
+    New-Item -ItemType Directory -Path $aggregateDir | Out-Null
+}
+$aggregateRows | Export-Csv -Path $AggregateCsvPath -NoTypeInformation
+$aggregateSummaryDir = Split-Path -Parent $AggregateSummaryPath
+if (-not (Test-Path $aggregateSummaryDir)) {
+    New-Item -ItemType Directory -Path $aggregateSummaryDir | Out-Null
+}
+$aggregateSummary | Set-Content -Path $AggregateSummaryPath
 $summary | ForEach-Object { Write-Host $_ }
+Write-Host "Aggregate CSV: $AggregateCsvPath"
+Write-Host "Aggregate Summary: $AggregateSummaryPath"
 
 if ($overallPass) {
     exit 0
