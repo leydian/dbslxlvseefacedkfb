@@ -43,6 +43,7 @@ Entry point for `NativeVsfClone` documentation.
 - [vsfavatar_stage_lift_diff_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_stage_lift_diff_2026-03-03.md): VSFAvatar stage transition diff report
 - [vsfavatar_serialized_gateD_update_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_serialized_gateD_update_2026-03-03.md): VSFAvatar serialized candidate expansion + GateD strict update report
 - [vsfavatar_gateD_lzma_pass_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_gateD_lzma_pass_2026-03-03.md): VSFAvatar UnityFS LZMA decode integration + GateD pass report
+- [vsfavatar_serialized_bottleneck_followup_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_serialized_bottleneck_followup_2026-03-03.md): VSFAvatar serialized bottleneck follow-up with 4/4 fixed-set complete result
 
 ## Generated Reports
 

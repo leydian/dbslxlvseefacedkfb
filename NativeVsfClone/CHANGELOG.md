@@ -2,6 +2,57 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-03 - VSFAvatar serialized bottleneck follow-up (4/4 fixed samples complete)
+
+### Summary
+
+Completed a follow-up pass focused on the remaining serialized parsing bottleneck after the LZMA/reconstruction lift. The fixed 4-sample set now reaches `complete + object_table_parsed=true + primary_error_code=NONE` for all samples, while preserving gate stability.
+
+### Changed
+
+- `include/vsfclone/vsf/unityfs_reader.h`
+  - Added additive serialized diagnostics fields:
+    - `serialized_detail_error_code`
+    - `serialized_last_failure_offset`
+    - `serialized_last_failure_window_size`
+    - `serialized_last_failure_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded node-based serialized candidate attempts with wider offset deltas and low-candidate expansion windows.
+  - Increased minimum parse window for node candidates to reduce header/window miss cases.
+  - Added structured tracking for best serialized failure detail (code/offset/window).
+  - Added raw-scan failure detail mapping (`SF_NO_RAW_HEADER_CANDIDATE` / `SF_RAW_PARSE_FAILED`).
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added parse classification split for truncated metadata windows:
+    - `SF_METADATA_WINDOW_TRUNCATED`
+  - Tuned offset-scan behavior for large buffers:
+    - reduced scan limit / hit cap / window size
+    - larger step for large buffers to avoid runtime blow-up while preserving fallback recovery.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Emitted new optional serialized detail fields.
+  - Added `W_SERIALIZED_DETAIL` warning line for easier triage.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Consumed serialized detail fields as warnings only (no schema contract break).
+
+- `docs/reports/vsfavatar_serialized_bottleneck_followup_2026-03-03.md` (new)
+  - Added follow-up implementation + verification report.
+
+### Verification
+
+- `tools/vsfavatar_sample_report.ps1 -UseFixedSet:$true ...`
+  - `UseFixedSet=True`, `FileCount=4`, `GateRows=4`.
+  - All fixed samples reported `SidecarProbeStage=complete`, `SidecarObjectTableParsed=True`, `SidecarPrimaryError=NONE`.
+
+- `tools/vsfavatar_quality_gate.ps1 -UseFixedSet -ReportPath ./build/reports/vsfavatar_probe_latest_after_gate_new.txt`
+  - GateA/B/C/D: PASS
+  - Overall: PASS
+
+- `tools/vrm_quality_gate.ps1`
+  - Overall: PASS
+
 ## 2026-03-03 - VSFAvatar gate reporting split (parser/host) + aggregate diagnostics
 
 ### Summary
