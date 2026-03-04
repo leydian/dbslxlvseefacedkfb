@@ -116,12 +116,15 @@ function Write-WinUiDiagnosticManifest {
         [string]$ManifestPath,
         [string]$Reason,
         [string]$PublishError,
+        [string]$FailureClass,
+        [string]$FailureClassConfidence,
         [string]$DiagCommand,
         [int]$DiagExitCode,
         [string]$BinlogPath,
         [string]$DiagLogPath,
         [string]$DiagStderrPath,
         [string]$ObjDumpPath,
+        [hashtable]$Preflight,
         [hashtable]$EnvironmentSummary,
         [string]$ManagedDiagCommand,
         [int]$ManagedDiagExitCode,
@@ -134,6 +137,8 @@ function Write-WinUiDiagnosticManifest {
         generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
         reason = $Reason
         publish_error = $PublishError
+        failure_class = $FailureClass
+        failure_class_confidence = $FailureClassConfidence
         diagnostics_command = $DiagCommand
         diagnostics_exit_code = $DiagExitCode
         artifacts = [ordered]@{
@@ -147,6 +152,7 @@ function Write-WinUiDiagnosticManifest {
         managed_diagnostics_command = $ManagedDiagCommand
         managed_diagnostics_exit_code = $ManagedDiagExitCode
         root_cause_hints = $RootCauseHints
+        preflight = $Preflight
         environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
@@ -260,10 +266,97 @@ function Get-WinUiRootCauseHints {
     return $hints.ToArray()
 }
 
+function Test-WinUiToolchainPreconditions {
+    param(
+        [hashtable]$EnvironmentSummary
+    )
+
+    $failedChecks = [System.Collections.Generic.List[string]]::new()
+    $recommendedActions = [System.Collections.Generic.List[string]]::new()
+    $detectedSdks = @()
+
+    if ($null -ne $EnvironmentSummary -and $null -ne $EnvironmentSummary.dotnet_sdks) {
+        $detectedSdks = @($EnvironmentSummary.dotnet_sdks)
+    }
+
+    $hasNet8Sdk = $false
+    foreach ($sdk in $detectedSdks) {
+        if ("$sdk".StartsWith("8.")) {
+            $hasNet8Sdk = $true
+            break
+        }
+    }
+    if (-not $hasNet8Sdk) {
+        $failedChecks.Add("MISSING_DOTNET_8_SDK")
+        $recommendedActions.Add("Install .NET 8 SDK (8.x) and re-run publish.")
+    }
+
+    $hasVisualStudio = $false
+    if ($null -ne $EnvironmentSummary -and $null -ne $EnvironmentSummary.visual_studio) {
+        $vsEntries = @($EnvironmentSummary.visual_studio)
+        foreach ($entry in $vsEntries) {
+            if (-not [string]::IsNullOrWhiteSpace("$entry") -and "$entry" -notmatch "not found" -and "$entry" -notmatch "parse failed") {
+                $hasVisualStudio = $true
+                break
+            }
+        }
+    }
+    if (-not $hasVisualStudio) {
+        $failedChecks.Add("MISSING_VISUAL_STUDIO_DISCOVERY")
+        $recommendedActions.Add("Verify Visual Studio Build Tools 2022 with Windows app build components is installed.")
+    }
+
+    return [ordered]@{
+        passed = ($failedChecks.Count -eq 0)
+        failed_checks = $failedChecks.ToArray()
+        detected_sdks = $detectedSdks
+        recommended_actions = $recommendedActions.ToArray()
+    }
+}
+
+function Get-WinUiFailureClass {
+    param(
+        [string]$DiagLogPath,
+        [string]$ManagedDiagLogPath,
+        [hashtable]$Preflight
+    )
+
+    if ($null -ne $Preflight -and $null -ne $Preflight.passed -and -not [bool]$Preflight.passed) {
+        $checks = @($Preflight.failed_checks)
+        if ($checks -contains "MISSING_DOTNET_8_SDK") {
+            return [ordered]@{ Class = "TOOLCHAIN_MISSING_DOTNET8"; Confidence = "high" }
+        }
+        return [ordered]@{ Class = "TOOLCHAIN_PRECONDITION_FAILED"; Confidence = "high" }
+    }
+
+    if (Test-Path $DiagLogPath) {
+        if ((Select-String -Path $DiagLogPath -Pattern "NU1101" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet)) {
+            return [ordered]@{ Class = "NUGET_SOURCE_UNREACHABLE"; Confidence = "high" }
+        }
+        if ((Select-String -Path $DiagLogPath -Pattern "MSB3073" -SimpleMatch -Quiet) -and
+            (Select-String -Path $DiagLogPath -Pattern "XamlCompiler.exe" -SimpleMatch -Quiet)) {
+            return [ordered]@{ Class = "XAML_COMPILER_EXEC_FAIL"; Confidence = "high" }
+        }
+    }
+
+    if (Test-Path $ManagedDiagLogPath) {
+        if (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet) {
+            return [ordered]@{ Class = "MANAGED_XAML_TASK_MISSING_DEP"; Confidence = "high" }
+        }
+        if (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet) {
+            return [ordered]@{ Class = "XAML_COMPILER_EXEC_FAIL"; Confidence = "medium" }
+        }
+    }
+
+    return [ordered]@{ Class = "UNKNOWN"; Confidence = "low" }
+}
+
 function Collect-WinUiDiagnostics {
     param(
         [string]$Reason,
-        [string]$PublishError
+        [string]$PublishError,
+        [hashtable]$Preflight
     )
 
     New-Item -ItemType Directory -Force -Path $resolvedWinUiDiagDir | Out-Null
@@ -317,16 +410,20 @@ function Collect-WinUiDiagnostics {
 
     Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
     $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -EnvironmentSummary $envSummary
+    $failure = Get-WinUiFailureClass -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -Preflight $Preflight
     Write-WinUiDiagnosticManifest `
         -ManifestPath $manifestPath `
         -Reason $Reason `
         -PublishError $PublishError `
+        -FailureClass $failure.Class `
+        -FailureClassConfidence $failure.Confidence `
         -DiagCommand $diagCommandText `
         -DiagExitCode $diagExitCode `
         -BinlogPath $binlogPath `
         -DiagLogPath $diagLogPath `
         -DiagStderrPath $diagStderrPath `
         -ObjDumpPath $objDumpPath `
+        -Preflight $Preflight `
         -EnvironmentSummary $envSummary `
         -ManagedDiagCommand $managedDiagCommandText `
         -ManagedDiagExitCode $managedDiagExitCode `
@@ -347,6 +444,8 @@ function Collect-WinUiDiagnostics {
     foreach ($hint in $rootCauseHints) {
         $log.Add("WinUI root-cause hint: $hint")
     }
+    $log.Add("WinUI failure class: $($failure.Class)")
+    $log.Add("WinUI failure class confidence: $($failure.Confidence)")
     $log.Add("WinUI diagnostics manifest: $manifestPath")
     $log.Add("WinUI diagnostics binlog: $binlogPath")
     $log.Add("WinUI diagnostics diag log: $diagLogPath")
@@ -394,6 +493,31 @@ try {
 }
 
 if ($IncludeWinUi) {
+    $envSummaryForPreflight = Get-WinUiEnvironmentSummary
+    $winUiPreflight = Test-WinUiToolchainPreconditions -EnvironmentSummary $envSummaryForPreflight
+    if (-not [bool]$winUiPreflight.passed) {
+        $preflightError = "WinUI toolchain preflight failed: $($winUiPreflight.failed_checks -join ', ')"
+        $log.Add("WinUI preflight: FAIL")
+        foreach ($check in $winUiPreflight.failed_checks) {
+            $log.Add("WinUI preflight failed check: $check")
+        }
+        foreach ($action in $winUiPreflight.recommended_actions) {
+            $log.Add("WinUI preflight recommended action: $action")
+        }
+
+        if ($CollectWinUiDiagnostics) {
+            Write-Step "WinUI preflight failed; collecting diagnostics..."
+            Collect-WinUiDiagnostics -Reason "winui preflight failed" -PublishError $preflightError -Preflight $winUiPreflight
+            Write-Step "WinUI diagnostics saved under: $resolvedWinUiDiagDir"
+        } else {
+            $log.Add("WinUI diagnostics: skipped (CollectWinUiDiagnostics=false)")
+        }
+
+        $log | Set-Content -Path $logPath -Encoding UTF8
+        throw $preflightError
+    }
+
+    $log.Add("WinUI preflight: PASS")
     try {
         Write-Step "Publishing WinUI host to dist/winui..."
         $winUiPublishArgs = @(
@@ -426,7 +550,7 @@ if ($IncludeWinUi) {
 
         if ($CollectWinUiDiagnostics) {
             Write-Step "WinUI publish failed; collecting diagnostics..."
-            Collect-WinUiDiagnostics -Reason "winui publish failed" -PublishError $publishErrorText
+            Collect-WinUiDiagnostics -Reason "winui publish failed" -PublishError $publishErrorText -Preflight $winUiPreflight
             Write-Step "WinUI diagnostics saved under: $resolvedWinUiDiagDir"
         } else {
             $log.Add("WinUI diagnostics: skipped (CollectWinUiDiagnostics=false)")

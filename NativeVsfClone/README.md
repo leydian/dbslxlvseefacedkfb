@@ -65,6 +65,8 @@ If `sidecar` mode fails to execute:
   - `docs/reports/ui_host_runtime_integration_2026-03-02.md`
 - Detailed operation-focused UI redesign report:
   - `docs/reports/ui_host_operation_redesign_2026-03-03.md`
+- Detailed host plan execution update report:
+  - `docs/reports/host_plan_execution_update_2026-03-04.md`
 - Detailed auto-quality pass report:
   - `docs/reports/ui_host_auto_quality_2026-03-03.md`
 - `vsfclone_cli` and `avatar_tool` print structured load diagnostics.
@@ -174,10 +176,13 @@ Notes:
 
 - Script auto-kills running `WpfHost`/`WinUiHost` before publish.
 - If `build/Release/nativecore.dll` is locked, script falls back to `build_hotfix` and copies the fallback DLL.
+- WinUI publish now enforces fail-fast preflight checks before publish starts:
+  - `.NET 8 SDK` presence from `dotnet --list-sdks`
+  - Visual Studio discovery snapshot (`vswhere`) availability
 - On WinUI publish failure, diagnostics are captured under `build/reports/winui`:
   - standard diag: `winui_build.binlog`, `winui_build_diag.log`, `winui_build_stderr.log`
   - managed XAML fallback diag: `winui_build_managed_diag.log`, `winui_build_managed_stderr.log`
-  - manifest with environment + root-cause hints: `winui_diagnostic_manifest.json`
+  - manifest with preflight + environment + root-cause hints + failure class: `winui_diagnostic_manifest.json`
   - root-cause hints include SDK precondition detection (for example: missing `8.x` SDK in `dotnet --list-sdks`)
 
 ## Unity XAV2 SDK scaffold
@@ -233,7 +238,7 @@ Gate rules:
 Track split:
 
 - Parser Track DoD: `GateA && GateB && GateC && GateD`
-- Host Track DoD: WinUI/XAML runtime parity path ready (`HostTrackStatus=READY`)
+- Host Track DoD: `HostTrackStatus=PASS` (auto-resolved from host publish report and WinUI diagnostic manifest by default)
 
 Exit code:
 

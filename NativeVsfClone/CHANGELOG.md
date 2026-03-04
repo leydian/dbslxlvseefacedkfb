@@ -2,6 +2,67 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-04 - WinUI preflight fail-fast + HostTrack auto-resolution + host/baseline CI integration
+
+### Summary
+
+Implemented the follow-up execution plan to reduce WinUI publish ambiguity and make HostTrack reporting/CI verification deterministic:
+
+- added WinUI toolchain preflight with fail-fast behavior
+- added normalized WinUI failure-class output in diagnostics manifest
+- switched VSFAvatar HostTrack from static default to evidence-based auto-resolution
+- integrated quality-baseline job into host publish workflow (`pull_request` + `push(main)`)
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added WinUI preflight checks before publish:
+    - `.NET 8 SDK` presence
+    - Visual Studio discovery availability
+  - Added fail-fast behavior for preflight failures with diagnostics capture.
+  - Added normalized failure classification and confidence:
+    - `TOOLCHAIN_MISSING_DOTNET8`
+    - `TOOLCHAIN_PRECONDITION_FAILED`
+    - `NUGET_SOURCE_UNREACHABLE`
+    - `MANAGED_XAML_TASK_MISSING_DEP`
+    - `XAML_COMPILER_EXEC_FAIL`
+    - `UNKNOWN`
+  - Extended WinUI diagnostic manifest fields:
+    - `failure_class`
+    - `failure_class_confidence`
+    - `preflight` (`passed`, `failed_checks`, `detected_sdks`, `recommended_actions`)
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Changed default `HostTrackStatus` from static blocker to `AUTO`.
+  - Added host evidence inputs:
+    - `HostPublishReportPath`
+    - `WinUiDiagnosticManifestPath`
+  - Added auto-resolution logic for host track status/reason/evidence path.
+  - Updated HostTrack DoD contract:
+    - `PASS` only when resolved status is `PASS`.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added host metadata fields to report header:
+    - `HostTrackStatusReason`
+    - `HostTrackEvidencePath`
+  - Updated HostTrack DoD line to align with `HostTrackStatus=PASS` contract.
+
+- `.github/workflows/host-publish.yml`
+  - Added `quality-baseline` job (`tools/run_quality_baseline.ps1`).
+  - Set `publish-hosts` to depend on baseline job.
+  - Expanded path triggers to include baseline/gate scripts.
+  - Added baseline artifact upload bundle.
+
+- `docs/reports/host_runtime_parity_smoke_checklist_2026-03-04.md` (new)
+  - Added post-publish WPF/WinUI runtime parity smoke checklist and result template.
+
+- `README.md`
+  - Updated WinUI publish notes for preflight fail-fast + enriched manifest schema.
+  - Updated VSFAvatar HostTrack DoD wording to `HostTrackStatus=PASS`.
+
+- `docs/INDEX.md`
+  - Added link to `host_runtime_parity_smoke_checklist_2026-03-04.md`.
+
 ## 2026-03-04 - Host publish diagnostics hardening + gate baseline re-validation
 
 ### Summary

@@ -8,7 +8,9 @@ param(
     [string]$SummaryPath = ".\\build\\reports\\vsfavatar_gate_summary.txt",
     [string]$AggregateCsvPath = ".\\build\\reports\\vsfavatar_gate_aggregate.csv",
     [string]$AggregateSummaryPath = ".\\build\\reports\\vsfavatar_gate_aggregate.txt",
-    [string]$HostTrackStatus = "BLOCKED_XAML_COMPILER",
+    [string]$HostTrackStatus = "AUTO",
+    [string]$HostPublishReportPath = ".\\build\\reports\\host_publish_latest.txt",
+    [string]$WinUiDiagnosticManifestPath = ".\\build\\reports\\winui\\winui_diagnostic_manifest.json",
     [switch]$UseSmoke,
     [int]$SmokeMaxFiles = 2,
     [switch]$UseFixedSet,
@@ -140,6 +142,85 @@ function Get-DiffLabel {
     return "UNCHANGED"
 }
 
+function Resolve-HostTrackStatus {
+    param(
+        [string]$RequestedStatus,
+        [string]$PublishReportPath,
+        [string]$DiagnosticManifestPath
+    )
+
+    $resolved = [ordered]@{
+        Status = "UNKNOWN"
+        Reason = "Host status not resolved."
+        EvidencePath = ""
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedStatus) -and $RequestedStatus -ne "AUTO") {
+        $resolved.Status = $RequestedStatus
+        $resolved.Reason = "Explicit HostTrackStatus override was provided."
+        return $resolved
+    }
+
+    $hasWpfExe = Test-Path ".\dist\wpf\WpfHost.exe"
+    $hasWinUiExe = Test-Path ".\dist\winui\WinUiHost.exe"
+    if ($hasWpfExe -and $hasWinUiExe) {
+        $resolved.Status = "PASS"
+        $resolved.Reason = "WPF/WinUI publish outputs detected."
+        $resolved.EvidencePath = ".\dist"
+        return $resolved
+    }
+
+    if (Test-Path $DiagnosticManifestPath) {
+        try {
+            $manifest = Get-Content -Raw -Path $DiagnosticManifestPath | ConvertFrom-Json
+            $failureClass = "$($manifest.failure_class)"
+            $resolved.EvidencePath = $DiagnosticManifestPath
+            switch ($failureClass) {
+                "TOOLCHAIN_MISSING_DOTNET8" { $resolved.Status = "BLOCKED_TOOLCHAIN_MISSING_DOTNET8" }
+                "TOOLCHAIN_PRECONDITION_FAILED" { $resolved.Status = "BLOCKED_TOOLCHAIN_PRECONDITION" }
+                "NUGET_SOURCE_UNREACHABLE" { $resolved.Status = "BLOCKED_NUGET_SOURCE" }
+                "MANAGED_XAML_TASK_MISSING_DEP" { $resolved.Status = "BLOCKED_MANAGED_XAML_DEPENDENCY" }
+                "XAML_COMPILER_EXEC_FAIL" { $resolved.Status = "BLOCKED_XAML_COMPILER" }
+                default { $resolved.Status = "FAIL" }
+            }
+            $resolved.Reason = "Resolved from winui diagnostics manifest failure_class=$failureClass."
+            return $resolved
+        } catch {
+            $resolved.Status = "FAIL"
+            $resolved.Reason = "Failed to parse WinUI diagnostics manifest."
+            $resolved.EvidencePath = $DiagnosticManifestPath
+            return $resolved
+        }
+    }
+
+    if (Test-Path $PublishReportPath) {
+        $reportLines = Get-Content -Path $PublishReportPath
+        $resolved.EvidencePath = $PublishReportPath
+        $wpfPass = ($reportLines | Select-String -Pattern "WPF exe:" -SimpleMatch -Quiet)
+        $winUiPass = ($reportLines | Select-String -Pattern "WinUI exe:" -SimpleMatch -Quiet)
+        $winUiFailed = ($reportLines | Select-String -Pattern "WinUI publish: failed" -SimpleMatch -Quiet)
+
+        if ($wpfPass -and $winUiPass) {
+            $resolved.Status = "PASS"
+            $resolved.Reason = "WPF/WinUI publish entries found in host publish report."
+            return $resolved
+        }
+        if ($winUiFailed) {
+            $resolved.Status = "BLOCKED_XAML_COMPILER"
+            $resolved.Reason = "WinUI publish failure found in host publish report."
+            return $resolved
+        }
+
+        $resolved.Status = "UNKNOWN"
+        $resolved.Reason = "Host publish report found but no definitive WinUI outcome."
+        return $resolved
+    }
+
+    $resolved.Status = "UNKNOWN"
+    $resolved.Reason = "No host publish evidence found."
+    return $resolved
+}
+
 if (-not (Test-Path $ReportScriptPath)) {
     throw "report script not found: $ReportScriptPath"
 }
@@ -150,13 +231,23 @@ if (-not (Test-Path $BaselinePath)) {
     Write-Warning "baseline report not found: $BaselinePath (continuing with empty baseline)"
 }
 
+$hostTrack = Resolve-HostTrackStatus `
+    -RequestedStatus $HostTrackStatus `
+    -PublishReportPath $HostPublishReportPath `
+    -DiagnosticManifestPath $WinUiDiagnosticManifestPath
+$resolvedHostTrackStatus = $hostTrack.Status
+$resolvedHostTrackReason = $hostTrack.Reason
+$resolvedHostTrackEvidencePath = $hostTrack.EvidencePath
+
 if ($UseFixedSet) {
     & $ReportScriptPath `
         -SampleDir $SampleDir `
         -AvatarToolPath $AvatarToolPath `
         -SidecarPath $SidecarPath `
         -OutputPath $ReportPath `
-        -HostTrackStatus $HostTrackStatus `
+        -HostTrackStatus $resolvedHostTrackStatus `
+        -HostTrackStatusReason $resolvedHostTrackReason `
+        -HostTrackEvidencePath $resolvedHostTrackEvidencePath `
         -UseFixedSet `
         -FixedSamples $FixedSamples
 } else {
@@ -168,7 +259,9 @@ if ($UseFixedSet) {
         -OutputPath $ReportPath `
         -MaxFiles $maxFiles `
         -UseFixedSet:$false `
-        -HostTrackStatus $HostTrackStatus
+        -HostTrackStatus $resolvedHostTrackStatus `
+        -HostTrackStatusReason $resolvedHostTrackReason `
+        -HostTrackEvidencePath $resolvedHostTrackEvidencePath
 }
 
 $current = Parse-Report -Path $ReportPath
@@ -284,7 +377,7 @@ $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
 $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
 $overallPass = if ($UseSmoke) { $gateA -and $gateB -and $gateC } else { $gateA -and $gateB -and $gateC -and $gateD }
 $parserTrackDoD = if ($overallPass) { "PASS" } else { "FAIL" }
-$hostTrackDoD = if ($HostTrackStatus -eq "READY") { "PASS" } else { "PENDING" }
+$hostTrackDoD = if ($resolvedHostTrackStatus -eq "PASS") { "PASS" } else { "PENDING" }
 $runDurationSec = [Math]::Round(((Get-Date) - $runStart).TotalSeconds, 3)
 $attemptAvg = 0.0
 $attemptMax = [uint64]0
@@ -337,7 +430,9 @@ $summary += "- GateDBlocking: $(if($UseSmoke){'NO (smoke mode)'}else{'YES'})"
 $summary += "- ParserTrack_DoD: $parserTrackDoD"
 $summary += ""
 $summary += "Host Track"
-$summary += "- HostTrackStatus: $HostTrackStatus"
+$summary += "- HostTrackStatus: $resolvedHostTrackStatus"
+$summary += "- HostTrackStatusReason: $resolvedHostTrackReason"
+$summary += "- HostTrackEvidencePath: $resolvedHostTrackEvidencePath"
 $summary += "- HostTrack_DoD: $hostTrackDoD"
 $summary += ""
 $summary += "Gate Overall"
