@@ -18,10 +18,10 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - `tools/vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`: PASS (`GateA`..`GateH` PASS).
 - `tools/publish_hosts.ps1 -IncludeWinUi`:
   - WPF publish: PASS (`dist/wpf/WpfHost.exe` generated)
-  - WinUI publish: FAIL (blocked in preflight before publish)
+  - WinUI publish: FAIL (preflight passed, blocked at XAML compile stage)
   - diagnostics: `build/reports/winui/*` generated with root-cause hints + failure class
-  - preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
-  - current class: `TOOLCHAIN_PRECONDITION_FAILED`
+  - preflight: PASS
+  - current class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` (`WMC9999` observed)
 
 SDK pinning:
 

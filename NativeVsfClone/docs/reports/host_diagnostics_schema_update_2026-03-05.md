@@ -98,12 +98,12 @@ Observed results:
 
 ## Remaining Blocker
 
-Current environment still lacks Windows SDK metadata/facade requirements for WinUI net8 toolchain preflight:
+Initial blocker in this report phase was missing Windows SDK metadata/facade requirements for WinUI net8 preflight (`MISSING_WINDOWS_SDK_19041_METADATA`).
 
-- blocker code: `MISSING_WINDOWS_SDK_19041_METADATA`
-- host-track status: `BLOCKED_TOOLCHAIN_PRECONDITION`
+That preflight blocker was resolved later on the same date after SDK remediation. Current blocker moved forward to XAML compiler platform-unsupported path:
 
-Next unblock action is environment remediation for Windows SDK 10.0.19041 metadata components.
+- current failure class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- current host-track status: `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
 
 ## Re-validation Round (2026-03-05 02:35 KST)
 
@@ -130,4 +130,5 @@ Observed:
 Conclusion:
 
 - no behavioral regression after diagnostics/schema hardening changes
-- blocker remains environment/toolchain precondition, not parser or gate logic
+- preflight/toolchain metadata blocker was resolved
+- active blocker has shifted to post-preflight XAML compiler platform support path

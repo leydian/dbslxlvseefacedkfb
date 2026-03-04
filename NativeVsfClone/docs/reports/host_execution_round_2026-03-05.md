@@ -154,3 +154,30 @@ Executed another full validation pass after pushing diagnostics/schema hardening
   - `Overall: PASS`
 
 Result: blocker classification and HostTrack auto-resolution remained deterministic with no regression.
+
+## Follow-up Update (same date, Windows SDK 19041 remediation applied)
+
+Applied environment remediation for the preflight blocker and re-ran host/gate/baseline verification:
+
+- installed via winget:
+  - `Microsoft.WindowsSDK.10.0.19041`
+- metadata probe status:
+  - `UnionMetadata\10.0.19041.0\Facade\Windows.winmd`: detected
+
+Post-remediation execution result:
+
+- `dotnet --version`: `8.0.418`
+- `publish_hosts.ps1 -IncludeWinUi`:
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`MSB3073` / `XamlCompiler.exe`)
+  - diagnostics class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`:
+  - `HostTrackStatus=BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+- `run_quality_baseline.ps1`:
+  - `Overall: PASS`
+
+Outcome:
+
+- preflight blocker (`MISSING_WINDOWS_SDK_19041_METADATA`) is resolved in this environment
+- current remaining blocker shifted to XAML compiler platform-unsupported failure path

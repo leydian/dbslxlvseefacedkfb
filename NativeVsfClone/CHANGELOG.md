@@ -2,6 +2,43 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI preflight unblock confirmation (Windows SDK 19041 installed)
+
+### Summary
+
+Executed the host/gate/baseline plan again after installing Windows SDK `10.0.19041` to remove the preflight blocker and verify state transition behavior.
+
+- WinUI preflight transitioned from `FAIL` to `PASS`
+- WinUI publish now fails at XAML compile stage (post-preflight), not precondition stage
+- failure class transitioned from `TOOLCHAIN_PRECONDITION_FAILED` to `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- HostTrack auto-resolution transitioned to `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+- quality baseline remained `PASS`
+
+### Environment update
+
+- installed package:
+  - `Microsoft.WindowsSDK.10.0.19041` (winget)
+- metadata probe confirmation:
+  - `C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.19041.0\Facade\Windows.winmd` => present
+
+### Verification
+
+- `dotnet --version`
+  - `8.0.418`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe` / `MSB3073`)
+  - diagnostics class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
+
 ## 2026-03-05 - Host change rollup document update
 
 ### Summary

@@ -83,3 +83,25 @@ powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -Use
 Success condition:
 
 - preflight check `MISSING_WINDOWS_SDK_19041_METADATA` disappears and HostTrack transitions away from `BLOCKED_TOOLCHAIN_PRECONDITION`.
+
+## Update: Remediation Outcome (2026-03-05, same day)
+
+The planned environment remediation has now been executed:
+
+- installed `Microsoft.WindowsSDK.10.0.19041` via winget
+- metadata probe now detects:
+  - `C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.19041.0\Facade\Windows.winmd`
+
+Transition observed after rerun:
+
+- preflight state:
+  - `FAIL (MISSING_WINDOWS_SDK_19041_METADATA)` -> `PASS`
+- failure class:
+  - `TOOLCHAIN_PRECONDITION_FAILED` -> `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- HostTrack:
+  - `BLOCKED_TOOLCHAIN_PRECONDITION` -> `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+
+Current status:
+
+- the former precondition blocker is resolved
+- remaining blocker is WinUI XAML compile platform-unsupported path (`WMC9999` / `XamlCompiler.exe`)
