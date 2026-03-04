@@ -16,6 +16,9 @@ Entry point for `NativeVsfClone` documentation.
 ## Reports
 
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report
+- [ui_wpf_refresh_throttle_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_wpf_refresh_throttle_2026-03-05.md): WPF operation-flow relayout + 60Hz render / 10Hz UI refresh throttle update
+- [wpf_ui_smoke_and_perf_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md): WPF smoke/performance evidence status and closure gate
+- [winui_ui_refresh_followup_ticket_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/winui_ui_refresh_followup_ticket_2026-03-05.md): WinUI parity follow-up ticket for refresh-throttle model
 - [host_wpf_first_transition_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_wpf_first_transition_2026-03-05.md): WPF-first host policy transition, CI split, and latest verification snapshot
 - [host_change_rollup_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_change_rollup_2026-03-05.md): consolidated summary of diagnostics schema hardening, re-validation, and current WinUI blocker state
 - [host_diagnostics_schema_update_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_diagnostics_schema_update_2026-03-05.md): WinUI diagnostic manifest schema expansion (`preflight_probe`) and failure-class precedence update

@@ -2,6 +2,61 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WPF UI flow relayout + refresh throttle (60Hz render / 10Hz UI)
+
+### Summary
+
+Implemented a WPF-focused UI/performance pass that preserves render cadence while reducing UI-thread update churn.
+
+- render loop remains `~16ms` tick (`60Hz` target)
+- state/diagnostics UI refresh moved to `100ms` cadence (`10Hz`)
+- logs text re-materialization is now log-tab-aware
+- WPF host layout updated to an operation-first flow
+
+### Changed
+
+- `host/HostCore/HostUiState.cs`
+  - extended `DiagnosticsSnapshot` with:
+    - `SnapshotVersion`
+    - `LogVersion`
+
+- `host/HostCore/HostController.cs`
+  - added internal version counters:
+    - `_snapshotVersion` increments on diagnostics publication
+    - `_logVersion` increments on log enqueue
+  - snapshot builder now emits version signals for downstream throttled UI consumers
+
+- `host/WpfHost/MainWindow.xaml`
+  - added `Quick Actions` section with high-frequency operator actions
+  - reordered left control surface into:
+    - `1) Session`
+    - `2) Avatar`
+    - `3) Render`
+    - `4) Outputs`
+  - split render controls into `Basic` + `Advanced`
+  - wired diagnostics tab selection event for log-tab-aware updates
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - added `_uiRefreshTimer` (`100ms`) and dirty-flag update model
+  - decoupled immediate controller-event full refresh from render tick path
+  - added cached runtime/avatar/log text update paths with version checks
+  - logs textbox updates now occur only when logs tab is active (or forced)
+
+- `docs/reports/ui_wpf_refresh_throttle_2026-03-05.md` (new)
+  - implementation detail + validation report for this pass
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md` (new)
+  - smoke/performance evidence status and closure checklist
+
+- `docs/reports/winui_ui_refresh_followup_ticket_2026-03-05.md` (new)
+  - WinUI parity follow-up scope and DoD definition
+
+- `docs/INDEX.md`
+  - added report index entries for:
+    - `ui_wpf_refresh_throttle_2026-03-05.md`
+    - `wpf_ui_smoke_and_perf_2026-03-05.md`
+    - `winui_ui_refresh_followup_ticket_2026-03-05.md`
+
 ## 2026-03-05 - WPF-first transition detailed report publication
 
 ### Summary
