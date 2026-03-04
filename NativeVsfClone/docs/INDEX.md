@@ -16,6 +16,7 @@ Entry point for `NativeVsfClone` documentation.
 ## Reports
 
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report
+- [host_execution_round_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_execution_round_2026-03-05.md): baseline/host/gate re-run with SDK8 remediation and current WinUI blocker status
 - [host_gate_execution_round_2026-03-04.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_gate_execution_round_2026-03-04.md): gate re-validation + host publish execution round with WinUI blocker diagnostics hardening
 - [host_plan_execution_update_2026-03-04.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_plan_execution_update_2026-03-04.md): detailed implementation summary for preflight fail-fast, HostTrack auto-resolution, and CI integration
 - [host_runtime_parity_smoke_checklist_2026-03-04.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_runtime_parity_smoke_checklist_2026-03-04.md): post-publish WPF/WinUI manual runtime parity smoke checklist

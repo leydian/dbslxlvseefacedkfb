@@ -124,3 +124,16 @@ Operational verification should now run in order:
 1. `tools/run_quality_baseline.ps1`
 2. `tools/publish_hosts.ps1 -IncludeWinUi`
 3. If WinUI succeeds, execute manual parity smoke checklist
+
+## 2026-03-05 Execution Outcome
+
+The follow-up run was executed and recorded in:
+
+- `docs/reports/host_execution_round_2026-03-05.md`
+
+Outcome summary:
+
+- baseline: PASS
+- WinUI preflight `.NET 8 SDK` blocker: resolved
+- WinUI publish: still blocked (`XAML_COMPILER_EXEC_FAIL`)
+- HostTrack auto-resolution: validated (`BLOCKED_XAML_COMPILER` from manifest class)

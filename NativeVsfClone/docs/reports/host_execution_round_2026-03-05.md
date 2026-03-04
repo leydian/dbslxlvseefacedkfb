@@ -1,0 +1,100 @@
+# Host/Gate Execution Round Report (2026-03-05)
+
+## Summary
+
+Executed the implementation plan steps for baseline, host publish, and gate verification.
+
+Result:
+
+- quality baseline: PASS
+- host publish:
+  - WPF: PASS
+  - WinUI: FAIL
+- host track auto-resolution: working as intended (`BLOCKED_XAML_COMPILER`)
+
+## Executed Commands
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi
+powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet
+```
+
+Additional environment correction step:
+
+```powershell
+winget install --id Microsoft.DotNet.SDK.8 --silent --accept-package-agreements --accept-source-agreements
+dotnet --list-sdks
+```
+
+## Baseline Result
+
+- `tools/run_quality_baseline.ps1`: `Overall: PASS`
+- Report:
+  - `build/reports/quality_baseline_summary.txt`
+
+## WinUI Publish Tracking
+
+### Before SDK 8 install
+
+- preflight failed with:
+  - `MISSING_DOTNET_8_SDK`
+- classified as:
+  - `failure_class=TOOLCHAIN_MISSING_DOTNET8`
+
+### After SDK 8 install
+
+- `.NET SDK`: `8.0.418`, `9.0.311`
+- preflight: PASS
+- WinUI publish still failed on XAML compile path:
+  - `MSB3073` (`XamlCompiler.exe`)
+  - managed diagnostics: `WMC9999` (`Operation is not supported on this platform`)
+- classified as:
+  - `failure_class=XAML_COMPILER_EXEC_FAIL`
+
+Relevant artifacts:
+
+- `build/reports/host_publish_latest.txt`
+- `build/reports/winui/winui_diagnostic_manifest.json`
+- `build/reports/winui/winui_build_diag.log`
+- `build/reports/winui/winui_build_managed_diag.log`
+
+## HostTrack Re-Validation
+
+`tools/vsfavatar_quality_gate.ps1 -UseFixedSet` summary:
+
+- ParserTrack_DoD: `PASS`
+- HostTrackStatus: `BLOCKED_XAML_COMPILER`
+- HostTrackStatusReason:
+  - resolved from diagnostics manifest (`failure_class=XAML_COMPILER_EXEC_FAIL`)
+- HostTrackEvidencePath:
+  - `build/reports/winui/winui_diagnostic_manifest.json`
+
+This confirms HostTrack auto-resolution contract is functioning.
+
+## Changes Applied During This Round
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - upgraded `Microsoft.WindowsAppSDK`:
+    - `1.5.240802000` -> `1.8.260209005`
+
+## Documentation Updates
+
+- `README.md`
+  - latest validation snapshot date updated to `2026-03-05`
+  - WinUI status note expanded with preflight/failure-class progression
+- `CHANGELOG.md`
+  - added `2026-03-05` execution-round entry with command-level verification
+- `docs/INDEX.md`
+  - added this report entry for traceability
+- `docs/reports/host_plan_execution_update_2026-03-04.md`
+  - appended `2026-03-05` outcome section linking this run
+
+## Manual Parity Smoke Status
+
+Not executed.
+
+Reason:
+
+- parity smoke checklist requires WinUI publish success
+- WinUI publish remains blocked by XAML compiler failure path in this environment

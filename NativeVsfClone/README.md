@@ -11,7 +11,7 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - streaming and OSC runtime output path (`shared-memory frame sender`, `UDP OSC`)
 - host app skeletons (`host/WpfHost`, `host/WinUiHost`) via shared `host/HostCore`
 
-## Latest validation snapshot (2026-03-04)
+## Latest validation snapshot (2026-03-05)
 
 - `tools/vsfavatar_quality_gate.ps1 -UseFixedSet`: PASS (`GateA/B/C/D` PASS, fixed 4/4 complete).
 - `tools/vrm_quality_gate.ps1 -Profile fixed5`: PASS.
@@ -19,7 +19,9 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - `tools/publish_hosts.ps1 -IncludeWinUi`:
   - WPF publish: PASS (`dist/wpf/WpfHost.exe` generated)
   - WinUI publish: FAIL (`XamlCompiler.exe` exit code `1`)
-  - diagnostics: `build/reports/winui/*` generated with root-cause hints
+  - diagnostics: `build/reports/winui/*` generated with root-cause hints + failure class
+  - preflight: PASS (after installing `.NET 8 SDK`)
+  - current class: `XAML_COMPILER_EXEC_FAIL` (`MSB3073` + managed fallback `WMC9999`)
 
 ## VSFAvatar parser mode (current default)
 

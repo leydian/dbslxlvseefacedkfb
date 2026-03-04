@@ -2,6 +2,47 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI blocker execution round (SDK8 remediation + XAML failure-class confirmation)
+
+### Summary
+
+Executed the current host/gate plan sequence and captured updated blocker state:
+
+- quality baseline re-run: PASS
+- WinUI preflight blocker (`MISSING_DOTNET_8_SDK`) resolved by installing .NET 8 SDK
+- WinUI publish still fails at XAML compile stage, now consistently classified as `XAML_COMPILER_EXEC_FAIL`
+- HostTrack auto-resolution correctly maps diagnostics manifest class to `BLOCKED_XAML_COMPILER`
+
+### Changed
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - Upgraded `Microsoft.WindowsAppSDK`:
+    - `1.5.240802000` -> `1.8.260209005`
+
+- `docs/reports/host_execution_round_2026-03-05.md` (new)
+  - Added full execution record:
+    - baseline/gate commands and results
+    - SDK8 remediation step
+    - WinUI publish failure-class evidence (`MSB3073`, `WMC9999`)
+    - HostTrack auto-resolution verification
+
+- `docs/INDEX.md`
+  - Added link to `host_execution_round_2026-03-05.md`.
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI publish: FAIL
+  - diagnostics class: `XAML_COMPILER_EXEC_FAIL`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_XAML_COMPILER`
+
 ## 2026-03-04 - WinUI preflight fail-fast + HostTrack auto-resolution + host/baseline CI integration
 
 ### Summary
