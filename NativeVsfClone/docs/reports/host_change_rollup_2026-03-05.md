@@ -8,6 +8,35 @@ Coverage window:
 
 - `5fabc34` docs/schema hardening pass
 - `08b3fb8` post-push re-validation pass
+- `067d0dd` consolidated host rollup documentation pass
+- `ccaefc5` preflight-unblock and blocker-transition documentation pass
+
+## Commit-by-Commit Breakdown
+
+### `5fabc34` - diagnostics schema hardening
+
+- added `preflight_probe` evidence structure in WinUI manifest
+- kept legacy `preflight` contract for downstream compatibility
+- documented classification precedence and evidence model
+
+### `08b3fb8` - post-push re-validation
+
+- re-ran host/gate/baseline after schema hardening push
+- confirmed deterministic state under preflight-blocked environment
+- recorded `HostTrackStatus=BLOCKED_TOOLCHAIN_PRECONDITION`
+
+### `067d0dd` - consolidated rollup
+
+- introduced this rollup report as the single operator-oriented summary
+- linked rollup from docs index and changelog
+
+### `ccaefc5` - preflight unblock transition
+
+- installed Windows SDK `10.0.19041` and verified metadata probe success
+- confirmed WinUI state moved from preflight-blocked to XAML compile-blocked
+- updated docs to reflect new active blocker:
+  - `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `HostTrackStatus=BLOCKED_XAML_PLATFORM_UNSUPPORTED`
 
 ## What Changed
 
@@ -105,3 +134,26 @@ Current status:
 
 - the former precondition blocker is resolved
 - remaining blocker is WinUI XAML compile platform-unsupported path (`WMC9999` / `XamlCompiler.exe`)
+
+## Latest Verification Snapshot (2026-03-05, KST)
+
+Generated artifacts from latest run sequence:
+
+- host publish report time:
+  - `2026-03-05T03:09:45+09:00`
+- VSFAvatar gate summary time:
+  - `2026-03-05T03:31:56`
+- quality baseline summary time:
+  - `2026-03-05T03:32:52`
+
+Observed final state:
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe`, managed `WMC9999`)
+  - class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `HostTrackStatus=BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+- `run_quality_baseline.ps1`
+  - `Overall: PASS`

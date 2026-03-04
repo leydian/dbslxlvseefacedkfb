@@ -2,6 +2,22 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Host rollup detail refresh (commit breakdown + latest snapshot)
+
+### Summary
+
+Expanded the consolidated host rollup document with commit-by-commit detail and latest verified runtime snapshot timestamps so operators can map current status directly to recent commits and artifacts.
+
+### Changed
+
+- `docs/reports/host_change_rollup_2026-03-05.md`
+  - added detailed breakdown for:
+    - `5fabc34`
+    - `08b3fb8`
+    - `067d0dd`
+    - `ccaefc5`
+  - added latest verification snapshot section with artifact generation times and final state summary (`preflight=PASS`, `failure_class=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
+
 ## 2026-03-05 - WinUI preflight unblock confirmation (Windows SDK 19041 installed)
 
 ### Summary
