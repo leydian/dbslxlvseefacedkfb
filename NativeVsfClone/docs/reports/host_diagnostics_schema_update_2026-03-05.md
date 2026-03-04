@@ -104,3 +104,30 @@ Current environment still lacks Windows SDK metadata/facade requirements for Win
 - host-track status: `BLOCKED_TOOLCHAIN_PRECONDITION`
 
 Next unblock action is environment remediation for Windows SDK 10.0.19041 metadata components.
+
+## Re-validation Round (2026-03-05 02:35 KST)
+
+Re-ran the full planned verification sequence after upstream push to confirm the contract remains stable in the same environment.
+
+Executed:
+
+```powershell
+dotnet --version
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi
+powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet
+powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1
+```
+
+Observed:
+
+- `dotnet --version`: `8.0.418`
+- WPF publish: PASS
+- WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+- diagnostics manifest class: `TOOLCHAIN_PRECONDITION_FAILED`
+- HostTrackStatus: `BLOCKED_TOOLCHAIN_PRECONDITION`
+- quality baseline summary: `Overall: PASS`
+
+Conclusion:
+
+- no behavioral regression after diagnostics/schema hardening changes
+- blocker remains environment/toolchain precondition, not parser or gate logic

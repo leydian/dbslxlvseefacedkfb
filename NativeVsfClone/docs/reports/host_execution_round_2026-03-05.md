@@ -138,3 +138,19 @@ Verification in this environment:
   - manifest contains `preflight_probe.checks[*]` with checked Windows SDK metadata paths
 - `vsfavatar_quality_gate.ps1 -UseFixedSet`:
   - `HostTrackStatus=BLOCKED_TOOLCHAIN_PRECONDITION` (resolved from manifest class)
+
+## Follow-up Update (same date, re-validation after push)
+
+Executed another full validation pass after pushing diagnostics/schema hardening commits to verify stability:
+
+- `dotnet --version`: `8.0.418`
+- `publish_hosts.ps1 -IncludeWinUi`:
+  - WPF: PASS
+  - WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - failure class: `TOOLCHAIN_PRECONDITION_FAILED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`:
+  - `HostTrackStatus=BLOCKED_TOOLCHAIN_PRECONDITION`
+- `run_quality_baseline.ps1`:
+  - `Overall: PASS`
+
+Result: blocker classification and HostTrack auto-resolution remained deterministic with no regression.
