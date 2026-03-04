@@ -11,6 +11,16 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - streaming and OSC runtime output path (`shared-memory frame sender`, `UDP OSC`)
 - host app skeletons (`host/WpfHost`, `host/WinUiHost`) via shared `host/HostCore`
 
+## Latest validation snapshot (2026-03-04)
+
+- `tools/vsfavatar_quality_gate.ps1 -UseFixedSet`: PASS (`GateA/B/C/D` PASS, fixed 4/4 complete).
+- `tools/vrm_quality_gate.ps1 -Profile fixed5`: PASS.
+- `tools/vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`: PASS (`GateA`..`GateH` PASS).
+- `tools/publish_hosts.ps1 -IncludeWinUi`:
+  - WPF publish: PASS (`dist/wpf/WpfHost.exe` generated)
+  - WinUI publish: FAIL (`XamlCompiler.exe` exit code `1`)
+  - diagnostics: `build/reports/winui/*` generated with root-cause hints
+
 ## VSFAvatar parser mode (current default)
 
 `.vsfavatar` loading is now sidecar-first.
@@ -156,6 +166,10 @@ Notes:
 
 - Script auto-kills running `WpfHost`/`WinUiHost` before publish.
 - If `build/Release/nativecore.dll` is locked, script falls back to `build_hotfix` and copies the fallback DLL.
+- On WinUI publish failure, diagnostics are captured under `build/reports/winui`:
+  - standard diag: `winui_build.binlog`, `winui_build_diag.log`, `winui_build_stderr.log`
+  - managed XAML fallback diag: `winui_build_managed_diag.log`, `winui_build_managed_stderr.log`
+  - manifest with environment + root-cause hints: `winui_diagnostic_manifest.json`
 
 ## Unity XAV2 SDK scaffold
 

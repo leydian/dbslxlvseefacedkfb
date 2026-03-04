@@ -16,6 +16,7 @@ Entry point for `NativeVsfClone` documentation.
 ## Reports
 
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report
+- [host_gate_execution_round_2026-03-04.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_gate_execution_round_2026-03-04.md): gate re-validation + host publish execution round with WinUI blocker diagnostics hardening
 - [ui_host_operation_redesign_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_operation_redesign_2026-03-03.md): WPF/WinUI operation-focused host UI redesign and shared HostCore state controller report
 - [ui_host_auto_quality_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_auto_quality_2026-03-03.md): DPI-aware render sizing, resize debounce, and Spout auto-reconfigure quality pass report
 - [ui_host_validation_busy_and_winui_diag_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_validation_busy_and_winui_diag_2026-03-03.md): host input validation, busy-state gating, and WinUI diagnostic environment snapshot update

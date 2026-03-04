@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-03T01:41:54
+Generated: 2026-03-04T22:22:17
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -7,7 +7,6 @@ FileCount: 5
 
 ---- Kikyo_FT Variant(Clone).vrm
 Load succeeded
-  Handle: 1
   DisplayName: Kikyo_FT Variant(Clone)
   SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant(Clone).vrm
   Format: VRM
@@ -25,14 +24,13 @@ Load succeeded
   FormatDecodedSections: 0
   FormatUnknownSections: 0
   Warnings: 17
+  WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
-  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
   MissingFeatures: 2
   LastMissingFeature: SpringBone support
 
 ---- Kikyo_FT Variant.vrm
 Load succeeded
-  Handle: 1
   DisplayName: Kikyo_FT Variant
   SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant.vrm
   Format: VRM
@@ -50,14 +48,13 @@ Load succeeded
   FormatDecodedSections: 0
   FormatUnknownSections: 0
   Warnings: 20
+  WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
-  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
   MissingFeatures: 2
   LastMissingFeature: SpringBone support
 
 ---- Kikyo_FT Variant111.vrm
 Load succeeded
-  Handle: 1
   DisplayName: Kikyo_FT Variant111
   SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant111.vrm
   Format: VRM
@@ -75,14 +72,13 @@ Load succeeded
   FormatDecodedSections: 0
   FormatUnknownSections: 0
   Warnings: 20
+  WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
-  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
   MissingFeatures: 2
   LastMissingFeature: SpringBone support
 
 ---- Kikyo_FT Variant112.vrm
 Load succeeded
-  Handle: 1
   DisplayName: Kikyo_FT Variant112
   SourcePath: D:\dbslxlvseefacedkfb\sample\Kikyo_FT Variant112.vrm
   Format: VRM
@@ -100,14 +96,13 @@ Load succeeded
   FormatDecodedSections: 0
   FormatUnknownSections: 0
   Warnings: 20
+  WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
-  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
   MissingFeatures: 2
   LastMissingFeature: SpringBone support
 
 ---- NewOnYou.vrm
 Load succeeded
-  Handle: 1
   DisplayName: NewOnYou
   SourcePath: D:\dbslxlvseefacedkfb\sample\NewOnYou.vrm
   Format: VRM
@@ -125,8 +120,8 @@ Load succeeded
   FormatDecodedSections: 0
   FormatUnknownSections: 0
   Warnings: 14
+  WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
-  LastExpressionSummary: blink=0.000000, aa=0.000000, joy=0.000000
   MissingFeatures: 2
   LastMissingFeature: SpringBone support
 

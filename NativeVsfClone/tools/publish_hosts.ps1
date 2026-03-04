@@ -5,6 +5,7 @@ param(
     [switch]$IncludeWinUi,
     [switch]$NoRestore,
     [bool]$CollectWinUiDiagnostics = $true,
+    [bool]$CollectManagedXamlDiagnostics = $true,
     [string]$WinUiDiagDir = ".\build\reports\winui"
 )
 
@@ -69,6 +70,7 @@ $log.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $log.Add("IncludeWinUi: $IncludeWinUi")
 $log.Add("NoRestore: $NoRestore")
 $log.Add("CollectWinUiDiagnostics: $CollectWinUiDiagnostics")
+$log.Add("CollectManagedXamlDiagnostics: $CollectManagedXamlDiagnostics")
 $log.Add("WinUiDiagDir: $resolvedWinUiDiagDir")
 
 Assert-Command "cmake"
@@ -120,7 +122,12 @@ function Write-WinUiDiagnosticManifest {
         [string]$DiagLogPath,
         [string]$DiagStderrPath,
         [string]$ObjDumpPath,
-        [hashtable]$EnvironmentSummary
+        [hashtable]$EnvironmentSummary,
+        [string]$ManagedDiagCommand,
+        [int]$ManagedDiagExitCode,
+        [string]$ManagedDiagLogPath,
+        [string]$ManagedDiagStderrPath,
+        [string[]]$RootCauseHints
     )
 
     $manifest = [ordered]@{
@@ -134,7 +141,12 @@ function Write-WinUiDiagnosticManifest {
             diag_log = $DiagLogPath
             stderr_log = $DiagStderrPath
             obj_dump_dir = $ObjDumpPath
+            managed_diag_log = $ManagedDiagLogPath
+            managed_stderr_log = $ManagedDiagStderrPath
         }
+        managed_diagnostics_command = $ManagedDiagCommand
+        managed_diagnostics_exit_code = $ManagedDiagExitCode
+        root_cause_hints = $RootCauseHints
         environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
@@ -187,7 +199,7 @@ function Copy-WinUiObjDiagnostics {
     }
 
     $candidates = Get-ChildItem -Path $ObjRoot -Recurse -File | Where-Object {
-        $_.Name -ieq "output.json" -or $_.Extension -in @(".log", ".err", ".wrn")
+        $_.Name -ieq "output.json" -or $_.Name -ieq "input.json" -or $_.Extension -in @(".log", ".err", ".wrn")
     }
 
     foreach ($file in $candidates) {
@@ -197,6 +209,37 @@ function Copy-WinUiObjDiagnostics {
         New-Item -ItemType Directory -Force -Path $destDir | Out-Null
         Copy-Item -Path $file.FullName -Destination $dest -Force
     }
+}
+
+function Get-WinUiRootCauseHints {
+    param(
+        [string]$DiagLogPath,
+        [string]$ManagedDiagLogPath
+    )
+
+    $hints = [System.Collections.Generic.List[string]]::new()
+
+    if (Test-Path $DiagLogPath) {
+        if (Select-String -Path $DiagLogPath -Pattern "XamlCompiler.exe" -SimpleMatch -Quiet) {
+            $hints.Add("XamlCompiler.exe exit path observed (MSB3073).")
+        }
+        if (Select-String -Path $DiagLogPath -Pattern "NU1101" -SimpleMatch -Quiet) {
+            $hints.Add("NuGet package resolution failed (NU1101). Verify package source connectivity.")
+        }
+        if (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet) {
+            $hints.Add("NuGet source access failed (NU1301). Verify network/proxy and source config.")
+        }
+    }
+
+    if ((Test-Path $ManagedDiagLogPath) -and (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet)) {
+        $hints.Add("Managed XAML compiler task load failed: missing System.Security.Permissions assembly.")
+    }
+
+    if ($hints.Count -eq 0) {
+        $hints.Add("No explicit root-cause hint extracted from diagnostics logs.")
+    }
+
+    return $hints.ToArray()
 }
 
 function Collect-WinUiDiagnostics {
@@ -210,6 +253,8 @@ function Collect-WinUiDiagnostics {
     $binlogPath = Join-Path $resolvedWinUiDiagDir "winui_build.binlog"
     $diagLogPath = Join-Path $resolvedWinUiDiagDir "winui_build_diag.log"
     $diagStderrPath = Join-Path $resolvedWinUiDiagDir "winui_build_stderr.log"
+    $managedDiagLogPath = Join-Path $resolvedWinUiDiagDir "winui_build_managed_diag.log"
+    $managedDiagStderrPath = Join-Path $resolvedWinUiDiagDir "winui_build_managed_stderr.log"
     $manifestPath = Join-Path $resolvedWinUiDiagDir "winui_diagnostic_manifest.json"
     $objRoot = Join-Path $repoRoot "host\WinUiHost\obj"
     $objDumpPath = Join-Path $resolvedWinUiDiagDir "obj-dump"
@@ -233,7 +278,27 @@ function Collect-WinUiDiagnostics {
     & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
     $diagExitCode = $LASTEXITCODE
 
+    $managedDiagCommandText = ""
+    $managedDiagExitCode = -1
+    if ($CollectManagedXamlDiagnostics) {
+        $managedDiagArgs = @(
+            "build",
+            $winUiProject,
+            "-c", $Configuration,
+            "-p:Platform=x64",
+            "-v:m",
+            "-p:UseXamlCompilerExecutable=false"
+        )
+        if ($NoRestore) {
+            $managedDiagArgs += "--no-restore"
+        }
+        $managedDiagCommandText = "dotnet " + ($managedDiagArgs -join " ")
+        & dotnet @managedDiagArgs 1> $managedDiagLogPath 2> $managedDiagStderrPath
+        $managedDiagExitCode = $LASTEXITCODE
+    }
+
     Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
+    $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath
     Write-WinUiDiagnosticManifest `
         -ManifestPath $manifestPath `
         -Reason $Reason `
@@ -244,10 +309,26 @@ function Collect-WinUiDiagnostics {
         -DiagLogPath $diagLogPath `
         -DiagStderrPath $diagStderrPath `
         -ObjDumpPath $objDumpPath `
-        -EnvironmentSummary $envSummary
+        -EnvironmentSummary $envSummary `
+        -ManagedDiagCommand $managedDiagCommandText `
+        -ManagedDiagExitCode $managedDiagExitCode `
+        -ManagedDiagLogPath $managedDiagLogPath `
+        -ManagedDiagStderrPath $managedDiagStderrPath `
+        -RootCauseHints $rootCauseHints
 
     $log.Add("WinUI diagnostics command: $diagCommandText")
     $log.Add("WinUI diagnostics exit code: $diagExitCode")
+    if ($CollectManagedXamlDiagnostics) {
+        $log.Add("WinUI managed diagnostics command: $managedDiagCommandText")
+        $log.Add("WinUI managed diagnostics exit code: $managedDiagExitCode")
+        $log.Add("WinUI managed diagnostics log: $managedDiagLogPath")
+        $log.Add("WinUI managed diagnostics stderr log: $managedDiagStderrPath")
+    } else {
+        $log.Add("WinUI managed diagnostics: skipped (CollectManagedXamlDiagnostics=false)")
+    }
+    foreach ($hint in $rootCauseHints) {
+        $log.Add("WinUI root-cause hint: $hint")
+    }
     $log.Add("WinUI diagnostics manifest: $manifestPath")
     $log.Add("WinUI diagnostics binlog: $binlogPath")
     $log.Add("WinUI diagnostics diag log: $diagLogPath")

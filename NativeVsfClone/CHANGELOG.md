@@ -2,6 +2,60 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-04 - Host publish diagnostics hardening + gate baseline re-validation
+
+### Summary
+
+Executed the planned verification round after recent host/parser updates:
+
+- re-ran VSFAvatar/VRM/VXAvatar gates and re-confirmed PASS baseline
+- re-ran host publish path and confirmed `WPF=PASS`, `WinUI=FAIL`
+- hardened WinUI failure diagnostics in publish script to extract actionable root-cause hints
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added `CollectManagedXamlDiagnostics` option (default `true`).
+  - On WinUI publish failure, now runs an additional managed XAML diagnostic pass:
+    - `dotnet build ... -p:UseXamlCompilerExecutable=false`
+  - Added root-cause hint extraction from diagnostics logs:
+    - `XamlCompiler.exe` MSB3073 path detection
+    - `NU1101` / `NU1301` NuGet failure detection
+    - `System.Security.Permissions` missing assembly detection
+  - Extended diagnostic manifest with:
+    - managed diagnostic command/exit code
+    - managed diagnostic log paths
+    - extracted root-cause hints
+  - Expanded WinUI obj diagnostic dump to include `input.json` in addition to `output.json`/log files.
+
+- `README.md`
+  - Added latest validation snapshot (`2026-03-04`) with gate and publish status.
+  - Updated GUI publish notes with managed XAML diagnostic artifact paths.
+
+- `docs/reports/host_gate_execution_round_2026-03-04.md` (new)
+  - Added execution report for gate re-validation and host publish results.
+
+- `docs/INDEX.md`
+  - Added link to `host_gate_execution_round_2026-03-04.md`.
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - GateA/B/C/D: PASS
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5`
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - GateA..H: PASS
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe` exit code `1`)
+  - diagnostics captured under `build/reports/winui`
+
 ## 2026-03-03 - VSFAvatar serialized bottleneck follow-up (4/4 fixed samples complete)
 
 ### Summary
