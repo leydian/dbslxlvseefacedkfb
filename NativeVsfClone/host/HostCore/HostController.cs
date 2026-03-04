@@ -16,6 +16,8 @@ public sealed class HostController
     private readonly Queue<HostLogEntry> _logs = new();
     private RenderPresetStoreModel _presetStoreModel;
     private NcRenderQualityOptions _renderOptions;
+    private long _snapshotVersion;
+    private long _logVersion;
     private bool _windowAttached;
     private IntPtr _windowHandle = IntPtr.Zero;
 
@@ -481,6 +483,8 @@ public sealed class HostController
         var runtime = DiagnosticsModel.Capture();
         return new DiagnosticsSnapshot(
             DateTimeOffset.UtcNow,
+            _snapshotVersion,
+            _logVersion,
             SessionState,
             Outputs,
             RenderState,
@@ -491,6 +495,7 @@ public sealed class HostController
 
     private void PublishDiagnostics()
     {
+        _snapshotVersion++;
         LastSnapshot = BuildSnapshot();
         DiagnosticsUpdated?.Invoke(this, EventArgs.Empty);
     }
@@ -706,6 +711,7 @@ public sealed class HostController
 
     private void AddLog(HostLogEntry entry, bool raiseError)
     {
+        _logVersion++;
         _logs.Enqueue(entry);
         while (_logs.Count > MaxLogEntries)
         {

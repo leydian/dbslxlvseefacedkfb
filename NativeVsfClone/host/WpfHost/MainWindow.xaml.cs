@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HostCore;
@@ -14,11 +15,23 @@ public partial class MainWindow : Window
 {
     private readonly HostController _controller = new();
     private readonly DispatcherTimer _timer = new();
+    private readonly DispatcherTimer _uiRefreshTimer = new();
     private readonly DispatcherTimer _resizeTimer = new();
     private readonly DispatcherTimer _renderApplyTimer = new();
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private bool _isSyncingRenderUi;
     private bool _isSyncingPresetUi;
+    private bool _isLogsTabActive;
+    private bool _pendingUiStateRefresh;
+    private bool _pendingRuntimeRefresh;
+    private bool _pendingAvatarRefresh;
+    private bool _pendingLogsRefresh;
+    private long _lastRuntimeSnapshotVersion = -1;
+    private long _lastAvatarSnapshotVersion = -1;
+    private long _lastLogVersion = -1;
+    private string _lastRuntimeText = string.Empty;
+    private string _lastAvatarText = string.Empty;
+    private string _lastLogsText = string.Empty;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
 
     public MainWindow()
@@ -27,19 +40,29 @@ public partial class MainWindow : Window
         SourceInitialized += MainWindow_SourceInitialized;
         Closed += MainWindow_Closed;
         SizeChanged += MainWindow_SizeChanged;
+
         _timer.Interval = TimeSpan.FromMilliseconds(16.0);
         _timer.Tick += Timer_Tick;
+
+        _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(100.0);
+        _uiRefreshTimer.Tick += UiRefreshTimer_Tick;
+
         _resizeTimer.Interval = TimeSpan.FromMilliseconds(90.0);
         _resizeTimer.Tick += ResizeTimer_Tick;
+
         _renderApplyTimer.Interval = TimeSpan.FromMilliseconds(100.0);
         _renderApplyTimer.Tick += RenderApplyTimer_Tick;
 
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
+
+        _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         RefreshValidationState();
         SyncRenderControlsFromState();
-        RefreshAll();
+        MarkAllDirty(includeLogs: true);
+        ProcessPendingUpdates(force: true);
+        _uiRefreshTimer.Start();
     }
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
@@ -69,6 +92,7 @@ public partial class MainWindow : Window
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
         _timer.Stop();
+        _uiRefreshTimer.Stop();
         _resizeTimer.Stop();
         _renderApplyTimer.Stop();
         _ = _controller.Shutdown();
@@ -106,6 +130,9 @@ public partial class MainWindow : Window
                 _timer.Start();
             }
         }
+
+        MarkAllDirty(includeLogs: true);
+        ProcessPendingUpdates(force: true);
     }
 
     private void Shutdown_Click(object sender, RoutedEventArgs e)
@@ -122,6 +149,7 @@ public partial class MainWindow : Window
 
         _timer.Stop();
         _ = _controller.Shutdown();
+        MarkAllDirty(includeLogs: true);
     }
 
     private void BrowseAvatar_Click(object sender, RoutedEventArgs e)
@@ -139,7 +167,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void InputTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    private void InputTextChanged(object sender, TextChangedEventArgs e)
     {
         RefreshValidationState();
         UpdateUiState();
@@ -294,7 +322,7 @@ public partial class MainWindow : Window
         QueueRenderApply();
     }
 
-    private void CameraMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private void CameraMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ShouldSkipRenderInteraction())
         {
@@ -357,7 +385,7 @@ public partial class MainWindow : Window
         QueueRenderApply();
     }
 
-    private void BackgroundPreset_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    private void BackgroundPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ShouldSkipRenderInteraction())
         {
@@ -452,6 +480,21 @@ public partial class MainWindow : Window
         SyncPresetControlsFromState();
     }
 
+    private void DiagnosticsTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not TabControl tabControl)
+        {
+            return;
+        }
+
+        _isLogsTabActive = tabControl.SelectedIndex == 2;
+        if (_isLogsTabActive)
+        {
+            _pendingLogsRefresh = true;
+            ProcessPendingUpdates(force: false);
+        }
+    }
+
     private void RenderApplyTimer_Tick(object? sender, EventArgs e)
     {
         _renderApplyTimer.Stop();
@@ -462,6 +505,11 @@ public partial class MainWindow : Window
     {
         _renderApplyTimer.Stop();
         _renderApplyTimer.Start();
+    }
+
+    private void UiRefreshTimer_Tick(object? sender, EventArgs e)
+    {
+        ProcessPendingUpdates(force: false);
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -495,20 +543,45 @@ public partial class MainWindow : Window
         _ = _controller.ResizeWindow(metrics.pixelWidth, metrics.pixelHeight);
     }
 
-    private void Controller_StateChanged(object? sender, EventArgs e) => RefreshAll();
-    private void Controller_DiagnosticsUpdated(object? sender, EventArgs e) => RefreshAll();
+    private void Controller_StateChanged(object? sender, EventArgs e)
+    {
+        _pendingUiStateRefresh = true;
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = true;
+    }
+
+    private void Controller_DiagnosticsUpdated(object? sender, EventArgs e)
+    {
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = true;
+    }
 
     private void Controller_ErrorRaised(object? sender, HostLogEntry e)
     {
         ErrorStatusText.Text = $"{e.Source}: {e.ResultCode}";
+        _pendingLogsRefresh = true;
     }
 
-    private void RefreshAll()
+    private void MarkAllDirty(bool includeLogs)
     {
-        UpdateRenderMetricsFromHost();
-        RefreshValidationState();
-        UpdateUiState();
-        UpdateDiagnostics();
+        _pendingUiStateRefresh = true;
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = includeLogs;
+    }
+
+    private void ProcessPendingUpdates(bool force)
+    {
+        if (_pendingUiStateRefresh || force)
+        {
+            RefreshValidationState();
+            UpdateUiState();
+            _pendingUiStateRefresh = false;
+        }
+
+        UpdateDiagnostics(force);
     }
 
     private void UpdateUiState()
@@ -528,6 +601,7 @@ public partial class MainWindow : Window
         StopSpoutButton.IsEnabled = outputs.SpoutActive && !isBusy;
         StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive && !isBusy && _validationState.OscBindPortValid && _validationState.OscPublishAddressValid;
         StopOscButton.IsEnabled = outputs.OscActive && !isBusy;
+
         var renderControlsEnabled = session.IsInitialized && !isBusy;
         var manualCameraMode = CameraModeComboBox.SelectedIndex == 2 || _controller.RenderState.CameraMode == RenderCameraMode.Manual;
         BroadcastModeCheckBox.IsEnabled = renderControlsEnabled;
@@ -546,11 +620,17 @@ public partial class MainWindow : Window
         PresetNameTextBox.IsEnabled = renderControlsEnabled;
         PresetComboBox.IsEnabled = renderControlsEnabled;
 
-        SessionStatusText.Text = session.IsInitialized ? "Initialized" : "Stopped";
-        AvatarStatusText.Text = hasAvatar ? "Loaded" : "None";
+        var sessionText = session.IsInitialized ? "Initialized" : "Stopped";
+        var avatarText = hasAvatar ? "Loaded" : "None";
+        var outputsText = $"Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
+
+        SessionStatusText.Text = sessionText;
+        AvatarStatusText.Text = avatarText;
         RenderStatusText.Text = $"{session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
-        OutputStatusText.Text = $"Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
+        OutputStatusText.Text = outputsText;
         BusyStatusText.Text = isBusy ? operation.CurrentOperation : "Idle";
+        QuickStatusText.Text = $"Session={sessionText} | Avatar={avatarText} | Outputs={outputsText}";
+
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
     }
@@ -572,17 +652,65 @@ public partial class MainWindow : Window
         OscPublishValidationText.Text = _validationState.OscPublishAddressValid ? string.Empty : _validationState.OscPublishAddressError;
     }
 
-    private void UpdateDiagnostics()
+    private void UpdateDiagnostics(bool force)
     {
         var snapshot = _controller.LastSnapshot;
         var runtime = snapshot.Runtime;
-        var avatarInfo = snapshot.AvatarInfo;
 
         FrameStatusText.Text = $"{runtime.LastFrameMs:F2} ms";
         ErrorStatusText.Text = runtime.LastError;
 
+        var runtimeChanged = force || _pendingRuntimeRefresh || snapshot.SnapshotVersion != _lastRuntimeSnapshotVersion;
+        if (runtimeChanged)
+        {
+            var runtimeText = BuildRuntimeText(snapshot);
+            if (!string.Equals(runtimeText, _lastRuntimeText, StringComparison.Ordinal))
+            {
+                RuntimeDiagnosticsTextBox.Text = runtimeText;
+                DebugOverlayText.Text = runtimeText;
+                _lastRuntimeText = runtimeText;
+            }
+
+            DebugOverlayPanel.Visibility = snapshot.Render.ShowDebugOverlay ? Visibility.Visible : Visibility.Collapsed;
+            _lastRuntimeSnapshotVersion = snapshot.SnapshotVersion;
+            _pendingRuntimeRefresh = false;
+        }
+
+        var avatarChanged = force || _pendingAvatarRefresh || snapshot.SnapshotVersion != _lastAvatarSnapshotVersion;
+        if (avatarChanged)
+        {
+            var avatarText = BuildAvatarText(snapshot);
+            if (!string.Equals(avatarText, _lastAvatarText, StringComparison.Ordinal))
+            {
+                AvatarDiagnosticsTextBox.Text = avatarText;
+                _lastAvatarText = avatarText;
+            }
+
+            _lastAvatarSnapshotVersion = snapshot.SnapshotVersion;
+            _pendingAvatarRefresh = false;
+        }
+
+        if ((force || _isLogsTabActive) && (force || _pendingLogsRefresh || snapshot.LogVersion != _lastLogVersion))
+        {
+            var logsText = BuildLogsText();
+            if (!string.Equals(logsText, _lastLogsText, StringComparison.Ordinal))
+            {
+                LogsTextBox.Text = logsText;
+                _lastLogsText = logsText;
+            }
+
+            _lastLogVersion = snapshot.LogVersion;
+            _pendingLogsRefresh = false;
+        }
+    }
+
+    private string BuildRuntimeText(DiagnosticsSnapshot snapshot)
+    {
+        var runtime = snapshot.Runtime;
         var runtimeSb = new StringBuilder();
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
+        runtimeSb.AppendLine($"SnapshotVersion: {snapshot.SnapshotVersion}");
+        runtimeSb.AppendLine($"LogVersion: {snapshot.LogVersion}");
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
@@ -591,15 +719,16 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
-        RuntimeDiagnosticsTextBox.Text = runtimeSb.ToString();
-        DebugOverlayPanel.Visibility = snapshot.Render.ShowDebugOverlay ? Visibility.Visible : Visibility.Collapsed;
-        DebugOverlayText.Text = runtimeSb.ToString();
+        return runtimeSb.ToString();
+    }
 
+    private string BuildAvatarText(DiagnosticsSnapshot snapshot)
+    {
         var avatarSb = new StringBuilder();
         avatarSb.AppendLine($"AvatarHandle: {snapshot.Session.ActiveAvatarHandle?.ToString() ?? "none"}");
-        if (avatarInfo.HasValue)
+        if (snapshot.AvatarInfo.HasValue)
         {
-            var info = avatarInfo.Value;
+            var info = snapshot.AvatarInfo.Value;
             avatarSb.AppendLine($"DisplayName: {info.DisplayName}");
             avatarSb.AppendLine($"Format: {info.DetectedFormat}");
             avatarSb.AppendLine($"ParserStage: {info.ParserStage}");
@@ -613,14 +742,19 @@ public partial class MainWindow : Window
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
-        AvatarDiagnosticsTextBox.Text = avatarSb.ToString();
 
+        return avatarSb.ToString();
+    }
+
+    private string BuildLogsText()
+    {
         var logsSb = new StringBuilder();
         foreach (var log in _controller.LogEntries)
         {
             logsSb.AppendLine($"{log.TimestampUtc:HH:mm:ss.fff} [{log.Source}] {log.ResultCode} {log.Message}");
         }
-        LogsTextBox.Text = logsSb.ToString();
+
+        return logsSb.ToString();
     }
 
     private bool Confirm(string message)

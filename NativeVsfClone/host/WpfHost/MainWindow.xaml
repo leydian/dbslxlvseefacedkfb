@@ -2,27 +2,43 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WpfHost"
-        Title="VsfClone Host (WPF)" Height="820" Width="1380" MinHeight="760" MinWidth="1240">
+        Title="VsfClone Host (WPF)" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
     <Grid Margin="12">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="420" />
+            <ColumnDefinition Width="440" />
             <ColumnDefinition Width="12" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <GroupBox Header="Session" Margin="0,0,0,8">
+                <GroupBox Header="Quick Actions" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="Runtime lifecycle controls. Initialize before loading avatars." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
+                        <TextBlock Text="Use the core flow: Initialize -> Load -> Start outputs." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="InitializeButton" Content="Initialize" Click="Initialize_Click" Margin="0,0,8,8" MinWidth="94"/>
+                            <Button x:Name="LoadButton" Content="Load" Click="Load_Click" Margin="0,0,8,8" MinWidth="94"/>
+                            <Button x:Name="StartSpoutButton" Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,8" MinWidth="100"/>
+                            <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,8" MinWidth="100"/>
+                            <Button x:Name="ShutdownButton" Content="Shutdown" Click="Shutdown_Click" Margin="0,0,8,8" MinWidth="94"/>
+                        </WrapPanel>
+                        <Border Background="#EDF3FA" BorderBrush="#CAD8E8" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                            <TextBlock x:Name="QuickStatusText" Text="Session=Stopped | Avatar=None | Outputs=Off" TextWrapping="Wrap" Foreground="#243548" FontWeight="SemiBold"/>
+                        </Border>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="1) Session" Margin="0,0,0,8">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="Runtime lifecycle controls." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
                         <WrapPanel>
-                            <Button x:Name="InitializeButton" Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="92"/>
-                            <Button x:Name="ShutdownButton" Content="Shutdown" Click="Shutdown_Click" MinWidth="92"/>
+                            <Button Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button Content="Shutdown" Click="Shutdown_Click" MinWidth="92"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Header="Avatar" Margin="0,0,0,8">
+                <GroupBox Header="2) Avatar" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="Avatar file path" FontWeight="SemiBold"/>
                         <DockPanel Margin="0,4,0,8">
@@ -31,99 +47,109 @@
                         </DockPanel>
                         <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button x:Name="LoadButton" Content="Load" Click="Load_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button Content="Load" Click="Load_Click" Margin="0,0,8,0" MinWidth="92"/>
                             <Button x:Name="UnloadButton" Content="Unload" Click="Unload_Click" MinWidth="92"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Header="Render" Margin="0,0,0,8">
+                <GroupBox Header="3) Render" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <CheckBox x:Name="BroadcastModeCheckBox" Content="Broadcast Mode" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Camera" VerticalAlignment="Center"/>
-                            <ComboBox Grid.Column="1" x:Name="CameraModeComboBox" SelectionChanged="CameraMode_SelectionChanged">
-                                <ComboBoxItem Content="Auto Fit Full"/>
-                                <ComboBoxItem Content="Auto Fit Bust"/>
-                                <ComboBoxItem Content="Manual"/>
-                            </ComboBox>
-                        </Grid>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="50"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Framing" VerticalAlignment="Center"/>
-                            <Slider Grid.Column="1" x:Name="FramingSlider" Minimum="0.35" Maximum="0.95" Value="0.72" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="FramingSlider_ValueChanged"/>
-                            <TextBlock Grid.Column="2" x:Name="FramingValueText" Text="0.72" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="50"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Headroom" VerticalAlignment="Center"/>
-                            <Slider Grid.Column="1" x:Name="HeadroomSlider" Minimum="0.00" Maximum="0.50" Value="0.10" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="HeadroomSlider_ValueChanged"/>
-                            <TextBlock Grid.Column="2" x:Name="HeadroomValueText" Text="0.10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="50"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
-                            <Slider Grid.Column="1" x:Name="YawSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="YawSlider_ValueChanged"/>
-                            <TextBlock Grid.Column="2" x:Name="YawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="50"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="FOV" VerticalAlignment="Center"/>
-                            <Slider Grid.Column="1" x:Name="FovSlider" Minimum="20" Maximum="70" Value="35" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="FovSlider_ValueChanged"/>
-                            <TextBlock Grid.Column="2" x:Name="FovValueText" Text="35" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Background" VerticalAlignment="Center"/>
-                            <ComboBox Grid.Column="1" x:Name="BackgroundPresetComboBox" SelectionChanged="BackgroundPreset_SelectionChanged">
-                                <ComboBoxItem Content="Dark Blue"/>
-                                <ComboBoxItem Content="Neutral Gray"/>
-                                <ComboBoxItem Content="Green Screen"/>
-                            </ComboBox>
-                        </Grid>
-                        <CheckBox x:Name="MirrorModeCheckBox" Content="Mirror Mode" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
-                        <CheckBox x:Name="DebugOverlayCheckBox" Content="Show Debug Overlay" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
-                        <Separator Margin="0,10,0,10"/>
-                        <TextBlock Text="Presets" FontWeight="SemiBold"/>
-                        <DockPanel Margin="0,4,0,8">
-                            <Button x:Name="SavePresetButton" Content="Save" Width="74" Click="SavePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
-                            <TextBox x:Name="PresetNameTextBox" Text="My Preset"/>
-                        </DockPanel>
-                        <DockPanel Margin="0,0,0,8">
-                            <WrapPanel DockPanel.Dock="Right">
-                                <Button x:Name="ApplyPresetButton" Content="Apply" Width="74" Margin="8,0,0,0" Click="ApplyPreset_Click"/>
-                                <Button x:Name="DeletePresetButton" Content="Delete" Width="74" Margin="8,0,0,0" Click="DeletePreset_Click"/>
-                            </WrapPanel>
-                            <ComboBox x:Name="PresetComboBox"/>
-                        </DockPanel>
-                        <Button x:Name="ResetRenderButton" Content="Reset To Default" Width="132" Click="ResetRender_Click"/>
+                        <Border BorderBrush="#D7E0EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="Basic" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <CheckBox x:Name="BroadcastModeCheckBox" Content="Broadcast Mode" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Camera" VerticalAlignment="Center"/>
+                                    <ComboBox Grid.Column="1" x:Name="CameraModeComboBox" SelectionChanged="CameraMode_SelectionChanged">
+                                        <ComboBoxItem Content="Auto Fit Full"/>
+                                        <ComboBoxItem Content="Auto Fit Bust"/>
+                                        <ComboBoxItem Content="Manual"/>
+                                    </ComboBox>
+                                </Grid>
+                                <Grid Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Framing" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="FramingSlider" Minimum="0.35" Maximum="0.95" Value="0.72" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="FramingSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="FramingValueText" Text="0.72" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Expander Header="Advanced" IsExpanded="True">
+                            <StackPanel Margin="0,8,0,0">
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Headroom" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="HeadroomSlider" Minimum="0.00" Maximum="0.50" Value="0.10" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="HeadroomSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="HeadroomValueText" Text="0.10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="YawSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="YawSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="YawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="FOV" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="FovSlider" Minimum="20" Maximum="70" Value="35" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="FovSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="FovValueText" Text="35" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Background" VerticalAlignment="Center"/>
+                                    <ComboBox Grid.Column="1" x:Name="BackgroundPresetComboBox" SelectionChanged="BackgroundPreset_SelectionChanged">
+                                        <ComboBoxItem Content="Dark Blue"/>
+                                        <ComboBoxItem Content="Neutral Gray"/>
+                                        <ComboBoxItem Content="Green Screen"/>
+                                    </ComboBox>
+                                </Grid>
+                                <CheckBox x:Name="MirrorModeCheckBox" Content="Mirror Mode" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
+                                <CheckBox x:Name="DebugOverlayCheckBox" Content="Show Debug Overlay" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
+                                <Separator Margin="0,10,0,10"/>
+                                <TextBlock Text="Presets" FontWeight="SemiBold"/>
+                                <DockPanel Margin="0,4,0,8">
+                                    <Button x:Name="SavePresetButton" Content="Save" Width="74" Click="SavePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="PresetNameTextBox" Text="My Preset"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <WrapPanel DockPanel.Dock="Right">
+                                        <Button x:Name="ApplyPresetButton" Content="Apply" Width="74" Margin="8,0,0,0" Click="ApplyPreset_Click"/>
+                                        <Button x:Name="DeletePresetButton" Content="Delete" Width="74" Margin="8,0,0,0" Click="DeletePreset_Click"/>
+                                    </WrapPanel>
+                                    <ComboBox x:Name="PresetComboBox"/>
+                                </DockPanel>
+                                <Button x:Name="ResetRenderButton" Content="Reset To Default" Width="132" Click="ResetRender_Click"/>
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Header="Outputs">
+                <GroupBox Header="4) Outputs">
                     <StackPanel Margin="8">
                         <TextBlock Text="Spout" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
@@ -135,7 +161,7 @@
                             <TextBox Grid.Column="1" x:Name="SpoutChannelTextBox" Text="VsfClone"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <Button x:Name="StartSpoutButton" Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
                             <Button x:Name="StopSpoutButton" Content="Stop Spout" Click="StopSpout_Click" MinWidth="110"/>
                         </WrapPanel>
 
@@ -157,7 +183,7 @@
                         <TextBlock x:Name="OscBindValidationText" Foreground="#B03030" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <TextBlock x:Name="OscPublishValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
                             <Button x:Name="StopOscButton" Content="Stop OSC" Click="StopOsc_Click" MinWidth="110"/>
                         </WrapPanel>
                     </StackPanel>
@@ -183,7 +209,7 @@
                 </Border>
             </Grid>
 
-            <TabControl Grid.Row="1" Margin="0,8,0,8">
+            <TabControl x:Name="DiagnosticsTabControl" Grid.Row="1" Margin="0,8,0,8" SelectionChanged="DiagnosticsTabControl_SelectionChanged">
                 <TabItem Header="Runtime">
                     <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                 </TabItem>

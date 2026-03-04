@@ -51,6 +51,8 @@ public sealed record RenderUiState(
 
 public sealed record DiagnosticsSnapshot(
     DateTimeOffset TimestampUtc,
+    long SnapshotVersion,
+    long LogVersion,
     HostSessionState Session,
     OutputState Outputs,
     RenderUiState Render,
