@@ -148,6 +148,8 @@ Follow-up observation in this round:
 - managed fallback now surfaces explicit platform/internal marker:
   - `WMC9999: Operation is not supported on this platform`
 - blocker status remains unchanged (`WinUI publish FAIL`)
+- toolchain precondition check was added to publish diagnostics:
+  - root-cause hints now include whether `.NET 8 SDK` is absent from `dotnet --list-sdks`
 
 ## Manual Host Smoke Status
 

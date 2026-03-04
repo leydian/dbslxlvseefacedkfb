@@ -23,6 +23,7 @@ Executed the planned verification round after recent host/parser updates:
     - `NU1101` / `NU1301` NuGet failure detection
     - `System.Security.Permissions` missing assembly detection
     - `WMC9999` platform-unsupported/internal compiler error detection
+    - `.NET 8 SDK` precondition hint when only `9.x` SDK entries are detected
   - Extended diagnostic manifest with:
     - managed diagnostic command/exit code
     - managed diagnostic log paths

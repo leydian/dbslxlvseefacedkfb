@@ -214,7 +214,8 @@ function Copy-WinUiObjDiagnostics {
 function Get-WinUiRootCauseHints {
     param(
         [string]$DiagLogPath,
-        [string]$ManagedDiagLogPath
+        [string]$ManagedDiagLogPath,
+        [hashtable]$EnvironmentSummary
     )
 
     $hints = [System.Collections.Generic.List[string]]::new()
@@ -236,6 +237,20 @@ function Get-WinUiRootCauseHints {
     }
     if ((Test-Path $ManagedDiagLogPath) -and (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet)) {
         $hints.Add("Managed XAML compiler reported WMC9999 (platform unsupported/internal operation not supported).")
+    }
+    if ($null -ne $EnvironmentSummary -and $null -ne $EnvironmentSummary.dotnet_sdks) {
+        $sdkEntries = @($EnvironmentSummary.dotnet_sdks)
+        $hasNet8Sdk = $false
+        foreach ($sdk in $sdkEntries) {
+            $text = "$sdk"
+            if ($text.StartsWith("8.")) {
+                $hasNet8Sdk = $true
+                break
+            }
+        }
+        if (-not $hasNet8Sdk) {
+            $hints.Add(".NET 8 SDK was not detected in dotnet --list-sdks; WinUI net8.0 build may fail under SDK-only 9.x environments.")
+        }
     }
 
     if ($hints.Count -eq 0) {
@@ -301,7 +316,7 @@ function Collect-WinUiDiagnostics {
     }
 
     Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
-    $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath
+    $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -EnvironmentSummary $envSummary
     Write-WinUiDiagnosticManifest `
         -ManifestPath $manifestPath `
         -Reason $Reason `

@@ -144,6 +144,14 @@ Prerequisites:
 - Windows App SDK tooling (WinUI host publish)
 - `build/Release/nativecore.dll` available (native build)
 
+Quick preflight:
+
+```powershell
+dotnet --list-sdks
+```
+
+If only `9.x` SDKs are installed and no `8.x` SDK is present, WinUI `net8.0-windows` publish can fail in XAML compile stages on some environments.
+
 Run (WPF only default):
 
 ```powershell
@@ -170,6 +178,7 @@ Notes:
   - standard diag: `winui_build.binlog`, `winui_build_diag.log`, `winui_build_stderr.log`
   - managed XAML fallback diag: `winui_build_managed_diag.log`, `winui_build_managed_stderr.log`
   - manifest with environment + root-cause hints: `winui_diagnostic_manifest.json`
+  - root-cause hints include SDK precondition detection (for example: missing `8.x` SDK in `dotnet --list-sdks`)
 
 ## Unity XAV2 SDK scaffold
 
