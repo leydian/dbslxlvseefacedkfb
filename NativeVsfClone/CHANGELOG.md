@@ -2,6 +2,24 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WPF-first transition detailed report publication
+
+### Summary
+
+Published a dedicated transition report that documents the final WPF-first operating contract, CI split, and latest verification evidence after the policy switch implementation.
+
+### Changed
+
+- `docs/reports/host_wpf_first_transition_2026-03-05.md` (new)
+  - includes:
+    - rationale for WPF-first switch
+    - script/gate/CI contract changes
+    - latest artifact timestamps and verification outcomes
+    - operational impact and remaining WinUI recovery item
+
+- `docs/INDEX.md`
+  - added report index entry for `host_wpf_first_transition_2026-03-05.md`
+
 ## 2026-03-05 - WPF-first host policy transition (WinUI optional diagnostics track)
 
 ### Summary
