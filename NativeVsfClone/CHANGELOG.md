@@ -2,6 +2,24 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Host change rollup document update
+
+### Summary
+
+Added a consolidated operator-facing rollup that summarizes the latest diagnostics schema hardening and re-validation outcomes in one place.
+
+### Changed
+
+- `docs/reports/host_change_rollup_2026-03-05.md` (new)
+  - unified summary of:
+    - `preflight_probe` manifest expansion
+    - failure-class precedence hardening
+    - latest verified runtime status (`WPF=PASS`, `WinUI preflight blocked`)
+    - explicit unblock action and success condition
+
+- `docs/INDEX.md`
+  - added report index entry for the new rollup document
+
 ## 2026-03-05 - Host plan execution re-validation (post-push confirmation)
 
 ### Summary

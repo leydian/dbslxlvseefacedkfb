@@ -16,6 +16,7 @@ Entry point for `NativeVsfClone` documentation.
 ## Reports
 
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report
+- [host_change_rollup_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_change_rollup_2026-03-05.md): consolidated summary of diagnostics schema hardening, re-validation, and current WinUI blocker state
 - [host_diagnostics_schema_update_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_diagnostics_schema_update_2026-03-05.md): WinUI diagnostic manifest schema expansion (`preflight_probe`) and failure-class precedence update
 - [host_execution_round_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_execution_round_2026-03-05.md): baseline/host/gate re-run with SDK8 remediation and current WinUI blocker status
 - [host_gate_execution_round_2026-03-04.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/host_gate_execution_round_2026-03-04.md): gate re-validation + host publish execution round with WinUI blocker diagnostics hardening
