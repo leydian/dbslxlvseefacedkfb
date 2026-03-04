@@ -185,10 +185,13 @@ Notes:
 - WinUI publish now enforces fail-fast preflight checks before publish starts:
   - `.NET 8 SDK` presence from `dotnet --list-sdks`
   - Visual Studio discovery snapshot (`vswhere`) availability
+  - Windows SDK metadata/facade probe (`10.0.19041.0`)
 - On WinUI publish failure, diagnostics are captured under `build/reports/winui`:
   - standard diag: `winui_build.binlog`, `winui_build_diag.log`, `winui_build_stderr.log`
   - managed XAML fallback diag: `winui_build_managed_diag.log`, `winui_build_managed_stderr.log`
-  - manifest with preflight + environment + root-cause hints + failure class: `winui_diagnostic_manifest.json`
+  - manifest with failure class + root-cause hints + environment + preflight/probe evidence: `winui_diagnostic_manifest.json`
+    - `preflight` (legacy contract): `passed`, `failed_checks`, `detected_sdks`, `recommended_actions`
+    - `preflight_probe` (new): per-check evidence and inspected paths (`DOTNET_8_SDK`, `VISUAL_STUDIO_DISCOVERY`, `WINDOWS_SDK_19041_METADATA`)
   - root-cause hints include SDK precondition detection (for example: missing `8.x` SDK in `dotnet --list-sdks`)
 
 ## Unity XAV2 SDK scaffold

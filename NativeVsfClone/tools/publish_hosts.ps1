@@ -130,8 +130,19 @@ function Write-WinUiDiagnosticManifest {
         [int]$ManagedDiagExitCode,
         [string]$ManagedDiagLogPath,
         [string]$ManagedDiagStderrPath,
-        [string[]]$RootCauseHints
+        [string[]]$RootCauseHints,
+        [hashtable]$PreflightProbe
     )
+
+    $legacyPreflight = $Preflight
+    if ($null -ne $Preflight -and $Preflight.Contains("probe")) {
+        $legacyPreflight = [ordered]@{
+            passed = $Preflight.passed
+            failed_checks = $Preflight.failed_checks
+            detected_sdks = $Preflight.detected_sdks
+            recommended_actions = $Preflight.recommended_actions
+        }
+    }
 
     $manifest = [ordered]@{
         generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
@@ -152,7 +163,8 @@ function Write-WinUiDiagnosticManifest {
         managed_diagnostics_command = $ManagedDiagCommand
         managed_diagnostics_exit_code = $ManagedDiagExitCode
         root_cause_hints = $RootCauseHints
-        preflight = $Preflight
+        preflight = $legacyPreflight
+        preflight_probe = $PreflightProbe
         environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
@@ -181,7 +193,7 @@ function Get-WinUiEnvironmentSummary {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
         try {
-            $summary.visual_studio = (& $vswhere -all -products * -format json | ConvertFrom-Json | ForEach-Object {
+            $summary.visual_studio = @(& $vswhere -all -products * -format json | ConvertFrom-Json | ForEach-Object {
                 "$($_.displayName) $($_.catalog.productDisplayVersion)"
             })
         } catch {
@@ -306,8 +318,18 @@ function Test-WinUiToolchainPreconditions {
         $recommendedActions.Add("Verify Visual Studio Build Tools 2022 with Windows app build components is installed.")
     }
 
-    $windowsSdkFacade = "C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.19041.0\Facade\Windows.winmd"
-    if (-not (Test-Path $windowsSdkFacade)) {
+    $windowsSdkProbePaths = @(
+        "C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.19041.0\Facade\Windows.winmd",
+        "C:\Program Files (x86)\Windows Kits\10\References\10.0.19041.0\Windows.Foundation.FoundationContract\3.0.0.0\Windows.Foundation.FoundationContract.winmd"
+    )
+    $foundWindowsSdkMetadataPath = ""
+    foreach ($probePath in $windowsSdkProbePaths) {
+        if (Test-Path $probePath) {
+            $foundWindowsSdkMetadataPath = $probePath
+            break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($foundWindowsSdkMetadataPath)) {
         $failedChecks.Add("MISSING_WINDOWS_SDK_19041_METADATA")
         $recommendedActions.Add("Install Windows 10 SDK 10.0.19041.0 metadata/facade components for WinUI net8 targeting.")
     }
@@ -317,6 +339,26 @@ function Test-WinUiToolchainPreconditions {
         failed_checks = $failedChecks.ToArray()
         detected_sdks = $detectedSdks
         recommended_actions = $recommendedActions.ToArray()
+        probe = [ordered]@{
+            checks = @(
+                [ordered]@{
+                    check = "DOTNET_8_SDK"
+                    detected = $hasNet8Sdk
+                    evidence = $detectedSdks
+                },
+                [ordered]@{
+                    check = "VISUAL_STUDIO_DISCOVERY"
+                    detected = $hasVisualStudio
+                    evidence = if ($null -ne $EnvironmentSummary -and $null -ne $EnvironmentSummary.visual_studio) { @($EnvironmentSummary.visual_studio) } else { @() }
+                },
+                [ordered]@{
+                    check = "WINDOWS_SDK_19041_METADATA"
+                    detected = -not [string]::IsNullOrWhiteSpace($foundWindowsSdkMetadataPath)
+                    checked_paths = $windowsSdkProbePaths
+                    detected_path = $foundWindowsSdkMetadataPath
+                }
+            )
+        }
     }
 }
 
@@ -335,6 +377,20 @@ function Get-WinUiFailureClass {
         return [ordered]@{ Class = "TOOLCHAIN_PRECONDITION_FAILED"; Confidence = "high" }
     }
 
+    # Classification priority:
+    # 1) toolchain preconditions (handled above)
+    # 2) managed WMC9999 platform unsupported
+    # 3) diagnostics-specific execution/path failures (NuGet/XamlCompiler/etc.)
+    # 4) unknown
+    if (Test-Path $ManagedDiagLogPath) {
+        if (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet) {
+            return [ordered]@{ Class = "TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED"; Confidence = "high" }
+        }
+        if (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet) {
+            return [ordered]@{ Class = "MANAGED_XAML_TASK_MISSING_DEP"; Confidence = "high" }
+        }
+    }
+
     if (Test-Path $DiagLogPath) {
         if ((Select-String -Path $DiagLogPath -Pattern "NU1101" -SimpleMatch -Quiet) -or
             (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet)) {
@@ -343,15 +399,6 @@ function Get-WinUiFailureClass {
         if ((Select-String -Path $DiagLogPath -Pattern "MSB3073" -SimpleMatch -Quiet) -and
             (Select-String -Path $DiagLogPath -Pattern "XamlCompiler.exe" -SimpleMatch -Quiet)) {
             return [ordered]@{ Class = "XAML_COMPILER_EXEC_FAIL"; Confidence = "high" }
-        }
-    }
-
-    if (Test-Path $ManagedDiagLogPath) {
-        if (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet) {
-            return [ordered]@{ Class = "TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED"; Confidence = "high" }
-        }
-        if (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet) {
-            return [ordered]@{ Class = "MANAGED_XAML_TASK_MISSING_DEP"; Confidence = "high" }
         }
     }
 
@@ -435,7 +482,8 @@ function Collect-WinUiDiagnostics {
         -ManagedDiagExitCode $managedDiagExitCode `
         -ManagedDiagLogPath $managedDiagLogPath `
         -ManagedDiagStderrPath $managedDiagStderrPath `
-        -RootCauseHints $rootCauseHints
+        -RootCauseHints $rootCauseHints `
+        -PreflightProbe $Preflight.probe
 
     $log.Add("WinUI diagnostics command: $diagCommandText")
     $log.Add("WinUI diagnostics exit code: $diagExitCode")

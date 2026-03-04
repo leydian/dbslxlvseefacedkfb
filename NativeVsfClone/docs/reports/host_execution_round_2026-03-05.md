@@ -115,3 +115,26 @@ Post-hardening execution result:
 - WinUI publish: blocked in preflight (`MISSING_WINDOWS_SDK_19041_METADATA`)
 - diagnostics class: `TOOLCHAIN_PRECONDITION_FAILED`
 - HostTrackStatus after gate re-run: `BLOCKED_TOOLCHAIN_PRECONDITION`
+
+## Follow-up Update (same date, diagnostics schema expansion)
+
+Applied an additional diagnostics/schema pass to make manifest evidence decision-complete without opening raw logs:
+
+- added `preflight_probe` to `build/reports/winui/winui_diagnostic_manifest.json`
+  - includes per-check evidence for:
+    - `.NET 8 SDK`
+    - `Visual Studio discovery`
+    - `Windows SDK 19041 metadata` (with explicit checked paths)
+- preserved `preflight` legacy fields for compatibility:
+  - `passed`, `failed_checks`, `detected_sdks`, `recommended_actions`
+- adjusted failure-class priority so managed `WMC9999` classification takes precedence over generic `XamlCompiler.exe` execution failures when preflight passes.
+
+Verification in this environment:
+
+- `publish_hosts.ps1 -IncludeWinUi`:
+  - WPF: PASS
+  - WinUI: preflight FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - manifest confirms `failure_class=TOOLCHAIN_PRECONDITION_FAILED`
+  - manifest contains `preflight_probe.checks[*]` with checked Windows SDK metadata paths
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`:
+  - `HostTrackStatus=BLOCKED_TOOLCHAIN_PRECONDITION` (resolved from manifest class)

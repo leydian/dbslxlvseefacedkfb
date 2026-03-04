@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI diagnostics schema expansion (preflight probe + class precedence)
+
+### Summary
+
+Extended WinUI diagnostics output so preflight evidence is decision-complete in the manifest and aligned failure classification priority with current host-track expectations.
+
+- added `preflight_probe` field in WinUI diagnostics manifest
+- kept `preflight` legacy shape unchanged for downstream compatibility
+- added explicit probe evidence for .NET SDK, Visual Studio discovery, and Windows SDK 19041 metadata paths
+- enforced failure classification priority to prefer `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` over generic XAML exec failures when managed `WMC9999` is present
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - diagnostic manifest:
+    - added `preflight_probe`
+    - preserved legacy `preflight` object contract (`passed`, `failed_checks`, `detected_sdks`, `recommended_actions`)
+  - preflight probing:
+    - added explicit probe checks and path evidence for Windows SDK metadata candidates:
+      - `UnionMetadata\10.0.19041.0\Facade\Windows.winmd`
+      - `References\10.0.19041.0\Windows.Foundation.FoundationContract...winmd`
+  - failure classification:
+    - documented/evaluated priority as:
+      - `TOOLCHAIN_PRECONDITION_FAILED` (and `TOOLCHAIN_MISSING_DOTNET8` specialization)
+      - `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+      - diagnostics-driven classes (`NUGET_SOURCE_UNREACHABLE`, `XAML_COMPILER_EXEC_FAIL`, etc.)
+      - `UNKNOWN`
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - `winui_diagnostic_manifest.json` includes:
+    - `failure_class=TOOLCHAIN_PRECONDITION_FAILED`
+    - `preflight` legacy fields
+    - `preflight_probe.checks[*]` with checked metadata paths and detection flags
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_TOOLCHAIN_PRECONDITION`
+  - HostTrack resolved from manifest `failure_class`
+
 ## 2026-03-05 - WinUI preflight hardening follow-up (SDK pin + Windows SDK metadata gate)
 
 ### Summary
