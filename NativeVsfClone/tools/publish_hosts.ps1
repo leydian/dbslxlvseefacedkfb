@@ -64,7 +64,9 @@ New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
 
 $log = [System.Collections.Generic.List[string]]::new()
+$hostPublishMode = if ($IncludeWinUi) { "WPF_PLUS_WINUI" } else { "WPF_ONLY" }
 $log.Add("Host publish run: $(Get-Date -Format o)")
+$log.Add("HostPublishMode: $hostPublishMode")
 $log.Add("Configuration: $Configuration")
 $log.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $log.Add("IncludeWinUi: $IncludeWinUi")
@@ -614,7 +616,7 @@ if ($IncludeWinUi) {
         throw
     }
 } else {
-    $log.Add("WinUI publish: skipped (use -IncludeWinUi)")
+    $log.Add("WinUI publish: skipped (WPF_ONLY mode; use -IncludeWinUi for optional diagnostics track)")
 }
 
 $log.Add("NativeCore copy: $nativeCoreDll")

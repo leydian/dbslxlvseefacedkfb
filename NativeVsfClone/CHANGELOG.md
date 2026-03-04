@@ -2,6 +2,41 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WPF-first host policy transition (WinUI optional diagnostics track)
+
+### Summary
+
+Shifted host publish/gate/CI contracts to WPF-first operation so release gating is stable while WinUI remains available as an opt-in diagnostics track.
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - added explicit host publish mode logging:
+    - `WPF_ONLY` (default)
+    - `WPF_PLUS_WINUI` (`-IncludeWinUi`)
+  - updated WinUI skip log message to clarify optional diagnostics role in default mode
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - HostTrack auto-resolution now treats WPF output as a pass baseline:
+    - `PASS_WPF_BASELINE`
+    - `PASS_WPF_AND_WINUI`
+  - HostTrack DoD pass check updated from strict `PASS` to `PASS*` family
+
+- `tools/vsfavatar_sample_report.ps1`
+  - HostTrack DoD pass check updated to `PASS*` family for report parity
+
+- `.github/workflows/host-publish.yml`
+  - split host publish jobs into:
+    - required WPF-first publish job (`publish-hosts-wpf`)
+    - optional/non-blocking WinUI diagnostics job (`publish-hosts-winui-diagnostics`)
+  - WPF required artifact validation now checks WPF outputs + publish report only
+
+- `README.md`
+  - documented WPF-first policy and `PASS*` HostTrack contract
+
+- `docs/reports/host_change_rollup_2026-03-05.md`
+  - appended policy transition section and CI split summary
+
 ## 2026-03-05 - Host rollup detail refresh (commit breakdown + latest snapshot)
 
 ### Summary

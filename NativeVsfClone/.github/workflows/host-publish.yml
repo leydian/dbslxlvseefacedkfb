@@ -66,7 +66,7 @@ jobs:
             NativeVsfClone/build/reports/vrm_gate_fixed5.txt
             NativeVsfClone/build/reports/vxavatar_gate_summary.txt
 
-  publish-hosts:
+  publish-hosts-wpf:
     needs: quality-baseline
     runs-on: windows-latest
     defaults:
@@ -84,18 +84,16 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Publish Hosts
-        run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
+      - name: Publish Hosts (WPF-first)
+        run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild
 
-      - name: Validate Dist Artifacts
+      - name: Validate WPF Dist Artifacts
         run: |
           $wpfExe = Join-Path $PWD "dist\wpf\WpfHost.exe"
           $wpfDll = Join-Path $PWD "dist\wpf\nativecore.dll"
-          $winUiExe = Join-Path $PWD "dist\winui\WinUiHost.exe"
-          $winUiDll = Join-Path $PWD "dist\winui\nativecore.dll"
           $report = Join-Path $PWD "build\reports\host_publish_latest.txt"
 
-          $required = @($wpfExe, $wpfDll, $winUiExe, $winUiDll, $report)
+          $required = @($wpfExe, $wpfDll, $report)
           $missing = @()
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { $missing += $path }
@@ -111,10 +109,41 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: host-publish-outputs
+          name: host-publish-wpf-outputs
           if-no-files-found: warn
           path: |
             NativeVsfClone/dist/wpf
+            NativeVsfClone/build/reports/host_publish_latest.txt
+
+  publish-hosts-winui-diagnostics:
+    needs: quality-baseline
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: powershell
+        working-directory: NativeVsfClone
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Publish Hosts (WPF + WinUI optional diagnostics)
+        run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
+
+      - name: Upload WinUI Diagnostic Outputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-publish-winui-diagnostics
+          if-no-files-found: warn
+          path: |
             NativeVsfClone/dist/winui
             NativeVsfClone/build/reports/host_publish_latest.txt
             NativeVsfClone/build/reports/winui

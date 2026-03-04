@@ -22,6 +22,9 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
   - diagnostics: `build/reports/winui/*` generated with root-cause hints + failure class
   - preflight: PASS
   - current class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` (`WMC9999` observed)
+- WPF-first host policy:
+  - default host publish/gate success is evaluated on WPF track
+  - WinUI is an optional diagnostics track (`-IncludeWinUi`)
 
 SDK pinning:
 
@@ -166,6 +169,11 @@ Run (WPF only default):
 powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1
 ```
 
+Default mode behavior:
+
+- host publish mode is `WPF_ONLY`
+- WinUI publish is skipped unless explicitly requested
+
 Run (WPF + WinUI):
 
 ```powershell
@@ -247,7 +255,7 @@ Gate rules:
 Track split:
 
 - Parser Track DoD: `GateA && GateB && GateC && GateD`
-- Host Track DoD: `HostTrackStatus=PASS` (auto-resolved from host publish report and WinUI diagnostic manifest by default)
+- Host Track DoD: `HostTrackStatus=PASS*` (WPF-first; e.g., `PASS_WPF_BASELINE`, `PASS_WPF_AND_WINUI`)
 
 Exit code:
 

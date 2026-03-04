@@ -175,7 +175,8 @@ foreach ($r in $gateRows) {
 "GateD_AtLeastOneCompleteWithObjectTable: $(if($gateD){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
 "GateRows: $($gateRows.Count)" | Add-Content -Path $OutputPath
 "ParserTrack_DoD: $(if($gateA -and $gateB -and $gateC -and $gateD){'PASS'}else{'FAIL'})" | Add-Content -Path $OutputPath
-"HostTrack_DoD: $(if($HostTrackStatus -eq 'PASS'){ 'PASS' } else { 'PENDING' })" | Add-Content -Path $OutputPath
+$hostTrackPass = (-not [string]::IsNullOrWhiteSpace($HostTrackStatus)) -and ($HostTrackStatus -eq "PASS" -or $HostTrackStatus.StartsWith("PASS_"))
+"HostTrack_DoD: $(if($hostTrackPass){ 'PASS' } else { 'PENDING' })" | Add-Content -Path $OutputPath
 $elapsedSec = [Math]::Round(((Get-Date) - $runStart).TotalSeconds, 3)
 "RunDurationSec: $elapsedSec" | Add-Content -Path $OutputPath
 

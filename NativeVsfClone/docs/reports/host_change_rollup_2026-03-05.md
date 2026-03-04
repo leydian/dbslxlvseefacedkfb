@@ -157,3 +157,21 @@ Observed final state:
   - `HostTrackStatus=BLOCKED_XAML_PLATFORM_UNSUPPORTED`
 - `run_quality_baseline.ps1`
   - `Overall: PASS`
+
+## WPF-first Policy Transition (same date)
+
+Operational policy has been switched to WPF-first to stabilize release gates:
+
+- default host publish mode:
+  - `WPF_ONLY`
+- WinUI role:
+  - optional diagnostics track (`-IncludeWinUi`)
+- HostTrack pass contract:
+  - `PASS*` family accepted (for example `PASS_WPF_BASELINE`, `PASS_WPF_AND_WINUI`)
+
+CI policy split:
+
+- required:
+  - WPF publish job
+- optional/non-blocking:
+  - WinUI diagnostics publish job

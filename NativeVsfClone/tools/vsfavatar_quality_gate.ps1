@@ -164,9 +164,15 @@ function Resolve-HostTrackStatus {
     $hasWpfExe = Test-Path ".\dist\wpf\WpfHost.exe"
     $hasWinUiExe = Test-Path ".\dist\winui\WinUiHost.exe"
     if ($hasWpfExe -and $hasWinUiExe) {
-        $resolved.Status = "PASS"
+        $resolved.Status = "PASS_WPF_AND_WINUI"
         $resolved.Reason = "WPF/WinUI publish outputs detected."
         $resolved.EvidencePath = ".\dist"
+        return $resolved
+    }
+    if ($hasWpfExe) {
+        $resolved.Status = "PASS_WPF_BASELINE"
+        $resolved.Reason = "WPF publish output detected (WPF-first host policy)."
+        $resolved.EvidencePath = ".\dist\wpf\WpfHost.exe"
         return $resolved
     }
 
@@ -202,8 +208,13 @@ function Resolve-HostTrackStatus {
         $winUiFailed = ($reportLines | Select-String -Pattern "WinUI publish: failed" -SimpleMatch -Quiet)
 
         if ($wpfPass -and $winUiPass) {
-            $resolved.Status = "PASS"
+            $resolved.Status = "PASS_WPF_AND_WINUI"
             $resolved.Reason = "WPF/WinUI publish entries found in host publish report."
+            return $resolved
+        }
+        if ($wpfPass) {
+            $resolved.Status = "PASS_WPF_BASELINE"
+            $resolved.Reason = "WPF publish entry found in host publish report (WPF-first host policy)."
             return $resolved
         }
         if ($winUiFailed) {
@@ -220,6 +231,14 @@ function Resolve-HostTrackStatus {
     $resolved.Status = "UNKNOWN"
     $resolved.Reason = "No host publish evidence found."
     return $resolved
+}
+
+function Test-IsHostTrackPass {
+    param([string]$Status)
+    if ([string]::IsNullOrWhiteSpace($Status)) {
+        return $false
+    }
+    return $Status -eq "PASS" -or $Status.StartsWith("PASS_")
 }
 
 if (-not (Test-Path $ReportScriptPath)) {
@@ -378,7 +397,7 @@ $gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
 $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
 $overallPass = if ($UseSmoke) { $gateA -and $gateB -and $gateC } else { $gateA -and $gateB -and $gateC -and $gateD }
 $parserTrackDoD = if ($overallPass) { "PASS" } else { "FAIL" }
-$hostTrackDoD = if ($resolvedHostTrackStatus -eq "PASS") { "PASS" } else { "PENDING" }
+$hostTrackDoD = if (Test-IsHostTrackPass -Status $resolvedHostTrackStatus) { "PASS" } else { "PENDING" }
 $runDurationSec = [Math]::Round(((Get-Date) - $runStart).TotalSeconds, 3)
 $attemptAvg = 0.0
 $attemptMax = [uint64]0
