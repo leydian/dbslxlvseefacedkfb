@@ -241,6 +241,18 @@ Outputs:
 - aggregate summary: `build/reports/vsfavatar_gate_aggregate.txt`
 - baseline compare input (default): `build/reports/vsfavatar_probe_fixed.txt`
 
+## Quality baseline (combined)
+
+Run the standard gate baseline in one command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1
+```
+
+Output summary:
+
+- `build/reports/quality_baseline_summary.txt`
+
 ## VRM quality gate
 
 Run fixed profile (recommended default):

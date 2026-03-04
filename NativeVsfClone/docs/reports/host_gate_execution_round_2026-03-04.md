@@ -69,6 +69,12 @@ dotnet publish host/WinUiHost/WinUiHost.csproj -c Release -r win-x64 --self-cont
 
 ## Gate Results
 
+Combined runner:
+
+- `tools/run_quality_baseline.ps1` -> `Overall: PASS`
+- Summary artifact:
+  - `build/reports/quality_baseline_summary.txt`
+
 ### VSFAvatar (`vsfavatar_quality_gate.ps1 -UseFixedSet`)
 
 - GateA/B/C/D: PASS
@@ -135,6 +141,13 @@ Updated `tools/publish_hosts.ps1`:
 - WinUI publish remains blocked by XAML compile toolchain failure.
 - Actionable hint now captured automatically:
   - managed task load path indicates missing `System.Security.Permissions` dependency.
+
+Follow-up observation in this round:
+
+- after upgrading `Microsoft.WindowsAppSDK` to `1.8.260209005`, default XAML compiler path still fails (`MSB3073`)
+- managed fallback now surfaces explicit platform/internal marker:
+  - `WMC9999: Operation is not supported on this platform`
+- blocker status remains unchanged (`WinUI publish FAIL`)
 
 ## Manual Host Smoke Status
 

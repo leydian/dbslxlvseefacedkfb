@@ -22,6 +22,7 @@ Executed the planned verification round after recent host/parser updates:
     - `XamlCompiler.exe` MSB3073 path detection
     - `NU1101` / `NU1301` NuGet failure detection
     - `System.Security.Permissions` missing assembly detection
+    - `WMC9999` platform-unsupported/internal compiler error detection
   - Extended diagnostic manifest with:
     - managed diagnostic command/exit code
     - managed diagnostic log paths
@@ -31,6 +32,15 @@ Executed the planned verification round after recent host/parser updates:
 - `README.md`
   - Added latest validation snapshot (`2026-03-04`) with gate and publish status.
   - Updated GUI publish notes with managed XAML diagnostic artifact paths.
+  - Added combined baseline command documentation (`tools/run_quality_baseline.ps1`).
+
+- `tools/run_quality_baseline.ps1` (new)
+  - Added combined quality baseline runner for standard gate set:
+    - VSFAvatar fixed-set
+    - VRM fixed5
+    - VXAvatar quick fixed-set
+  - Added summary output:
+    - `build/reports/quality_baseline_summary.txt`
 
 - `docs/reports/host_gate_execution_round_2026-03-04.md` (new)
   - Added execution report for gate re-validation and host publish results.
@@ -55,6 +65,9 @@ Executed the planned verification round after recent host/parser updates:
   - WPF publish: PASS
   - WinUI publish: FAIL (`XamlCompiler.exe` exit code `1`)
   - diagnostics captured under `build/reports/winui`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
 
 ## 2026-03-03 - VSFAvatar serialized bottleneck follow-up (4/4 fixed samples complete)
 

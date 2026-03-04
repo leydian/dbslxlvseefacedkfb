@@ -1,5 +1,5 @@
 VRM Quality Gate Summary
-Generated: 2026-03-04T22:22:24
+Generated: 2026-03-04T23:05:38
 ReportPath: .\\build\\reports\\vrm_probe_fixed5.txt
 Profile: fixed5
 UseFixedSet: False

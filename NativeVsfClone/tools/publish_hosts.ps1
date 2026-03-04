@@ -234,6 +234,9 @@ function Get-WinUiRootCauseHints {
     if ((Test-Path $ManagedDiagLogPath) -and (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet)) {
         $hints.Add("Managed XAML compiler task load failed: missing System.Security.Permissions assembly.")
     }
+    if ((Test-Path $ManagedDiagLogPath) -and (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet)) {
+        $hints.Add("Managed XAML compiler reported WMC9999 (platform unsupported/internal operation not supported).")
+    }
 
     if ($hints.Count -eq 0) {
         $hints.Add("No explicit root-cause hint extracted from diagnostics logs.")
