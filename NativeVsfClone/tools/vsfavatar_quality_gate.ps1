@@ -178,6 +178,7 @@ function Resolve-HostTrackStatus {
             switch ($failureClass) {
                 "TOOLCHAIN_MISSING_DOTNET8" { $resolved.Status = "BLOCKED_TOOLCHAIN_MISSING_DOTNET8" }
                 "TOOLCHAIN_PRECONDITION_FAILED" { $resolved.Status = "BLOCKED_TOOLCHAIN_PRECONDITION" }
+                "TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED" { $resolved.Status = "BLOCKED_XAML_PLATFORM_UNSUPPORTED" }
                 "NUGET_SOURCE_UNREACHABLE" { $resolved.Status = "BLOCKED_NUGET_SOURCE" }
                 "MANAGED_XAML_TASK_MISSING_DEP" { $resolved.Status = "BLOCKED_MANAGED_XAML_DEPENDENCY" }
                 "XAML_COMPILER_EXEC_FAIL" { $resolved.Status = "BLOCKED_XAML_COMPILER" }

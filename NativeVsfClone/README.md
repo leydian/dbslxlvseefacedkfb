@@ -18,10 +18,14 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 - `tools/vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`: PASS (`GateA`..`GateH` PASS).
 - `tools/publish_hosts.ps1 -IncludeWinUi`:
   - WPF publish: PASS (`dist/wpf/WpfHost.exe` generated)
-  - WinUI publish: FAIL (`XamlCompiler.exe` exit code `1`)
+  - WinUI publish: FAIL (blocked in preflight before publish)
   - diagnostics: `build/reports/winui/*` generated with root-cause hints + failure class
-  - preflight: PASS (after installing `.NET 8 SDK`)
-  - current class: `XAML_COMPILER_EXEC_FAIL` (`MSB3073` + managed fallback `WMC9999`)
+  - preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - current class: `TOOLCHAIN_PRECONDITION_FAILED`
+
+SDK pinning:
+
+- repository now includes `global.json` (`8.0.418`) so `dotnet` CLI uses .NET 8 by default for this workspace.
 
 ## VSFAvatar parser mode (current default)
 

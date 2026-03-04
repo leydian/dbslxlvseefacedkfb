@@ -306,6 +306,12 @@ function Test-WinUiToolchainPreconditions {
         $recommendedActions.Add("Verify Visual Studio Build Tools 2022 with Windows app build components is installed.")
     }
 
+    $windowsSdkFacade = "C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.19041.0\Facade\Windows.winmd"
+    if (-not (Test-Path $windowsSdkFacade)) {
+        $failedChecks.Add("MISSING_WINDOWS_SDK_19041_METADATA")
+        $recommendedActions.Add("Install Windows 10 SDK 10.0.19041.0 metadata/facade components for WinUI net8 targeting.")
+    }
+
     return [ordered]@{
         passed = ($failedChecks.Count -eq 0)
         failed_checks = $failedChecks.ToArray()
@@ -341,11 +347,11 @@ function Get-WinUiFailureClass {
     }
 
     if (Test-Path $ManagedDiagLogPath) {
+        if (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet) {
+            return [ordered]@{ Class = "TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED"; Confidence = "high" }
+        }
         if (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet) {
             return [ordered]@{ Class = "MANAGED_XAML_TASK_MISSING_DEP"; Confidence = "high" }
-        }
-        if (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet) {
-            return [ordered]@{ Class = "XAML_COMPILER_EXEC_FAIL"; Confidence = "medium" }
         }
     }
 

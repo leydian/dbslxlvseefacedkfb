@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI preflight hardening follow-up (SDK pin + Windows SDK metadata gate)
+
+### Summary
+
+Applied an additional hardening pass after the 2026-03-05 execution round to make the WinUI blocker fail-fast and deterministic in this environment:
+
+- pinned workspace CLI SDK to .NET 8 (`global.json`)
+- added WinUI preflight guard for missing `Windows SDK 10.0.19041` metadata facade
+- refined failure classification for managed `WMC9999` path
+- verified host track auto-resolution transitions to precondition-blocked status
+
+### Changed
+
+- `global.json` (new)
+  - pins SDK to `8.0.418` (`rollForward=latestFeature`)
+
+- `tools/publish_hosts.ps1`
+  - preflight:
+    - added `MISSING_WINDOWS_SDK_19041_METADATA` check
+  - failure class:
+    - added `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` mapping for managed `WMC9999`
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - added manifest class mapping:
+    - `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` -> `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+
+- `docs/reports/host_execution_round_2026-03-05.md`
+  - appended post-hardening follow-up outcome section.
+
+### Verification
+
+- `dotnet --version` (in repo root with `global.json`)
+  - `8.0.418`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - diagnostics class: `TOOLCHAIN_PRECONDITION_FAILED`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_TOOLCHAIN_PRECONDITION`
+
 ## 2026-03-05 - WinUI blocker execution round (SDK8 remediation + XAML failure-class confirmation)
 
 ### Summary

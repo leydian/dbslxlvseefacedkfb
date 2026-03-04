@@ -98,3 +98,20 @@ Reason:
 
 - parity smoke checklist requires WinUI publish success
 - WinUI publish remains blocked by XAML compiler failure path in this environment
+
+## Follow-up Update (same date, post-hardening pass)
+
+Additional hardening pass applied after this round:
+
+- added workspace `global.json` to pin SDK to `.NET 8.0.418`
+- added WinUI preflight check for Windows SDK metadata:
+  - `MISSING_WINDOWS_SDK_19041_METADATA`
+- added failure classification split:
+  - `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` (for managed `WMC9999` path)
+
+Post-hardening execution result:
+
+- WPF publish: PASS
+- WinUI publish: blocked in preflight (`MISSING_WINDOWS_SDK_19041_METADATA`)
+- diagnostics class: `TOOLCHAIN_PRECONDITION_FAILED`
+- HostTrackStatus after gate re-run: `BLOCKED_TOOLCHAIN_PRECONDITION`
