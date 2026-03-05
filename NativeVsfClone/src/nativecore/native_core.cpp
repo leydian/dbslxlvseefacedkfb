@@ -109,10 +109,35 @@ struct RendererResources {
 };
 #endif
 
+struct SecondaryMotionChainRuntime {
+    std::string name;
+    bool is_vrc = false;
+    std::vector<std::size_t> target_mesh_indices;
+    float stiffness = 0.35f;
+    float drag = 0.25f;
+    float gravity_y = -0.15f;
+    float radius = 0.02f;
+    bool enabled = true;
+    float phase = 0.0f;
+    float velocity = 0.0f;
+    float offset = 0.0f;
+    std::uint32_t corrected_count = 0U;
+};
+
+struct AvatarSecondaryMotionState {
+    bool initialized = false;
+    bool warnings_emitted = false;
+    std::vector<SecondaryMotionChainRuntime> chains;
+    std::uint32_t active_chain_count = 0U;
+    std::uint32_t corrected_chain_count = 0U;
+    std::uint32_t disabled_chain_count = 0U;
+};
+
 struct CoreState {
     bool initialized = false;
     std::uint64_t next_avatar_handle = 1;
     std::unordered_map<std::uint64_t, AvatarPackage> avatars;
+    std::unordered_map<std::uint64_t, AvatarSecondaryMotionState> secondary_motion_states;
     std::unordered_set<std::uint64_t> render_ready_avatars;
     avatar::AvatarLoaderFacade loader;
     stream::SpoutSender spout;
@@ -142,7 +167,7 @@ NcRenderQualityOptions MakeDefaultRenderQualityOptions() {
     options.camera_mode = NC_CAMERA_MODE_AUTO_FIT_BUST;
     options.framing_target = 0.72f;
     options.headroom = 0.12f;
-    options.yaw_deg = 192.0f;
+    options.yaw_deg = 0.0f;
     options.fov_deg = 45.0f;
     options.background_rgba[0] = 0.08f;
     options.background_rgba[1] = 0.12f;
@@ -160,7 +185,7 @@ NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions
     }
     out.framing_target = std::max(0.35f, std::min(0.95f, out.framing_target));
     out.headroom = std::max(0.0f, std::min(0.40f, out.headroom));
-    out.yaw_deg = std::max(0.0f, std::min(360.0f, out.yaw_deg));
+    out.yaw_deg = std::max(-45.0f, std::min(45.0f, out.yaw_deg));
     out.fov_deg = std::max(20.0f, std::min(80.0f, out.fov_deg));
     for (int i = 0; i < 4; ++i) {
         out.background_rgba[i] = std::max(0.0f, std::min(1.0f, out.background_rgba[i]));
@@ -914,6 +939,267 @@ std::string NormalizeRefKey(std::string s) {
         return static_cast<char>(std::tolower(c));
     });
     return s;
+}
+
+std::string ExtractTerminalToken(const std::string& path) {
+    if (path.empty()) {
+        return {};
+    }
+    const std::string key = NormalizeRefKey(path);
+    const auto pos = key.find_last_of('/');
+    if (pos == std::string::npos) {
+        return key;
+    }
+    if (pos + 1U >= key.size()) {
+        return {};
+    }
+    return key.substr(pos + 1U);
+}
+
+void PushAvatarWarningUnique(AvatarPackage* pkg, const std::string& message, const std::string& code) {
+    if (pkg == nullptr) {
+        return;
+    }
+    if (!message.empty()) {
+        pkg->warnings.push_back(message);
+    }
+    if (code.empty()) {
+        return;
+    }
+    if (std::find(pkg->warning_codes.begin(), pkg->warning_codes.end(), code) == pkg->warning_codes.end()) {
+        pkg->warning_codes.push_back(code);
+    }
+}
+
+float ClampFinite(float value, float min_v, float max_v, float fallback) {
+    if (!std::isfinite(value)) {
+        return fallback;
+    }
+    return std::max(min_v, std::min(max_v, value));
+}
+
+std::vector<std::size_t> ResolveChainTargetMeshes(
+    const std::vector<std::string>& bone_paths,
+    const std::string& root_bone_path,
+    const std::vector<GpuMeshResource>& meshes) {
+    std::vector<std::string> tokens;
+    for (const auto& path : bone_paths) {
+        const auto token = ExtractTerminalToken(path);
+        if (!token.empty()) {
+            tokens.push_back(token);
+        }
+    }
+    const auto root_token = ExtractTerminalToken(root_bone_path);
+    if (!root_token.empty()) {
+        tokens.push_back(root_token);
+    }
+    if (tokens.empty()) {
+        return {};
+    }
+
+    std::vector<std::size_t> target_mesh_indices;
+    for (std::size_t i = 0U; i < meshes.size(); ++i) {
+        const auto mesh_key = NormalizeMeshKey(meshes[i].mesh_name);
+        for (const auto& token : tokens) {
+            if (token.empty()) {
+                continue;
+            }
+            if (mesh_key.find(token) != std::string::npos) {
+                target_mesh_indices.push_back(i);
+                break;
+            }
+        }
+    }
+    return target_mesh_indices;
+}
+
+void InitializeSecondaryMotionStateForAvatar(
+    std::uint64_t handle,
+    const AvatarPackage& avatar_pkg,
+    const std::vector<GpuMeshResource>& meshes) {
+    auto& state = g_state.secondary_motion_states[handle];
+    if (state.initialized) {
+        return;
+    }
+    state.chains.clear();
+    state.active_chain_count = 0U;
+    state.corrected_chain_count = 0U;
+    state.disabled_chain_count = 0U;
+    const bool has_vrc = !avatar_pkg.physbone_payloads.empty();
+
+    std::unordered_set<std::string> collider_keys;
+    for (const auto& c : avatar_pkg.physics_colliders) {
+        collider_keys.insert(NormalizeRefKey(c.name));
+    }
+
+    for (const auto& phys : avatar_pkg.physbone_payloads) {
+        SecondaryMotionChainRuntime chain {};
+        chain.name = phys.name;
+        chain.is_vrc = true;
+        chain.enabled = phys.enabled;
+        chain.radius = ClampFinite(phys.radius, 0.001f, 0.20f, 0.02f);
+        chain.stiffness = ClampFinite(phys.spring, 0.05f, 1.0f, 0.35f);
+        chain.drag = ClampFinite(phys.pull, 0.0f, 1.0f, 0.25f);
+        chain.gravity_y = ClampFinite(phys.gravity[1], -1.0f, 1.0f, -0.15f);
+        std::vector<std::string> corrected_bones = phys.bone_paths;
+        if (corrected_bones.empty() && !phys.root_bone_path.empty()) {
+            corrected_bones.push_back(phys.root_bone_path);
+            ++chain.corrected_count;
+        }
+        if (chain.radius != phys.radius || chain.stiffness != phys.spring || chain.drag != phys.pull) {
+            ++chain.corrected_count;
+        }
+        for (const auto& collider_ref : phys.collider_refs) {
+            if (collider_keys.find(NormalizeRefKey(collider_ref)) == collider_keys.end()) {
+                ++chain.corrected_count;
+            }
+        }
+        chain.target_mesh_indices = ResolveChainTargetMeshes(corrected_bones, phys.root_bone_path, meshes);
+        if (chain.target_mesh_indices.empty()) {
+            chain.enabled = false;
+            ++chain.corrected_count;
+        }
+        state.chains.push_back(std::move(chain));
+    }
+    for (const auto& spring : avatar_pkg.springbone_payloads) {
+        SecondaryMotionChainRuntime chain {};
+        chain.name = spring.name;
+        chain.is_vrc = false;
+        chain.enabled = spring.enabled;
+        chain.radius = ClampFinite(spring.radius, 0.001f, 0.20f, 0.02f);
+        chain.stiffness = ClampFinite(spring.stiffness, 0.05f, 1.0f, 0.35f);
+        chain.drag = ClampFinite(spring.drag, 0.0f, 1.0f, 0.25f);
+        chain.gravity_y = ClampFinite(spring.gravity[1], -1.0f, 1.0f, -0.15f);
+        std::vector<std::string> corrected_bones = spring.bone_paths;
+        if (corrected_bones.empty() && !spring.root_bone_path.empty()) {
+            corrected_bones.push_back(spring.root_bone_path);
+            ++chain.corrected_count;
+        }
+        if (chain.radius != spring.radius || chain.stiffness != spring.stiffness || chain.drag != spring.drag) {
+            ++chain.corrected_count;
+        }
+        for (const auto& collider_ref : spring.collider_refs) {
+            if (collider_keys.find(NormalizeRefKey(collider_ref)) == collider_keys.end()) {
+                ++chain.corrected_count;
+            }
+        }
+        chain.target_mesh_indices = ResolveChainTargetMeshes(corrected_bones, spring.root_bone_path, meshes);
+        if (chain.target_mesh_indices.empty()) {
+            chain.enabled = false;
+            ++chain.corrected_count;
+        }
+        if (has_vrc) {
+            chain.enabled = false;
+        }
+        state.chains.push_back(std::move(chain));
+    }
+
+    for (const auto& chain : state.chains) {
+        if (chain.enabled) {
+            ++state.active_chain_count;
+        } else {
+            ++state.disabled_chain_count;
+        }
+        if (chain.corrected_count > 0U) {
+            ++state.corrected_chain_count;
+        }
+    }
+    state.initialized = true;
+}
+
+bool ApplySecondaryMotionToAvatar(
+    RendererResources* renderer,
+    AvatarPackage* avatar_pkg,
+    std::uint64_t handle,
+    ID3D11DeviceContext* device_ctx,
+    float delta_time_seconds) {
+    if (renderer == nullptr || avatar_pkg == nullptr || device_ctx == nullptr) {
+        return false;
+    }
+    if (avatar_pkg->physbone_payloads.empty() && avatar_pkg->springbone_payloads.empty()) {
+        return true;
+    }
+
+    auto mesh_it = renderer->avatar_meshes.find(handle);
+    if (mesh_it == renderer->avatar_meshes.end()) {
+        return true;
+    }
+    auto& meshes = mesh_it->second;
+    if (meshes.empty()) {
+        return true;
+    }
+
+    InitializeSecondaryMotionStateForAvatar(handle, *avatar_pkg, meshes);
+    auto state_it = g_state.secondary_motion_states.find(handle);
+    if (state_it == g_state.secondary_motion_states.end()) {
+        return true;
+    }
+    auto& state = state_it->second;
+    if (!state.warnings_emitted) {
+        if (state.corrected_chain_count > 0U) {
+            std::ostringstream oss;
+            oss << "W_RENDER: XAV2_PHYSICS_AUTO_CORRECTED: correctedChains=" << state.corrected_chain_count;
+            PushAvatarWarningUnique(avatar_pkg, oss.str(), "XAV2_PHYSICS_AUTO_CORRECTED");
+        }
+        if (state.disabled_chain_count > 0U) {
+            std::ostringstream oss;
+            oss << "W_RENDER: XAV2_PHYSICS_CHAIN_DISABLED: disabledChains=" << state.disabled_chain_count;
+            PushAvatarWarningUnique(avatar_pkg, oss.str(), "XAV2_PHYSICS_CHAIN_DISABLED");
+        }
+        state.warnings_emitted = true;
+    }
+
+    const float dt = ClampFinite(delta_time_seconds, 1.0f / 240.0f, 1.0f / 15.0f, 1.0f / 60.0f);
+    for (auto& chain : state.chains) {
+        if (!chain.enabled || chain.target_mesh_indices.empty()) {
+            continue;
+        }
+        chain.phase += dt * (2.0f + chain.stiffness * 4.0f);
+        const float head_influence = ClampFinite(g_state.latest_tracking.head_pos[1], -1.0f, 1.0f, 0.0f) * 0.002f;
+        const float target =
+            std::sin(chain.phase) * (0.0015f + chain.radius * 0.20f) +
+            (chain.gravity_y * 0.0035f) +
+            head_influence;
+        const float accel = (target - chain.offset) * (chain.stiffness * 20.0f);
+        chain.velocity += accel * dt;
+        const float drag_decay = std::max(0.0f, 1.0f - chain.drag * (dt * 30.0f));
+        chain.velocity *= drag_decay;
+        chain.offset = ClampFinite(chain.offset + chain.velocity * dt, -0.05f, 0.05f, 0.0f);
+
+        for (const auto mesh_index : chain.target_mesh_indices) {
+            if (mesh_index >= meshes.size()) {
+                continue;
+            }
+            auto& mesh = meshes[mesh_index];
+            if (mesh.vertex_buffer == nullptr || mesh.vertex_stride < 12U) {
+                continue;
+            }
+
+            auto& blob = mesh.deformed_vertex_blob;
+            if (blob.empty()) {
+                blob = mesh.base_vertex_blob;
+            }
+            const std::size_t stride = mesh.vertex_stride;
+            for (std::uint32_t vi = 0U; vi < mesh.vertex_count; ++vi) {
+                const std::size_t base = static_cast<std::size_t>(vi) * stride;
+                if (base + 12U > blob.size()) {
+                    break;
+                }
+                float py = 0.0f;
+                std::memcpy(&py, blob.data() + base + 4U, sizeof(float));
+                py += chain.offset;
+                std::memcpy(blob.data() + base + 4U, &py, sizeof(float));
+            }
+
+            D3D11_MAPPED_SUBRESOURCE mapped {};
+            if (SUCCEEDED(device_ctx->Map(mesh.vertex_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
+                std::memcpy(mapped.pData, blob.data(), blob.size());
+                device_ctx->Unmap(mesh.vertex_buffer, 0U);
+            }
+        }
+    }
+
+    return true;
 }
 
 bool ShouldApplyExperimentalStaticSkinning() {
@@ -2416,6 +2702,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             SetError(NC_ERROR_INTERNAL, "render", "failed to apply expression morphs", true);
             return NC_ERROR_INTERNAL;
         }
+        if (!ApplySecondaryMotionToAvatar(&renderer, &it->second, handle, device_ctx, ctx->delta_time_seconds)) {
+            SetError(NC_ERROR_INTERNAL, "render", "failed to apply secondary motion", true);
+            return NC_ERROR_INTERNAL;
+        }
         auto mesh_it = renderer.avatar_meshes.find(handle);
         if (mesh_it == renderer.avatar_meshes.end()) {
             continue;
@@ -2785,6 +3075,7 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.initialized = true;
     vsfclone::nativecore::g_state.next_avatar_handle = 1;
     vsfclone::nativecore::g_state.avatars.clear();
+    vsfclone::nativecore::g_state.secondary_motion_states.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
@@ -2846,6 +3137,7 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
 
     const std::uint64_t handle = vsfclone::nativecore::g_state.next_avatar_handle++;
     vsfclone::nativecore::g_state.avatars[handle] = loaded.value;
+    vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
     *out_handle = handle;
     vsfclone::nativecore::FillAvatarInfo(loaded.value, handle, out_info);
     vsfclone::nativecore::ClearError();
@@ -2864,6 +3156,7 @@ NcResultCode nc_unload_avatar(NcAvatarHandle handle) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
     vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
+    vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
 #if defined(_WIN32)
     auto mesh_it = vsfclone::nativecore::g_state.renderer.avatar_meshes.find(handle);
     if (mesh_it != vsfclone::nativecore::g_state.renderer.avatar_meshes.end()) {
@@ -3199,6 +3492,7 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
         vsfclone::nativecore::g_state.renderer.avatar_materials.erase(material_it);
     }
 #endif
+    vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
     it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -3233,6 +3527,7 @@ NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
         vsfclone::nativecore::g_state.renderer.avatar_materials.erase(material_it);
     }
 #endif
+    vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
     it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;

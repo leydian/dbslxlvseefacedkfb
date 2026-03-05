@@ -70,6 +70,7 @@ Report list for this week.
 - [2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md](./2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md)
 - [2026-03-06_host_pose_tracking_refinement_execution.md](./2026-03-06_host_pose_tracking_refinement_execution.md)
 - [2026-03-06_ifacialmocap_direct_tracking.md](./2026-03-06_ifacialmocap_direct_tracking.md)
+- [2026-03-06_native_secondary_motion_v1_runtime.md](./2026-03-06_native_secondary_motion_v1_runtime.md)
 - [2026-03-06_release_automation_execution_update.md](./2026-03-06_release_automation_execution_update.md)
 - [2026-03-06_release_execution_board_20.md](./2026-03-06_release_execution_board_20.md)
 - [2026-03-06_release_execution_followup.md](./2026-03-06_release_execution_followup.md)

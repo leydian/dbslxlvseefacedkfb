@@ -2,6 +2,48 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Native secondary motion v1 runtime execution (VRC-first, auto-correct, frame-pass integration)
+
+### Summary
+
+Implemented the first native runtime execution slice for XAV2 physics by adding a frame-time secondary motion solver pass in `nativecore` with VRC-first chain priority, automatic data correction, and non-fatal warning diagnostics.
+
+### Changed
+
+- native runtime secondary motion state/model:
+  - `src/nativecore/native_core.cpp`
+  - added per-avatar runtime state (`secondary_motion_states`) and chain runtime model.
+  - tracks chain activation/correction/disable counts and one-time warning emission.
+- VRC-first chain policy + auto-correction:
+  - `src/nativecore/native_core.cpp`
+  - PhysBone chains are prioritized when both PhysBone/SpringBone exist.
+  - SpringBone chains are disabled under mixed input when VRC chains are present.
+  - automatic correction behavior:
+    - clamps invalid numeric params (radius/stiffness/drag/gravity).
+    - backfills missing bone path from root path.
+    - marks unresolved collider refs and unresolved target meshes.
+  - emits stable runtime warning codes:
+    - `XAV2_PHYSICS_AUTO_CORRECTED`
+    - `XAV2_PHYSICS_CHAIN_DISABLED`
+- render frame integration:
+  - `src/nativecore/native_core.cpp`
+  - inserted secondary motion pass after expression morph application in render loop.
+  - uses `delta_time_seconds` with bounded dt for stable 60fps-oriented integration.
+  - applies per-chain y-offset deformation directly to dynamic vertex buffers each frame.
+- lifecycle consistency:
+  - `src/nativecore/native_core.cpp`
+  - clears secondary motion state on:
+    - `nc_initialize`
+    - `nc_shutdown`
+    - `nc_load_avatar` (handle state reset)
+    - `nc_unload_avatar`
+    - `nc_create_render_resources`
+    - `nc_destroy_render_resources`
+- detailed implementation report:
+  - `docs/reports/native_secondary_motion_v1_runtime_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_native_secondary_motion_v1_runtime.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+
 ## 2026-03-06 - XAV2 physics typed section rollout (SpringBone/PhysBone/Collider metadata)
 
 ### Summary
