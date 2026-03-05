@@ -205,21 +205,26 @@ namespace VsfClone.Xav2.Editor
             }
 
             var textureName = string.Empty;
-            if (material.HasProperty("_MainTex"))
+            var mainTexture = ResolveBaseColorTexture(material);
+            if (mainTexture != null)
             {
-                var mainTex = material.GetTexture("_MainTex");
-                if (mainTex is Texture2D tex2d)
+                var encoded = EncodeTextureSafe(mainTexture);
+                if (encoded.Length > 0)
                 {
-                    textureName = tex2d.name;
+                    textureName = mainTexture.name;
                     if (textureNameSet.Add(textureName))
                     {
                         payload.Textures.Add(new Xav2TexturePayload
                         {
                             Name = textureName,
-                            Bytes = EncodeTextureSafe(tex2d)
+                            Bytes = encoded
                         });
                         payload.Manifest.textureRefs.Add(textureName);
                     }
+                }
+                else
+                {
+                    Debug.LogWarning($"[XAV2] Texture encode failed for material '{material.name}', texture '{mainTexture.name}'.");
                 }
             }
 
@@ -365,7 +370,68 @@ namespace VsfClone.Xav2.Editor
             }
             catch
             {
+                return EncodeTextureViaRenderTexture(texture);
+            }
+        }
+
+        private static Texture2D ResolveBaseColorTexture(Material material)
+        {
+            if (material == null)
+            {
+                return null;
+            }
+
+            var candidateProps = new[] { "_MainTex", "_BaseMap", "_BaseColorMap" };
+            foreach (var prop in candidateProps)
+            {
+                if (!material.HasProperty(prop))
+                {
+                    continue;
+                }
+                if (material.GetTexture(prop) is Texture2D tex2d)
+                {
+                    return tex2d;
+                }
+            }
+            return null;
+        }
+
+        private static byte[] EncodeTextureViaRenderTexture(Texture2D source)
+        {
+            if (source == null || source.width <= 0 || source.height <= 0)
+            {
                 return Array.Empty<byte>();
+            }
+
+            var prev = RenderTexture.active;
+            var rt = RenderTexture.GetTemporary(
+                source.width,
+                source.height,
+                0,
+                RenderTextureFormat.ARGB32,
+                RenderTextureReadWrite.sRGB);
+            Texture2D readable = null;
+            try
+            {
+                Graphics.Blit(source, rt);
+                RenderTexture.active = rt;
+                readable = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
+                readable.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
+                readable.Apply(false, false);
+                return readable.EncodeToPNG();
+            }
+            catch
+            {
+                return Array.Empty<byte>();
+            }
+            finally
+            {
+                RenderTexture.active = prev;
+                if (readable != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(readable);
+                }
+                RenderTexture.ReleaseTemporary(rt);
             }
         }
     }

@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [xav2_liltoon_texture_export_fallback_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_liltoon_texture_export_fallback_2026-03-05.md): Unity XAV2 exporter texture-path hardening for lilToon/non-readable textures via RenderTexture fallback and expanded base map property probe
 - [session_change_summary_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/session_change_summary_2026-03-05.md): consolidated latest-session rollup covering WPF crash hotfix, Unity XAV2 relaxed export menu, avatar extension policy trim, and current host load-failure behavior
 - [xav2_relaxed_export_menu_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_relaxed_export_menu_2026-03-05.md): Unity XAV2 strict-policy bypass path addition via opt-in relaxed export menu with mode-aware diagnostics/logging
 - [r01_r20_top5_execution_and_winui_sdk_contract_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_top5_execution_and_winui_sdk_contract_2026-03-05.md): Top5 (`R01/R02/R03/R05/R13`) implementation closure with HostCore contract upgrades, WPF/WinUI parity updates, and WinUI SDK-contract diagnostics execution

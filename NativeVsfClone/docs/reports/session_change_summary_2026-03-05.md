@@ -8,8 +8,9 @@ Primary outcomes:
 
 1. WPF crash-path hardening was applied and verified (`cross-thread UI access` guard).
 2. Unity XAV2 SDK gained an opt-in relaxed export menu path for shader-policy bypass scenarios.
-3. Host/runtime avatar extension policy was trimmed to `.vrm`, `.vsfavatar`, `.xav2` in this branch line.
-4. Runtime load failures surfaced as `Load failed: Unsupported` remain possible when native render-resource requirements are not satisfied.
+3. Unity XAV2 texture extraction path was hardened for lilToon/non-readable texture cases via PNG fallback capture.
+4. Host/runtime avatar extension policy was trimmed to `.vrm`, `.vsfavatar`, `.xav2` in this branch line.
+5. Runtime load failures surfaced as `Load failed: Unsupported` remain possible when native render-resource requirements are not satisfied.
 
 ## Change Set Rollup
 
@@ -49,6 +50,18 @@ Primary outcomes:
   - updated docs:
     - `docs/reports/avatar_extension_policy_trim_2026-03-05.md`
     - `README.md` and host guidance strings
+
+### 4) Unity XAV2 lilToon texture fallback track
+
+- reference commit: pending (current workspace update)
+- key changes:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+    - texture export fallback added (`EncodeToPNG` fail -> RenderTexture/ReadPixels path).
+    - base texture probe expanded (`_MainTex`, `_BaseMap`, `_BaseColorMap`).
+    - warning log added for persistent texture encode failure.
+  - docs:
+    - `docs/reports/xav2_liltoon_texture_export_fallback_2026-03-05.md`
+    - `docs/INDEX.md` link update
 
 ## Current Runtime Behavior Notes
 
