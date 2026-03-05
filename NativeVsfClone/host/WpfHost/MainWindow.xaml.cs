@@ -53,6 +53,9 @@ public partial class MainWindow : Window
     private string _lastFailureSource = string.Empty;
     private bool _isRenderRightDragging;
     private int _lastRenderDragX;
+    private bool _isRenderOnlyMode;
+    private DateTimeOffset _renderOnlyHintVisibleUntil = DateTimeOffset.MinValue;
+    private static readonly TimeSpan RenderOnlyHintDuration = TimeSpan.FromSeconds(3.0);
     private const int WebcamProbeLimit = 10;
 
     public MainWindow()
@@ -61,6 +64,7 @@ public partial class MainWindow : Window
         SourceInitialized += MainWindow_SourceInitialized;
         Closed += MainWindow_Closed;
         SizeChanged += MainWindow_SizeChanged;
+        PreviewKeyDown += MainWindow_PreviewKeyDown;
 
         _timer.Interval = TimeSpan.FromMilliseconds(16.0);
         _timer.Tick += Timer_Tick;
@@ -123,6 +127,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        PreviewKeyDown -= MainWindow_PreviewKeyDown;
         RenderHost.RenderRightDragStarted -= RenderHost_RenderRightDragStarted;
         RenderHost.RenderRightDragMoved -= RenderHost_RenderRightDragMoved;
         RenderHost.RenderRightDragCompleted -= RenderHost_RenderRightDragCompleted;
@@ -222,6 +227,22 @@ public partial class MainWindow : Window
     private void AdvancedMode_Click(object sender, RoutedEventArgs e)
     {
         SetUiMode(UiModeAdvanced, persist: true);
+    }
+
+    private void RenderOnlyToggle_Click(object sender, RoutedEventArgs e)
+    {
+        SetRenderOnlyMode(!_isRenderOnlyMode);
+    }
+
+    private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.F11)
+        {
+            return;
+        }
+
+        SetRenderOnlyMode(!_isRenderOnlyMode);
+        e.Handled = true;
     }
 
     private void PrimaryAction_Click(object sender, RoutedEventArgs e)
@@ -1141,6 +1162,12 @@ public partial class MainWindow : Window
     private void UiRefreshTimer_Tick(object? sender, EventArgs e)
     {
         ProcessPendingUpdates(force: false);
+        if (_isRenderOnlyMode &&
+            RenderOnlyHintOverlay.Visibility == Visibility.Visible &&
+            DateTimeOffset.UtcNow > _renderOnlyHintVisibleUntil)
+        {
+            RenderOnlyHintOverlay.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -1373,6 +1400,10 @@ public partial class MainWindow : Window
                 break;
         }
         PrimaryActionButton.Tag = onboarding.PrimaryAction;
+        RenderOnlyToggleButton.Content = _isRenderOnlyMode
+            ? "일반 UI 복귀 (F11)"
+            : "렌더 전용 모드 (F11)";
+        RenderOnlyToggleButton.IsEnabled = !operation.IsBusy;
 
         SyncRenderControlsFromState();
         SyncPoseControlsFromState();
@@ -1921,8 +1952,64 @@ public partial class MainWindow : Window
         UpdateUiState();
     }
 
+    private void SetRenderOnlyMode(bool enabled)
+    {
+        if (_isRenderOnlyMode == enabled)
+        {
+            return;
+        }
+
+        _isRenderOnlyMode = enabled;
+        if (_isRenderOnlyMode)
+        {
+            _renderOnlyHintVisibleUntil = DateTimeOffset.UtcNow + RenderOnlyHintDuration;
+        }
+
+        ApplyModeVisibility();
+        UpdateUiState();
+        RefreshRenderTargetAfterLayoutChange();
+    }
+
+    private void RefreshRenderTargetAfterLayoutChange()
+    {
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            UpdateRenderMetricsFromHost();
+            var state = _controller.SessionState;
+            if (!state.IsInitialized || !state.IsWindowAttached)
+            {
+                return;
+            }
+
+            var metrics = GetRenderMetrics();
+            _ = _controller.ResizeWindow(metrics.pixelWidth, metrics.pixelHeight);
+        }), DispatcherPriority.Background);
+    }
+
     private void ApplyModeVisibility()
     {
+        if (_isRenderOnlyMode)
+        {
+            ControlsColumn.Width = new GridLength(0.0);
+            SplitterColumn.Width = new GridLength(0.0);
+            ControlPanelScrollViewer.Visibility = Visibility.Collapsed;
+            MainGridSplitter.Visibility = Visibility.Collapsed;
+            DiagnosticsRow.Height = new GridLength(0.0);
+            DiagnosticsTabControl.Visibility = Visibility.Collapsed;
+            StatusBarBorder.Visibility = Visibility.Collapsed;
+            RenderOnlyHintOverlay.Visibility = DateTimeOffset.UtcNow <= _renderOnlyHintVisibleUntil
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            return;
+        }
+
+        ControlsColumn.Width = new GridLength(440.0);
+        SplitterColumn.Width = new GridLength(12.0);
+        ControlPanelScrollViewer.Visibility = Visibility.Visible;
+        MainGridSplitter.Visibility = Visibility.Visible;
+        StatusBarBorder.Visibility = Visibility.Visible;
+        RenderOnlyHintOverlay.Visibility = Visibility.Collapsed;
+
         var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
         var beginner = !advanced;
         BeginnerModeButton.IsEnabled = !advanced;
