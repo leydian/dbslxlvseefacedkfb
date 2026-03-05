@@ -1397,6 +1397,8 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutStrictMode: {runtime.SpoutStrictMode}");
         runtimeSb.AppendLine($"SpoutFallbackCount: {runtime.SpoutFallbackCount}");
         runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
+        runtimeSb.AppendLine($"NativeCoreModulePath: {NormalizeDiagField(runtime.NativeCoreModulePath)}");
+        runtimeSb.AppendLine($"NativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;

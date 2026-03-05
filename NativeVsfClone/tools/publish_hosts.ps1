@@ -55,6 +55,57 @@ function Assert-Command {
     }
 }
 
+function Invoke-CMakeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Args,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    Push-Location $repoRoot
+    try {
+        & cmake @Args | Out-Host
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+
+    if ($exitCode -ne 0) {
+        throw "$Description failed with exit code $exitCode (cmake $($Args -join ' '))"
+    }
+}
+
+function Assert-NativeCoreCopyIntegrity {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][System.Collections.Generic.List[string]]$Log
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        throw "$Label nativecore source missing: $SourcePath"
+    }
+    if (-not (Test-Path $DestinationPath)) {
+        throw "$Label nativecore destination missing: $DestinationPath"
+    }
+
+    $src = Get-Item $SourcePath
+    $dst = Get-Item $DestinationPath
+    $srcHash = (Get-FileHash -Path $SourcePath -Algorithm SHA256).Hash
+    $dstHash = (Get-FileHash -Path $DestinationPath -Algorithm SHA256).Hash
+
+    $Log.Add("$Label nativecore source: $SourcePath")
+    $Log.Add("$Label nativecore destination: $DestinationPath")
+    $Log.Add("$Label nativecore source timestamp: $($src.LastWriteTime.ToString('o'))")
+    $Log.Add("$Label nativecore destination timestamp: $($dst.LastWriteTime.ToString('o'))")
+    $Log.Add("$Label nativecore source hash: $srcHash")
+    $Log.Add("$Label nativecore destination hash: $dstHash")
+
+    if ($srcHash -ne $dstHash) {
+        throw "$Label nativecore integrity mismatch: source and destination hashes differ."
+    }
+}
+
 function Get-DotNetVersionInfo {
     param([string]$WorkingDirectory)
 
@@ -319,7 +370,7 @@ if (-not $SkipNativeBuild) {
     Write-Step "Building nativecore..."
     $nativeBuildSucceeded = $false
     try {
-        cmake --build $buildDir --config Release --target nativecore | Out-Host
+        Invoke-CMakeCommand -Description "native build (build dir)" -Args @("--build", $buildDir, "--config", "Release", "--target", "nativecore")
         $nativeBuildSucceeded = $true
         $log.Add("Native build: build/nativecore success")
     } catch {
@@ -328,8 +379,8 @@ if (-not $SkipNativeBuild) {
 
     if (-not $nativeBuildSucceeded) {
         Write-Step "Falling back to build_hotfix for locked-dll cases..."
-        cmake -S $repoRoot -B $buildHotfixDir -G "Visual Studio 17 2022" -A x64 | Out-Host
-        cmake --build $buildHotfixDir --config Release --target nativecore | Out-Host
+        Invoke-CMakeCommand -Description "native configure (build_hotfix)" -Args @("-S", $repoRoot, "-B", $buildHotfixDir, "-G", "Visual Studio 17 2022", "-A", "x64")
+        Invoke-CMakeCommand -Description "native build (build_hotfix)" -Args @("--build", $buildHotfixDir, "--config", "Release", "--target", "nativecore")
         if (-not (Test-Path $nativeCoreDllHotfix)) {
             throw "nativecore.dll not found in fallback build output: $nativeCoreDllHotfix"
         }
@@ -983,6 +1034,7 @@ try {
     }
 
     Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
+    Assert-NativeCoreCopyIntegrity -SourcePath $nativeCoreDll -DestinationPath (Join-Path $wpfDist "nativecore.dll") -Label "WPF" -Log $log
     Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $wpfDist -Log $log
     $log.Add("WPF dist: $wpfDist")
     $log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
@@ -1080,6 +1132,7 @@ if ($IncludeWinUi) {
             throw "WinUI publish output not found: $winUiDist"
         }
         Copy-Item -Path $nativeCoreDll -Destination $winUiDist -Force
+        Assert-NativeCoreCopyIntegrity -SourcePath $nativeCoreDll -DestinationPath (Join-Path $winUiDist "nativecore.dll") -Label "WinUI" -Log $log
         Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $winUiDist -Log $log
         $log.Add("WinUI dist: $winUiDist")
         $log.Add("WinUI exe: $(Join-Path $winUiDist 'WinUiHost.exe')")

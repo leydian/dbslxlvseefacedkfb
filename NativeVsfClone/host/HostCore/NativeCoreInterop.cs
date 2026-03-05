@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -29,6 +30,13 @@ public enum NcCameraMode : uint
     AutoFitFull = 0,
     AutoFitBust = 1,
     Manual = 2,
+}
+
+public enum NcRenderQualityProfile : uint
+{
+    Default = 0,
+    Balanced = 1,
+    UltraParity = 2,
 }
 
 public enum NcPoseBoneId : uint
@@ -194,6 +202,7 @@ public struct NcRenderQualityOptions
     public float BackgroundG;
     public float BackgroundB;
     public float BackgroundA;
+    public uint QualityProfile;
     public uint ShowDebugOverlay;
 }
 
@@ -213,6 +222,10 @@ public struct NcRuntimeStats
     public uint SpoutActive;
     public uint OscActive;
     public float LastFrameMs;
+    public float GpuFrameMs;
+    public float CpuFrameMs;
+    public float MaterialResolveMs;
+    public uint PassCount;
 }
 
 public enum NcSpoutBackendKind : uint
@@ -246,6 +259,13 @@ public struct NcErrorInfo
 public static class NativeCoreInterop
 {
     private const string DllName = "nativecore.dll";
+    private const int MaxModulePathChars = 1024;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandleW(string moduleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetModuleFileNameW(IntPtr module, StringBuilder fileName, int size);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_initialize(ref NcInitOptions options);
@@ -360,6 +380,7 @@ public static class NativeCoreInterop
             BackgroundG = 0.12f,
             BackgroundB = 0.18f,
             BackgroundA = 1.0f,
+            QualityProfile = (uint)NcRenderQualityProfile.Default,
             ShowDebugOverlay = 0U,
         };
     }
@@ -371,6 +392,16 @@ public static class NativeCoreInterop
         return options;
     }
 
+    public static NcRenderQualityOptions BuildUltraParityPreset()
+    {
+        var options = BuildBroadcastPreset();
+        options.QualityProfile = (uint)NcRenderQualityProfile.UltraParity;
+        options.FovDeg = 42.0f;
+        options.Headroom = 0.10f;
+        options.ShowDebugOverlay = 0U;
+        return options;
+    }
+
     public static string FormatSpoutBackend(uint backendKind)
     {
         return backendKind switch
@@ -379,5 +410,41 @@ public static class NativeCoreInterop
             (uint)NcSpoutBackendKind.LegacySharedMemory => "legacy-shared-memory",
             _ => "inactive",
         };
+    }
+
+    public static string GetLoadedNativeCorePath()
+    {
+        var module = GetModuleHandleW(DllName);
+        if (module == IntPtr.Zero)
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder(MaxModulePathChars);
+        var len = GetModuleFileNameW(module, sb, sb.Capacity);
+        if (len == 0U)
+        {
+            return string.Empty;
+        }
+
+        return sb.ToString();
+    }
+
+    public static string GetLoadedNativeCoreTimestampUtc()
+    {
+        var path = GetLoadedNativeCorePath();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return File.GetLastWriteTimeUtc(path).ToString("O");
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }
