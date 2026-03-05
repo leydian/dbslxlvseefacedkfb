@@ -168,6 +168,43 @@ Observed outcomes:
   - `2026-03-05T17:25:43.9247110+09:00`
   - `Status=FAIL`, `ExitCode=-532462766`
 
+## Follow-up Execution Snapshot (2026-03-05, preflight-unblock rerun)
+
+Implemented script adjustment before rerun:
+
+- `tools/publish_hosts.ps1`
+  - `MSBUILD_DISCOVERY` check changed from hard preflight fail to warning-style probe with fallback path detection in standard VS2022 install locations.
+  - result: preflight no longer stops at `MISSING_MSBUILD_DISCOVERY` in this environment.
+
+Executed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
+powershell -ExecutionPolicy Bypass -File .\tools\compare_winui_diag_manifest.ps1 `
+  -BaseManifestPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\reports\winui\winui_diagnostic_manifest_run3.json `
+  -TargetManifestPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\reports\winui\winui_diagnostic_manifest_run4.json `
+  -OutputPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\reports\winui_manifest_diff_run3_vs_run4.txt
+powershell -ExecutionPolicy Bypass -File .\tools\wpf_launch_smoke.ps1 `
+  -ExePath D:\dbslxlvseefacedkfb\NativeVsfClone\dist\wpf\WpfHost.exe `
+  -WorkingDirectory D:\dbslxlvseefacedkfb\NativeVsfClone\dist\wpf
+```
+
+Observed outcomes:
+
+- host rerun (`run3`: `2026-03-05T18:14:40.0950026+09:00`, `run4`: `2026-03-05T18:15:58.0618412+09:00`)
+  - WPF publish: FAIL (`NU1301`)
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`NU1301`)
+  - WinUI failure class: `NUGET_SOURCE_UNREACHABLE`
+- manifest diff:
+  - `build/reports/winui_manifest_diff_run3_vs_run4.txt`
+  - result: all tracked fields `SAME`
+- WPF launch smoke rerun:
+  - `runA`: `2026-03-05T18:17:49.3166582+09:00`
+  - `runB`: `2026-03-05T18:18:02.8195550+09:00`
+  - both `FAIL`, `ExitCode=-532462766`
+
 ## Open Follow-up Items
 
 1. Run full local `publish_hosts.ps1 -IncludeWinUi` with new profile-enabled diagnostics and verify manifest profile outputs under actual WinUI failure conditions.

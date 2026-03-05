@@ -118,3 +118,15 @@ This evidence document is considered complete when:
 - note:
   - this run did not capture a fresh matching Application event within the script window
   - historical evidence from same-day runs still shows `.NET Runtime` event `1026` with `System.DllNotFoundException`
+
+## Follow-up Update (2026-03-05, repeat smoke verification)
+
+- repeated direct smoke probe twice with same execution shape:
+  - `runA`: `2026-03-05T18:17:49.3166582+09:00`
+  - `runB`: `2026-03-05T18:18:02.8195550+09:00`
+- both runs:
+  - `Status: FAIL`
+  - `ExitCode: -532462766`
+- evidence files:
+  - `build/reports/wpf_launch_smoke_runA.txt`
+  - `build/reports/wpf_launch_smoke_runB.txt`

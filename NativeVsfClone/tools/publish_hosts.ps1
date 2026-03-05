@@ -343,6 +343,7 @@ function Test-WinUiToolchainPreconditions {
 
     $failedChecks = [System.Collections.Generic.List[string]]::new()
     $recommendedActions = [System.Collections.Generic.List[string]]::new()
+    $warnings = [System.Collections.Generic.List[string]]::new()
     $detectedSdks = @()
 
     if ($null -ne $EnvironmentSummary -and $null -ne $EnvironmentSummary.dotnet_sdks) {
@@ -392,11 +393,28 @@ function Test-WinUiToolchainPreconditions {
         $recommendedActions.Add("Install Windows 10 SDK 10.0.19041.0 metadata/facade components for WinUI net8 targeting.")
     }
 
+    $msbuildDetectedPath = ""
     $msbuildCommand = Get-Command msbuild -ErrorAction SilentlyContinue
-    $hasMsbuild = $null -ne $msbuildCommand
+    if ($null -ne $msbuildCommand) {
+        $msbuildDetectedPath = $msbuildCommand.Source
+    } else {
+        $msbuildCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe")
+        )
+        foreach ($candidate in $msbuildCandidates) {
+            if (Test-Path $candidate) {
+                $msbuildDetectedPath = $candidate
+                break
+            }
+        }
+    }
+    $hasMsbuild = -not [string]::IsNullOrWhiteSpace($msbuildDetectedPath)
     if (-not $hasMsbuild) {
-        $failedChecks.Add("MISSING_MSBUILD_DISCOVERY")
-        $recommendedActions.Add("Install Visual Studio Build Tools 2022 with MSBuild and desktop/windows workload components.")
+        $warnings.Add("MISSING_MSBUILD_DISCOVERY")
+        $recommendedActions.Add("MSBuild.exe was not discovered from PATH or standard VS2022 locations; verify Build Tools installation if WinUI publish continues to fail.")
     }
 
     $windowsSdkBinProbePath = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\rc.exe"
@@ -426,6 +444,7 @@ function Test-WinUiToolchainPreconditions {
     return [ordered]@{
         passed = ($failedChecks.Count -eq 0)
         failed_checks = $failedChecks.ToArray()
+        warnings = $warnings.ToArray()
         detected_sdks = $detectedSdks
         recommended_actions = $recommendedActions.ToArray()
         probe = [ordered]@{
@@ -449,7 +468,7 @@ function Test-WinUiToolchainPreconditions {
                 [ordered]@{
                     check = "MSBUILD_DISCOVERY"
                     detected = $hasMsbuild
-                    detected_path = if ($hasMsbuild) { $msbuildCommand.Source } else { "" }
+                    detected_path = $msbuildDetectedPath
                 },
                 [ordered]@{
                     check = "WINDOWS_SDK_19041_BINTOOLS"

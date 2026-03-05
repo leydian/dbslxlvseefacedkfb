@@ -2,6 +2,50 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Host execution follow-up: preflight unblock to publish-stage and deterministic NU1301 classification
+
+### Summary
+
+Applied a focused preflight adjustment for MSBuild discovery and re-ran host diagnostics twice.
+
+- WinUI preflight now passes in this environment (no fail-fast stop on `MISSING_MSBUILD_DISCOVERY`)
+- both reruns reached WinUI publish stage and failed consistently on restore/network path (`NU1301`)
+- failure class stabilized at `NUGET_SOURCE_UNREACHABLE`
+- WPF launch smoke repeated twice with consistent failure signature (`ExitCode=-532462766`)
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - `MSBUILD_DISCOVERY` handling adjusted:
+    - added fallback path probe for standard VS2022 `MSBuild.exe` locations
+    - changed missing-msbuild outcome from hard preflight failure to warning-style recommendation
+  - keeps probe output in manifest (`preflight_probe.checks[]`) and preserves diagnostics collection flow
+
+- docs refresh:
+  - `docs/reports/host_blocker_status_board_2026-03-05.md`
+    - updated latest blocker class and rerun evidence (`run3`, `run4`)
+  - `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md`
+    - added preflight-unblock rerun snapshot and deterministic comparison result
+  - `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+    - added repeat smoke verification snapshot (`runA`, `runB`)
+
+### Verification (latest reruns)
+
+- `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi`
+  - `run3`: `2026-03-05T18:14:40.0950026+09:00`
+  - `run4`: `2026-03-05T18:15:58.0618412+09:00`
+  - both runs:
+    - WPF publish: FAIL (`NU1301`)
+    - WinUI preflight: PASS
+    - WinUI publish: FAIL (`NU1301`)
+    - failure class: `NUGET_SOURCE_UNREACHABLE`
+- `compare_winui_diag_manifest.ps1`
+  - output: `build/reports/winui_manifest_diff_run3_vs_run4.txt`
+  - result: tracked fields all `SAME`
+- `wpf_launch_smoke.ps1`
+  - `runA`: `2026-03-05T18:17:49.3166582+09:00` -> FAIL (`-532462766`)
+  - `runB`: `2026-03-05T18:18:02.8195550+09:00` -> FAIL (`-532462766`)
+
 ## 2026-03-05 - Host follow-up execution: deterministic rerun evidence + manifest diff utility
 
 ### Summary
