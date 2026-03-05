@@ -2,6 +2,35 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF Light Glass Editorial UI refresh
+
+### Summary
+
+Modernized the `WpfHost` operator UI with a light-glass editorial direction by introducing a tokenized style system, a new left-rail + workspace layout, and visibility sync updates for render-only mode while preserving existing behavior contracts.
+
+### Changed
+
+- WPF design-token and global-style refresh:
+  - `host/WpfHost/App.xaml`
+  - added typography/color/spacing tokens and refined global styles for `Window`, `GroupBox`, `Button`, `TextBox`, `ComboBox`, `ListBox`, `TabControl`, `TabItem`, `CheckBox`, `TextBlock`, `ProgressBar`.
+- WPF layout modernization:
+  - `host/WpfHost/MainWindow.xaml`
+  - restructured control area with a new `LeftRailPanel` + existing control workspace.
+  - updated splitter, render host framing, debug overlay, and status bar contrast treatment.
+- Render-only mode visibility alignment:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `ApplyModeVisibility()` now toggles `LeftRailPanel` and uses updated control/splitter widths.
+- Documentation:
+  - `docs/reports/wpf_light_glass_editorial_ui_refresh_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_light_glass_editorial_ui_refresh.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
 ## 2026-03-06 - ARKit52 strict full-support pipeline (VRM + XAV2)
 
 ### Summary

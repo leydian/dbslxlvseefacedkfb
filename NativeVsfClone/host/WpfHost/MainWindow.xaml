@@ -3,15 +3,52 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WpfHost"
         Title="VsfClone Host (WPF)" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
-    <Grid Margin="12">
+    <Grid Margin="14">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="ControlsColumn" Width="440" />
-            <ColumnDefinition x:Name="SplitterColumn" Width="12" />
+            <ColumnDefinition x:Name="ControlsColumn" Width="560" />
+            <ColumnDefinition x:Name="SplitterColumn" Width="14" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <ScrollViewer x:Name="ControlPanelScrollViewer" Grid.Column="0" VerticalScrollBarVisibility="Auto">
-            <StackPanel>
+        <Grid Grid.Column="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="156"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="LeftRailPanel"
+                    Grid.Column="0"
+                    Background="#E9F0F8"
+                    BorderBrush="#C7D5E6"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="10">
+                <StackPanel>
+                    <TextBlock Text="WORKSPACE" Foreground="#5D6F83" FontWeight="Bold" FontSize="11"/>
+                    <TextBlock Text="Host Control" Margin="0,4,0,12" FontSize="18" FontWeight="SemiBold"/>
+                    <Border Background="#FFFFFF" BorderBrush="#C7D5E6" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+                        <TextBlock Text="Getting Started" FontWeight="SemiBold"/>
+                    </Border>
+                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+                        <TextBlock Text="Session / Avatar" Foreground="#31485F"/>
+                    </Border>
+                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+                        <TextBlock Text="Render / Outputs" Foreground="#31485F"/>
+                    </Border>
+                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
+                        <TextBlock Text="Tracking / Ops" Foreground="#31485F"/>
+                    </Border>
+                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6">
+                        <TextBlock Text="Diagnostics" Foreground="#31485F"/>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1" Background="#D8E2EE" CornerRadius="3"/>
+
+            <ScrollViewer x:Name="ControlPanelScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,0,2">
                 <GroupBox x:Name="ModeGroup" Header="모드 선택 (Mode)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="초급 모드는 필수 작업만 보여주고, 고급 모드는 전체 운영/진단 기능을 표시합니다." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
@@ -519,9 +556,10 @@
                     </StackPanel>
                 </GroupBox>
             </StackPanel>
-        </ScrollViewer>
+            </ScrollViewer>
+        </Grid>
 
-        <GridSplitter x:Name="MainGridSplitter" Grid.Column="1" Width="12" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#102030" />
+        <GridSplitter x:Name="MainGridSplitter" Grid.Column="1" Width="14" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#B9C8DB" />
 
         <Grid Grid.Column="2">
             <Grid.RowDefinitions>
@@ -531,7 +569,7 @@
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0">
-                <Border Background="#111722" BorderBrush="#304050" BorderThickness="1" CornerRadius="4">
+                <Border Background="#182639" BorderBrush="#5A708B" BorderThickness="1" CornerRadius="8">
                     <local:RenderHwndHost x:Name="RenderHost"/>
                 </Border>
                 <Border x:Name="RenderOnlyHintOverlay"
@@ -549,7 +587,7 @@
                                Foreground="#E8F0F8"
                                FontWeight="SemiBold"/>
                 </Border>
-                <Border x:Name="DebugOverlayPanel" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="8" Background="#EEFFFFFF" BorderBrush="#203040" BorderThickness="1" CornerRadius="2">
+                <Border x:Name="DebugOverlayPanel" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="8" Background="#EEFFFFFF" BorderBrush="#47627E" BorderThickness="1" CornerRadius="6">
                     <TextBlock x:Name="DebugOverlayText" FontFamily="Consolas" FontSize="11" Foreground="#1A2530" TextWrapping="Wrap" Width="420"/>
                 </Border>
             </Grid>
@@ -572,24 +610,24 @@
                 </TabItem>
             </TabControl>
 
-            <Border x:Name="StatusBarBorder" Grid.Row="2" Padding="8" Background="#0F1720" BorderBrush="#2D3A48" BorderThickness="1" CornerRadius="4">
+            <Border x:Name="StatusBarBorder" Grid.Row="2" Padding="8" Background="#24384E" BorderBrush="#546E88" BorderThickness="1" CornerRadius="8">
                 <WrapPanel>
-                    <TextBlock Text="Session: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="SessionStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
-                    <TextBlock Text="Avatar: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="AvatarStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
-                    <TextBlock Text="Render: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="RenderStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
-                    <TextBlock Text="Frame: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
-                    <TextBlock Text="Outputs: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
-                    <TextBlock Text="Busy: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
-                    <TextBlock Text="LastError: " Foreground="#A7B7C7"/>
-                    <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360"/>
-                    <TextBlock Text="Track: " Foreground="#A7B7C7" Margin="12,0,0,0"/>
-                    <TextBlock x:Name="TrackStatusText" FontWeight="SemiBold" Width="300" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="Session: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="SessionStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Avatar: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="AvatarStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Render: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="RenderStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Frame: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Outputs: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Busy: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
+                    <TextBlock Text="LastError: " Foreground="#D7E5F3"/>
+                    <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Track: " Foreground="#D7E5F3" Margin="12,0,0,0"/>
+                    <TextBlock x:Name="TrackStatusText" FontWeight="SemiBold" Width="300" TextTrimming="CharacterEllipsis" Foreground="#F4FAFF"/>
                 </WrapPanel>
             </Border>
         </Grid>
