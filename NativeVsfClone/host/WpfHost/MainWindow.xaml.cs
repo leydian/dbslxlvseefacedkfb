@@ -948,7 +948,7 @@ public partial class MainWindow : Window
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} schema_ok={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -1057,7 +1057,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, schema_ok={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1079,12 +1079,36 @@ public partial class MainWindow : Window
             avatarSb.AppendLine($"TexturePayloads: {info.TexturePayloadCount}");
             avatarSb.AppendLine($"Expressions: {info.ExpressionCount}");
             avatarSb.AppendLine($"DrawCalls: {info.LastRenderDrawCalls}");
+            avatarSb.AppendLine($"WarningCount: {info.WarningCount}");
+            avatarSb.AppendLine($"LastWarningCode: {ExtractWarningCode(info.LastWarning)}");
             avatarSb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
 
         return avatarSb.ToString();
+    }
+
+    private static string ExtractWarningCode(string warningText)
+    {
+        if (string.IsNullOrWhiteSpace(warningText))
+        {
+            return "none";
+        }
+
+        var firstColon = warningText.IndexOf(':');
+        if (firstColon < 0 || firstColon >= warningText.Length - 1)
+        {
+            return "unknown";
+        }
+
+        var secondColon = warningText.IndexOf(':', firstColon + 1);
+        if (secondColon < 0 || secondColon <= firstColon + 1)
+        {
+            return "unknown";
+        }
+
+        return warningText.Substring(firstColon + 1, secondColon - firstColon - 1).Trim();
     }
 
     private string BuildLogsText()

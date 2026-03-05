@@ -67,14 +67,16 @@ foreach ($f in $files) {
         ParserStage = ""
         PrimaryError = ""
         WarningCount = 0
-        WarningCodes = ""
+        WarningCodes = @()
+        LastWarningCode = ""
     }
     foreach ($line in $out) {
         if ($line -match '^\s*Compat:\s*(.+)$') { $row.Compat = $matches[1].Trim() }
         elseif ($line -match '^\s*ParserStage:\s*(.+)$') { $row.ParserStage = $matches[1].Trim() }
         elseif ($line -match '^\s*PrimaryError:\s*(.+)$') { $row.PrimaryError = $matches[1].Trim() }
         elseif ($line -match '^\s*WarningCodes:\s*(\d+)$') { $row.WarningCount = [int]$matches[1] }
-        elseif ($line -match '^\s*LastWarningCode:\s*(.+)$') { $row.WarningCodes = $matches[1].Trim() }
+        elseif ($line -match '^\s*WarningCode\[\d+\]:\s*(.+)$') { $row.WarningCodes += $matches[1].Trim() }
+        elseif ($line -match '^\s*LastWarningCode:\s*(.+)$') { $row.LastWarningCode = $matches[1].Trim() }
     }
     $rows += [PSCustomObject]$row
 }
@@ -97,12 +99,22 @@ foreach ($r in $rows) {
 $gate3 = $null -ne $target
 $gate4 = $true
 if ($FailOnRenderWarnings) {
+    $criticalWarningCodes = @(
+        "XAV2_SKINNING_STATIC_DISABLED",
+        "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED",
+        "XAV3_SKELETON_PAYLOAD_MISSING",
+        "XAV3_SKELETON_MESH_BIND_MISMATCH",
+        "XAV3_SKINNING_MATRIX_INVALID"
+    )
     foreach ($r in $rows) {
-        if ($r.WarningCodes -eq "XAV2_SKINNING_STATIC_DISABLED" -or
-            $r.WarningCodes -eq "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED" -or
-            $r.WarningCodes -eq "XAV3_SKELETON_PAYLOAD_MISSING" -or
-            $r.WarningCodes -eq "XAV3_SKELETON_MESH_BIND_MISMATCH" -or
-            $r.WarningCodes -eq "XAV3_SKINNING_MATRIX_INVALID") {
+        $hasCriticalWarning = $false
+        foreach ($code in $r.WarningCodes) {
+            if ($criticalWarningCodes -contains $code) {
+                $hasCriticalWarning = $true
+                break
+            }
+        }
+        if ($hasCriticalWarning) {
             $gate4 = $false
             break
         }
@@ -171,7 +183,8 @@ $summary += "- SnapshotThreshold: $MaxSnapshotMeanAbsDiff"
 $summary += ""
 $summary += "Rows"
 foreach ($r in $rows) {
-    $summary += "- $($r.Name): compat=$($r.Compat), stage=$($r.ParserStage), error=$($r.PrimaryError), last_warning_code=$($r.WarningCodes)"
+    $codes = if ($r.WarningCodes.Count -gt 0) { ($r.WarningCodes -join ",") } else { "none" }
+    $summary += "- $($r.Name): compat=$($r.Compat), stage=$($r.ParserStage), error=$($r.PrimaryError), warning_codes=$codes, last_warning_code=$($r.LastWarningCode)"
 }
 if ($snapshotRows.Count -gt 0) {
     $summary += ""

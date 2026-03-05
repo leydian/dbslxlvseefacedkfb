@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [xav2_visibility_fallback_and_warning_gate_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_visibility_fallback_and_warning_gate_2026-03-06.md): XAV2 visibility hardening update covering v3 skeleton finite-check + fallback skinning path, full warning-code emission in avatar_tool, strict gate warning-set evaluation, and WPF avatar diagnostics warning visibility
 - [workspace_change_rollup_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/workspace_change_rollup_2026-03-06.md): consolidated workspace rollup for XAV2 v3 skeleton/lilToon rendering path, Unity importer workflow addition, host UI encoding stabilization, and release/build guardrail updates
 - [release_execution_followup_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/release_execution_followup_2026-03-06.md): follow-up execution pass for 20-item board automation (GateD trend, tracking fuzz gate, render perf gate, soak gate, session migration check, diagnostics bundle enrichment)
 - [release_automation_execution_update_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/release_automation_execution_update_2026-03-06.md): detailed execution update for release automation work (dashboard split, fail-fast readiness gate, WinUI manifest matrix summary) with command/evidence snapshot

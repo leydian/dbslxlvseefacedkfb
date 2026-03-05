@@ -140,6 +140,9 @@ int main(int argc, char** argv) {
     std::cout << "  FormatUnknownSections: " << info.format_unknown_section_count << "\n";
     std::cout << "  Warnings: " << info.warnings.size() << "\n";
     std::cout << "  WarningCodes: " << info.warning_codes.size() << "\n";
+    for (std::size_t i = 0; i < info.warning_codes.size(); ++i) {
+        std::cout << "  WarningCode[" << i << "]: " << info.warning_codes[i] << "\n";
+    }
     if (!info.warning_codes.empty()) {
         std::cout << "  LastWarningCode: " << info.warning_codes.back() << "\n";
     }

@@ -795,8 +795,18 @@ bool IsValidSkeletonPosePayload(
     if (bind_pose_count == 0U) {
         return false;
     }
+    for (const float v : skin_payload.bind_poses_16xn) {
+        if (!std::isfinite(v)) {
+            return false;
+        }
+    }
     if ((skeleton_payload.bone_matrices_16xn.size() % 16U) != 0U) {
         return false;
+    }
+    for (const float v : skeleton_payload.bone_matrices_16xn) {
+        if (!std::isfinite(v)) {
+            return false;
+        }
     }
     const std::size_t skeleton_matrix_count = skeleton_payload.bone_matrices_16xn.size() / 16U;
     return skeleton_matrix_count >= bind_pose_count;
@@ -944,6 +954,7 @@ bool BuildGpuMeshForPayload(
     const avatar::MeshRenderPayload& payload,
     const avatar::SkinRenderPayload* skin_payload,
     const avatar::SkeletonRenderPayload* skeleton_payload,
+    bool force_static_skinning_fallback,
     ID3D11Device* device,
     GpuMeshResource* out_mesh) {
     if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty() || payload.indices.empty()) {
@@ -983,10 +994,12 @@ bool BuildGpuMeshForPayload(
     }
 
     if (skin_payload != nullptr) {
-        const bool force_apply_with_skeleton =
+        const bool can_apply_with_skeleton =
             skeleton_payload != nullptr && IsValidSkeletonPosePayload(*skin_payload, *skeleton_payload);
-        if (force_apply_with_skeleton || ShouldApplyExperimentalStaticSkinning()) {
+        if (can_apply_with_skeleton) {
             (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, skeleton_payload);
+        } else if (force_static_skinning_fallback || ShouldApplyExperimentalStaticSkinning()) {
+            (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, nullptr);
         }
     }
 
@@ -1095,6 +1108,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         GpuMeshResource mesh {};
         const avatar::SkinRenderPayload* skin_payload = nullptr;
         const avatar::SkeletonRenderPayload* skeleton_payload = nullptr;
+        bool force_static_skinning_fallback = false;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
         if (skin_it != skin_by_mesh.end()) {
             const auto check = ValidateSkinPayload(payload, *skin_it->second);
@@ -1112,6 +1126,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                             avatar_it->second.warning_codes.push_back("XAV3_SKINNING_MATRIX_INVALID");
                         }
                         skeleton_payload = nullptr;
+                        force_static_skinning_fallback = true;
                     }
                 } else if (!avatar_pkg.skeleton_payloads.empty()) {
                     auto avatar_it = g_state.avatars.find(handle);
@@ -1121,6 +1136,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                         avatar_it->second.warnings.push_back(warning.str());
                         avatar_it->second.warning_codes.push_back("XAV3_SKELETON_PAYLOAD_MISSING");
                     }
+                    force_static_skinning_fallback = true;
                 }
             } else {
                 auto avatar_it = g_state.avatars.find(handle);
@@ -1132,7 +1148,13 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                 }
             }
         }
-        if (!BuildGpuMeshForPayload(payload, skin_payload, skeleton_payload, device, &mesh)) {
+        if (!BuildGpuMeshForPayload(
+                payload,
+                skin_payload,
+                skeleton_payload,
+                force_static_skinning_fallback,
+                device,
+                &mesh)) {
             for (auto& created : meshes) {
                 ReleaseGpuMeshResource(&created);
             }
