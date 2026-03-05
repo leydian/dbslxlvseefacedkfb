@@ -1,5 +1,5 @@
 VRM Quality Gate Summary
-Generated: 2026-03-05T16:49:00
+Generated: 2026-03-05T21:53:25
 ReportPath: .\\build\\reports\\vrm_probe_fixed5.txt
 Profile: fixed5
 UseFixedSet: False
@@ -9,6 +9,8 @@ Gate Results
 - GateB (VRM runtime-ready + mesh payload): PASS
 - GateC (material+texture payload minimum): PASS
 - GateD (expression count visibility): PASS
+- GateE (expression bind visibility): PASS
+- GateF (springbone metadata visibility): PASS
 - Overall: PASS
 
 Per-sample

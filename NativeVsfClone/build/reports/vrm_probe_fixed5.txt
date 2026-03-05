@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-05T16:48:54
+Generated: 2026-03-05T21:53:15
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -19,15 +19,21 @@ Load succeeded
   MaterialPayloads: 15
   TexturePayloads: 11
   ExpressionCount: 3
+  ExpressionBindTotal: 0
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 17
+  Warnings: 18
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
+  SpringBonePresent: true
+  SpringBoneSprings: 0
+  SpringBoneJoints: 0
+  SpringBoneColliders: 0
+  SpringBoneColliderGroups: 0
   MissingFeatures: 2
-  LastMissingFeature: SpringBone support
+  LastMissingFeature: MToon advanced parameter binding
 
 ---- Kikyo_FT Variant.vrm
 Load succeeded
@@ -43,15 +49,21 @@ Load succeeded
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 3
+  ExpressionBindTotal: 0
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 20
+  Warnings: 21
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
+  SpringBonePresent: true
+  SpringBoneSprings: 0
+  SpringBoneJoints: 0
+  SpringBoneColliders: 0
+  SpringBoneColliderGroups: 0
   MissingFeatures: 2
-  LastMissingFeature: SpringBone support
+  LastMissingFeature: MToon advanced parameter binding
 
 ---- Kikyo_FT Variant111.vrm
 Load succeeded
@@ -67,15 +79,21 @@ Load succeeded
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 17
+  ExpressionBindTotal: 9
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 20
+  Warnings: 21
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
+  SpringBonePresent: true
+  SpringBoneSprings: 1
+  SpringBoneJoints: 0
+  SpringBoneColliders: 0
+  SpringBoneColliderGroups: 0
   MissingFeatures: 2
-  LastMissingFeature: SpringBone support
+  LastMissingFeature: MToon advanced parameter binding
 
 ---- Kikyo_FT Variant112.vrm
 Load succeeded
@@ -91,15 +109,21 @@ Load succeeded
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 18
+  ExpressionBindTotal: 63
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 20
+  Warnings: 21
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
+  SpringBonePresent: true
+  SpringBoneSprings: 2
+  SpringBoneJoints: 26
+  SpringBoneColliders: 4
+  SpringBoneColliderGroups: 2
   MissingFeatures: 2
-  LastMissingFeature: SpringBone support
+  LastMissingFeature: MToon advanced parameter binding
 
 ---- NewOnYou.vrm
 Load succeeded
@@ -115,13 +139,19 @@ Load succeeded
   MaterialPayloads: 12
   TexturePayloads: 9
   ExpressionCount: 18
+  ExpressionBindTotal: 102
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 14
+  Warnings: 15
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
+  SpringBonePresent: true
+  SpringBoneSprings: 1
+  SpringBoneJoints: 5
+  SpringBoneColliders: 57
+  SpringBoneColliderGroups: 50
   MissingFeatures: 2
-  LastMissingFeature: SpringBone support
+  LastMissingFeature: MToon advanced parameter binding
 

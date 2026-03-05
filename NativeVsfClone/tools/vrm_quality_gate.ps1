@@ -105,6 +105,8 @@ $gateA = $true  # basic load stability
 $gateB = $true  # vrm/runtime-ready/mesh
 $gateC = $true  # material/texture minimum
 $gateD = $true  # expression extraction visibility
+$gateE = $true  # expression bind visibility
+$gateF = $true  # springbone metadata visibility
 $failReasons = @()
 
 foreach ($r in $rows) {
@@ -126,6 +128,33 @@ foreach ($r in $rows) {
     }
 }
 
+$rows2 = @()
+foreach ($f in $candidates) {
+    $rawSample = & $AvatarToolPath $f.FullName
+    $fields = @{}
+    foreach ($line in $rawSample) {
+        if ($line -match '^\s*([^:]+):\s*(.*)$') {
+            $fields[$matches[1].Trim()] = $matches[2].Trim()
+        }
+    }
+    $rows2 += [PSCustomObject]@{
+        Name = $f.Name
+        ExpressionBindTotal = (To-Int "$($fields["ExpressionBindTotal"])")
+        SpringBonePresent = "$($fields["SpringBonePresent"])"
+    }
+}
+foreach ($r2 in $rows2) {
+    if ([string]::IsNullOrWhiteSpace($r2.SpringBonePresent) -or ($r2.SpringBonePresent -ne "true" -and $r2.SpringBonePresent -ne "false")) {
+        $gateF = $false
+        $failReasons += "GateF: $($r2.Name) expected SpringBonePresent to be true/false but got '$($r2.SpringBonePresent)'"
+    }
+}
+$hasBoundExpression = ($rows2 | Where-Object { $_.ExpressionBindTotal -gt 0 } | Measure-Object).Count -gt 0
+if (-not $hasBoundExpression) {
+    $gateE = $false
+    $failReasons += "GateE: expected at least one sample with ExpressionBindTotal > 0"
+}
+
 $summary = @()
 $summary += "VRM Quality Gate Summary"
 $summary += "Generated: $(Get-Date -Format s)"
@@ -138,7 +167,9 @@ $summary += "- GateA (load stability): $(if($gateA){'PASS'}else{'FAIL'})"
 $summary += "- GateB (VRM runtime-ready + mesh payload): $(if($gateB){'PASS'}else{'FAIL'})"
 $summary += "- GateC (material+texture payload minimum): $(if($gateC){'PASS'}else{'FAIL'})"
 $summary += "- GateD (expression count visibility): $(if($gateD){'PASS'}else{'FAIL'})"
-$overall = $gateA -and $gateB -and $gateC -and $gateD
+$summary += "- GateE (expression bind visibility): $(if($gateE){'PASS'}else{'FAIL'})"
+$summary += "- GateF (springbone metadata visibility): $(if($gateF){'PASS'}else{'FAIL'})"
+$overall = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Per-sample"

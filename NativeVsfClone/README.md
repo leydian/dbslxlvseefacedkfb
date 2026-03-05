@@ -97,6 +97,10 @@ If `sidecar` mode fails to execute:
   - state-based button enable/disable to enforce valid operation order
   - structured diagnostics views (`Runtime`, `Avatar`, `Logs`)
   - persistent status strip (session/avatar/render/frame/output/last-error)
+  - runtime output-state reconciliation:
+    - detects UI/runtime output-state mismatch (`Spout`, `OSC`) during tick
+    - emits mismatch diagnostics to host log stream
+    - attempts bounded auto-recovery using last-known output settings
 - WPF/WinUI host render path now applies automatic quality safeguards:
   - DPI-aware physical-pixel render target sizing
   - resize debounce to reduce swapchain thrash during drag-resize
@@ -201,6 +205,16 @@ Notes:
     - `preflight` (legacy contract): `passed`, `failed_checks`, `detected_sdks`, `recommended_actions`
     - `preflight_probe` (new): per-check evidence and inspected paths (`DOTNET_8_SDK`, `VISUAL_STUDIO_DISCOVERY`, `WINDOWS_SDK_19041_METADATA`)
   - root-cause hints include SDK precondition detection (for example: missing `8.x` SDK in `dotnet --list-sdks`)
+
+WPF reliability loop (recommended before release candidate cut):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\wpf_reliability_gate.ps1 -Iterations 3 -RunQualityBaselineAtEnd
+```
+
+Outputs:
+
+- `build/reports/wpf_reliability_gate_latest.txt` (iteration pass/fail, smoke/baseline outcome, total duration)
 
 ## Unity XAV2 SDK scaffold
 

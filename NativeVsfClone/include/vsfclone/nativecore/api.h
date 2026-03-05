@@ -80,6 +80,22 @@ typedef struct NcAvatarInfo {
     char last_missing_feature[256];
 } NcAvatarInfo;
 
+typedef struct NcExpressionInfo {
+    char name[64];
+    char mapping_kind[32];
+    float default_weight;
+    float runtime_weight;
+    uint32_t bind_count;
+} NcExpressionInfo;
+
+typedef struct NcSpringBoneInfo {
+    uint32_t present;
+    uint32_t spring_count;
+    uint32_t joint_count;
+    uint32_t collider_count;
+    uint32_t collider_group_count;
+} NcSpringBoneInfo;
+
 typedef struct NcTrackingFrame {
     float head_pos[3];
     float head_rot_quat[4];
@@ -154,6 +170,9 @@ VSFCLONE_API NcResultCode nc_shutdown(void);
 VSFCLONE_API NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* out_handle, NcAvatarInfo* out_info);
 VSFCLONE_API NcResultCode nc_unload_avatar(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_get_avatar_info(NcAvatarHandle handle, NcAvatarInfo* out_info);
+VSFCLONE_API NcResultCode nc_get_expression_count(NcAvatarHandle handle, uint32_t* out_count);
+VSFCLONE_API NcResultCode nc_get_expression_infos(NcAvatarHandle handle, NcExpressionInfo* out_infos, uint32_t capacity, uint32_t* out_written);
+VSFCLONE_API NcResultCode nc_get_springbone_info(NcAvatarHandle handle, NcSpringBoneInfo* out_info);
 
 VSFCLONE_API NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame);
 VSFCLONE_API NcResultCode nc_create_render_resources(NcAvatarHandle handle);

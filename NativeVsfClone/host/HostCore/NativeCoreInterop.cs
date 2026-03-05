@@ -81,6 +81,28 @@ public struct NcAvatarInfo
     public string LastMissingFeature;
 }
 
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct NcExpressionInfo
+{
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string Name;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string MappingKind;
+    public float DefaultWeight;
+    public float RuntimeWeight;
+    public uint BindCount;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct NcSpringBoneInfo
+{
+    public uint Present;
+    public uint SpringCount;
+    public uint JointCount;
+    public uint ColliderCount;
+    public uint ColliderGroupCount;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NcSpoutOptions
 {
@@ -163,6 +185,19 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_get_avatar_info(ulong handle, out NcAvatarInfo outInfo);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_expression_count(ulong handle, out uint outCount);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_expression_infos(
+        ulong handle,
+        [Out] NcExpressionInfo[] outInfos,
+        uint capacity,
+        out uint outWritten);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_springbone_info(ulong handle, out NcSpringBoneInfo outInfo);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_create_render_resources(ulong handle);

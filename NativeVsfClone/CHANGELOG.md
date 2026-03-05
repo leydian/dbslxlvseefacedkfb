@@ -2,6 +2,81 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - VRM expression runtime morph application + SpringBone metadata diagnostics (phase 1)
+
+### Summary
+
+Implemented the phase-1 VRM feature completion slice by wiring expression metadata to runtime mesh deformation and adding SpringBone metadata extraction/visibility while preserving backward-compatible native API behavior.
+
+### Changed
+
+- VRM data model extensions:
+  - `include/vsfclone/avatar/avatar_package.h`
+  - added expression bind list (`ExpressionState::Bind`) and springbone summary (`SpringBoneSummary`).
+- VRM loader expansion:
+  - `src/avatar/vrm_loader.cpp`
+  - added morph target delta extraction from glTF primitive targets.
+  - populated `blendshape_payloads` for VRM meshes.
+  - parsed expression binds from both:
+    - VRM1: `extensions.VRMC_vrm.expressions.*.morphTargetBinds`
+    - VRM0.x: `extensions.VRM.blendShapeMaster.blendShapeGroups[].binds`
+  - added heuristic bind fallback for blink/viseme/joy when explicit binds are missing.
+  - added SpringBone metadata summary parsing from both:
+    - VRM1: `extensions.VRMC_springBone`
+    - VRM0.x: `extensions.VRM.secondaryAnimation`
+- Runtime morph application:
+  - `src/nativecore/native_core.cpp`
+  - switched GPU vertex buffer allocation to dynamic write for mesh payloads.
+  - applied expression runtime weights to blendshape deltas and uploaded deformed vertices before draw.
+- Native C API additive extension:
+  - `include/vsfclone/nativecore/api.h`
+  - `src/nativecore/native_core.cpp`
+  - added:
+    - `nc_get_expression_count`
+    - `nc_get_expression_infos`
+    - `nc_get_springbone_info`
+  - existing `NcAvatarInfo` contract remains unchanged.
+- Host interop and diagnostics tooling:
+  - `host/HostCore/NativeCoreInterop.cs` (new P/Invoke structs and signatures)
+  - `tools/avatar_tool.cpp` (expression bind total + springbone summary output)
+  - `tools/vrm_quality_gate.ps1` (new GateE/GateF checks)
+
+### Verified
+
+- build:
+  - `cmake --build NativeVsfClone/build --config Release` PASS
+- quality gate:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5` PASS
+
+## 2026-03-05 - WPF operational reliability loop + Host output-state reconciliation
+
+### Summary
+
+Added a WPF-first operational reliability pass that detects output-state drift and provides bounded automatic recovery while introducing a repeatable reliability gate loop for release readiness checks.
+
+### Changed
+
+- Host runtime synchronization:
+  - `host/HostCore/HostController.cs`
+  - added desired-vs-runtime output-state reconciliation for `Spout` / `OSC`.
+  - mismatch logging and throttled recovery attempts now run during tick updates.
+- Reliability automation:
+  - `tools/wpf_reliability_gate.ps1` (new)
+  - loops WPF publish + launch smoke, optional baseline run, single summary report output.
+- Documentation:
+  - `README.md` updated with reliability loop usage and output-state reconciliation note.
+  - `docs/reports/wpf_operational_reliability_loop_and_output_sync_2026-03-05.md` added.
+  - `docs/reports/workspace_change_rollup_2026-03-05.md` added.
+  - `docs/INDEX.md` updated with new report links.
+
+### Verified
+
+- build:
+  - `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` PASS
+  - `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release` PASS
+- reliability loop:
+  - `powershell -ExecutionPolicy Bypass -File NativeVsfClone\tools\wpf_reliability_gate.ps1 -Iterations 1 -SkipNativeBuild` PASS
+
 ## 2026-03-05 - Host blocker-closure implementation pass (WPF smoke stabilized, WinUI diagnostics hardened)
 
 ### Summary

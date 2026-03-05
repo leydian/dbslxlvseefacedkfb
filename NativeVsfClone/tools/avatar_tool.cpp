@@ -129,6 +129,11 @@ int main(int argc, char** argv) {
     std::cout << "  MaterialPayloads: " << info.material_payloads.size() << "\n";
     std::cout << "  TexturePayloads: " << info.texture_payloads.size() << "\n";
     std::cout << "  ExpressionCount: " << info.expressions.size() << "\n";
+    std::size_t expression_bind_total = 0U;
+    for (const auto& expr : info.expressions) {
+        expression_bind_total += expr.binds.size();
+    }
+    std::cout << "  ExpressionBindTotal: " << expression_bind_total << "\n";
     std::cout << "  LastRenderDrawCalls: " << info.last_render_draw_calls << "\n";
     std::cout << "  FormatSections: " << info.format_section_count << "\n";
     std::cout << "  FormatDecodedSections: " << info.format_decoded_section_count << "\n";
@@ -143,6 +148,13 @@ int main(int argc, char** argv) {
     }
     if (!info.last_expression_summary.empty()) {
         std::cout << "  LastExpressionSummary: " << info.last_expression_summary << "\n";
+    }
+    std::cout << "  SpringBonePresent: " << (info.springbone_summary.present ? "true" : "false") << "\n";
+    if (info.springbone_summary.present) {
+        std::cout << "  SpringBoneSprings: " << info.springbone_summary.spring_count << "\n";
+        std::cout << "  SpringBoneJoints: " << info.springbone_summary.joint_count << "\n";
+        std::cout << "  SpringBoneColliders: " << info.springbone_summary.collider_count << "\n";
+        std::cout << "  SpringBoneColliderGroups: " << info.springbone_summary.collider_group_count << "\n";
     }
     std::cout << "  MissingFeatures: " << info.missing_features.size() << "\n";
     if (!info.missing_features.empty()) {

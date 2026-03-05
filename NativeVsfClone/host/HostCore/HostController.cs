@@ -20,6 +20,10 @@ public sealed class HostController
     private long _logVersion;
     private bool _windowAttached;
     private IntPtr _windowHandle = IntPtr.Zero;
+    private bool _desiredSpoutActive;
+    private bool _desiredOscActive;
+    private DateTimeOffset _lastOutputStateSyncLogUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastOutputRecoveryAttemptUtc = DateTimeOffset.MinValue;
 
     public HostController()
         : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore())
@@ -40,6 +44,8 @@ public sealed class HostController
         _presetStoreModel = EnsurePresetStoreModel(_presetStore.Load());
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
         Outputs = new OutputState(false, false, "VsfClone", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
+        _desiredSpoutActive = false;
+        _desiredOscActive = false;
         RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
         if (TryGetSelectedPreset(out var selectedPreset))
         {
@@ -96,12 +102,14 @@ public sealed class HostController
                 TrackResult("StopSpout", _outputService.StopSpout());
                 Outputs = Outputs with { SpoutActive = false };
             }
+            _desiredSpoutActive = false;
 
             if (Outputs.OscActive)
             {
                 TrackResult("StopOsc", _outputService.StopOsc());
                 Outputs = Outputs with { OscActive = false };
             }
+            _desiredOscActive = false;
 
             if (_sessionService.ActiveAvatarHandle.HasValue)
             {
@@ -202,6 +210,7 @@ public sealed class HostController
         {
             var rc = _outputService.StartSpout(width, height, fps, channelName);
             TrackResult("StartSpout", rc);
+            _desiredSpoutActive = rc == NcResultCode.Ok;
             Outputs = Outputs with
             {
                 SpoutActive = rc == NcResultCode.Ok,
@@ -221,6 +230,7 @@ public sealed class HostController
         {
             var rc = _outputService.StopSpout();
             TrackResult("StopSpout", rc);
+            _desiredSpoutActive = false;
             Outputs = Outputs with { SpoutActive = false };
             RefreshState();
             return rc;
@@ -233,6 +243,7 @@ public sealed class HostController
         {
             var rc = _outputService.StartOsc(bindPort, publishAddress);
             TrackResult("StartOsc", rc);
+            _desiredOscActive = rc == NcResultCode.Ok;
             Outputs = Outputs with
             {
                 OscActive = rc == NcResultCode.Ok,
@@ -250,6 +261,7 @@ public sealed class HostController
         {
             var rc = _outputService.StopOsc();
             TrackResult("StopOsc", rc);
+            _desiredOscActive = false;
             Outputs = Outputs with { OscActive = false };
             RefreshState();
             return rc;
@@ -417,6 +429,7 @@ public sealed class HostController
             TrackResult("RefreshAvatarInfo", refreshRc);
         }
 
+        ReconcileRuntimeOutputState();
         RefreshState();
         return rc;
     }
@@ -831,6 +844,7 @@ public sealed class HostController
         var channel = string.IsNullOrWhiteSpace(Outputs.SpoutChannelName) ? "VsfClone" : Outputs.SpoutChannelName;
         var startRc = _outputService.StartSpout(width, height, fps, channel);
         TrackResult("SpoutAutoStart", startRc);
+        _desiredSpoutActive = startRc == NcResultCode.Ok;
         Outputs = Outputs with
         {
             SpoutActive = startRc == NcResultCode.Ok,
@@ -846,5 +860,138 @@ public sealed class HostController
                 $"target={width}x{height} fps={fps}",
                 startRc),
             false);
+    }
+
+    private void ReconcileRuntimeOutputState()
+    {
+        if (OperationState.IsBusy || !_sessionService.IsInitialized)
+        {
+            return;
+        }
+
+        var statsRc = NativeCoreInterop.nc_get_runtime_stats(out var runtimeStats);
+        if (statsRc != NcResultCode.Ok)
+        {
+            TrackResult("RuntimeStatsSync", statsRc);
+            return;
+        }
+
+        var runtimeSpoutActive = runtimeStats.SpoutActive != 0U;
+        var runtimeOscActive = runtimeStats.OscActive != 0U;
+        if (Outputs.SpoutActive == runtimeSpoutActive &&
+            Outputs.OscActive == runtimeOscActive)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if ((now - _lastOutputStateSyncLogUtc) >= TimeSpan.FromSeconds(2))
+        {
+            AddLog(
+                new HostLogEntry(
+                    now,
+                    "OutputStateSync",
+                    $"mismatch detected (ui: spout={Outputs.SpoutActive}, osc={Outputs.OscActive}; runtime: spout={runtimeSpoutActive}, osc={runtimeOscActive})",
+                    NcResultCode.Ok),
+                false);
+            _lastOutputStateSyncLogUtc = now;
+        }
+
+        Outputs = Outputs with
+        {
+            SpoutActive = runtimeSpoutActive,
+            OscActive = runtimeOscActive,
+        };
+
+        if ((now - _lastOutputRecoveryAttemptUtc) < TimeSpan.FromSeconds(4))
+        {
+            return;
+        }
+        _lastOutputRecoveryAttemptUtc = now;
+
+        if (_desiredSpoutActive != runtimeSpoutActive)
+        {
+            ReconcileSpout(runtimeSpoutActive);
+        }
+        if (_desiredOscActive != runtimeOscActive)
+        {
+            ReconcileOsc(runtimeOscActive);
+        }
+    }
+
+    private void ReconcileSpout(bool runtimeSpoutActive)
+    {
+        NcResultCode rc;
+        if (_desiredSpoutActive)
+        {
+            var width = Outputs.SpoutWidthPx > 0U ? Outputs.SpoutWidthPx : Math.Max(1U, SessionState.RenderWidthPx);
+            var height = Outputs.SpoutHeightPx > 0U ? Outputs.SpoutHeightPx : Math.Max(1U, SessionState.RenderHeightPx);
+            var fps = Outputs.SpoutFps > 0U ? Outputs.SpoutFps : 60U;
+            var channel = string.IsNullOrWhiteSpace(Outputs.SpoutChannelName) ? "VsfClone" : Outputs.SpoutChannelName;
+            rc = _outputService.StartSpout(width, height, fps, channel);
+            TrackResult("OutputStateSyncSpoutStart", rc);
+        }
+        else if (runtimeSpoutActive)
+        {
+            rc = _outputService.StopSpout();
+            TrackResult("OutputStateSyncSpoutStop", rc);
+        }
+        else
+        {
+            return;
+        }
+
+        var statsRc = NativeCoreInterop.nc_get_runtime_stats(out var statsAfter);
+        if (statsRc == NcResultCode.Ok)
+        {
+            Outputs = Outputs with { SpoutActive = statsAfter.SpoutActive != 0U };
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "OutputStateSyncSpout",
+                    $"desired={_desiredSpoutActive}, runtime_after={Outputs.SpoutActive}",
+                    rc),
+                false);
+            return;
+        }
+
+        TrackResult("OutputStateSyncSpoutStats", statsRc);
+    }
+
+    private void ReconcileOsc(bool runtimeOscActive)
+    {
+        NcResultCode rc;
+        if (_desiredOscActive)
+        {
+            var bindPort = Outputs.OscBindPort;
+            var publishAddress = string.IsNullOrWhiteSpace(Outputs.OscPublishAddress) ? "127.0.0.1:39540" : Outputs.OscPublishAddress;
+            rc = _outputService.StartOsc(bindPort, publishAddress);
+            TrackResult("OutputStateSyncOscStart", rc);
+        }
+        else if (runtimeOscActive)
+        {
+            rc = _outputService.StopOsc();
+            TrackResult("OutputStateSyncOscStop", rc);
+        }
+        else
+        {
+            return;
+        }
+
+        var statsRc = NativeCoreInterop.nc_get_runtime_stats(out var statsAfter);
+        if (statsRc == NcResultCode.Ok)
+        {
+            Outputs = Outputs with { OscActive = statsAfter.OscActive != 0U };
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "OutputStateSyncOsc",
+                    $"desired={_desiredOscActive}, runtime_after={Outputs.OscActive}",
+                    rc),
+                false);
+            return;
+        }
+
+        TrackResult("OutputStateSyncOscStats", statsRc);
     }
 }

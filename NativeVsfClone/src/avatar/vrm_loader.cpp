@@ -544,6 +544,52 @@ bool ExtractPositions(const std::vector<std::uint8_t>& bin,
     return true;
 }
 
+bool ExtractPositionDeltas(const std::vector<std::uint8_t>& bin,
+                           const std::vector<AccessorMeta>& accessors,
+                           const std::vector<BufferViewMeta>& views,
+                           std::size_t accessor_index,
+                           std::vector<std::uint8_t>* out_delta_vertices,
+                           std::uint32_t expected_vertex_count,
+                           std::string* out_error) {
+    if (accessor_index >= accessors.size()) {
+        *out_error = "morph target accessor index out of range";
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.component_type != 5126U || a.type != "VEC3") {
+        *out_error = "morph target accessor must be FLOAT VEC3";
+        return false;
+    }
+    if (expected_vertex_count > 0U && a.count != expected_vertex_count) {
+        *out_error = "morph target vertex count mismatch";
+        return false;
+    }
+    if (a.buffer_view >= views.size()) {
+        *out_error = "morph target bufferView index out of range";
+        return false;
+    }
+    const auto& bv = views[a.buffer_view];
+    const std::size_t start = static_cast<std::size_t>(bv.byte_offset) + static_cast<std::size_t>(a.byte_offset);
+    const std::size_t stride = bv.byte_stride > 0U ? bv.byte_stride : 12U;
+    const std::size_t needed = start + (static_cast<std::size_t>(a.count) - 1U) * stride + 12U;
+    if (a.count == 0U || needed > bin.size()) {
+        *out_error = "morph target accessor data out of range";
+        return false;
+    }
+    out_delta_vertices->clear();
+    out_delta_vertices->reserve(static_cast<std::size_t>(a.count) * 12U);
+    for (std::uint32_t i = 0U; i < a.count; ++i) {
+        const std::size_t base = start + static_cast<std::size_t>(i) * stride;
+        const float px = ReadF32Le(bin, base);
+        const float py = ReadF32Le(bin, base + 4U);
+        const float pz = ReadF32Le(bin, base + 8U);
+        const std::array<float, 3U> v = {px, py, pz};
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(v.data());
+        out_delta_vertices->insert(out_delta_vertices->end(), bytes, bytes + sizeof(v));
+    }
+    return true;
+}
+
 bool ExtractIndices(const std::vector<std::uint8_t>& bin,
                     const std::vector<AccessorMeta>& accessors,
                     const std::vector<BufferViewMeta>& views,
@@ -667,7 +713,75 @@ void AddExpressionIfMissing(std::vector<ExpressionState>* out,
     out->push_back(std::move(expr));
 }
 
-void ParseVrmExpressionEntries(const JsonValue& root, std::vector<ExpressionState>* out_expressions) {
+ExpressionState* FindExpression(std::vector<ExpressionState>* out, const std::string& name) {
+    if (out == nullptr) {
+        return nullptr;
+    }
+    for (auto& expr : *out) {
+        if (ToLower(expr.name) == ToLower(name)) {
+            return &expr;
+        }
+    }
+    return nullptr;
+}
+
+void AddExpressionBindIfMissing(ExpressionState* expr,
+                                const std::string& mesh_name,
+                                const std::string& frame_name,
+                                float weight_scale) {
+    if (expr == nullptr || mesh_name.empty() || frame_name.empty()) {
+        return;
+    }
+    for (const auto& existing : expr->binds) {
+        if (ToLower(existing.mesh_name) == ToLower(mesh_name) &&
+            ToLower(existing.frame_name) == ToLower(frame_name)) {
+            return;
+        }
+    }
+    ExpressionState::Bind bind;
+    bind.mesh_name = mesh_name;
+    bind.frame_name = frame_name;
+    bind.weight_scale = std::max(0.0f, std::min(1.0f, weight_scale));
+    expr->binds.push_back(std::move(bind));
+}
+
+void AddHeuristicExpressionBinds(
+    std::vector<ExpressionState>* out_expressions,
+    const std::vector<BlendShapeRenderPayload>& blendshape_payloads) {
+    if (out_expressions == nullptr || blendshape_payloads.empty()) {
+        return;
+    }
+    for (auto& expr : *out_expressions) {
+        for (const auto& mesh_bs : blendshape_payloads) {
+            for (const auto& frame : mesh_bs.frames) {
+                const auto lname = ToLower(frame.name);
+                bool match = false;
+                if (expr.mapping_kind == "blink" && lname.find("blink") != std::string::npos) {
+                    match = true;
+                } else if (expr.mapping_kind == "viseme_aa" &&
+                           (lname == "a" || lname == "aa" || lname.find("mouth") != std::string::npos ||
+                            lname.find("viseme") != std::string::npos)) {
+                    match = true;
+                } else if (expr.mapping_kind == "joy" &&
+                           (lname.find("joy") != std::string::npos || lname.find("happy") != std::string::npos ||
+                            lname.find("smile") != std::string::npos)) {
+                    match = true;
+                }
+                if (match) {
+                    AddExpressionBindIfMissing(&expr, mesh_bs.mesh_name, frame.name, 1.0f);
+                }
+            }
+        }
+    }
+}
+
+void ParseVrmExpressionEntries(
+    const JsonValue& root,
+    const std::vector<BlendShapeRenderPayload>& blendshape_payloads,
+    const std::vector<std::size_t>& node_to_mesh_index,
+    const std::vector<std::string>& mesh_names_by_index,
+    const std::unordered_map<std::string, std::vector<std::string>>& mesh_frame_names,
+    std::vector<ExpressionState>* out_expressions) {
     const auto* extensions = FindKey(root, "extensions");
     if (extensions == nullptr || extensions->type != JsonValue::Type::Object) {
         return;
@@ -691,6 +805,37 @@ void ParseVrmExpressionEntries(const JsonValue& root, std::vector<ExpressionStat
                     const auto* entry = FindKey(*preset, name);
                     if (entry != nullptr && entry->type == JsonValue::Type::Object) {
                         AddExpressionIfMissing(out_expressions, name, mapping);
+                        auto* expr = FindExpression(out_expressions, name);
+                        const auto* mtb = FindKey(*entry, "morphTargetBinds");
+                        if (expr != nullptr && mtb != nullptr && mtb->type == JsonValue::Type::Array) {
+                            for (const auto& bind : mtb->array_value) {
+                                if (bind.type != JsonValue::Type::Object) {
+                                    continue;
+                                }
+                                std::size_t node_index = std::numeric_limits<std::size_t>::max();
+                                std::size_t target_index = std::numeric_limits<std::size_t>::max();
+                                if (!TryGetIndex(bind, "node", &node_index) ||
+                                    !TryGetIndex(bind, "index", &target_index)) {
+                                    continue;
+                                }
+                                if (node_index >= node_to_mesh_index.size()) {
+                                    continue;
+                                }
+                                const auto mesh_index = node_to_mesh_index[node_index];
+                                if (mesh_index >= mesh_names_by_index.size()) {
+                                    continue;
+                                }
+                                const auto& mesh_name = mesh_names_by_index[mesh_index];
+                                const auto frame_it = mesh_frame_names.find(mesh_name);
+                                if (frame_it == mesh_frame_names.end() || target_index >= frame_it->second.size()) {
+                                    continue;
+                                }
+                                double weight = 1.0;
+                                TryGetNumber(bind, "weight", &weight);
+                                AddExpressionBindIfMissing(
+                                    expr, mesh_name, frame_it->second[target_index], static_cast<float>(weight));
+                            }
+                        }
                     }
                 }
             }
@@ -699,6 +844,37 @@ void ParseVrmExpressionEntries(const JsonValue& root, std::vector<ExpressionStat
                 for (const auto& [name, value] : custom->object_value) {
                     if (value.type == JsonValue::Type::Object) {
                         AddExpressionIfMissing(out_expressions, name, "none");
+                        auto* expr = FindExpression(out_expressions, name);
+                        const auto* mtb = FindKey(value, "morphTargetBinds");
+                        if (expr != nullptr && mtb != nullptr && mtb->type == JsonValue::Type::Array) {
+                            for (const auto& bind : mtb->array_value) {
+                                if (bind.type != JsonValue::Type::Object) {
+                                    continue;
+                                }
+                                std::size_t node_index = std::numeric_limits<std::size_t>::max();
+                                std::size_t target_index = std::numeric_limits<std::size_t>::max();
+                                if (!TryGetIndex(bind, "node", &node_index) ||
+                                    !TryGetIndex(bind, "index", &target_index)) {
+                                    continue;
+                                }
+                                if (node_index >= node_to_mesh_index.size()) {
+                                    continue;
+                                }
+                                const auto mesh_index = node_to_mesh_index[node_index];
+                                if (mesh_index >= mesh_names_by_index.size()) {
+                                    continue;
+                                }
+                                const auto& mesh_name = mesh_names_by_index[mesh_index];
+                                const auto frame_it = mesh_frame_names.find(mesh_name);
+                                if (frame_it == mesh_frame_names.end() || target_index >= frame_it->second.size()) {
+                                    continue;
+                                }
+                                double weight = 1.0;
+                                TryGetNumber(bind, "weight", &weight);
+                                AddExpressionBindIfMissing(
+                                    expr, mesh_name, frame_it->second[target_index], static_cast<float>(weight));
+                            }
+                        }
                     }
                 }
             }
@@ -737,7 +913,115 @@ void ParseVrmExpressionEntries(const JsonValue& root, std::vector<ExpressionStat
                 mapping_kind = "joy";
             }
             AddExpressionIfMissing(out_expressions, expr_name, mapping_kind);
+            auto* expr = FindExpression(out_expressions, expr_name);
+            const auto* binds = FindKey(group, "binds");
+            if (expr != nullptr && binds != nullptr && binds->type == JsonValue::Type::Array) {
+                for (const auto& bind : binds->array_value) {
+                    if (bind.type != JsonValue::Type::Object) {
+                        continue;
+                    }
+                    std::size_t mesh_index = std::numeric_limits<std::size_t>::max();
+                    std::size_t target_index = std::numeric_limits<std::size_t>::max();
+                    if (!TryGetIndex(bind, "mesh", &mesh_index) ||
+                        !TryGetIndex(bind, "index", &target_index)) {
+                        continue;
+                    }
+                    if (mesh_index >= mesh_names_by_index.size()) {
+                        continue;
+                    }
+                    const auto& mesh_name = mesh_names_by_index[mesh_index];
+                    const auto frame_it = mesh_frame_names.find(mesh_name);
+                    if (frame_it == mesh_frame_names.end() || target_index >= frame_it->second.size()) {
+                        continue;
+                    }
+                    double weight = 100.0;
+                    TryGetNumber(bind, "weight", &weight);
+                    const float normalized = static_cast<float>(std::max(0.0, std::min(1.0, weight / 100.0)));
+                    AddExpressionBindIfMissing(expr, mesh_name, frame_it->second[target_index], normalized);
+                }
+            }
         }
+    }
+
+    AddHeuristicExpressionBinds(out_expressions, blendshape_payloads);
+}
+
+void ParseSpringBoneSummary(const JsonValue& root, SpringBoneSummary* out_summary) {
+    if (out_summary == nullptr) {
+        return;
+    }
+    const auto* extensions = FindKey(root, "extensions");
+    if (extensions == nullptr || extensions->type != JsonValue::Type::Object) {
+        return;
+    }
+
+    const auto* vrmc_spring = FindKey(*extensions, "VRMC_springBone");
+    if (vrmc_spring != nullptr && vrmc_spring->type == JsonValue::Type::Object) {
+        out_summary->present = true;
+        const auto* colliders = FindKey(*vrmc_spring, "colliders");
+        if (colliders != nullptr && colliders->type == JsonValue::Type::Array) {
+            out_summary->collider_count = static_cast<std::uint32_t>(colliders->array_value.size());
+        }
+        const auto* collider_groups = FindKey(*vrmc_spring, "colliderGroups");
+        if (collider_groups != nullptr && collider_groups->type == JsonValue::Type::Array) {
+            out_summary->collider_group_count = static_cast<std::uint32_t>(collider_groups->array_value.size());
+        }
+        const auto* springs = FindKey(*vrmc_spring, "springs");
+        if (springs != nullptr && springs->type == JsonValue::Type::Array) {
+            out_summary->spring_count = static_cast<std::uint32_t>(springs->array_value.size());
+            std::uint32_t joints = 0U;
+            for (const auto& spring : springs->array_value) {
+                if (spring.type != JsonValue::Type::Object) {
+                    continue;
+                }
+                const auto* spring_joints = FindKey(spring, "joints");
+                if (spring_joints != nullptr && spring_joints->type == JsonValue::Type::Array) {
+                    joints += static_cast<std::uint32_t>(spring_joints->array_value.size());
+                }
+            }
+            out_summary->joint_count = joints;
+        }
+        return;
+    }
+
+    const auto* vrm_legacy = FindKey(*extensions, "VRM");
+    if (vrm_legacy == nullptr || vrm_legacy->type != JsonValue::Type::Object) {
+        return;
+    }
+    const auto* secondary = FindKey(*vrm_legacy, "secondaryAnimation");
+    if (secondary == nullptr || secondary->type != JsonValue::Type::Object) {
+        return;
+    }
+    out_summary->present = true;
+    const auto* collider_groups = FindKey(*secondary, "colliderGroups");
+    if (collider_groups != nullptr && collider_groups->type == JsonValue::Type::Array) {
+        out_summary->collider_group_count = static_cast<std::uint32_t>(collider_groups->array_value.size());
+        std::uint32_t colliders = 0U;
+        for (const auto& group : collider_groups->array_value) {
+            if (group.type != JsonValue::Type::Object) {
+                continue;
+            }
+            const auto* cols = FindKey(group, "colliders");
+            if (cols != nullptr && cols->type == JsonValue::Type::Array) {
+                colliders += static_cast<std::uint32_t>(cols->array_value.size());
+            }
+        }
+        out_summary->collider_count = colliders;
+    }
+    const auto* bone_groups = FindKey(*secondary, "boneGroups");
+    if (bone_groups != nullptr && bone_groups->type == JsonValue::Type::Array) {
+        out_summary->spring_count = static_cast<std::uint32_t>(bone_groups->array_value.size());
+        std::uint32_t joints = 0U;
+        for (const auto& group : bone_groups->array_value) {
+            if (group.type != JsonValue::Type::Object) {
+                continue;
+            }
+            const auto* bones = FindKey(group, "bones");
+            if (bones != nullptr && bones->type == JsonValue::Type::Array) {
+                joints += static_cast<std::uint32_t>(bones->array_value.size());
+            }
+        }
+        out_summary->joint_count = joints;
     }
 }
 
@@ -850,6 +1134,37 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             views.push_back(BufferViewMeta{});
         }
     }
+
+    std::vector<std::string> mesh_names_by_index;
+    mesh_names_by_index.resize(meshes_v->array_value.size());
+    for (std::size_t mesh_i = 0U; mesh_i < meshes_v->array_value.size(); ++mesh_i) {
+        const auto& mesh = meshes_v->array_value[mesh_i];
+        std::string mesh_name = "Mesh" + std::to_string(mesh_i);
+        if (mesh.type == JsonValue::Type::Object) {
+            TryGetString(mesh, "name", &mesh_name);
+        }
+        mesh_names_by_index[mesh_i] = mesh_name;
+    }
+
+    std::vector<std::size_t> node_to_mesh_index;
+    const auto* nodes_v = FindKey(root, "nodes");
+    if (nodes_v != nullptr && nodes_v->type == JsonValue::Type::Array) {
+        node_to_mesh_index.assign(
+            nodes_v->array_value.size(),
+            std::numeric_limits<std::size_t>::max());
+        for (std::size_t node_i = 0U; node_i < nodes_v->array_value.size(); ++node_i) {
+            const auto& node = nodes_v->array_value[node_i];
+            if (node.type != JsonValue::Type::Object) {
+                continue;
+            }
+            std::size_t mesh_index = std::numeric_limits<std::size_t>::max();
+            if (TryGetIndex(node, "mesh", &mesh_index)) {
+                node_to_mesh_index[node_i] = mesh_index;
+            }
+        }
+    }
+
+    std::unordered_map<std::string, std::vector<std::string>> mesh_frame_names;
 
     pkg.parser_stage = "resolve";
     const auto* textures_v = FindKey(root, "textures");
@@ -991,7 +1306,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     std::size_t mesh_added = 0U;
-    for (const auto& mesh : meshes_v->array_value) {
+    for (std::size_t mesh_i = 0U; mesh_i < meshes_v->array_value.size(); ++mesh_i) {
+        const auto& mesh = meshes_v->array_value[mesh_i];
         if (mesh.type != JsonValue::Type::Object) {
             continue;
         }
@@ -1016,7 +1332,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         MeshRenderPayload mesh_payload;
         std::string mesh_name;
         if (!TryGetString(mesh, "name", &mesh_name)) {
-            mesh_name = "Mesh" + std::to_string(mesh_added);
+            mesh_name = "Mesh" + std::to_string(mesh_i);
         }
         mesh_payload.name = mesh_name;
         mesh_payload.vertex_stride = 12U;
@@ -1068,6 +1384,74 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             }
         }
 
+        const auto* targets_v = FindKey(prim, "targets");
+        std::vector<std::string> target_names;
+        const auto* extras_v = FindKey(mesh, "extras");
+        if (extras_v != nullptr && extras_v->type == JsonValue::Type::Object) {
+            const auto* target_names_v = FindKey(*extras_v, "targetNames");
+            if (target_names_v != nullptr && target_names_v->type == JsonValue::Type::Array) {
+                target_names.reserve(target_names_v->array_value.size());
+                for (const auto& n : target_names_v->array_value) {
+                    if (n.type == JsonValue::Type::String) {
+                        target_names.push_back(n.string_value);
+                    } else {
+                        target_names.push_back(std::string());
+                    }
+                }
+            }
+        }
+        std::vector<float> target_default_weights;
+        const auto* weights_v = FindKey(mesh, "weights");
+        if (weights_v != nullptr && weights_v->type == JsonValue::Type::Array) {
+            target_default_weights.reserve(weights_v->array_value.size());
+            for (const auto& w : weights_v->array_value) {
+                if (w.type == JsonValue::Type::Number) {
+                    target_default_weights.push_back(static_cast<float>(w.number_value));
+                } else {
+                    target_default_weights.push_back(0.0f);
+                }
+            }
+        }
+        BlendShapeRenderPayload blendshape_payload;
+        blendshape_payload.mesh_name = mesh_name;
+        if (targets_v != nullptr && targets_v->type == JsonValue::Type::Array) {
+            for (std::size_t target_i = 0U; target_i < targets_v->array_value.size(); ++target_i) {
+                const auto& target = targets_v->array_value[target_i];
+                if (target.type != JsonValue::Type::Object) {
+                    continue;
+                }
+                const auto* pos_acc = FindKey(target, "POSITION");
+                if (pos_acc == nullptr || pos_acc->type != JsonValue::Type::Number) {
+                    continue;
+                }
+                const std::size_t pos_accessor =
+                    static_cast<std::size_t>(static_cast<std::uint32_t>(pos_acc->number_value));
+                BlendShapeFramePayload frame;
+                frame.name = "target_" + std::to_string(target_i);
+                if (target_i < target_names.size() && !target_names[target_i].empty()) {
+                    frame.name = target_names[target_i];
+                }
+                if (target_i < target_default_weights.size()) {
+                    frame.weight = target_default_weights[target_i];
+                }
+                if (!ExtractPositionDeltas(
+                        bin_chunk.bytes, accessors, views, pos_accessor, &frame.delta_vertices, vtx_count, &read_error)) {
+                    pkg.warnings.push_back("W_PAYLOAD: VRM_BLENDSHAPE_READ_FAILED: " + read_error);
+                    continue;
+                }
+                blendshape_payload.frames.push_back(std::move(frame));
+            }
+        }
+        if (!blendshape_payload.frames.empty()) {
+            std::vector<std::string> frame_names;
+            frame_names.reserve(blendshape_payload.frames.size());
+            for (const auto& frame : blendshape_payload.frames) {
+                frame_names.push_back(frame.name);
+            }
+            mesh_frame_names[mesh_name] = std::move(frame_names);
+            pkg.blendshape_payloads.push_back(std::move(blendshape_payload));
+        }
+
         pkg.mesh_payloads.push_back(std::move(mesh_payload));
         pkg.meshes.push_back(MeshAssetSummary{mesh_name, vtx_count, static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size())});
         ++mesh_added;
@@ -1114,7 +1498,13 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         }
     }
 
-    ParseVrmExpressionEntries(root, &pkg.expressions);
+    ParseVrmExpressionEntries(
+        root,
+        pkg.blendshape_payloads,
+        node_to_mesh_index,
+        mesh_names_by_index,
+        mesh_frame_names,
+        &pkg.expressions);
     if (!pkg.expressions.empty()) {
         pkg.warnings.push_back("W_EXPRESSION: extracted expression entries=" + std::to_string(pkg.expressions.size()));
     } else {
@@ -1125,8 +1515,17 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             "W_VRM_EXPRESSION_FALLBACK: no expression entries found, injected default blink/aa/joy mappings");
     }
 
+    ParseSpringBoneSummary(root, &pkg.springbone_summary);
+    if (pkg.springbone_summary.present) {
+        pkg.warnings.push_back(
+            "W_SPRINGBONE: parsed springbone metadata spring=" + std::to_string(pkg.springbone_summary.spring_count) +
+            ", joint=" + std::to_string(pkg.springbone_summary.joint_count) +
+            ", collider=" + std::to_string(pkg.springbone_summary.collider_count));
+        pkg.missing_features.push_back("SpringBone runtime simulation");
+    } else {
+        pkg.missing_features.push_back("SpringBone metadata");
+    }
     pkg.missing_features.push_back("MToon advanced parameter binding");
-    pkg.missing_features.push_back("SpringBone support");
 
     pkg.parser_stage = "runtime-ready";
     if (pkg.compat_level != AvatarCompatLevel::Partial) {

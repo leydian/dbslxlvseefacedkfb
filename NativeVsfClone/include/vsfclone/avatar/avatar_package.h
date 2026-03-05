@@ -91,6 +91,20 @@ struct ExpressionState {
     std::string mapping_kind;
     float default_weight = 0.0f;
     float runtime_weight = 0.0f;
+    struct Bind {
+        std::string mesh_name;
+        std::string frame_name;
+        float weight_scale = 1.0f;
+    };
+    std::vector<Bind> binds;
+};
+
+struct SpringBoneSummary {
+    bool present = false;
+    std::uint32_t spring_count = 0;
+    std::uint32_t joint_count = 0;
+    std::uint32_t collider_count = 0;
+    std::uint32_t collider_group_count = 0;
 };
 
 struct AvatarPackage {
@@ -108,6 +122,7 @@ struct AvatarPackage {
     std::vector<MaterialRenderPayload> material_payloads;
     std::vector<TextureRenderPayload> texture_payloads;
     std::vector<ExpressionState> expressions;
+    SpringBoneSummary springbone_summary;
     std::string last_expression_summary;
     std::uint32_t last_render_draw_calls = 0;
     std::uint32_t format_section_count = 0;

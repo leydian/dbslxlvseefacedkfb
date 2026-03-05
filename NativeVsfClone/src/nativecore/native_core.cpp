@@ -49,6 +49,7 @@ struct WindowRenderState {
 };
 
 struct GpuMeshResource {
+    std::string mesh_name;
     ID3D11Buffer* vertex_buffer = nullptr;
     ID3D11Buffer* index_buffer = nullptr;
     std::uint32_t vertex_count = 0;
@@ -58,6 +59,8 @@ struct GpuMeshResource {
     std::uint32_t vertex_stride = 12;
     DirectX::XMFLOAT3 bounds_min = {0.0f, 0.0f, 0.0f};
     DirectX::XMFLOAT3 bounds_max = {0.0f, 0.0f, 0.0f};
+    std::vector<std::uint8_t> base_vertex_blob;
+    std::vector<std::uint8_t> deformed_vertex_blob;
 };
 
 struct GpuMaterialResource {
@@ -297,6 +300,9 @@ void ReleaseGpuMeshResource(GpuMeshResource* mesh) {
     mesh->center = {0.0f, 0.0f, 0.0f};
     mesh->bounds_min = {0.0f, 0.0f, 0.0f};
     mesh->bounds_max = {0.0f, 0.0f, 0.0f};
+    mesh->mesh_name.clear();
+    mesh->base_vertex_blob.clear();
+    mesh->deformed_vertex_blob.clear();
 }
 
 void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
@@ -677,8 +683,9 @@ bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Devi
 
     D3D11_BUFFER_DESC vb_desc {};
     vb_desc.ByteWidth = static_cast<UINT>(gpu_vertex_blob.size());
-    vb_desc.Usage = D3D11_USAGE_DEFAULT;
+    vb_desc.Usage = D3D11_USAGE_DYNAMIC;
     vb_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    vb_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     D3D11_SUBRESOURCE_DATA vb_data {};
     vb_data.pSysMem = gpu_vertex_blob.data();
 
@@ -741,6 +748,9 @@ bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Devi
     out_mesh->vertex_stride = 20U;
     out_mesh->bounds_min = bmin;
     out_mesh->bounds_max = bmax;
+    out_mesh->mesh_name = payload.name;
+    out_mesh->base_vertex_blob = gpu_vertex_blob;
+    out_mesh->deformed_vertex_blob = gpu_vertex_blob;
     return true;
 }
 
@@ -764,6 +774,126 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         meshes.push_back(mesh);
     }
     renderer->avatar_meshes[handle] = std::move(meshes);
+    return true;
+}
+
+bool ApplyExpressionMorphToAvatar(
+    RendererResources* renderer,
+    const AvatarPackage& avatar_pkg,
+    std::uint64_t handle,
+    ID3D11DeviceContext* device_ctx) {
+    if (renderer == nullptr || device_ctx == nullptr) {
+        return false;
+    }
+    auto mesh_it = renderer->avatar_meshes.find(handle);
+    if (mesh_it == renderer->avatar_meshes.end()) {
+        return true;
+    }
+    if (avatar_pkg.expressions.empty() || avatar_pkg.blendshape_payloads.empty()) {
+        return true;
+    }
+    auto& gpu_meshes = mesh_it->second;
+    if (gpu_meshes.empty()) {
+        return true;
+    }
+
+    std::unordered_map<std::string, std::size_t> gpu_mesh_index_by_name;
+    for (std::size_t i = 0U; i < gpu_meshes.size(); ++i) {
+        gpu_mesh_index_by_name[gpu_meshes[i].mesh_name] = i;
+    }
+    std::unordered_map<std::string, const avatar::BlendShapeRenderPayload*> blendshape_by_mesh;
+    for (const auto& bs : avatar_pkg.blendshape_payloads) {
+        blendshape_by_mesh[bs.mesh_name] = &bs;
+    }
+
+    std::vector<std::vector<float>> accum_deltas(gpu_meshes.size());
+    std::vector<bool> has_delta(gpu_meshes.size(), false);
+    for (const auto& expr : avatar_pkg.expressions) {
+        const float expr_weight = std::max(0.0f, std::min(1.0f, expr.runtime_weight));
+        if (expr_weight <= 0.0001f || expr.binds.empty()) {
+            continue;
+        }
+        for (const auto& bind : expr.binds) {
+            const auto mesh_idx_it = gpu_mesh_index_by_name.find(bind.mesh_name);
+            if (mesh_idx_it == gpu_mesh_index_by_name.end()) {
+                continue;
+            }
+            const auto bs_it = blendshape_by_mesh.find(bind.mesh_name);
+            if (bs_it == blendshape_by_mesh.end() || bs_it->second == nullptr) {
+                continue;
+            }
+            const auto mesh_index = mesh_idx_it->second;
+            const auto& gpu_mesh = gpu_meshes[mesh_index];
+            const auto* frame_ptr = static_cast<const avatar::BlendShapeFramePayload*>(nullptr);
+            for (const auto& frame : bs_it->second->frames) {
+                if (frame.name == bind.frame_name) {
+                    frame_ptr = &frame;
+                    break;
+                }
+            }
+            if (frame_ptr == nullptr) {
+                continue;
+            }
+            const auto& frame = *frame_ptr;
+            if (frame.delta_vertices.size() < static_cast<std::size_t>(gpu_mesh.vertex_count) * 12U) {
+                continue;
+            }
+            if (accum_deltas[mesh_index].empty()) {
+                accum_deltas[mesh_index].assign(static_cast<std::size_t>(gpu_mesh.vertex_count) * 3U, 0.0f);
+            }
+            auto& accum = accum_deltas[mesh_index];
+            const float scale = expr_weight * std::max(0.0f, bind.weight_scale);
+            const auto* delta_bytes = frame.delta_vertices.data();
+            for (std::uint32_t vi = 0U; vi < gpu_mesh.vertex_count; ++vi) {
+                const std::size_t dbase = static_cast<std::size_t>(vi) * 12U;
+                float dx = 0.0f;
+                float dy = 0.0f;
+                float dz = 0.0f;
+                std::memcpy(&dx, delta_bytes + dbase, sizeof(float));
+                std::memcpy(&dy, delta_bytes + dbase + 4U, sizeof(float));
+                std::memcpy(&dz, delta_bytes + dbase + 8U, sizeof(float));
+                const std::size_t a = static_cast<std::size_t>(vi) * 3U;
+                accum[a] += dx * scale;
+                accum[a + 1U] += dy * scale;
+                accum[a + 2U] += dz * scale;
+            }
+            has_delta[mesh_index] = true;
+        }
+    }
+
+    for (std::size_t mesh_index = 0U; mesh_index < gpu_meshes.size(); ++mesh_index) {
+        auto& gpu_mesh = gpu_meshes[mesh_index];
+        if (gpu_mesh.base_vertex_blob.empty() || gpu_mesh.vertex_buffer == nullptr) {
+            continue;
+        }
+        gpu_mesh.deformed_vertex_blob = gpu_mesh.base_vertex_blob;
+        if (has_delta[mesh_index] && !accum_deltas[mesh_index].empty()) {
+            auto& deformed = gpu_mesh.deformed_vertex_blob;
+            const auto& accum = accum_deltas[mesh_index];
+            for (std::uint32_t vi = 0U; vi < gpu_mesh.vertex_count; ++vi) {
+                const std::size_t vbase = static_cast<std::size_t>(vi) * gpu_mesh.vertex_stride;
+                const std::size_t a = static_cast<std::size_t>(vi) * 3U;
+                float px = 0.0f;
+                float py = 0.0f;
+                float pz = 0.0f;
+                std::memcpy(&px, deformed.data() + vbase, sizeof(float));
+                std::memcpy(&py, deformed.data() + vbase + 4U, sizeof(float));
+                std::memcpy(&pz, deformed.data() + vbase + 8U, sizeof(float));
+                px += accum[a];
+                py += accum[a + 1U];
+                pz += accum[a + 2U];
+                std::memcpy(deformed.data() + vbase, &px, sizeof(float));
+                std::memcpy(deformed.data() + vbase + 4U, &py, sizeof(float));
+                std::memcpy(deformed.data() + vbase + 8U, &pz, sizeof(float));
+            }
+        }
+
+        D3D11_MAPPED_SUBRESOURCE mapped {};
+        if (SUCCEEDED(device_ctx->Map(gpu_mesh.vertex_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
+            std::memcpy(mapped.pData, gpu_mesh.deformed_vertex_blob.data(), gpu_mesh.deformed_vertex_blob.size());
+            device_ctx->Unmap(gpu_mesh.vertex_buffer, 0U);
+        }
+    }
     return true;
 }
 
@@ -1141,6 +1271,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             SetError(NC_ERROR_INTERNAL, "render", "failed to create material GPU resources", true);
             return NC_ERROR_INTERNAL;
         }
+        if (!ApplyExpressionMorphToAvatar(&renderer, it->second, handle, device_ctx)) {
+            SetError(NC_ERROR_INTERNAL, "render", "failed to apply expression morphs", true);
+            return NC_ERROR_INTERNAL;
+        }
         auto mesh_it = renderer.avatar_meshes.find(handle);
         if (mesh_it == renderer.avatar_meshes.end()) {
             continue;
@@ -1476,6 +1610,90 @@ NcResultCode nc_get_avatar_info(NcAvatarHandle handle, NcAvatarInfo* out_info) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
     vsfclone::nativecore::FillAvatarInfo(it->second, handle, out_info);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_expression_count(NcAvatarHandle handle, uint32_t* out_count) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_count == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "out_count must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    auto it = vsfclone::nativecore::g_state.avatars.find(handle);
+    if (it == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    *out_count = static_cast<std::uint32_t>(it->second.expressions.size());
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_expression_infos(
+    NcAvatarHandle handle,
+    NcExpressionInfo* out_infos,
+    uint32_t capacity,
+    uint32_t* out_written) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_written == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "out_written must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    auto it = vsfclone::nativecore::g_state.avatars.find(handle);
+    if (it == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    *out_written = 0U;
+    const auto& expressions = it->second.expressions;
+    const auto to_write = static_cast<std::uint32_t>(std::min<std::size_t>(capacity, expressions.size()));
+    if (to_write > 0U && out_infos == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "out_infos must not be null when capacity > 0", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    for (std::uint32_t i = 0U; i < to_write; ++i) {
+        std::memset(&out_infos[i], 0, sizeof(NcExpressionInfo));
+        const auto& expr = expressions[i];
+        vsfclone::nativecore::CopyString(out_infos[i].name, sizeof(out_infos[i].name), expr.name);
+        vsfclone::nativecore::CopyString(out_infos[i].mapping_kind, sizeof(out_infos[i].mapping_kind), expr.mapping_kind);
+        out_infos[i].default_weight = expr.default_weight;
+        out_infos[i].runtime_weight = expr.runtime_weight;
+        out_infos[i].bind_count = static_cast<std::uint32_t>(expr.binds.size());
+    }
+    *out_written = to_write;
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_springbone_info(NcAvatarHandle handle, NcSpringBoneInfo* out_info) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_info == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "out_info must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    auto it = vsfclone::nativecore::g_state.avatars.find(handle);
+    if (it == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    std::memset(out_info, 0, sizeof(*out_info));
+    out_info->present = it->second.springbone_summary.present ? 1U : 0U;
+    out_info->spring_count = it->second.springbone_summary.spring_count;
+    out_info->joint_count = it->second.springbone_summary.joint_count;
+    out_info->collider_count = it->second.springbone_summary.collider_count;
+    out_info->collider_group_count = it->second.springbone_summary.collider_group_count;
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
