@@ -130,3 +130,25 @@ This evidence document is considered complete when:
 - evidence files:
   - `build/reports/wpf_launch_smoke_runA.txt`
   - `build/reports/wpf_launch_smoke_runB.txt`
+
+## Follow-up Update (2026-03-05, startup-crash fix verification)
+
+- root cause refinement:
+  - latest event-log evidence showed startup failure was `NullReferenceException` in `MainWindow.RefreshValidationState()` rather than `DllNotFoundException`.
+  - exception anchor:
+    - `WpfHost.MainWindow.RefreshValidationState()` (`MainWindow.xaml.cs:645` in failing build)
+- fix applied:
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - added UI-ready gating for early `TextChanged` events during XAML initialization.
+    - added null guards for validation controls before calling `_controller.ValidateInputs(...)`.
+- verification:
+  - `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi` rerun:
+    - WPF publish: PASS
+    - WPF launch smoke: PASS
+  - direct smoke rerun:
+    - `build/reports/wpf_launch_smoke_latest.txt`
+    - `WPF launch smoke run: 2026-03-05T21:36:16.2937824+09:00`
+    - `Status: PASS`
+    - `ExitCode: 0`
+- current status:
+  - non-interactive WPF launch smoke blocker is closed in this environment.

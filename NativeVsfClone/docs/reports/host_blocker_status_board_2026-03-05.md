@@ -7,14 +7,9 @@ Single status board for host-track closure work across WPF-first release gating 
 ## Open Blockers
 
 1. WinUI compile blocker remains open.
-   - current local signature: WinUI publish-stage restore/network failure (`NU1301`)
-   - current class: `NUGET_SOURCE_UNREACHABLE`
+   - current local signature: `XamlCompiler.exe` publish-stage failure (`MSB3073`)
+   - current class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
    - latest evidence: `build/reports/winui/winui_diagnostic_manifest.json`
-
-2. WPF non-interactive launch smoke is unstable in CLI/headless runs.
-   - signature: process exit `-532462766`
-   - evidence path: `build/reports/wpf_launch_smoke_latest.txt`
-   - historical event-log anchor: `.NET Runtime` event `1026`, `System.DllNotFoundException`
 
 ## Closed Items
 
@@ -26,35 +21,42 @@ Single status board for host-track closure work across WPF-first release gating 
 2. WinUI diagnostics collection contract is deterministic.
    - preflight probe + failure class + binlog/log artifacts produced on failure path
    - profile-based diagnostics (`diag-default`, `managed-xaml`) persisted in manifest
-   - local rerun comparison (`run3` vs `run4`) shows no class/profile drift:
-     - `failure_class=NUGET_SOURCE_UNREACHABLE` (same)
-     - profiles exit/hints (same)
-     - evidence: `build/reports/winui_manifest_diff_run3_vs_run4.txt`
+  - local rerun comparison (`runA` vs `runB`) shows no class/profile drift:
+    - `failure_class=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` (same)
+    - profiles exit/hints (same)
+    - evidence: `build/reports/winui_manifest_diff_runA_vs_runB.txt`
+
+3. WPF non-interactive launch smoke is stabilized.
+   - latest evidence: `build/reports/wpf_launch_smoke_latest.txt`
+   - latest status: `PASS`, `ExitCode=0`
+   - closure change:
+     - startup null-guard + UI-ready gating added in `host/WpfHost/MainWindow.xaml.cs`
+     - smoke report now includes scoped event-log window and probe-path inventory (`tools/wpf_launch_smoke.ps1`)
 
 ## Next Actions
 
 1. Compare WinUI diagnostics across CI matrix (`windows-latest`, `windows-2022`) and local run using `tools/compare_winui_diag_manifest.ps1`.
-2. Resolve NuGet/network path (`NU1301`) so WPF/WinUI publish can reach compile-stage diagnostics reliably.
-3. Resolve WPF launch failure dependency chain (`exit=-532462766`) and stabilize smoke probe.
+2. Resolve WinUI `XamlCompiler.exe` publish-stage blocker (`MSB3073`/`WMC9999`) and validate whether auth-related feed hints (`401/403`) are causal or secondary.
+3. Validate CI matrix parity via uploaded per-OS manifest summary (`winui_manifest_summary_*.txt`) and local manifest diff.
 4. Capture quantitative before/after metrics for refresh-throttle (`LastFrameMs`, UI update cadence, logs-tab active/inactive impact).
 
-## Latest Evidence Snapshot (2026-03-05, follow-up execution)
+## Latest Evidence Snapshot (2026-03-05, implementation follow-up)
 
 - `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi` rerun x2:
-  - `run3`: `2026-03-05T18:14:40.0950026+09:00`
-  - `run4`: `2026-03-05T18:15:58.0618412+09:00`
+  - `runA`: `2026-03-05T21:30:53+09:00`
+  - `runB`: `2026-03-05T21:31:50+09:00`
   - both runs:
-    - WPF publish: FAIL (`NU1301` restore/network path)
+    - WPF publish: PASS
+    - WPF launch smoke: PASS after startup null-guard fix (`latest direct smoke run: 2026-03-05T21:36:16+09:00`)
     - WinUI preflight: PASS
-    - WinUI publish: FAIL (`NU1301`)
+    - WinUI publish: FAIL (`XamlCompiler.exe`/`MSB3073`)
     - diagnostics collected with profile outputs
 - manifest rerun diff:
-  - `build/reports/winui_manifest_diff_run3_vs_run4.txt`
+  - `build/reports/winui_manifest_diff_runA_vs_runB.txt`
   - result: all tracked fields `SAME`
-- WPF launch smoke direct rerun:
-  - `runA`: `2026-03-05T18:17:49.3166582+09:00`
-  - `runB`: `2026-03-05T18:18:02.8195550+09:00`
-  - result: `FAIL`, `ExitCode=-532462766`
+- latest WinUI manifest key fields:
+  - `failure_class=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `root_cause_hints` includes `MSB3073`, `WMC9999`, and auth-related feed hint (`401/403`)
 
 ## Artifact Contract
 
@@ -65,3 +67,7 @@ Single status board for host-track closure work across WPF-first release gating 
 - `build/reports/winui/winui_build_diag.log`
 - `build/reports/winui/winui_build_managed_diag.log`
 - `build/reports/winui/obj-dump/**`
+
+## Detailed Implementation Record
+
+- `docs/reports/host_blocker_closure_implementation_pass_2026-03-05.md`

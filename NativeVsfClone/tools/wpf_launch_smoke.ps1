@@ -3,7 +3,9 @@ param(
     [string]$WorkingDirectory = "",
     [int]$AliveSeconds = 6,
     [string]$ReportPath = ".\build\reports\wpf_launch_smoke_latest.txt",
-    [bool]$TreatFailureAsError = $false
+    [bool]$TreatFailureAsError = $false,
+    [string[]]$AdditionalProbePaths = @(),
+    [bool]$IncludeDirectoryInventory = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,12 +29,24 @@ $resolvedReportPath = Resolve-AbsolutePath -Path $ReportPath -BaseDirectory $rep
 $reportDir = Split-Path -Parent $resolvedReportPath
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 
+$probePaths = [System.Collections.Generic.List[string]]::new()
+$probePaths.Add($resolvedWorkingDirectory)
+foreach ($candidate in $AdditionalProbePaths) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        $resolvedCandidate = Resolve-AbsolutePath -Path $candidate -BaseDirectory $repoRoot
+        if (-not $probePaths.Contains($resolvedCandidate)) {
+            $probePaths.Add($resolvedCandidate)
+        }
+    }
+}
+
 $runStart = Get-Date
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("WPF launch smoke run: $(Get-Date -Format o)")
 $lines.Add("ExePath: $resolvedExePath")
 $lines.Add("WorkingDirectory: $resolvedWorkingDirectory")
 $lines.Add("AliveSeconds: $AliveSeconds")
+$lines.Add("ProbePaths: $($probePaths -join ';')")
 
 if (-not (Test-Path $resolvedExePath)) {
     $errorText = "WPF smoke target not found: $resolvedExePath"
@@ -45,8 +59,10 @@ if (-not (Test-Path $resolvedExePath)) {
 $status = "PASS"
 $exitCode = 0
 $process = $null
+$originalPath = $env:PATH
 
 try {
+    $env:PATH = (($probePaths | Where-Object { Test-Path $_ }) -join ";") + ";" + $env:PATH
     $process = Start-Process -FilePath $resolvedExePath -WorkingDirectory $resolvedWorkingDirectory -PassThru
     Start-Sleep -Seconds $AliveSeconds
 
@@ -59,6 +75,7 @@ try {
     $exitCode = -1
     $lines.Add("Exception: $($_.Exception.Message)")
 } finally {
+    $env:PATH = $originalPath
     if ($null -ne $process -and -not $process.HasExited) {
         try {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
@@ -71,7 +88,7 @@ try {
 $lines.Add("Status: $status")
 $lines.Add("ExitCode: $exitCode")
 
-$startTime = $runStart.AddMinutes(-10)
+$startTime = $runStart.AddSeconds(-2)
 try {
     $events = Get-WinEvent -FilterHashtable @{
         LogName = "Application"
@@ -80,21 +97,66 @@ try {
         ($_.Id -in @(1026, 1000, 1001)) -and ($_.Message -match "WpfHost\.exe|DllNotFoundException")
     } | Select-Object -First 5
 
+    $eventMessages = [System.Collections.Generic.List[string]]::new()
     if ($null -ne $events -and @($events).Count -gt 0) {
         $lines.Add("EventLog: related Application entries (IDs 1026/1000/1001, latest up to 5)")
+        $lines.Add("EventLogStartTime: $($startTime.ToString("o"))")
         foreach ($event in $events) {
             $msg = "$($event.Message)"
             $msg = $msg -replace "`r", " " -replace "`n", " "
             if ($msg.Length -gt 500) {
                 $msg = $msg.Substring(0, 500)
             }
+            $eventMessages.Add($msg)
             $lines.Add(" - [$($event.TimeCreated.ToString("o"))] id=$($event.Id) provider=$($event.ProviderName) $msg")
         }
+
+        $dependencyHints = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($message in $eventMessages) {
+            if ($message -match "Could not load file or assembly '([^']+)'") {
+                [void]$dependencyHints.Add($Matches[1])
+            }
+            if ($message -match "Unable to load DLL '([^']+)'") {
+                [void]$dependencyHints.Add($Matches[1])
+            }
+            if ($message -match "Faulting module name:\s*([^,\s]+)") {
+                [void]$dependencyHints.Add($Matches[1])
+            }
+        }
+        if ($dependencyHints.Count -gt 0) {
+            $lines.Add("DependencyHints: " + ((@($dependencyHints) | Sort-Object) -join ", "))
+        } else {
+            $lines.Add("DependencyHints: none extracted from event messages.")
+        }
     } else {
-        $lines.Add("EventLog: no related entries found in last 10 minutes.")
+        $lines.Add("EventLog: no related entries found since smoke run start.")
+        $lines.Add("DependencyHints: unavailable (no matching event log records).")
     }
 } catch {
     $lines.Add("EventLog: query failed ($($_.Exception.Message))")
+    $lines.Add("DependencyHints: unavailable (event log query failed).")
+}
+
+if ($IncludeDirectoryInventory) {
+    $lines.Add("DirectoryInventory:")
+    foreach ($dirPath in $probePaths) {
+        if (-not (Test-Path $dirPath)) {
+            $lines.Add(" - $dirPath (missing)")
+            continue
+        }
+        $lines.Add(" - $dirPath")
+        $dllFiles = @(Get-ChildItem -Path $dirPath -Filter *.dll -File -ErrorAction SilentlyContinue | Select-Object -First 20)
+        if ($dllFiles.Count -eq 0) {
+            $lines.Add("   dlls: <none>")
+            continue
+        }
+        foreach ($dllFile in $dllFiles) {
+            $lines.Add("   dll: $($dllFile.Name)")
+        }
+        if ((Get-ChildItem -Path $dirPath -Filter *.dll -File -ErrorAction SilentlyContinue).Count -gt 20) {
+            $lines.Add("   dll: <truncated>")
+        }
+    }
 }
 
 $lines | Set-Content -Path $resolvedReportPath -Encoding UTF8

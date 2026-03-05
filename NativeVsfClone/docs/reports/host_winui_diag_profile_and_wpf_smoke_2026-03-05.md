@@ -207,9 +207,60 @@ Observed outcomes:
 
 ## Open Follow-up Items
 
-1. Run full local `publish_hosts.ps1 -IncludeWinUi` with new profile-enabled diagnostics and verify manifest profile outputs under actual WinUI failure conditions.
-2. Compare CI matrix artifacts (`windows-latest` vs `windows-2022`) to isolate environment-specific blocker differences.
-3. Resolve WPF `DllNotFoundException` dependency chain for headless launch-failure signature (`exit=-532462766`) and confirm smoke stability.
+1. Compare CI matrix artifacts (`windows-latest` vs `windows-2022`) to isolate environment-specific blocker differences using `winui_manifest_summary_*.txt` and raw manifest files.
+2. Resolve WinUI `XamlCompiler.exe` path (`MSB3073`/`WMC9999`) and verify whether feed auth hints (`401/403`) are causal.
+3. Capture quantitative refresh-throttle metrics (`LastFrameMs`, update cadence, logs-tab active/inactive) as closure evidence.
+
+## Follow-up Execution Snapshot (2026-03-05, implementation pass)
+
+Implemented updates in this pass:
+
+- `tools/publish_hosts.ps1`
+  - added `WinUiRestoreRetryCount` option and NU1301-aware retry wrapper for dotnet publish commands.
+  - added NuGet source/proxy probe capture (`nuget_probe`) and surfaced summary into host publish log and manifest.
+  - added NuGet auth hint extraction (`401/403`) and explicit failure class mapping for `NUGET_AUTH_FAILURE`.
+- `tools/wpf_launch_smoke.ps1`
+  - added probe-path PATH injection (`AdditionalProbePaths`) for launch-time dependency resolution checks.
+  - added dependency hint extraction from related event messages.
+  - added directory DLL inventory to report artifact for quick dependency audits.
+  - narrowed event query window to run-start scope to avoid stale historical event bleed.
+- `.github/workflows/host-publish.yml`
+  - added trigger path for `tools/compare_winui_diag_manifest.ps1`.
+  - added per-OS WinUI manifest summary generation (`build/reports/winui_manifest_summary_*.txt`) and step-summary output.
+- `host/WpfHost/MainWindow.xaml.cs`
+  - added UI-ready gating and null guards around validation controls to prevent startup-time `NullReferenceException` during initial XAML text-change events.
+
+Executed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -WinUiRestoreRetryCount 1 -NuGetProbeTimeoutSeconds 6
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -WinUiRestoreRetryCount 1 -NuGetProbeTimeoutSeconds 6
+powershell -ExecutionPolicy Bypass -File .\tools\compare_winui_diag_manifest.ps1 `
+  -BaseManifestPath .\build\reports\winui\winui_diagnostic_manifest_runA.json `
+  -TargetManifestPath .\build\reports\winui\winui_diagnostic_manifest_runB.json `
+  -OutputPath .\build\reports\winui_manifest_diff_runA_vs_runB.txt
+powershell -ExecutionPolicy Bypass -File .\tools\wpf_launch_smoke.ps1 `
+  -ExePath .\dist\wpf\WpfHost.exe `
+  -WorkingDirectory .\dist\wpf `
+  -AliveSeconds 6 `
+  -ReportPath .\build\reports\wpf_launch_smoke_latest.txt `
+  -AdditionalProbePaths .\build\Release
+```
+
+Observed outcomes:
+
+- host reruns (`runA`: `2026-03-05T21:30:53+09:00`, `runB`: `2026-03-05T21:31:50+09:00`)
+  - WPF publish: PASS
+  - WPF launch smoke: PASS after startup null-guard fix
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe`/`MSB3073`)
+  - WinUI failure class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- manifest diff:
+  - `build/reports/winui_manifest_diff_runA_vs_runB.txt`
+  - result: all tracked fields `SAME`
+- latest WPF smoke direct rerun:
+  - `2026-03-05T21:36:16.2937824+09:00`
+  - `Status=PASS`, `ExitCode=0`
 
 ## Related Tracking
 

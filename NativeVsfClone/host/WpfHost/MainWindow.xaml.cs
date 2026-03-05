@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private string _lastAvatarText = string.Empty;
     private string _lastLogsText = string.Empty;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
+    private bool _uiReady;
 
     public MainWindow()
     {
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
         SyncRenderControlsFromState();
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
+        _uiReady = true;
         _uiRefreshTimer.Start();
     }
 
@@ -169,6 +171,11 @@ public partial class MainWindow : Window
 
     private void InputTextChanged(object sender, TextChangedEventArgs e)
     {
+        if (!_uiReady)
+        {
+            return;
+        }
+
         RefreshValidationState();
         UpdateUiState();
     }
@@ -589,47 +596,47 @@ public partial class MainWindow : Window
         var session = _controller.SessionState;
         var outputs = _controller.Outputs;
         var operation = _controller.OperationState;
-        var hasAvatar = session.ActiveAvatarHandle.HasValue;
-        var isBusy = operation.IsBusy;
+        var uiState = HostUiPolicy.EvaluateAvailability(
+            session,
+            outputs,
+            operation,
+            _validationState,
+            _controller.RenderState,
+            CameraModeComboBox.SelectedIndex == 2);
+        var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
 
-        InitializeButton.IsEnabled = !session.IsInitialized && !isBusy;
-        ShutdownButton.IsEnabled = session.IsInitialized && !isBusy;
-        BrowseAvatarButton.IsEnabled = session.IsInitialized && !isBusy;
-        LoadButton.IsEnabled = session.IsInitialized && !isBusy && _validationState.AvatarPathValid;
-        UnloadButton.IsEnabled = session.IsInitialized && hasAvatar && !isBusy;
-        StartSpoutButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.SpoutActive && !isBusy;
-        StopSpoutButton.IsEnabled = outputs.SpoutActive && !isBusy;
-        StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive && !isBusy && _validationState.OscBindPortValid && _validationState.OscPublishAddressValid;
-        StopOscButton.IsEnabled = outputs.OscActive && !isBusy;
+        InitializeButton.IsEnabled = uiState.InitializeEnabled;
+        ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
+        BrowseAvatarButton.IsEnabled = uiState.BrowseAvatarEnabled;
+        LoadButton.IsEnabled = uiState.LoadEnabled;
+        UnloadButton.IsEnabled = uiState.UnloadEnabled;
+        StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
+        StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
+        StartOscButton.IsEnabled = uiState.StartOscEnabled;
+        StopOscButton.IsEnabled = uiState.StopOscEnabled;
 
-        var renderControlsEnabled = session.IsInitialized && !isBusy;
-        var manualCameraMode = CameraModeComboBox.SelectedIndex == 2 || _controller.RenderState.CameraMode == RenderCameraMode.Manual;
-        BroadcastModeCheckBox.IsEnabled = renderControlsEnabled;
-        CameraModeComboBox.IsEnabled = renderControlsEnabled;
-        FramingSlider.IsEnabled = renderControlsEnabled;
-        HeadroomSlider.IsEnabled = renderControlsEnabled;
-        YawSlider.IsEnabled = renderControlsEnabled && manualCameraMode;
-        FovSlider.IsEnabled = renderControlsEnabled && manualCameraMode;
-        BackgroundPresetComboBox.IsEnabled = renderControlsEnabled;
-        MirrorModeCheckBox.IsEnabled = renderControlsEnabled;
-        DebugOverlayCheckBox.IsEnabled = renderControlsEnabled;
-        SavePresetButton.IsEnabled = renderControlsEnabled;
-        ApplyPresetButton.IsEnabled = renderControlsEnabled;
-        DeletePresetButton.IsEnabled = renderControlsEnabled;
-        ResetRenderButton.IsEnabled = renderControlsEnabled;
-        PresetNameTextBox.IsEnabled = renderControlsEnabled;
-        PresetComboBox.IsEnabled = renderControlsEnabled;
+        BroadcastModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        CameraModeComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        FramingSlider.IsEnabled = uiState.RenderControlsEnabled;
+        HeadroomSlider.IsEnabled = uiState.RenderControlsEnabled;
+        YawSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
+        FovSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
+        BackgroundPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        ApplyPresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        DeletePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        ResetRenderButton.IsEnabled = uiState.RenderControlsEnabled;
+        PresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
+        PresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
 
-        var sessionText = session.IsInitialized ? "Initialized" : "Stopped";
-        var avatarText = hasAvatar ? "Loaded" : "None";
-        var outputsText = $"Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
-
-        SessionStatusText.Text = sessionText;
-        AvatarStatusText.Text = avatarText;
-        RenderStatusText.Text = $"{session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
-        OutputStatusText.Text = outputsText;
-        BusyStatusText.Text = isBusy ? operation.CurrentOperation : "Idle";
-        QuickStatusText.Text = $"Session={sessionText} | Avatar={avatarText} | Outputs={outputsText}";
+        SessionStatusText.Text = statusText.SessionText;
+        AvatarStatusText.Text = statusText.AvatarText;
+        RenderStatusText.Text = statusText.RenderText;
+        OutputStatusText.Text = statusText.OutputText;
+        BusyStatusText.Text = statusText.BusyText;
+        QuickStatusText.Text = statusText.QuickStatusText;
 
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
@@ -642,6 +649,16 @@ public partial class MainWindow : Window
 
     private void RefreshValidationState()
     {
+        if (AvatarPathTextBox is null ||
+            OscBindPortTextBox is null ||
+            OscPublishAddressTextBox is null ||
+            AvatarPathValidationText is null ||
+            OscBindValidationText is null ||
+            OscPublishValidationText is null)
+        {
+            return;
+        }
+
         _validationState = _controller.ValidateInputs(
             AvatarPathTextBox.Text,
             OscBindPortTextBox.Text,

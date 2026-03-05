@@ -8,6 +8,7 @@ on:
       - "host/**"
       - "tools/publish_hosts.ps1"
       - "tools/wpf_launch_smoke.ps1"
+      - "tools/compare_winui_diag_manifest.ps1"
       - "tools/run_quality_baseline.ps1"
       - "tools/vsfavatar_quality_gate.ps1"
       - "tools/vsfavatar_sample_report.ps1"
@@ -22,6 +23,7 @@ on:
       - "host/**"
       - "tools/publish_hosts.ps1"
       - "tools/wpf_launch_smoke.ps1"
+      - "tools/compare_winui_diag_manifest.ps1"
       - "tools/run_quality_baseline.ps1"
       - "tools/vsfavatar_quality_gate.ps1"
       - "tools/vsfavatar_sample_report.ps1"
@@ -152,6 +154,35 @@ jobs:
             exit 1
           }
 
+      - name: Summarize WinUI Diagnostic Manifest
+        if: always()
+        run: |
+          $manifestPath = Join-Path $PWD "build\reports\winui\winui_diagnostic_manifest.json"
+          $summaryPath = Join-Path $PWD "build\reports\winui_manifest_summary_${{ matrix.os }}.txt"
+          if (-not (Test-Path $manifestPath)) {
+            "manifest_missing=true" | Set-Content -Path $summaryPath -Encoding UTF8
+            "### WinUI diagnostics (${{ matrix.os }})`n- manifest missing" >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+
+          $manifest = Get-Content -Raw -Path $manifestPath | ConvertFrom-Json
+          $lines = @()
+          $lines += "os=${{ matrix.os }}"
+          $lines += "failure_class=$($manifest.failure_class)"
+          $lines += "failure_class_confidence=$($manifest.failure_class_confidence)"
+          $lines += "preflight_passed=$($manifest.preflight.passed)"
+          $lines += "preflight_failed_checks=$(([string]::Join(',', @($manifest.preflight.failed_checks))))"
+          $lines += "preflight_warnings=$(([string]::Join(',', @($manifest.preflight.warnings))))"
+          $lines += "nuget_enabled=$($manifest.nuget_probe.summary.enabled)"
+          $lines += "nuget_reachable=$($manifest.nuget_probe.summary.reachable)"
+          $lines += "nuget_unreachable=$($manifest.nuget_probe.summary.unreachable)"
+          $lines | Set-Content -Path $summaryPath -Encoding UTF8
+
+          "### WinUI diagnostics (${{ matrix.os }})" >> $env:GITHUB_STEP_SUMMARY
+          "- failure_class: $($manifest.failure_class)" >> $env:GITHUB_STEP_SUMMARY
+          "- preflight_failed_checks: $(([string]::Join(',', @($manifest.preflight.failed_checks))))" >> $env:GITHUB_STEP_SUMMARY
+          "- nuget summary: enabled=$($manifest.nuget_probe.summary.enabled), reachable=$($manifest.nuget_probe.summary.reachable), unreachable=$($manifest.nuget_probe.summary.unreachable)" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Upload WinUI Diagnostic Outputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -167,3 +198,4 @@ jobs:
             NativeVsfClone/build/reports/winui/winui_build_diag.log
             NativeVsfClone/build/reports/winui/winui_build_managed_diag.log
             NativeVsfClone/build/reports/winui/obj-dump
+            NativeVsfClone/build/reports/winui_manifest_summary_*.txt

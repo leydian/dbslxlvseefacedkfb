@@ -7,6 +7,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VSFCLONE_BUILD_CONSOLE "Build CLI/console entrypoint" ON)
 
+if(MSVC)
+    # Use static CRT to reduce runtime dependency issues for host-side nativecore loading.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 add_library(vsfclone_core STATIC
     src/avatar/avatar_loader_facade.cpp
     src/avatar/vrm_loader.cpp

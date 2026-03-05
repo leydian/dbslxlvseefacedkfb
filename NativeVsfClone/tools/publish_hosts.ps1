@@ -11,7 +11,9 @@ param(
     [bool]$RunWpfLaunchSmoke = $true,
     [bool]$WpfLaunchSmokeFailOnError = $false,
     [int]$WpfLaunchSmokeDurationSeconds = 6,
-    [string]$WpfLaunchSmokeReportPath = ".\build\reports\wpf_launch_smoke_latest.txt"
+    [string]$WpfLaunchSmokeReportPath = ".\build\reports\wpf_launch_smoke_latest.txt",
+    [int]$WinUiRestoreRetryCount = 1,
+    [int]$NuGetProbeTimeoutSeconds = 8
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,6 +49,119 @@ function Invoke-DotNetCommand {
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE (dotnet $($Args -join ' '))"
     }
+}
+
+function Invoke-DotNetCommandWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Args,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [int]$RetryCount = 0,
+        [int]$RetryDelaySeconds = 3
+    )
+
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        $output = & dotnet @Args 2>&1
+        $output | Out-Host
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
+            return
+        }
+
+        $outputText = ($output | ForEach-Object { "$_" }) -join "`n"
+        $nugetTransient = $outputText -match "NU1301"
+        if ($attempt -le $RetryCount -and $nugetTransient) {
+            Write-Step "$Description failed with NU1301; retrying ($attempt/$RetryCount) after ${RetryDelaySeconds}s..."
+            Start-Sleep -Seconds $RetryDelaySeconds
+            continue
+        }
+
+        throw "$Description failed with exit code $exitCode (dotnet $($Args -join ' '))"
+    }
+}
+
+function Get-NuGetSourceProbe {
+    param([int]$TimeoutSeconds = 8)
+
+    $probe = [ordered]@{
+        generated_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+        timeout_seconds = $TimeoutSeconds
+        proxy = [ordered]@{
+            http_proxy = $env:HTTP_PROXY
+            https_proxy = $env:HTTPS_PROXY
+            no_proxy = $env:NO_PROXY
+        }
+        sources = @()
+        summary = [ordered]@{
+            total = 0
+            enabled = 0
+            reachable = 0
+            unreachable = 0
+            unknown = 0
+        }
+    }
+
+    $sourceLines = @()
+    try {
+        $sourceLines = @(& dotnet nuget list source 2>$null)
+    } catch {
+        return $probe
+    }
+
+    $sources = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in $sourceLines) {
+        $text = "$line".Trim()
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            continue
+        }
+        if ($text -match '^\s*\d+\.\s+(.+?)\s+\[(Enabled|Disabled)\]\s*$') {
+            $sources.Add([ordered]@{
+                name = $Matches[1].Trim()
+                enabled = ($Matches[2] -eq "Enabled")
+                url = ""
+                reachable = $null
+                status = "unknown"
+                error = ""
+            })
+            continue
+        }
+        if ($text -match '^\s*(https?://\S+)\s*$') {
+            if ($sources.Count -gt 0) {
+                $entry = $sources[$sources.Count - 1]
+                $entry.url = $Matches[1]
+            }
+        }
+    }
+
+    foreach ($source in $sources) {
+        if (-not [bool]$source.enabled) {
+            $source.status = "disabled"
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace("$($source.url)")) {
+            $source.status = "enabled_no_url"
+            continue
+        }
+        try {
+            $null = Invoke-WebRequest -Uri $source.url -Method Head -TimeoutSec $TimeoutSeconds -UseBasicParsing
+            $source.reachable = $true
+            $source.status = "reachable"
+        } catch {
+            $source.reachable = $false
+            $source.status = "unreachable"
+            $source.error = "$($_.Exception.Message)"
+        }
+    }
+
+    $probe.sources = $sources.ToArray()
+    $probe.summary.total = $probe.sources.Count
+    $probe.summary.enabled = @($probe.sources | Where-Object { [bool]$_.enabled }).Count
+    $probe.summary.reachable = @($probe.sources | Where-Object { [bool]$_.enabled -and $_.status -eq "reachable" }).Count
+    $probe.summary.unreachable = @($probe.sources | Where-Object { [bool]$_.enabled -and $_.status -eq "unreachable" }).Count
+    $probe.summary.unknown = @($probe.sources | Where-Object { [bool]$_.enabled -and $_.status -notin @("reachable", "unreachable") }).Count
+
+    return $probe
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -89,6 +204,8 @@ $log.Add("RunWpfLaunchSmoke: $RunWpfLaunchSmoke")
 $log.Add("WpfLaunchSmokeFailOnError: $WpfLaunchSmokeFailOnError")
 $log.Add("WpfLaunchSmokeDurationSeconds: $WpfLaunchSmokeDurationSeconds")
 $log.Add("WpfLaunchSmokeReportPath: $resolvedWpfLaunchSmokeReportPath")
+$log.Add("WinUiRestoreRetryCount: $WinUiRestoreRetryCount")
+$log.Add("NuGetProbeTimeoutSeconds: $NuGetProbeTimeoutSeconds")
 
 Assert-Command "cmake"
 Assert-Command "dotnet"
@@ -150,7 +267,8 @@ function Write-WinUiDiagnosticManifest {
         [string]$ManagedDiagStderrPath,
         [string[]]$RootCauseHints,
         [hashtable]$PreflightProbe,
-        [object[]]$Profiles
+        [object[]]$Profiles,
+        [hashtable]$NuGetProbe
     )
 
     $legacyPreflight = $Preflight
@@ -185,6 +303,7 @@ function Write-WinUiDiagnosticManifest {
         profiles = $Profiles
         preflight = $legacyPreflight
         preflight_probe = $PreflightProbe
+        nuget_probe = $NuGetProbe
         environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
@@ -291,7 +410,8 @@ function Get-WinUiRootCauseHints {
     param(
         [string]$DiagLogPath,
         [string]$ManagedDiagLogPath,
-        [hashtable]$EnvironmentSummary
+        [hashtable]$EnvironmentSummary,
+        [hashtable]$NuGetProbe
     )
 
     $hints = [System.Collections.Generic.List[string]]::new()
@@ -305,6 +425,10 @@ function Get-WinUiRootCauseHints {
         }
         if (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet) {
             $hints.Add("NuGet source access failed (NU1301). Verify network/proxy and source config.")
+        }
+        if ((Select-String -Path $DiagLogPath -Pattern "401" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "403" -SimpleMatch -Quiet)) {
+            $hints.Add("NuGet feed returned authorization failure (401/403). Check credential provider/session token.")
         }
     }
 
@@ -328,6 +452,11 @@ function Get-WinUiRootCauseHints {
             $hints.Add(".NET 8 SDK was not detected in dotnet --list-sdks; WinUI net8.0 build may fail under SDK-only 9.x environments.")
         }
     }
+    if ($null -ne $NuGetProbe -and $null -ne $NuGetProbe.summary) {
+        if ([int]$NuGetProbe.summary.enabled -gt 0 -and [int]$NuGetProbe.summary.reachable -eq 0) {
+            $hints.Add("NuGet source probe found no reachable enabled sources; verify feed URL/proxy/firewall.")
+        }
+    }
 
     if ($hints.Count -eq 0) {
         $hints.Add("No explicit root-cause hint extracted from diagnostics logs.")
@@ -338,7 +467,8 @@ function Get-WinUiRootCauseHints {
 
 function Test-WinUiToolchainPreconditions {
     param(
-        [hashtable]$EnvironmentSummary
+        [hashtable]$EnvironmentSummary,
+        [hashtable]$NuGetProbe
     )
 
     $failedChecks = [System.Collections.Generic.List[string]]::new()
@@ -440,6 +570,12 @@ function Test-WinUiToolchainPreconditions {
         $failedChecks.Add("MISSING_WINDOWSAPPSDK_PACKAGE_CACHE")
         $recommendedActions.Add("Run dotnet restore for WinUiHost and verify Microsoft.WindowsAppSDK package cache is available.")
     }
+    if ($null -ne $NuGetProbe -and $null -ne $NuGetProbe.summary) {
+        if ([int]$NuGetProbe.summary.enabled -gt 0 -and [int]$NuGetProbe.summary.reachable -eq 0) {
+            $warnings.Add("NO_REACHABLE_NUGET_SOURCE")
+            $recommendedActions.Add("No enabled NuGet source responded to HTTP probe. Verify source URL/auth/proxy before WinUI publish.")
+        }
+    }
 
     return [ordered]@{
         passed = ($failedChecks.Count -eq 0)
@@ -526,6 +662,10 @@ function Get-WinUiFailureClass {
     }
 
     if (Test-Path $DiagLogPath) {
+        if ((Select-String -Path $DiagLogPath -Pattern "401" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "403" -SimpleMatch -Quiet)) {
+            return [ordered]@{ Class = "NUGET_AUTH_FAILURE"; Confidence = "medium" }
+        }
         if ((Select-String -Path $DiagLogPath -Pattern "NU1101" -SimpleMatch -Quiet) -or
             (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet)) {
             return [ordered]@{ Class = "NUGET_SOURCE_UNREACHABLE"; Confidence = "high" }
@@ -543,7 +683,8 @@ function Collect-WinUiDiagnostics {
     param(
         [string]$Reason,
         [string]$PublishError,
-        [hashtable]$Preflight
+        [hashtable]$Preflight,
+        [hashtable]$NuGetProbe
     )
 
     New-Item -ItemType Directory -Force -Path $resolvedWinUiDiagDir | Out-Null
@@ -630,7 +771,7 @@ function Collect-WinUiDiagnostics {
     }
 
     Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
-    $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -EnvironmentSummary $envSummary
+    $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -EnvironmentSummary $envSummary -NuGetProbe $NuGetProbe
     $failure = Get-WinUiFailureClass -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -Preflight $Preflight
     Write-WinUiDiagnosticManifest `
         -ManifestPath $manifestPath `
@@ -652,7 +793,8 @@ function Collect-WinUiDiagnostics {
         -ManagedDiagStderrPath $managedDiagStderrPath `
         -RootCauseHints $rootCauseHints `
         -PreflightProbe $Preflight.probe `
-        -Profiles $profiles.ToArray()
+        -Profiles $profiles.ToArray() `
+        -NuGetProbe $NuGetProbe
 
     $log.Add("WinUI diagnostics command: $diagCommandText")
     $log.Add("WinUI diagnostics exit code: $diagExitCode")
@@ -687,6 +829,9 @@ function Collect-WinUiDiagnostics {
     $log.Add("WinUI diagnostics diag log: $diagLogPath")
     $log.Add("WinUI diagnostics stderr log: $diagStderrPath")
     $log.Add("WinUI diagnostics obj dump: $objDumpPath")
+    if ($null -ne $NuGetProbe -and $null -ne $NuGetProbe.summary) {
+        $log.Add("NuGet probe summary: enabled=$($NuGetProbe.summary.enabled), reachable=$($NuGetProbe.summary.reachable), unreachable=$($NuGetProbe.summary.unreachable), unknown=$($NuGetProbe.summary.unknown)")
+    }
 }
 
 $wpfPublishFailed = $false
@@ -706,7 +851,7 @@ try {
     if ($NoRestore) {
         $wpfPublishArgs += "--no-restore"
     }
-    Invoke-DotNetCommand -Description "WPF publish" -Args $wpfPublishArgs
+    Invoke-DotNetCommandWithRetry -Description "WPF publish" -Args $wpfPublishArgs -RetryCount $WinUiRestoreRetryCount
 
     if (-not (Test-Path (Join-Path $wpfDist "WpfHost.exe"))) {
         throw "WPF publish output not found: $wpfDist"
@@ -752,7 +897,11 @@ try {
 
 if ($IncludeWinUi) {
     $envSummaryForPreflight = Get-WinUiEnvironmentSummary
-    $winUiPreflight = Test-WinUiToolchainPreconditions -EnvironmentSummary $envSummaryForPreflight
+    $nugetProbe = Get-NuGetSourceProbe -TimeoutSeconds $NuGetProbeTimeoutSeconds
+    $winUiPreflight = Test-WinUiToolchainPreconditions -EnvironmentSummary $envSummaryForPreflight -NuGetProbe $nugetProbe
+    if ($null -ne $nugetProbe -and $null -ne $nugetProbe.summary) {
+        $log.Add("NuGet probe summary: enabled=$($nugetProbe.summary.enabled), reachable=$($nugetProbe.summary.reachable), unreachable=$($nugetProbe.summary.unreachable), unknown=$($nugetProbe.summary.unknown)")
+    }
     if (-not [bool]$winUiPreflight.passed) {
         $preflightError = "WinUI toolchain preflight failed: $($winUiPreflight.failed_checks -join ', ')"
         $log.Add("WinUI preflight: FAIL")
@@ -762,10 +911,13 @@ if ($IncludeWinUi) {
         foreach ($action in $winUiPreflight.recommended_actions) {
             $log.Add("WinUI preflight recommended action: $action")
         }
+        foreach ($warning in @($winUiPreflight.warnings)) {
+            $log.Add("WinUI preflight warning: $warning")
+        }
 
         if ($CollectWinUiDiagnostics) {
             Write-Step "WinUI preflight failed; collecting diagnostics..."
-            Collect-WinUiDiagnostics -Reason "winui preflight failed" -PublishError $preflightError -Preflight $winUiPreflight
+            Collect-WinUiDiagnostics -Reason "winui preflight failed" -PublishError $preflightError -Preflight $winUiPreflight -NuGetProbe $nugetProbe
             Write-Step "WinUI diagnostics saved under: $resolvedWinUiDiagDir"
         } else {
             $log.Add("WinUI diagnostics: skipped (CollectWinUiDiagnostics=false)")
@@ -776,6 +928,9 @@ if ($IncludeWinUi) {
     }
 
     $log.Add("WinUI preflight: PASS")
+    foreach ($warning in @($winUiPreflight.warnings)) {
+        $log.Add("WinUI preflight warning: $warning")
+    }
     try {
         Write-Step "Publishing WinUI host to dist/winui..."
         $winUiPublishArgs = @(
@@ -793,7 +948,7 @@ if ($IncludeWinUi) {
         if ($NoRestore) {
             $winUiPublishArgs += "--no-restore"
         }
-        Invoke-DotNetCommand -Description "WinUI publish" -Args $winUiPublishArgs
+        Invoke-DotNetCommandWithRetry -Description "WinUI publish" -Args $winUiPublishArgs -RetryCount $WinUiRestoreRetryCount
 
         if (-not (Test-Path (Join-Path $winUiDist "WinUiHost.exe"))) {
             throw "WinUI publish output not found: $winUiDist"
@@ -808,7 +963,7 @@ if ($IncludeWinUi) {
 
         if ($CollectWinUiDiagnostics) {
             Write-Step "WinUI publish failed; collecting diagnostics..."
-            Collect-WinUiDiagnostics -Reason "winui publish failed" -PublishError $publishErrorText -Preflight $winUiPreflight
+            Collect-WinUiDiagnostics -Reason "winui publish failed" -PublishError $publishErrorText -Preflight $winUiPreflight -NuGetProbe $nugetProbe
             Write-Step "WinUI diagnostics saved under: $resolvedWinUiDiagDir"
         } else {
             $log.Add("WinUI diagnostics: skipped (CollectWinUiDiagnostics=false)")

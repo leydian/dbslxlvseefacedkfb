@@ -68,7 +68,12 @@ Add-DiffLine -Lines $lines -Name "failure_class_confidence" -BaseValue $base.fai
 Add-DiffLine -Lines $lines -Name "reason" -BaseValue $base.reason -TargetValue $target.reason
 Add-DiffLine -Lines $lines -Name "preflight.passed" -BaseValue $base.preflight.passed -TargetValue $target.preflight.passed
 Add-DiffLine -Lines $lines -Name "preflight.failed_checks" -BaseValue @($base.preflight.failed_checks) -TargetValue @($target.preflight.failed_checks)
+Add-DiffLine -Lines $lines -Name "preflight.warnings" -BaseValue @($base.preflight.warnings) -TargetValue @($target.preflight.warnings)
 Add-DiffLine -Lines $lines -Name "root_cause_hints" -BaseValue @($base.root_cause_hints) -TargetValue @($target.root_cause_hints)
+Add-DiffLine -Lines $lines -Name "nuget_probe.summary.enabled" -BaseValue $base.nuget_probe.summary.enabled -TargetValue $target.nuget_probe.summary.enabled
+Add-DiffLine -Lines $lines -Name "nuget_probe.summary.reachable" -BaseValue $base.nuget_probe.summary.reachable -TargetValue $target.nuget_probe.summary.reachable
+Add-DiffLine -Lines $lines -Name "nuget_probe.summary.unreachable" -BaseValue $base.nuget_probe.summary.unreachable -TargetValue $target.nuget_probe.summary.unreachable
+Add-DiffLine -Lines $lines -Name "nuget_probe.summary.unknown" -BaseValue $base.nuget_probe.summary.unknown -TargetValue $target.nuget_probe.summary.unknown
 
 $baseProfiles = @($base.profiles)
 $targetProfiles = @($target.profiles)
@@ -81,6 +86,7 @@ for ($i = 0; $i -lt $maxProfiles; $i++) {
     $name = if ($null -ne $bp) { "$($bp.name)" } elseif ($null -ne $tp) { "$($tp.name)" } else { "index-$i" }
     Add-DiffLine -Lines $lines -Name "profiles[$i].name" -BaseValue ($bp.name) -TargetValue ($tp.name)
     Add-DiffLine -Lines $lines -Name "profiles[$i].enabled" -BaseValue ($bp.enabled) -TargetValue ($tp.enabled)
+    Add-DiffLine -Lines $lines -Name "profiles[$i].command" -BaseValue ($bp.command) -TargetValue ($tp.command)
     Add-DiffLine -Lines $lines -Name "profiles[$i].exit_code" -BaseValue ($bp.exit_code) -TargetValue ($tp.exit_code)
     Add-DiffLine -Lines $lines -Name "profiles[$i].root_cause_hints" -BaseValue @($bp.root_cause_hints) -TargetValue @($tp.root_cause_hints)
 }
