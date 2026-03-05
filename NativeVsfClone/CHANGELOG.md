@@ -100,6 +100,15 @@ Implemented follow-up automation for the 20-item execution board by adding GateD
 - sample profile split:
   - `tools/sample_profiles/fixed_set.txt`
   - `tools/sample_profiles/real_large_set.txt`
+- host tracking diagnostics hardening:
+  - `TrackingStartOptions` / `TrackingInputSettings` include parse/drop warn thresholds
+  - tracking ingest status/error transitions now include threshold-exceeded states
+  - native tracking/expression submit failures now set `TrackingDiagnostics.LastErrorCode`
+- typed-v2 edge validation test expansion:
+  - unsupported shader-family warning coverage
+  - strict missing-required-typed-param failure coverage
+- native renderer XAV2 follow-up:
+  - force no-cull raster state for XAV2 source meshes
 - new checker helper projects:
   - `tools/session_state_migration_check/` (dotnet-run migration checker)
   - `tools/tracking_parser_fuzz_gate/` (dotnet-run fuzz checker)

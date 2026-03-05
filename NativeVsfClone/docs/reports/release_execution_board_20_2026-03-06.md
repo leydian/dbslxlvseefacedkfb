@@ -51,11 +51,11 @@ Status legend:
 
 10. Tracking threshold config externalization  
     Status: `IN_PROGRESS`  
-    Current: stale timeout/fps cap persistence exists; parse/drop threshold contract remains
+    Current: parse/drop warn thresholds now persisted and normalized in `TrackingInputSettings`; UI exposure and tuning UX remain
 
 11. Tracking/expression native submit failures surfaced in UI  
     Status: `IN_PROGRESS`  
-    Current: diagnostics/log path exists; dedicated error-code surface polish pending
+    Current: `TrackingDiagnostics.LastErrorCode` now records native submit failures (`NC_SET_TRACKING_FRAME_*`, `NC_SET_EXPRESSION_WEIGHTS_*`); final UI binding/polish remains
 
 12. Webcam ONNX source from placeholder to real inference  
     Status: `TODO`
@@ -74,7 +74,7 @@ Status legend:
 
 16. `.xav2` typed-v2 negative/edge validation expansion  
     Status: `IN_PROGRESS`  
-    Current: core parser/runtime tests exist; edge matrix expansion pending
+    Current: unsupported shader-family warning + strict missing-required-param failure tests added; broader edge matrix expansion remains
 
 17. Session schema migration regression (`v1/v2/v3 -> v4`)  
     Status: `DONE`  

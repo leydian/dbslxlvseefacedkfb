@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
-using OpenCvSharp;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Diagnostics.CodeAnalysis;
 
 namespace HostCore;
 
@@ -49,9 +52,13 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _refYaw;
     private float _refPitch;
     private float _refRoll;
-    private VideoCapture? _webcamCapture;
-    private double _lastFrameMean;
-    private bool _hasLastFrameMean;
+    private Process? _mediapipeProcess;
+    private Task? _mediapipeStdoutTask;
+    private Task? _mediapipeStderrTask;
+    private MediapipeFramePacket? _latestMediapipePacket;
+    private bool _hasMediapipePacket;
+    private string _latestMediapipeError = string.Empty;
+    private long _lastMediapipeFrameId;
 
     private static readonly string[] ArkitBlendshapeOrder =
     {
@@ -91,13 +98,15 @@ public sealed class TrackingInputService : ITrackingInputService
 
             if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
             {
+                _cts = new CancellationTokenSource();
                 var initRc = InitializeWebcamRuntime();
                 if (initRc != NcResultCode.Ok)
                 {
+                    _cts.Dispose();
+                    _cts = null;
                     return initRc;
                 }
 
-                _cts = new CancellationTokenSource();
                 _receiveTask = Task.Run(() => WebcamLoopAsync(_cts.Token));
                 _diagnostics = _diagnostics with
                 {
@@ -292,8 +301,10 @@ public sealed class TrackingInputService : ITrackingInputService
         _smoothedInputFps = 0.0;
         _smoothedCaptureFps = 0.0;
         _smoothedInferenceMs = 0.0;
-        _lastFrameMean = 0.0;
-        _hasLastFrameMean = false;
+        _latestMediapipePacket = null;
+        _hasMediapipePacket = false;
+        _latestMediapipeError = string.Empty;
+        _lastMediapipeFrameId = 0;
         _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "listening", _options.SourceType, "initializing");
     }
 
@@ -383,64 +394,43 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private async Task WebcamLoopAsync(CancellationToken token)
     {
-        var fpsCap = Math.Clamp(_options.InferenceFpsCap, 5, 120);
-        var targetFrameBudget = TimeSpan.FromMilliseconds(1000.0 / fpsCap);
-        using var frame = new Mat();
-        using var gray = new Mat();
+        var pollDelay = TimeSpan.FromMilliseconds(4);
 
         while (!token.IsCancellationRequested)
         {
-            var cycleStart = Stopwatch.GetTimestamp();
             NcResultCode loopRc = NcResultCode.Ok;
             string? loopError = null;
+            MediapipeFramePacket? packet = null;
             try
             {
-                if (_webcamCapture is null || !_webcamCapture.IsOpened())
+                lock (_sync)
                 {
-                    loopRc = NcResultCode.NotInitialized;
-                    loopError = "runtime not initialized";
-                }
-                else if (!_webcamCapture.Read(frame) || frame.Empty())
-                {
-                    loopRc = NcResultCode.Io;
-                    loopError = "camera frame read failed";
-                }
-                else
-                {
-                    UpdateCaptureFps();
-                    var inferWatch = Stopwatch.StartNew();
-                    var result = AnalyzeWebcamFrame(frame, gray);
-                    inferWatch.Stop();
-                    UpdateInferenceMs(inferWatch.Elapsed.TotalMilliseconds);
-
-                    lock (_sync)
+                    if (_mediapipeProcess is null)
                     {
-                        _rawFrame = BuildNeutralFrame();
-                        _rawHeadYaw = result.HeadYawDeg;
-                        _rawHeadPitch = result.HeadPitchDeg;
-                        _rawHeadRoll = result.HeadRollDeg;
-                        _hasHeadYpr = true;
-                        _rawFrame.HeadPosX = result.HeadPosX;
-                        _rawFrame.HeadPosY = result.HeadPosY;
-                        _rawFrame.HeadPosZ = result.HeadPosZ;
-                        ApplyPseudoBlendshapeResult(result.Blink, result.MouthOpen, result.Smile);
-
-                        _lastPacketUtc = DateTimeOffset.UtcNow;
-                        _hasFrame = true;
-                        UpdateInputFps();
-                        ApplySmoothing();
-                        _diagnostics = _diagnostics with
-                        {
-                            DetectedFormat = "webcam-mediapipe",
-                            InputFps = _smoothedInputFps,
-                            CaptureFps = _smoothedCaptureFps,
-                            InferenceMsAvg = _smoothedInferenceMs,
-                            SourceStatus = BuildWebcamSourceStatus("receiving"),
-                            StatusMessage = "receiving:webcam-mediapipe",
-                            ModelSchemaOk = true,
-                            LastErrorCode = string.Empty,
-                        };
+                        loopRc = NcResultCode.NotInitialized;
+                        loopError = "mediapipe sidecar not initialized";
                     }
+                    else if (_mediapipeProcess.HasExited)
+                    {
+                        loopRc = NcResultCode.Io;
+                        loopError = string.IsNullOrWhiteSpace(_latestMediapipeError)
+                            ? $"mediapipe sidecar exited (code={_mediapipeProcess.ExitCode})"
+                            : $"mediapipe sidecar exited (code={_mediapipeProcess.ExitCode}): {_latestMediapipeError}";
+                    }
+                    else if (!_hasMediapipePacket || _latestMediapipePacket is null)
+                    {
+                        loopRc = NcResultCode.Io;
+                        loopError = "mediapipe frame stream not ready";
+                    }
+                    else
+                    {
+                        packet = _latestMediapipePacket;
+                    }
+                }
+
+                if (packet is not null)
+                {
+                    ApplyMediapipePacket(packet);
                 }
             }
             catch (OperationCanceledException)
@@ -460,23 +450,16 @@ public sealed class TrackingInputService : ITrackingInputService
                     _diagnostics = _diagnostics with
                     {
                         DroppedPackets = _diagnostics.DroppedPackets + 1,
-                        SourceStatus = BuildWebcamSourceStatus("error"),
+                        SourceStatus = BuildWebcamSourceStatus("stream-error"),
                         StatusMessage = $"webcam error: {loopError}",
-                        LastErrorCode = loopRc.ToString(),
+                        LastErrorCode = $"TRACKING_MEDIAPIPE_{loopRc}".ToUpperInvariant(),
                     };
                 }
             }
 
-            var elapsed = Stopwatch.GetElapsedTime(cycleStart);
-            var remaining = targetFrameBudget - elapsed;
-            if (remaining < TimeSpan.Zero)
-            {
-                continue;
-            }
-
             try
             {
-                await Task.Delay(remaining, token);
+                await Task.Delay(pollDelay, token);
             }
             catch (OperationCanceledException)
             {
@@ -496,18 +479,74 @@ public sealed class TrackingInputService : ITrackingInputService
         DisposeWebcamRuntime();
         try
         {
-            _webcamCapture = OpenCapture(_options.CameraDeviceKey);
-            if (_webcamCapture is null || !_webcamCapture.IsOpened())
+            var launch = BuildMediapipeSidecarLaunchConfig();
+            if (!launch.IsValid)
             {
                 _diagnostics = _diagnostics with
                 {
                     IsActive = false,
-                    SourceStatus = BuildWebcamSourceStatus("camera-open-failed"),
-                    StatusMessage = "webcam open failed",
+                    SourceStatus = BuildWebcamSourceStatus("sidecar-config-invalid"),
+                    StatusMessage = launch.ErrorMessage,
                     ModelSchemaOk = false,
-                    LastErrorCode = NcResultCode.Io.ToString(),
+                    LastErrorCode = "TRACKING_MEDIAPIPE_CONFIG_INVALID",
                 };
-                return NcResultCode.Io;
+                return NcResultCode.InvalidArgument;
+            }
+
+            var process = StartMediapipeSidecar(launch);
+            if (process is null)
+            {
+                _diagnostics = _diagnostics with
+                {
+                    IsActive = false,
+                    SourceStatus = BuildWebcamSourceStatus("sidecar-start-failed"),
+                    StatusMessage = string.IsNullOrWhiteSpace(_latestMediapipeError)
+                        ? "mediapipe sidecar start failed"
+                        : $"mediapipe sidecar start failed: {_latestMediapipeError}",
+                    ModelSchemaOk = false,
+                    LastErrorCode = "TRACKING_MEDIAPIPE_START_FAILED",
+                };
+                return NcResultCode.NotInitialized;
+            }
+
+            _mediapipeProcess = process;
+            _mediapipeStdoutTask = Task.Run(() => ReadMediapipeStdoutLoopAsync(process, _cts?.Token ?? CancellationToken.None));
+            _mediapipeStderrTask = Task.Run(() => ReadMediapipeStderrLoopAsync(process, _cts?.Token ?? CancellationToken.None));
+
+            var waitWatch = Stopwatch.StartNew();
+            while (waitWatch.Elapsed < TimeSpan.FromSeconds(2.5))
+            {
+                lock (_sync)
+                {
+                    if (_hasMediapipePacket)
+                    {
+                        break;
+                    }
+                    if (_mediapipeProcess?.HasExited == true)
+                    {
+                        break;
+                    }
+                }
+
+                Thread.Sleep(40);
+            }
+
+            lock (_sync)
+            {
+                if (!_hasMediapipePacket)
+                {
+                    _diagnostics = _diagnostics with
+                    {
+                        IsActive = false,
+                        SourceStatus = BuildWebcamSourceStatus("sidecar-no-frames"),
+                        StatusMessage = string.IsNullOrWhiteSpace(_latestMediapipeError)
+                            ? "mediapipe sidecar started but no frame received"
+                            : $"mediapipe sidecar no frame: {_latestMediapipeError}",
+                        ModelSchemaOk = false,
+                        LastErrorCode = "TRACKING_MEDIAPIPE_NO_FRAME",
+                    };
+                    return NcResultCode.Io;
+                }
             }
 
             _diagnostics = _diagnostics with
@@ -536,91 +575,57 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private void DisposeWebcamRuntime()
     {
-        _webcamCapture?.Release();
-        _webcamCapture?.Dispose();
-        _webcamCapture = null;
+        try
+        {
+            _mediapipeProcess?.Kill(true);
+        }
+        catch
+        {
+            // Best effort.
+        }
+
+        _mediapipeProcess?.Dispose();
+        _mediapipeProcess = null;
+        _mediapipeStdoutTask = null;
+        _mediapipeStderrTask = null;
+        _latestMediapipePacket = null;
+        _hasMediapipePacket = false;
+        _latestMediapipeError = string.Empty;
+        _lastMediapipeFrameId = 0;
     }
 
-    private static VideoCapture OpenCapture(string cameraDeviceKey)
+    private void ApplyMediapipePacket(MediapipeFramePacket packet)
     {
-        if (string.IsNullOrWhiteSpace(cameraDeviceKey))
+        lock (_sync)
         {
-            return new VideoCapture(0);
+            _rawFrame = BuildNeutralFrame();
+            _rawHeadYaw = packet.HeadYawDeg;
+            _rawHeadPitch = packet.HeadPitchDeg;
+            _rawHeadRoll = packet.HeadRollDeg;
+            _hasHeadYpr = true;
+            _rawFrame.HeadPosX = packet.HeadPosX;
+            _rawFrame.HeadPosY = packet.HeadPosY;
+            _rawFrame.HeadPosZ = packet.HeadPosZ;
+            ApplyMediapipeBlendshapeResult(packet);
+
+            _lastPacketUtc = DateTimeOffset.UtcNow;
+            _hasFrame = true;
+            UpdateInputFps();
+            UpdateCaptureFps(packet.CaptureFps);
+            UpdateInferenceMs(packet.InferenceMs);
+            ApplySmoothing();
+            _diagnostics = _diagnostics with
+            {
+                DetectedFormat = "webcam-mediapipe",
+                InputFps = _smoothedInputFps,
+                CaptureFps = _smoothedCaptureFps,
+                InferenceMsAvg = _smoothedInferenceMs,
+                SourceStatus = BuildWebcamSourceStatus("receiving"),
+                StatusMessage = "receiving:webcam-mediapipe",
+                ModelSchemaOk = true,
+                LastErrorCode = string.Empty,
+            };
         }
-
-        if (int.TryParse(cameraDeviceKey, out var index))
-        {
-            return new VideoCapture(index);
-        }
-
-        return new VideoCapture(cameraDeviceKey);
-    }
-
-    private WebcamInferenceResult AnalyzeWebcamFrame(Mat frame, Mat gray)
-    {
-        Cv2.CvtColor(frame, gray, ColorConversionCodes.BGR2GRAY);
-        using var small = new Mat();
-        Cv2.Resize(gray, small, new OpenCvSharp.Size(160, 120), interpolation: InterpolationFlags.Linear);
-
-        var mean = Cv2.Mean(small).Val0 / 255.0;
-        var motion = 0.0;
-        if (_hasLastFrameMean)
-        {
-            motion = Math.Abs(mean - _lastFrameMean) * 6.0;
-        }
-
-        _lastFrameMean = mean;
-        _hasLastFrameMean = true;
-
-        using var blurred = new Mat();
-        using var binary = new Mat();
-        Cv2.GaussianBlur(small, blurred, new OpenCvSharp.Size(5, 5), 0.0);
-        Cv2.Threshold(blurred, binary, 0.0, 255.0, ThresholdTypes.Binary | ThresholdTypes.Otsu);
-        var moments = Cv2.Moments(binary, true);
-        float headPosX = 0.0f;
-        float headPosY = 0.0f;
-        if (moments.M00 > 1e-3)
-        {
-            var cx = (float)(moments.M10 / moments.M00) / small.Cols;
-            var cy = (float)(moments.M01 / moments.M00) / small.Rows;
-            headPosX = Math.Clamp((cx - 0.5f) * 0.2f, -0.2f, 0.2f);
-            headPosY = Math.Clamp((0.5f - cy) * 0.2f, -0.2f, 0.2f);
-        }
-
-        var blink = Clamp01((float)(1.0 - (mean * 1.2) + (motion * 0.1)));
-        var mouthOpen = Clamp01((float)(motion * 1.8));
-        var smile = Clamp01((float)(Math.Max(0.0, mean - 0.45) * 1.4));
-
-        return new WebcamInferenceResult(
-            headPosX * 120.0f,
-            headPosY * 120.0f,
-            0.0f,
-            headPosX,
-            headPosY,
-            0.0f,
-            blink,
-            mouthOpen,
-            smile);
-    }
-
-    private void ApplyPseudoBlendshapeResult(float blink, float mouthOpen, float smile)
-    {
-        for (var i = 0; i < ArkitBlendshapeOrder.Length; i++)
-        {
-            var key = NormalizeKey(ArkitBlendshapeOrder[i]);
-            _expressionCache[key] = 0.0f;
-        }
-
-        _expressionCache["eyeblinkleft"] = Clamp01(blink);
-        _expressionCache["eyeblinkright"] = Clamp01(blink);
-        _expressionCache["jawopen"] = Clamp01(mouthOpen);
-        _expressionCache["mouthsmileleft"] = Clamp01(smile);
-        _expressionCache["mouthsmileright"] = Clamp01(smile);
-
-        _rawFrame.BlinkL = _expressionCache["eyeblinkleft"];
-        _rawFrame.BlinkR = _expressionCache["eyeblinkright"];
-        _rawFrame.MouthOpen = _expressionCache["jawopen"];
-        SnapshotExpressionWeights();
     }
 
     private bool TryParsePacket(byte[] packet, out List<KeyValuePair<string, float>> updates, out string formatName)

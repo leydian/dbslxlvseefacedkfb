@@ -1974,8 +1974,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         DirectX::XMMATRIX world = DirectX::XMMatrixIdentity();
         float view_z = 0.0f;
         bool is_blend = false;
+        bool is_mask = false;
     };
     std::vector<DrawItem> opaque_draws;
+    std::vector<DrawItem> mask_draws;
     std::vector<DrawItem> blend_draws;
     std::uint32_t frame_draw_calls = 0U;
     const float fov_deg = quality.fov_deg;
@@ -2107,12 +2109,15 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             item.mesh = &mesh;
             item.material = material;
             item.world = world;
+            item.is_mask = (alpha_mode == "MASK");
             item.is_blend = (alpha_mode == "BLEND");
             const auto center = DirectX::XMVectorSet(mesh.center.x, mesh.center.y, mesh.center.z, 1.0f);
             const auto center_view = DirectX::XMVector3TransformCoord(DirectX::XMVector3TransformCoord(center, world), view);
             item.view_z = DirectX::XMVectorGetZ(center_view);
             if (item.is_blend) {
                 blend_draws.push_back(item);
+            } else if (item.is_mask) {
+                mask_draws.push_back(item);
             } else {
                 opaque_draws.push_back(item);
             }
@@ -2161,6 +2166,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (is_blend) {
             device_ctx->OMSetBlendState(renderer.blend_alpha, blend_factor, 0xFFFFFFFFU);
+            device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
+        } else if (is_mask) {
+            device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
         } else {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
@@ -2249,6 +2257,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ++frame_draw_calls;
     };
     for (const auto& item : opaque_draws) {
+        draw_pass(item);
+    }
+    for (const auto& item : mask_draws) {
         draw_pass(item);
     }
     for (const auto& item : blend_draws) {

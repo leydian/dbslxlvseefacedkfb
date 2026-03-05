@@ -14,6 +14,13 @@ Follow-up implementation pass for the 20-item release board focused on previousl
 - host end-to-end gate and WinUI minimal repro wrapper
 - sample profile split (`fixed_set` / `real_large_set`)
 
+## Execution Plan (This Pass)
+
+1) Close remaining automation gaps from the 20-item board (scripts + gate wiring)  
+2) Harden HostCore tracking diagnostics contract (thresholds + native submit error propagation)  
+3) Expand typed-v2 edge validation coverage and align native rendering behavior  
+4) Re-run targeted verification commands and refresh board/follow-up/changelog docs
+
 ## Implemented
 
 1) GateD trend tracking
@@ -89,6 +96,40 @@ Follow-up implementation pass for the 20-item release board focused on previousl
   - `tools/sample_profiles/real_large_set.txt`
   - `tools/sample_profile_resolve.ps1`
 
+9) Tracking diagnostics contract hardening
+
+- updated `host/HostCore/HostInterfaces.cs`:
+  - `TrackingStartOptions` now includes:
+    - `ParseErrorWarnThreshold`
+    - `DroppedPacketWarnThreshold`
+- updated `host/HostCore/PlatformFeatures.cs`:
+  - `TrackingInputSettings` now persists the same thresholds
+  - normalization path clamps threshold values to safe bounds
+- updated `host/HostCore/HostController.MvpFeatures.cs` and `HostController.cs`:
+  - tracking config updates carry threshold values end-to-end
+  - tracking native submit failures set `TrackingDiagnostics.LastErrorCode`
+
+10) Tracking ingest threshold semantics
+
+- updated `host/HostCore/TrackingInputService.cs`:
+  - parse/drop failure counters now use threshold-aware status transitions:
+    - `udp-parse-threshold-exceeded`
+    - `udp-drop-threshold-exceeded`
+  - `LastErrorCode` now records:
+    - `TRACKING_PARSE_FAILED`
+    - `TRACKING_PARSE_THRESHOLD_EXCEEDED`
+    - `TRACKING_NO_MAPPED_CHANNELS`
+    - `TRACKING_DROP_THRESHOLD_EXCEEDED`
+  - success path clears stale tracking error code
+
+11) Typed-v2 and native rendering follow-up
+
+- updated `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`:
+  - added unsupported shader family warning coverage
+  - added strict validation failure coverage for missing typed required param (`_BaseColor`)
+- updated `src/nativecore/native_core.cpp`:
+  - force no-cull raster state for XAV2 source meshes (`AvatarSourceType::Xav2`)
+
 ## Verification Snapshot
 
 Executed in this follow-up:
@@ -99,6 +140,12 @@ powershell -ExecutionPolicy Bypass -File .\tools\session_state_migration_check.p
 powershell -ExecutionPolicy Bypass -File .\tools\tracking_parser_fuzz_gate.ps1
 powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1 -SampleDir .. -IterationsPerSample 1 -IncludePatterns "*.xav2"
 powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1 -MetricsCsvPath .\build\reports\metrics_latest.csv -MinSamples 50
+powershell -ExecutionPolicy Bypass -File .\tools\sample_profile_resolve.ps1 -Profile fixed_set
+powershell -ExecutionPolicy Bypass -File .\tools\sidecar_lock_guard.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\nuget_mirror_bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\winui_xaml_min_repro.ps1 -NoRestore
+powershell -ExecutionPolicy Bypass -File .\tools\host_e2e_gate.ps1 -SkipNativeBuild -NoRestore
+dotnet build .\host\HostCore\HostCore.csproj -c Release
 ```
 
 Observed:
@@ -108,6 +155,12 @@ Observed:
 - `tracking_parser_fuzz_gate`: PASS (500 fuzz packets processed, parse/drop counters updated)
 - `avatar_load_soak_gate` (quick profile): PASS
 - `render_perf_gate` (sample metrics): PASS
+- `sample_profile_resolve` (`fixed_set`): PASS (`ResolvedCount=5`)
+- `sidecar_lock_guard`: PASS (process cleanup summary emitted)
+- `nuget_mirror_bootstrap`: PASS (local mirror source registered)
+- `winui_xaml_min_repro`: FAIL as expected (`FailureClass=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
+- `host_e2e_gate` (WPF-first): PASS (sidecar guard + publish/smoke + dashboard refresh)
+- `HostCore` build: PASS (`net8.0-windows`, 0 errors)
 
 ## Notes
 
