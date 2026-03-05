@@ -399,6 +399,16 @@ public sealed class TelemetryService
         return snapshot.Count;
     }
 
+    public IReadOnlyList<Dictionary<string, object?>> Snapshot()
+    {
+        lock (_sync)
+        {
+            return _events
+                .Select(item => new Dictionary<string, object?>(item, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
     private static object? Redact(string key, object? value)
     {
         if (value is null)

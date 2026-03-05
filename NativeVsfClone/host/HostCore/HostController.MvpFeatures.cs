@@ -224,6 +224,7 @@ public sealed partial class HostController
         var quickstartPath = Path.Combine(tempDir, "quickstart.txt");
         var compatibilityPath = Path.Combine(tempDir, "compatibility.txt");
         var telemetryPath = Path.Combine(tempDir, "telemetry.json");
+        var onboardingKpiPath = Path.Combine(tempDir, "onboarding_kpi_summary.txt");
         var reproCommandsPath = Path.Combine(tempDir, "repro_commands.txt");
         var environmentPath = Path.Combine(tempDir, "environment_snapshot.json");
 
@@ -233,6 +234,7 @@ public sealed partial class HostController
         File.WriteAllText(quickstartPath, HostContent.BuildQuickstartText(), Encoding.UTF8);
         File.WriteAllText(compatibilityPath, HostContent.BuildCompatibilityText(), Encoding.UTF8);
         _ = _telemetry.Export(telemetryPath);
+        File.WriteAllText(onboardingKpiPath, BuildOnboardingKpiSummary(), Encoding.UTF8);
         File.WriteAllText(reproCommandsPath, BuildDiagnosticsReproCommands(), Encoding.UTF8);
         File.WriteAllText(environmentPath, JsonSerializer.Serialize(BuildEnvironmentSnapshot(), FeatureJsonOptions), Encoding.UTF8);
 
@@ -269,7 +271,143 @@ public sealed partial class HostController
         sb.AppendLine("# Release dashboard / readiness");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_gate_dashboard.ps1");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1");
+        sb.AppendLine();
+        sb.AppendLine("# Onboarding KPI summary from telemetry export");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\onboarding_kpi_summary.ps1 -TelemetryPath .\\build\\reports\\telemetry_latest.json");
         return sb.ToString();
+    }
+
+    private string BuildOnboardingKpiSummary()
+    {
+        var events = _telemetry.Snapshot();
+        var onboardingEvents = events
+            .Where(item => string.Equals(ReadString(item, "name"), "onboarding_milestone", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var sessions = new Dictionary<string, SessionKpi>(StringComparer.Ordinal);
+        var outputMilestones = 0;
+        var outputSuccessMilestones = 0;
+
+        foreach (var item in onboardingEvents)
+        {
+            var sessionStartedAt = ReadString(item, "session_started_at");
+            if (string.IsNullOrWhiteSpace(sessionStartedAt))
+            {
+                continue;
+            }
+
+            if (!sessions.TryGetValue(sessionStartedAt, out var session))
+            {
+                session = new SessionKpi(sessionStartedAt);
+                sessions[sessionStartedAt] = session;
+            }
+
+            var milestone = ReadString(item, "milestone");
+            if (milestone.StartsWith("output_started:", StringComparison.OrdinalIgnoreCase))
+            {
+                outputMilestones++;
+                session.HasOutputStarted = true;
+                if (ReadBool(item, "within_3min_success"))
+                {
+                    outputSuccessMilestones++;
+                    session.Within3MinSuccess = true;
+                }
+            }
+        }
+
+        var sessionCount = sessions.Count;
+        var successSessions = sessions.Values.Count(x => x.Within3MinSuccess);
+        var outputStartedSessions = sessions.Values.Count(x => x.HasOutputStarted);
+        var successRate = sessionCount > 0 ? (100.0 * successSessions / sessionCount) : 0.0;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Onboarding KPI Summary");
+        sb.AppendLine($"GeneratedUtc: {DateTimeOffset.UtcNow:O}");
+        sb.AppendLine($"SessionCount: {sessionCount}");
+        sb.AppendLine($"OutputStartedSessions: {outputStartedSessions}");
+        sb.AppendLine($"Within3MinSuccessSessions: {successSessions}");
+        sb.AppendLine($"Within3MinSuccessRatePct: {successRate:F2}");
+        sb.AppendLine($"OutputStartedMilestones: {outputMilestones}");
+        sb.AppendLine($"OutputSuccessMilestones: {outputSuccessMilestones}");
+        if (_sessionStartedAtUtc.HasValue)
+        {
+            sb.AppendLine($"CurrentSessionStartedUtc: {_sessionStartedAtUtc.Value:O}");
+        }
+        if (_outputStartedAtUtc.HasValue)
+        {
+            sb.AppendLine($"CurrentSessionOutputStartedUtc: {_outputStartedAtUtc.Value:O}");
+            sb.AppendLine($"CurrentSessionWithin3MinSuccess: {_within3MinSuccess}");
+        }
+        return sb.ToString();
+    }
+
+    private static string ReadString(IReadOnlyDictionary<string, object?> item, string key)
+    {
+        if (!item.TryGetValue(key, out var value) || value is null)
+        {
+            return string.Empty;
+        }
+
+        if (value is string text)
+        {
+            return text;
+        }
+
+        if (value is JsonElement element)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString() ?? string.Empty,
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.Number => element.ToString(),
+                _ => string.Empty,
+            };
+        }
+
+        return value.ToString() ?? string.Empty;
+    }
+
+    private static bool ReadBool(IReadOnlyDictionary<string, object?> item, string key)
+    {
+        if (!item.TryGetValue(key, out var value) || value is null)
+        {
+            return false;
+        }
+
+        if (value is bool flag)
+        {
+            return flag;
+        }
+
+        if (value is string text && bool.TryParse(text, out var parsed))
+        {
+            return parsed;
+        }
+
+        if (value is JsonElement element)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.String when bool.TryParse(element.GetString(), out var parsedBool) => parsedBool,
+                _ => false,
+            };
+        }
+
+        return false;
+    }
+
+    private sealed class SessionKpi
+    {
+        public SessionKpi(string startedAtUtc)
+        {
+            StartedAtUtc = startedAtUtc;
+        }
+
+        public string StartedAtUtc { get; }
+        public bool HasOutputStarted { get; set; }
+        public bool Within3MinSuccess { get; set; }
     }
 
     private static object BuildEnvironmentSnapshot()
