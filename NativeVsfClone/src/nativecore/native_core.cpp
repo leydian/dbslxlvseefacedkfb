@@ -539,8 +539,11 @@ const char* AvatarSourceTypeName(AvatarSourceType source_type) {
 
 int PreviewYawDegreesForAvatarSource(AvatarSourceType source_type) {
     // Runtime preview yaw is the single source-of-truth for front-view alignment.
-    if (source_type == AvatarSourceType::Xav2 || source_type == AvatarSourceType::Vrm) {
+    if (source_type == AvatarSourceType::Xav2) {
         return 0;
+    }
+    if (source_type == AvatarSourceType::Vrm) {
+        return 180;
     }
     return 180;
 }
@@ -1319,7 +1322,9 @@ void PushAvatarWarningUnique(AvatarPackage* pkg, const std::string& message, con
         return;
     }
     if (!message.empty()) {
-        pkg->warnings.push_back(message);
+        if (std::find(pkg->warnings.begin(), pkg->warnings.end(), message) == pkg->warnings.end()) {
+            pkg->warnings.push_back(message);
+        }
     }
     if (code.empty()) {
         return;
@@ -4119,8 +4124,6 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cluster_cx = pick_median(&center_x_samples);
         const float cluster_cy = pick_median(&center_y_samples);
         const float cluster_cz = pick_median(&center_z_samples);
-        const bool has_cluster_center = !center_x_samples.empty();
-        const float draw_cluster_distance_threshold = std::max(1.8f, median_extent * 2.5f);
         if (it->second.source_type == AvatarSourceType::Xav2 && !center_x_samples.empty()) {
             for (const auto& sample : extent_samples) {
                 if (preview_bounds_excluded[sample.index] != 0U) {
@@ -4264,7 +4267,6 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cx = (avatar_bmin.x + avatar_bmax.x) * 0.5f;
         const float cy = (avatar_bmin.y + avatar_bmax.y) * 0.5f;
         const float cz = (avatar_bmin.z + avatar_bmax.z) * 0.5f;
-        const float draw_center_distance_threshold = std::max(3.0f, max_extent * 3.0f);
         const float focus_y =
             (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
                 ? (avatar_bmin.y + extent_y * (0.68f + quality.headroom * 0.2f))
@@ -4340,26 +4342,6 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
                     ++mesh_extent_outlier_skipped_count;
                     continue;
-                }
-                const float dcx = mesh.center.x - cx;
-                const float dcy = mesh.center.y - cy;
-                const float dcz = mesh.center.z - cz;
-                const float center_dist = std::sqrt((dcx * dcx) + (dcy * dcy) + (dcz * dcz));
-                if (has_cluster_center) {
-                    const float ccx = mesh.center.x - cluster_cx;
-                    const float ccy = mesh.center.y - cluster_cy;
-                    const float ccz = mesh.center.z - cluster_cz;
-                    const float cluster_dist = std::sqrt((ccx * ccx) + (ccy * ccy) + (ccz * ccz));
-                    // Prefer cluster-based gating to avoid a single excluded bounds mesh
-                    // pulling preview center and cascading draw skips.
-                    if (std::isfinite(cluster_dist) && cluster_dist > draw_cluster_distance_threshold) {
-                        ++mesh_extent_outlier_skipped_count;
-                        continue;
-                    }
-                    if (std::isfinite(center_dist) && center_dist > draw_center_distance_threshold * 2.5f) {
-                        ++mesh_extent_outlier_skipped_count;
-                        continue;
-                    }
                 }
             }
             std::size_t material_index = std::numeric_limits<std::size_t>::max();
