@@ -1,4 +1,4 @@
-# XAV2 Format (Draft v1/v2)
+# XAV2 Format (Draft v1/v2/v3)
 
 XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transport.
 
@@ -6,10 +6,10 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 - `.xav2`
 
-## Binary Layout (v1/v2)
+## Binary Layout (v1/v2/v3)
 
 1. `magic[4]`: ASCII `XAV2`
-2. `version[2]`: little-endian unsigned integer (`1|2`)
+2. `version[2]`: little-endian unsigned integer (`1|2|3`)
 3. `manifest_size[4]`: little-endian unsigned integer
 4. `manifest_json[manifest_size]`: UTF-8 JSON
 5. `asset_sections[...]`: zero or more TLV entries
@@ -40,7 +40,7 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED`.
 
-## Section Types (v1/v2)
+## Section Types (v1/v2/v3)
 
 - `0x0001` Legacy mesh blob
 - `0x0002` Texture blob
@@ -50,6 +50,7 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `0x0013` Skin payload
 - `0x0014` BlendShape payload
 - `0x0015` Material typed params (v2)
+- `0x0016` Skeleton pose payload (v3)
 
 ### `0x0011` Mesh render payload
 
@@ -138,6 +139,19 @@ For current implementation, `liltoon` typed fields are preferred over legacy `pa
   - `delta_normals[delta_normals_size]`
   - `delta_tangents_size[4]`
   - `delta_tangents[delta_tangents_size]`
+
+### `0x0016` Skeleton pose payload (v3)
+
+- `mesh_name_len[2]`
+- `mesh_name[mesh_name_len]`
+- `matrix_f32_count[4]`
+- `bone_matrices[matrix_f32_count * 4]` (`float32`)
+
+Notes:
+
+- `matrix_f32_count` should be a multiple of `16`.
+- Each 16-float chunk is one `float4x4` bone matrix.
+- In v3 skinning path, runtime combines section `0x0016` matrices with `0x0013` bindposes.
 
 ## Loader behavior in this repository
 

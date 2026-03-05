@@ -15,6 +15,7 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionSkinPayload = 0x0013;
         private const ushort SectionBlendShapePayload = 0x0014;
         private const ushort SectionMaterialTypedParams = 0x0015;
+        private const ushort SectionSkeletonPosePayload = 0x0016;
 
         public static Xav2AvatarPayload Load(string path)
         {
@@ -68,7 +69,7 @@ namespace VsfClone.Xav2.Runtime
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, "XAV2 version field is truncated.");
             }
-            if (version != 1 && version != 2)
+            if (version != 1 && version != 2 && version != 3)
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, $"Unsupported XAV2 version: {version}");
             }
@@ -157,6 +158,7 @@ namespace VsfClone.Xav2.Runtime
                         bytes,
                         sectionOffset,
                         sectionLength,
+                        version,
                         payload,
                         materialsByName,
                         diagnostics,
@@ -171,7 +173,7 @@ namespace VsfClone.Xav2.Runtime
                 payload.Materials.Add(mat);
             }
 
-            if (!EvaluatePartialCompatibility(payload, diagnostics, options))
+            if (!EvaluatePartialCompatibility(payload, diagnostics, options, version))
             {
                 return false;
             }
@@ -184,6 +186,7 @@ namespace VsfClone.Xav2.Runtime
             byte[] bytes,
             int sectionOffset,
             int sectionLength,
+            int formatVersion,
             Xav2AvatarPayload payload,
             Dictionary<string, Xav2MaterialPayload> materialsByName,
             Xav2LoadDiagnostics diagnostics,
@@ -205,6 +208,8 @@ namespace VsfClone.Xav2.Runtime
                     return TryParseBlendShape(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionMaterialTypedParams:
                     return TryParseMaterialTypedParams(bytes, sectionOffset, sectionLength, materialsByName, diagnostics, options);
+                case SectionSkeletonPosePayload:
+                    return TryParseSkeletonPose(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 default:
                     return HandleUnknownSection(diagnostics, options, sectionType);
             }
@@ -626,6 +631,52 @@ namespace VsfClone.Xav2.Runtime
             return true;
         }
 
+        private static bool TryParseSkeletonPose(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+
+            if (!TryReadSizedString(br, out var meshName) || !TryReadUInt32(br, out var matrixValueCount))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 skeleton pose section.");
+            }
+
+            if ((matrixValueCount % 16U) != 0U)
+            {
+                return AddWarningOrFail(
+                    diagnostics,
+                    options,
+                    $"XAV3_SKINNING_MATRIX_INVALID: mesh={meshName}, count={matrixValueCount}");
+            }
+
+            var matrices = new float[matrixValueCount];
+            for (var i = 0; i < matrixValueCount; i++)
+            {
+                if (!TryReadSingle(br, out matrices[i]))
+                {
+                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 skeleton matrix payload.");
+                }
+            }
+
+            if (ms.Position != ms.Length)
+            {
+                return AddWarningOrFail(diagnostics, options, $"XAV2_SKELETON_TRAILING_BYTES: mesh={meshName}");
+            }
+
+            payload.Skeletons.Add(new Xav2SkeletonPayload
+            {
+                MeshName = meshName,
+                BoneMatrices16xN = matrices
+            });
+            return true;
+        }
+
         private static void NormalizeManifest(Xav2Manifest manifest)
         {
             manifest.avatarId ??= string.Empty;
@@ -646,7 +697,8 @@ namespace VsfClone.Xav2.Runtime
         private static bool EvaluatePartialCompatibility(
             Xav2AvatarPayload payload,
             Xav2LoadDiagnostics diagnostics,
-            Xav2LoadOptions options)
+            Xav2LoadOptions options,
+            int formatVersion)
         {
             var meshNameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var mesh in payload.Meshes)
@@ -732,6 +784,47 @@ namespace VsfClone.Xav2.Runtime
                 }
                 diagnostics.IsPartial = true;
                 return true;
+            }
+
+            if (formatVersion >= 3 && payload.Skins.Count > 0)
+            {
+                var skinMeshSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var skin in payload.Skins)
+                {
+                    skinMeshSet.Add(NormalizeRefKey(skin.MeshName));
+                }
+
+                var skeletonMeshSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var skeleton in payload.Skeletons)
+                {
+                    var key = NormalizeRefKey(skeleton.MeshName);
+                    skeletonMeshSet.Add(key);
+                    if (!skinMeshSet.Contains(key))
+                    {
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV3_SKELETON_MESH_BIND_MISMATCH: skeletonMesh='{skeleton.MeshName}'"))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                foreach (var skin in payload.Skins)
+                {
+                    if (!skeletonMeshSet.Contains(NormalizeRefKey(skin.MeshName)))
+                    {
+                        missingMeshRef = true;
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV3_SKELETON_PAYLOAD_MISSING: mesh='{skin.MeshName}'"))
+                        {
+                            return false;
+                        }
+                    }
+                }
             }
 
             diagnostics.IsPartial = missingMeshRef || missingTextureRef;

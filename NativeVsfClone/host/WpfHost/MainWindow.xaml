@@ -12,12 +12,12 @@
 
         <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <GroupBox x:Name="ModeGroup" Header="紐⑤뱶 ?좏깮 (Mode)" Margin="0,0,0,8">
+                <GroupBox x:Name="ModeGroup" Header="모드 선택 (Mode)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="珥덉떖??紐⑤뱶???꾩닔 ?숈옉留?蹂댁뿬二쇨퀬, 怨좉툒 紐⑤뱶???꾩껜 ?댁쁺/吏꾨떒 湲곕뒫???쒖떆?⑸땲??" TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
+                        <TextBlock Text="초급 모드는 필수 작업만 보여주고, 고급 모드는 전체 운영/진단 기능을 표시합니다." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
                         <WrapPanel>
-                            <Button x:Name="BeginnerModeButton" Content="珥덉떖??紐⑤뱶 (Beginner)" Click="BeginnerMode_Click" Margin="0,0,8,0" MinWidth="170"/>
-                            <Button x:Name="AdvancedModeButton" Content="怨좉툒 紐⑤뱶 (Advanced)" Click="AdvancedMode_Click" MinWidth="170"/>
+                            <Button x:Name="BeginnerModeButton" Content="초급 모드 (Beginner)" Click="BeginnerMode_Click" Margin="0,0,8,0" MinWidth="170"/>
+                            <Button x:Name="AdvancedModeButton" Content="고급 모드 (Advanced)" Click="AdvancedMode_Click" MinWidth="170"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
@@ -41,28 +41,28 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="SessionGroup" Header="1) ?몄뀡 (Session)" Margin="0,0,0,8">
+                <GroupBox x:Name="SessionGroup" Header="1) 세션 (Session)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="?고????쒖옉/醫낅즺瑜??쒖뼱?⑸땲??" TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
+                        <TextBlock Text="세션 시작/종료를 제어합니다." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
                         <WrapPanel>
-                            <Button x:Name="InitializeButton" Content="珥덇린??(Initialize)" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="ShutdownButton" Content="醫낅즺 (Shutdown)" Click="Shutdown_Click" MinWidth="130"/>
+                            <Button x:Name="InitializeButton" Content="초기화 (Initialize)" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="130"/>
+                            <Button x:Name="ShutdownButton" Content="종료 (Shutdown)" Click="Shutdown_Click" MinWidth="130"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="AvatarGroup" Header="2) ?꾨컮? (Avatar)" Margin="0,0,0,8">
+                <GroupBox x:Name="AvatarGroup" Header="2) 아바타 (Avatar)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="?꾨컮? ?뚯씪 寃쎈줈 (Avatar Path)" FontWeight="SemiBold"/>
+                        <TextBlock Text="아바타 파일 경로 (Avatar Path)" FontWeight="SemiBold"/>
                         <DockPanel Margin="0,4,0,8">
-                            <Button x:Name="BrowseAvatarButton" Content="李얠븘蹂닿린..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                            <Button x:Name="BrowseAvatarButton" Content="찾아보기..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                             <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged" />
                         </DockPanel>
                         <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button x:Name="LoadButton" Content="遺덈윭?ㅺ린 (Load)" Click="Load_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="CancelLoadButton" Content="遺덈윭?ㅺ린 痍⑥냼" Click="CancelLoad_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="UnloadButton" Content="?댁젣 (Unload)" Click="Unload_Click" MinWidth="130"/>
+                            <Button x:Name="LoadButton" Content="불러오기 (Load)" Click="Load_Click" Margin="0,0,8,0" MinWidth="130"/>
+                            <Button x:Name="CancelLoadButton" Content="불러오기 취소" Click="CancelLoad_Click" Margin="0,0,8,0" MinWidth="130"/>
+                            <Button x:Name="UnloadButton" Content="해제 (Unload)" Click="Unload_Click" MinWidth="130"/>
                         </WrapPanel>
                         <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
@@ -79,12 +79,12 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="RenderGroup" Header="3) ?붾㈃ (Render)" Margin="0,0,0,8">
+                <GroupBox x:Name="RenderGroup" Header="3) 렌더 (Render)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <Border BorderBrush="#D7E0EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
-                                <TextBlock Text="湲곕낯 (Basic)" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                                <CheckBox x:Name="BroadcastModeCheckBox" Content="諛⑹넚 紐⑤뱶 (Broadcast Mode)" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
+                                <TextBlock Text="기본 (Basic)" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <CheckBox x:Name="BroadcastModeCheckBox" Content="방송 모드 (Broadcast Mode)" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="90"/>
@@ -110,7 +110,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Expander x:Name="RenderAdvancedExpander" Header="怨좉툒 ?ㅼ젙 (Advanced)" IsExpanded="True">
+                        <Expander x:Name="RenderAdvancedExpander" Header="고급 설정 (Advanced)" IsExpanded="True">
                             <StackPanel Margin="0,8,0,0">
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
@@ -154,18 +154,18 @@
                                         <ComboBoxItem Content="Green Screen"/>
                                     </ComboBox>
                                 </Grid>
-                                <CheckBox x:Name="MirrorModeCheckBox" Content="誘몃윭 紐⑤뱶 (Mirror Mode)" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
-                                <CheckBox x:Name="DebugOverlayCheckBox" Content="?붾쾭洹??ㅻ쾭?덉씠 ?쒖떆" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
+                                <CheckBox x:Name="MirrorModeCheckBox" Content="미러 모드 (Mirror Mode)" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
+                                <CheckBox x:Name="DebugOverlayCheckBox" Content="디버그 오버레이 표시" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
                                 <Separator Margin="0,10,0,10"/>
-                                <TextBlock Text="?꾨━??(Presets)" FontWeight="SemiBold"/>
+                                <TextBlock Text="프리셋 (Presets)" FontWeight="SemiBold"/>
                                 <DockPanel Margin="0,4,0,8">
                                     <Button x:Name="SavePresetButton" Content="Save" Width="74" Click="SavePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                                     <TextBox x:Name="PresetNameTextBox" Text="My Preset"/>
                                 </DockPanel>
                                 <DockPanel Margin="0,0,0,8">
                                     <WrapPanel DockPanel.Dock="Right">
-                                        <Button x:Name="ApplyPresetButton" Content="?곸슜" Width="74" Margin="8,0,0,0" Click="ApplyPreset_Click"/>
-                                        <Button x:Name="DeletePresetButton" Content="??젣" Width="74" Margin="8,0,0,0" Click="DeletePreset_Click"/>
+                                        <Button x:Name="ApplyPresetButton" Content="적용" Width="74" Margin="8,0,0,0" Click="ApplyPreset_Click"/>
+                                        <Button x:Name="DeletePresetButton" Content="삭제" Width="74" Margin="8,0,0,0" Click="DeletePreset_Click"/>
                                     </WrapPanel>
                                     <ComboBox x:Name="PresetComboBox"/>
                                 </DockPanel>
@@ -175,7 +175,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="OutputsGroup" Header="4) 異쒕젰 (Outputs)">
+                <GroupBox x:Name="OutputsGroup" Header="4) 출력 (Outputs)">
                     <StackPanel Margin="8">
                         <TextBlock Text="Spout" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
@@ -187,8 +187,8 @@
                             <TextBox Grid.Column="1" x:Name="SpoutChannelTextBox" Text="VsfClone"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <Button x:Name="StartSpoutButton" Content="Spout ?쒖옉" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
-                            <Button x:Name="StopSpoutButton" Content="Spout 以묒?" Click="StopSpout_Click" MinWidth="110"/>
+                            <Button x:Name="StartSpoutButton" Content="Spout 시작" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopSpoutButton" Content="Spout 중지" Click="StopSpout_Click" MinWidth="110"/>
                         </WrapPanel>
 
                         <TextBlock Text="OSC" FontWeight="SemiBold"/>
@@ -209,13 +209,13 @@
                         <TextBlock x:Name="OscBindValidationText" Foreground="#B03030" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <TextBlock x:Name="OscPublishValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button x:Name="StartOscButton" Content="OSC ?쒖옉" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
-                            <Button x:Name="StopOscButton" Content="OSC 以묒?" Click="StopOsc_Click" MinWidth="110"/>
+                            <Button x:Name="StartOscButton" Content="OSC 시작" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopOscButton" Content="OSC 중지" Click="StopOsc_Click" MinWidth="110"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="TrackingGroup" Header="5) ?몃옒???낅젰 (Tracking Input)" Margin="0,8,0,0">
+                <GroupBox x:Name="TrackingGroup" Header="5) 트래킹 입력 (Tracking Input)" Margin="0,8,0,0">
                     <StackPanel Margin="8">
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
@@ -252,23 +252,23 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="PlatformOpsGroup" Header="6) ?댁쁺/吏꾨떒 (Platform Ops)" Margin="0,8,0,0">
+                <GroupBox x:Name="PlatformOpsGroup" Header="6) 운영/진단 (Platform Ops)" Margin="0,8,0,0">
                     <StackPanel Margin="8">
                         <WrapPanel Margin="0,0,0,8">
-                            <Button x:Name="RunPreflightButton" Content="?ъ쟾 ?먭? ?ㅽ뻾" Click="RunPreflight_Click" Margin="0,0,8,0" MinWidth="112"/>
-                            <Button x:Name="ExportDiagButton" Content="吏꾨떒 ?대낫?닿린" Click="ExportDiag_Click" Margin="0,0,8,0" MinWidth="128"/>
-                            <Button x:Name="ExportMetricsButton" Content="硫뷀듃由??대낫?닿린" Click="ExportMetrics_Click" MinWidth="112"/>
+                            <Button x:Name="RunPreflightButton" Content="사전 점검 실행" Click="RunPreflight_Click" Margin="0,0,8,0" MinWidth="112"/>
+                            <Button x:Name="ExportDiagButton" Content="진단 내보내기" Click="ExportDiag_Click" Margin="0,0,8,0" MinWidth="128"/>
+                            <Button x:Name="ExportMetricsButton" Content="메트릭 내보내기" Click="ExportMetrics_Click" MinWidth="112"/>
                         </WrapPanel>
                         <TextBlock x:Name="PreflightHintText" Foreground="#5E6B78" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-                        <TextBlock Text="?뚮뜑 ?꾨줈??(Render Profiles)" FontWeight="SemiBold"/>
+                        <TextBlock Text="렌더 프로파일 (Render Profiles)" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,4,0,8">
                             <Button Content="Quality" Click="ProfileQuality_Click" Margin="0,0,8,0" MinWidth="92"/>
                             <Button Content="Performance" Click="ProfilePerformance_Click" Margin="0,0,8,0" MinWidth="92"/>
                             <Button Content="Stability" Click="ProfileStability_Click" MinWidth="92"/>
                         </WrapPanel>
 
-                        <TextBlock Text="Sidecar ?ㅼ젙" FontWeight="SemiBold"/>
+                        <TextBlock Text="Sidecar 설정" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
@@ -291,19 +291,19 @@
                             <TextBox Grid.Row="2" Grid.Column="1" x:Name="SidecarTimeoutTextBox" Text="15000" Margin="0,8,0,0"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <CheckBox x:Name="SidecarStrictCheckBox" Content="?꾧꺽 紐⑤뱶 (Strict, no fallback)" Margin="0,0,12,0"/>
-                            <Button Content="Sidecar ?곸슜" Click="ApplySidecar_Click" MinWidth="112"/>
+                            <CheckBox x:Name="SidecarStrictCheckBox" Content="엄격 모드 (Strict, no fallback)" Margin="0,0,12,0"/>
+                            <Button Content="Sidecar 적용" Click="ApplySidecar_Click" MinWidth="112"/>
                         </WrapPanel>
 
-                        <TextBlock Text="?붾젅硫뷀듃由?(Telemetry)" FontWeight="SemiBold"/>
+                        <TextBlock Text="텔레메트리 (Telemetry)" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,4,0,0">
-                            <CheckBox x:Name="TelemetryOptInCheckBox" Content="?섏쭛 ?숈쓽 (Opt-in)" Margin="0,0,8,0"/>
+                            <CheckBox x:Name="TelemetryOptInCheckBox" Content="수집 동의 (Opt-in)" Margin="0,0,8,0"/>
                             <CheckBox x:Name="TelemetryRedactCheckBox" Content="Redact Sensitive" IsChecked="True" Margin="0,0,8,0"/>
-                            <Button Content="Telemetry ?곸슜" Click="ApplyTelemetry_Click" Margin="0,0,8,0" MinWidth="112"/>
-                            <Button Content="Telemetry ?대낫?닿린" Click="ExportTelemetry_Click" MinWidth="120"/>
+                            <Button Content="Telemetry 적용" Click="ApplyTelemetry_Click" Margin="0,0,8,0" MinWidth="112"/>
+                            <Button Content="Telemetry 내보내기" Click="ExportTelemetry_Click" MinWidth="120"/>
                         </WrapPanel>
 
-                        <TextBlock Text="?먮룞 ?덉쭏 ?뺤콉 (Auto Quality)" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                        <TextBlock Text="자동 품질 정책 (Auto Quality)" FontWeight="SemiBold" Margin="0,10,0,0"/>
                         <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
@@ -324,7 +324,7 @@
                             <TextBlock Grid.Row="4" Grid.Column="0" Text="Recovery n" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="4" Grid.Column="1" x:Name="AutoQualityRecoveryConsecutiveTextBox" Text="240" Margin="0,8,0,0"/>
                         </Grid>
-                        <Button Content="?먮룞 ?덉쭏 ?뺤콉 ?곸슜" Click="ApplyAutoQualityPolicy_Click" MinWidth="170"/>
+                        <Button Content="자동 품질 정책 적용" Click="ApplyAutoQualityPolicy_Click" MinWidth="170"/>
                     </StackPanel>
                 </GroupBox>
             </StackPanel>
@@ -349,19 +349,19 @@
             </Grid>
 
             <TabControl x:Name="DiagnosticsTabControl" Grid.Row="1" Margin="0,8,0,8" SelectionChanged="DiagnosticsTabControl_SelectionChanged">
-                <TabItem Header="?고???(Runtime)">
+                <TabItem Header="런타임 (Runtime)">
                     <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                 </TabItem>
-                <TabItem Header="?꾨컮? (Avatar)">
+                <TabItem Header="아바타 (Avatar)">
                     <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                 </TabItem>
-                <TabItem Header="濡쒓렇 (Logs)">
+                <TabItem Header="로그 (Logs)">
                     <DockPanel>
-                        <Button Content="濡쒓렇 蹂듭궗" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyLogs_Click"/>
+                        <Button Content="로그 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyLogs_Click"/>
                         <TextBox x:Name="LogsTextBox" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
-                <TabItem Header="媛?대뱶 (Guides)">
+                <TabItem Header="가이드 (Guides)">
                     <TextBox x:Name="GuidesTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                 </TabItem>
             </TabControl>
@@ -389,6 +389,7 @@
         </Grid>
     </Grid>
 </Window>
+
 
 
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -213,6 +214,8 @@ public sealed partial class HostController
         var quickstartPath = Path.Combine(tempDir, "quickstart.txt");
         var compatibilityPath = Path.Combine(tempDir, "compatibility.txt");
         var telemetryPath = Path.Combine(tempDir, "telemetry.json");
+        var reproCommandsPath = Path.Combine(tempDir, "repro_commands.txt");
+        var environmentPath = Path.Combine(tempDir, "environment_snapshot.json");
 
         File.WriteAllText(snapshotPath, JsonSerializer.Serialize(LastSnapshot, FeatureJsonOptions), Encoding.UTF8);
         File.WriteAllText(logsPath, string.Join(Environment.NewLine, LogEntries.Select(x => $"{x.TimestampUtc:O} [{x.Source}] {x.ResultCode} {x.Message}")), Encoding.UTF8);
@@ -220,6 +223,8 @@ public sealed partial class HostController
         File.WriteAllText(quickstartPath, HostContent.BuildQuickstartText(), Encoding.UTF8);
         File.WriteAllText(compatibilityPath, HostContent.BuildCompatibilityText(), Encoding.UTF8);
         _ = _telemetry.Export(telemetryPath);
+        File.WriteAllText(reproCommandsPath, BuildDiagnosticsReproCommands(), Encoding.UTF8);
+        File.WriteAllText(environmentPath, JsonSerializer.Serialize(BuildEnvironmentSnapshot(), FeatureJsonOptions), Encoding.UTF8);
 
         var zipPath = Path.Combine(root, $"diagnostics_bundle_{timestamp}.zip");
         if (File.Exists(zipPath))
@@ -230,6 +235,64 @@ public sealed partial class HostController
         ZipFile.CreateFromDirectory(tempDir, zipPath, CompressionLevel.Optimal, false);
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "DiagnosticsBundle", zipPath, NcResultCode.Ok), false);
         return zipPath;
+    }
+
+    private string BuildDiagnosticsReproCommands()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("VsfClone Host Repro Commands");
+        sb.AppendLine($"GeneratedUtc: {DateTimeOffset.UtcNow:O}");
+        sb.AppendLine();
+        sb.AppendLine("# Host publish (WPF-only default)");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\publish_hosts.ps1");
+        sb.AppendLine();
+        sb.AppendLine("# Host publish with WinUI diagnostics track");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\publish_hosts.ps1 -IncludeWinUi");
+        sb.AppendLine();
+        sb.AppendLine("# Combined quality baseline");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\run_quality_baseline.ps1");
+        sb.AppendLine();
+        sb.AppendLine("# VSFAvatar gate + trend");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\vsfavatar_quality_gate.ps1 -UseFixedSet");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\vsfavatar_gated_trend.ps1");
+        sb.AppendLine();
+        sb.AppendLine("# Release dashboard / readiness");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_gate_dashboard.ps1");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1");
+        return sb.ToString();
+    }
+
+    private static object BuildEnvironmentSnapshot()
+    {
+        var envSubset = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["VSF_PARSER_MODE"] = Environment.GetEnvironmentVariable("VSF_PARSER_MODE"),
+            ["VSF_SIDECAR_PATH"] = Environment.GetEnvironmentVariable("VSF_SIDECAR_PATH"),
+            ["VSF_SIDECAR_TIMEOUT_MS"] = Environment.GetEnvironmentVariable("VSF_SIDECAR_TIMEOUT_MS"),
+            ["DOTNET_ROOT"] = Environment.GetEnvironmentVariable("DOTNET_ROOT"),
+            ["PATH"] = Environment.GetEnvironmentVariable("PATH"),
+        };
+
+        return new
+        {
+            generated_utc = DateTimeOffset.UtcNow.ToString("O"),
+            machine = new
+            {
+                machine_name = Environment.MachineName,
+                os = RuntimeInformation.OSDescription,
+                os_arch = RuntimeInformation.OSArchitecture.ToString(),
+                process_arch = RuntimeInformation.ProcessArchitecture.ToString(),
+                framework = RuntimeInformation.FrameworkDescription,
+                processor_count = Environment.ProcessorCount,
+            },
+            process = new
+            {
+                base_directory = AppContext.BaseDirectory,
+                current_directory = Directory.GetCurrentDirectory(),
+                command_line = Environment.CommandLine,
+            },
+            environment = envSubset,
+        };
     }
 
     public string ExportRollingMetricsCsv(string outputPath)

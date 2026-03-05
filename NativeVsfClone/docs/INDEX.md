@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [workspace_change_rollup_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/workspace_change_rollup_2026-03-06.md): consolidated workspace rollup for XAV2 v3 skeleton/lilToon rendering path, Unity importer workflow addition, host UI encoding stabilization, and release/build guardrail updates
 - [release_automation_execution_update_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/release_automation_execution_update_2026-03-06.md): detailed execution update for release automation work (dashboard split, fail-fast readiness gate, WinUI manifest matrix summary) with command/evidence snapshot
 - [release_execution_board_20_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/release_execution_board_20_2026-03-06.md): 20-item release completion execution board with current status (`DONE/IN_PROGRESS/BLOCKED/TODO`), fail-fast gate wiring, and command-level runbook
 - [vsfavatar_error_contract_and_target_gate_update_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_error_contract_and_target_gate_update_2026-03-06.md): VSFAvatar sidecar JSON contract stabilization (`serialized_best_candidate_path`), fixed-set target sample expansion (`*11-3.vsfavatar`), render-gate target-row enforcement (`GateR3`), and quality-gate field-rule alignment with full verification evidence

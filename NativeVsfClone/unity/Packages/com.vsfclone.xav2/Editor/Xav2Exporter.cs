@@ -18,6 +18,7 @@ namespace VsfClone.Xav2.Editor
         private const ushort SectionSkinPayload = 0x0013;
         private const ushort SectionBlendShapePayload = 0x0014;
         private const ushort SectionMaterialTypedParams = 0x0015;
+        private const ushort SectionSkeletonPosePayload = 0x0016;
 
         public static void Export(string outputPath, GameObject avatarRoot, Xav2ExportOptions options)
         {
@@ -42,6 +43,7 @@ namespace VsfClone.Xav2.Editor
             }
             ValidateShaderPolicy(payload, options);
             EnsureManifestDefaults(payload, options);
+            ValidateV3SkeletonCoverage(payload);
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
             using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -50,7 +52,7 @@ namespace VsfClone.Xav2.Editor
             var manifestJson = JsonUtility.ToJson(payload.Manifest);
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
             bw.Write(Encoding.ASCII.GetBytes("XAV2"));
-            bw.Write((ushort)2);
+            bw.Write((ushort)3);
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
@@ -74,6 +76,10 @@ namespace VsfClone.Xav2.Editor
             foreach (var skin in payload.Skins)
             {
                 WriteSection(bw, SectionSkinPayload, BuildSkinPayload(skin));
+            }
+            foreach (var skeleton in payload.Skeletons)
+            {
+                WriteSection(bw, SectionSkeletonPosePayload, BuildSkeletonPayload(skeleton));
             }
             foreach (var blendShape in payload.BlendShapes)
             {
@@ -174,6 +180,60 @@ namespace VsfClone.Xav2.Editor
                         $"XAV2 strict shader policy violation: material='{mat.Name}', shader='{mat.ShaderName}'.");
                 }
             }
+        }
+
+        private static void ValidateV3SkeletonCoverage(Xav2AvatarPayload payload)
+        {
+            if (payload.Skins == null || payload.Skins.Count == 0)
+            {
+                return;
+            }
+
+            var skeletonByMesh = new Dictionary<string, Xav2SkeletonPayload>(StringComparer.OrdinalIgnoreCase);
+            foreach (var skeleton in payload.Skeletons ?? new List<Xav2SkeletonPayload>())
+            {
+                var key = NormalizeRefKey(skeleton.MeshName);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+                skeletonByMesh[key] = skeleton;
+            }
+
+            foreach (var skin in payload.Skins)
+            {
+                var key = NormalizeRefKey(skin.MeshName);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    throw new InvalidOperationException("XAV3 skeleton validation failed: skin mesh name is empty.");
+                }
+                if (!skeletonByMesh.TryGetValue(key, out var skeleton))
+                {
+                    throw new InvalidOperationException(
+                        $"XAV3 skeleton validation failed: skeleton payload missing for mesh '{skin.MeshName}'.");
+                }
+
+                var bindPoseCount = (skin.BindPoses16xN?.Length ?? 0) / 16;
+                var skeletonCount = (skeleton.BoneMatrices16xN?.Length ?? 0) / 16;
+                if ((skin.BindPoses16xN == null || (skin.BindPoses16xN.Length % 16) != 0) ||
+                    (skeleton.BoneMatrices16xN == null || (skeleton.BoneMatrices16xN.Length % 16) != 0))
+                {
+                    throw new InvalidOperationException(
+                        $"XAV3 skeleton validation failed: matrix payload shape is invalid for mesh '{skin.MeshName}'.");
+                }
+                if (skeletonCount < bindPoseCount)
+                {
+                    throw new InvalidOperationException(
+                        $"XAV3 skeleton validation failed: skeleton matrix count ({skeletonCount}) < bindpose count ({bindPoseCount}) for mesh '{skin.MeshName}'.");
+                }
+            }
+        }
+
+        private static string NormalizeRefKey(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : value.Replace('\\', '/').Trim().ToLowerInvariant();
         }
 
         private static byte[] BuildMeshPayload(Xav2MeshPayload mesh)
@@ -296,6 +356,19 @@ namespace VsfClone.Xav2.Editor
                 bw.Write(frame.DeltaNormals);
                 bw.Write((uint)frame.DeltaTangents.Length);
                 bw.Write(frame.DeltaTangents);
+            }
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildSkeletonPayload(Xav2SkeletonPayload skeleton)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, skeleton.MeshName);
+            bw.Write((uint)skeleton.BoneMatrices16xN.Length);
+            foreach (var value in skeleton.BoneMatrices16xN)
+            {
+                bw.Write(value);
             }
             return ms.ToArray();
         }

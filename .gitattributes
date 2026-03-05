@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.cs text working-tree-encoding=UTF-8
+*.xaml text working-tree-encoding=UTF-8
+*.ps1 text working-tree-encoding=UTF-8
+*.md text working-tree-encoding=UTF-8
+*.json text working-tree-encoding=UTF-8
+*.xml text working-tree-encoding=UTF-8
+

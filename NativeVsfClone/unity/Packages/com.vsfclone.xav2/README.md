@@ -19,7 +19,13 @@ If a material in the export target set references a shader outside this list, ex
 
 ## Editor entry
 
-- `Tools/VsfClone/XAV2/Export Selected AvatarRoot`
+- Export:
+  - `Tools/VsfClone/XAV2/Export Selected AvatarRoot`
+- Import:
+  - `Tools/VsfClone/XAV2/Import XAV2...`
+  - Output root default: `Assets/ImportedXav2/<avatarId>/`
+  - Collision policy default: unique suffix (`_1`, `_2`, ...)
+  - Partial import default: continue with warnings
 
 ## Runtime loader API
 
@@ -42,6 +48,8 @@ Unknown section policy:
 
 - Runtime tests:
   - `Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+- Editor import tests:
+  - `Tests/Editor/Xav2ImporterTests.cs`
 - Recommended execution:
   - Unity Editor Test Runner (EditMode)
 

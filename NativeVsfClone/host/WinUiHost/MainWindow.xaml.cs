@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -103,7 +103,7 @@ public sealed partial class MainWindow : Window
         }
 
         if (_controller.SessionState.IsInitialized &&
-            !await ConfirmAsync("Session is already initialized. Reinitialize and reset active outputs/avatar?"))
+            !await ConfirmAsync("세션이 이미 초기화되어 있습니다. 다시 초기화하고 활성 출력/아바타를 재설정할까요? (Session is already initialized. Reinitialize and reset active outputs/avatar?)"))
         {
             return;
         }
@@ -138,7 +138,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!await ConfirmAsync("Shutdown runtime and stop rendering/outputs?"))
+        if (!await ConfirmAsync("런타임을 종료하고 렌더/출력을 중지하시겠습니까? (Shutdown runtime and stop rendering/outputs?)"))
         {
             return;
         }
@@ -180,12 +180,12 @@ public sealed partial class MainWindow : Window
         RefreshValidationState();
         if (!_controller.SessionState.IsInitialized)
         {
-            _ = ShowMessageAsync("Load Blocked", "Initialize the session first.");
+            _ = ShowMessageAsync("불러오기 차단 (Load Blocked)", "먼저 세션을 초기화하세요. (Initialize the session first.)");
             return;
         }
         if (!_validationState.AvatarPathValid)
         {
-            _ = ShowMessageAsync("Invalid Input", _validationState.AvatarPathError);
+            _ = ShowMessageAsync("입력 오류 (Invalid Input)", _validationState.AvatarPathError);
             return;
         }
 
@@ -213,7 +213,7 @@ public sealed partial class MainWindow : Window
                     ? technical
                     : $"{guidance}\n\n{technical}";
             }
-            await ShowMessageAsync("Load Failed", $"Load failed: {rc}\n\n{detail}");
+            await ShowMessageAsync("불러오기 실패 (Load Failed)", $"Load failed: {rc}\n\n{detail}");
         }
     }
 
@@ -229,7 +229,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!await ConfirmAsync("Unload active avatar?"))
+        if (!await ConfirmAsync("현재 아바타를 해제하시겠습니까? (Unload active avatar?)"))
         {
             return;
         }
@@ -244,7 +244,7 @@ public sealed partial class MainWindow : Window
         }
 
         if (_controller.Outputs.SpoutActive &&
-            !await ConfirmAsync("Spout is active. Restart with current settings?"))
+            !await ConfirmAsync("Spout가 이미 활성입니다. 현재 설정으로 다시 시작할까요? (Spout is active. Restart with current settings?)"))
         {
             return;
         }
@@ -273,7 +273,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!await ConfirmAsync("Stop Spout output?"))
+        if (!await ConfirmAsync("Spout 출력을 중지하시겠습니까? (Stop Spout output?)"))
         {
             return;
         }
@@ -290,23 +290,23 @@ public sealed partial class MainWindow : Window
         RefreshValidationState();
         if (!_validationState.OscBindPortValid)
         {
-            await ShowMessageAsync("Invalid Input", _validationState.OscBindPortError);
+            await ShowMessageAsync("입력 오류 (Invalid Input)", _validationState.OscBindPortError);
             return;
         }
         if (!_validationState.OscPublishAddressValid)
         {
-            await ShowMessageAsync("Invalid Input", _validationState.OscPublishAddressError);
+            await ShowMessageAsync("입력 오류 (Invalid Input)", _validationState.OscPublishAddressError);
             return;
         }
 
         if (!ushort.TryParse(OscBindPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var bindPort))
         {
-            await ShowMessageAsync("Invalid Input", "OSC bind port must be an integer between 0 and 65535.");
+            await ShowMessageAsync("입력 오류 (Invalid Input)", "OSC 바인드 포트는 0~65535 정수여야 합니다. (OSC bind port must be an integer between 0 and 65535.)");
             return;
         }
 
         if (_controller.Outputs.OscActive &&
-            !await ConfirmAsync("OSC is active. Restart with current settings?"))
+            !await ConfirmAsync("OSC가 이미 활성입니다. 현재 설정으로 다시 시작할까요? (OSC is active. Restart with current settings?)"))
         {
             return;
         }
@@ -327,7 +327,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!await ConfirmAsync("Stop OSC output?"))
+        if (!await ConfirmAsync("OSC 출력을 중지하시겠습니까? (Stop OSC output?)"))
         {
             return;
         }
@@ -343,7 +343,7 @@ public sealed partial class MainWindow : Window
 
         if (!ushort.TryParse(TrackingPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var listenPort))
         {
-            await ShowMessageAsync("Invalid Input", "Tracking listen port must be an integer between 0 and 65535.");
+            await ShowMessageAsync("입력 오류 (Invalid Input)", "트래킹 수신 포트는 0~65535 정수여야 합니다. (Tracking listen port must be an integer between 0 and 65535.)");
             return;
         }
 
@@ -369,7 +369,7 @@ public sealed partial class MainWindow : Window
         var rc = _controller.StartTracking(listenPort, settings.StaleTimeoutMs);
         if (rc != NcResultCode.Ok)
         {
-            await ShowMessageAsync("Tracking", $"Start tracking failed: {rc}");
+            await ShowMessageAsync("트래킹 (Tracking)", $"Start tracking failed: {rc}");
             return;
         }
     }
@@ -394,7 +394,7 @@ public sealed partial class MainWindow : Window
         var rc = _controller.RecenterTracking();
         if (rc != NcResultCode.Ok)
         {
-            await ShowMessageAsync("Tracking", "Recenter requires active tracking input.");
+            await ShowMessageAsync("트래킹 (Tracking)", "리센터는 활성 트래킹 입력이 필요합니다. (Recenter requires active tracking input.)");
         }
     }
 
@@ -421,24 +421,24 @@ public sealed partial class MainWindow : Window
 
         var failed = preflight.Checks.Where(x => !x.Passed).ToList();
         PreflightHintText.Text = failed.Count == 0
-            ? "Preflight passed. Proceed with Initialize -> Load -> Start outputs."
-            : "Preflight failed checks: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
+            ? "사전 점검 통과. 초기화 -> 불러오기 -> 출력 시작 순서로 진행하세요. (Preflight passed. Proceed with Initialize -> Load -> Start outputs.)"
+            : "사전 점검 실패 항목: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
 
-        await ShowMessageAsync("Preflight Result", sb.ToString());
+        await ShowMessageAsync("사전 점검 결과 (Preflight Result)", sb.ToString());
     }
 
     private async void ExportDiag_Click(object sender, RoutedEventArgs e)
     {
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "diagnostics");
         var path = _controller.ExportDiagnosticsBundle(outputDir);
-        await ShowMessageAsync("Export Diagnostics", $"Diagnostics bundle created:\n{path}");
+        await ShowMessageAsync("진단 내보내기 (Export Diagnostics)", $"진단 번들을 생성했습니다:\n{path}\n(Diagnostics bundle created)");
     }
 
     private async void ExportMetrics_Click(object sender, RoutedEventArgs e)
     {
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "metrics");
         var path = _controller.ExportRollingMetricsCsv(Path.Combine(outputDir, $"metrics_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.csv"));
-        await ShowMessageAsync("Export Metrics", $"Metrics exported:\n{path}");
+        await ShowMessageAsync("메트릭 내보내기 (Export Metrics)", $"메트릭을 내보냈습니다:\n{path}\n(Metrics exported)");
     }
 
     private void ProfileQuality_Click(object sender, RoutedEventArgs e)
@@ -483,7 +483,7 @@ public sealed partial class MainWindow : Window
     {
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "telemetry");
         var path = _controller.ExportTelemetry(Path.Combine(outputDir, $"telemetry_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.json"));
-        await ShowMessageAsync("Export Telemetry", $"Telemetry exported:\n{path}");
+        await ShowMessageAsync("Telemetry 내보내기 (Export Telemetry)", $"Telemetry를 내보냈습니다:\n{path}\n(Telemetry exported)");
     }
 
     private void ApplyAutoQualityPolicy_Click(object sender, RoutedEventArgs e)
@@ -628,7 +628,7 @@ public sealed partial class MainWindow : Window
         var name = PresetNameTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            await ShowMessageAsync("Invalid Input", "Preset name is required.");
+            await ShowMessageAsync("입력 오류 (Invalid Input)", "프리셋 이름이 필요합니다. (Preset name is required.)");
             return;
         }
 
@@ -1025,10 +1025,10 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = xamlRoot,
-            Title = "Confirm Action",
+            Title = "작업 확인 (Confirm Action)",
             Content = content,
-            PrimaryButtonText = "Yes",
-            CloseButtonText = "No",
+            PrimaryButtonText = "예 (Yes)",
+            CloseButtonText = "아니오 (No)",
             DefaultButton = ContentDialogButton.Close,
         };
         var result = await dialog.ShowAsync();
@@ -1048,7 +1048,7 @@ public sealed partial class MainWindow : Window
             XamlRoot = xamlRoot,
             Title = title,
             Content = content,
-            CloseButtonText = "OK",
+            CloseButtonText = "확인 (OK)",
         };
         await dialog.ShowAsync();
     }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -156,7 +156,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("Shutdown runtime and stop rendering/outputs?"))
+        if (!Confirm("런타임을 종료하고 렌더/출력을 중지하시겠습니까? (Shutdown runtime and stop rendering/outputs?)"))
         {
             return;
         }
@@ -212,12 +212,12 @@ public partial class MainWindow : Window
         RefreshValidationState();
         if (!_controller.SessionState.IsInitialized)
         {
-            MessageBox.Show(this, "Initialize the session first.", "Load Blocked", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "먼저 세션을 초기화하세요. (Initialize the session first.)", "불러오기 차단 (Load Blocked)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (!_validationState.AvatarPathValid)
         {
-            MessageBox.Show(this, _validationState.AvatarPathError, "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, _validationState.AvatarPathError, "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -266,7 +266,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("Unload active avatar?"))
+        if (!Confirm("현재 아바타를 해제하시겠습니까? (Unload active avatar?)"))
         {
             return;
         }
@@ -320,7 +320,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("Stop Spout output?"))
+        if (!Confirm("Spout 출력을 중지하시겠습니까? (Stop Spout output?)"))
         {
             return;
         }
@@ -337,18 +337,18 @@ public partial class MainWindow : Window
         RefreshValidationState();
         if (!_validationState.OscBindPortValid)
         {
-            MessageBox.Show(this, _validationState.OscBindPortError, "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, _validationState.OscBindPortError, "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (!_validationState.OscPublishAddressValid)
         {
-            MessageBox.Show(this, _validationState.OscPublishAddressError, "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, _validationState.OscPublishAddressError, "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         if (!ushort.TryParse(OscBindPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var bindPort))
         {
-            MessageBox.Show(this, "OSC bind port must be an integer between 0 and 65535.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "OSC 바인드 포트는 0~65535 정수여야 합니다. (OSC bind port must be an integer between 0 and 65535.)", "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -401,7 +401,7 @@ public partial class MainWindow : Window
 
         if (!ushort.TryParse(TrackingPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var listenPort))
         {
-            MessageBox.Show(this, "Tracking listen port must be 0-65535.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "트래킹 수신 포트는 0~65535여야 합니다. (Tracking listen port must be 0-65535.)", "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -430,7 +430,7 @@ public partial class MainWindow : Window
             staleTimeoutMs: _controller.GetTrackingInputSettings().StaleTimeoutMs);
         if (rc != NcResultCode.Ok)
         {
-            MessageBox.Show(this, $"Start tracking failed: {rc}", "Tracking", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, $"트래킹 시작 실패: {rc} (Start tracking failed: {rc})", "트래킹 (Tracking)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
     }
@@ -455,7 +455,7 @@ public partial class MainWindow : Window
         var rc = _controller.RecenterTracking();
         if (rc != NcResultCode.Ok)
         {
-            MessageBox.Show(this, "Recenter requires active tracking input.", "Tracking", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "리센터는 활성 트래킹 입력이 필요합니다. (Recenter requires active tracking input.)", "트래킹 (Tracking)", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -486,21 +486,21 @@ public partial class MainWindow : Window
         {
             RevealDiagnosticsForFailure("Preflight");
         }
-        MessageBox.Show(this, sb.ToString(), "Preflight Result", MessageBoxButton.OK, preflight.Passed ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        MessageBox.Show(this, sb.ToString(), "사전 점검 결과 (Preflight Result)", MessageBoxButton.OK, preflight.Passed ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
     private void ExportDiag_Click(object sender, RoutedEventArgs e)
     {
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "diagnostics");
         var path = _controller.ExportDiagnosticsBundle(outputDir);
-        MessageBox.Show(this, $"Diagnostics bundle created:\n{path}", "Export Diagnostics", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, $"진단 번들을 생성했습니다:\n{path}\n(Diagnostics bundle created)", "진단 내보내기 (Export Diagnostics)", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void ExportMetrics_Click(object sender, RoutedEventArgs e)
     {
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "metrics");
         var path = _controller.ExportRollingMetricsCsv(Path.Combine(outputDir, $"metrics_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.csv"));
-        MessageBox.Show(this, $"Metrics exported:\n{path}", "Export Metrics", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, $"메트릭을 내보냈습니다:\n{path}\n(Metrics exported)", "메트릭 내보내기 (Export Metrics)", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void ProfileQuality_Click(object sender, RoutedEventArgs e)
@@ -545,7 +545,7 @@ public partial class MainWindow : Window
     {
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "telemetry");
         var path = _controller.ExportTelemetry(Path.Combine(outputDir, $"telemetry_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.json"));
-        MessageBox.Show(this, $"Telemetry exported:\n{path}", "Export Telemetry", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show(this, $"Telemetry를 내보냈습니다:\n{path}\n(Telemetry exported)", "Telemetry 내보내기 (Export Telemetry)", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void ApplyAutoQualityPolicy_Click(object sender, RoutedEventArgs e)
@@ -691,7 +691,7 @@ public partial class MainWindow : Window
         var name = PresetNameTextBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            MessageBox.Show(this, "Preset name is required.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "프리셋 이름이 필요합니다. (Preset name is required.)", "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -731,7 +731,7 @@ public partial class MainWindow : Window
 
         if (!_controller.DeleteRenderPreset(name))
         {
-            MessageBox.Show(this, "Cannot delete preset. At least one preset must remain.", "Delete Blocked", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "프리셋은 최소 1개가 필요하여 삭제할 수 없습니다. (Cannot delete preset. At least one preset must remain.)", "삭제 차단 (Delete Blocked)", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1100,7 +1100,7 @@ public partial class MainWindow : Window
 
     private bool Confirm(string message)
     {
-        var result = MessageBox.Show(this, message, "Confirm Action", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        var result = MessageBox.Show(this, message, "작업 확인 (Confirm Action)", MessageBoxButton.YesNo, MessageBoxImage.Question);
         return result == MessageBoxResult.Yes;
     }
 
@@ -1371,7 +1371,7 @@ public partial class MainWindow : Window
     {
         ShowFailureHint(source, beginnerMessage);
         var message = IsBeginnerMode() ? beginnerMessage : advancedMessage;
-        MessageBox.Show(this, message, "Action Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+        MessageBox.Show(this, message, "조치 필요 (Action Required)", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 }
 

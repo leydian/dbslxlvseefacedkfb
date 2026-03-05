@@ -74,6 +74,11 @@ namespace VsfClone.Xav2.Editor
                     if (skinPayload != null)
                     {
                         payload.Skins.Add(skinPayload);
+                        var skeletonPayload = BuildSkeletonPayload(meshName, mesh, smr);
+                        if (skeletonPayload != null)
+                        {
+                            payload.Skeletons.Add(skeletonPayload);
+                        }
                     }
                     var blendShapePayload = BuildBlendShapePayload(meshName, mesh);
                     if (blendShapePayload != null)
@@ -120,6 +125,46 @@ namespace VsfClone.Xav2.Editor
                 payload.BindPoses16xN[o + 12] = m.m30; payload.BindPoses16xN[o + 13] = m.m31; payload.BindPoses16xN[o + 14] = m.m32; payload.BindPoses16xN[o + 15] = m.m33;
             }
             payload.SkinWeightBlob = BuildSkinWeightBlob(boneWeights);
+            return payload;
+        }
+
+        private static Xav2SkeletonPayload BuildSkeletonPayload(string meshName, Mesh mesh, SkinnedMeshRenderer smr)
+        {
+            var bindPoses = mesh.bindposes;
+            if (bindPoses == null || bindPoses.Length == 0)
+            {
+                return null;
+            }
+
+            var payload = new Xav2SkeletonPayload
+            {
+                MeshName = meshName,
+                BoneMatrices16xN = new float[bindPoses.Length * 16]
+            };
+
+            var bones = smr.bones ?? Array.Empty<Transform>();
+            var rootWorldToLocal = (smr.rootBone != null)
+                ? smr.rootBone.worldToLocalMatrix
+                : smr.transform.worldToLocalMatrix;
+
+            for (var i = 0; i < bindPoses.Length; i++)
+            {
+                Matrix4x4 skinMatrix;
+                if (i < bones.Length && bones[i] != null)
+                {
+                    skinMatrix = bones[i].localToWorldMatrix * rootWorldToLocal;
+                }
+                else
+                {
+                    skinMatrix = Matrix4x4.identity;
+                }
+
+                var o = i * 16;
+                payload.BoneMatrices16xN[o + 0] = skinMatrix.m00; payload.BoneMatrices16xN[o + 1] = skinMatrix.m01; payload.BoneMatrices16xN[o + 2] = skinMatrix.m02; payload.BoneMatrices16xN[o + 3] = skinMatrix.m03;
+                payload.BoneMatrices16xN[o + 4] = skinMatrix.m10; payload.BoneMatrices16xN[o + 5] = skinMatrix.m11; payload.BoneMatrices16xN[o + 6] = skinMatrix.m12; payload.BoneMatrices16xN[o + 7] = skinMatrix.m13;
+                payload.BoneMatrices16xN[o + 8] = skinMatrix.m20; payload.BoneMatrices16xN[o + 9] = skinMatrix.m21; payload.BoneMatrices16xN[o + 10] = skinMatrix.m22; payload.BoneMatrices16xN[o + 11] = skinMatrix.m23;
+                payload.BoneMatrices16xN[o + 12] = skinMatrix.m30; payload.BoneMatrices16xN[o + 13] = skinMatrix.m31; payload.BoneMatrices16xN[o + 14] = skinMatrix.m32; payload.BoneMatrices16xN[o + 15] = skinMatrix.m33;
+            }
             return payload;
         }
 

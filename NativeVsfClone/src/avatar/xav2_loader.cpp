@@ -27,6 +27,7 @@ constexpr std::uint16_t kSectionMaterialShaderParams = 0x0012U;
 constexpr std::uint16_t kSectionSkinPayload = 0x0013U;
 constexpr std::uint16_t kSectionBlendShapePayload = 0x0014U;
 constexpr std::uint16_t kSectionMaterialTypedParams = 0x0015U;
+constexpr std::uint16_t kSectionSkeletonPosePayload = 0x0016U;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -526,6 +527,40 @@ bool ParseMaterialShaderParamsSection(
     return cursor == end;
 }
 
+bool ParseSkeletonPosePayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    SkeletonRenderPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->mesh_name) || out_payload->mesh_name.empty()) {
+        return false;
+    }
+    const auto matrix_f32_count = ReadU32Le(bytes, cursor);
+    if (!matrix_f32_count) {
+        return false;
+    }
+    cursor += 4U;
+    const std::size_t value_count = static_cast<std::size_t>(*matrix_f32_count);
+    out_payload->bone_matrices_16xn.clear();
+    out_payload->bone_matrices_16xn.reserve(value_count);
+    for (std::size_t i = 0U; i < value_count; ++i) {
+        const auto f32_bits = ReadU32Le(bytes, cursor + i * 4U);
+        if (!f32_bits) {
+            return false;
+        }
+        float value = 0.0f;
+        std::memcpy(&value, &(*f32_bits), sizeof(float));
+        out_payload->bone_matrices_16xn.push_back(value);
+    }
+    cursor += value_count * 4U;
+    return cursor == end;
+}
+
 bool ParseMaterialTypedParamsSection(
     const std::vector<std::uint8_t>& bytes,
     std::size_t payload_offset,
@@ -678,11 +713,12 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     }
     const auto version = ReadU16Le(bytes, 4U);
     const auto manifest_size = ReadU32Le(bytes, 6U);
-    if (!version || !manifest_size || (*version != 1U && *version != 2U)) {
+    if (!version || !manifest_size || (*version != 1U && *version != 2U && *version != 3U)) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
         PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: unsupported version.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
+    const std::uint16_t format_version = *version;
     const std::size_t manifest_offset = 10U;
     const std::size_t manifest_end = manifest_offset + static_cast<std::size_t>(*manifest_size);
     if (manifest_end > bytes.size()) {
@@ -733,6 +769,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     std::unordered_map<std::string, std::string> material_params_sections;
     std::unordered_map<std::string, MaterialRenderPayload> material_typed_sections;
     std::unordered_map<std::string, SkinRenderPayload> skin_sections;
+    std::unordered_map<std::string, SkeletonRenderPayload> skeleton_pose_sections;
     std::unordered_map<std::string, BlendShapeRenderPayload> blendshape_sections;
 
     std::size_t cursor = manifest_end;
@@ -826,6 +863,21 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             }
             skin_sections[NormalizeRefKey(skin_payload.mesh_name)] = std::move(skin_payload);
             ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionSkeletonPosePayload) {
+            SkeletonRenderPayload skeleton_payload;
+            if (!ParseSkeletonPosePayloadSection(bytes, payload_offset, payload_size, &skeleton_payload)) {
+                pkg.primary_error_code = "XAV2_SKELETON_SCHEMA_INVALID";
+                PushWarning(&pkg, "E_PARSE: XAV2_SKELETON_SCHEMA_INVALID: invalid skeleton pose payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            if ((skeleton_payload.bone_matrices_16xn.size() % 16U) != 0U) {
+                PushWarning(
+                    &pkg,
+                    "W_PAYLOAD: XAV3_SKINNING_MATRIX_INVALID: mesh=" + skeleton_payload.mesh_name +
+                        ", matrix_f32_count=" + std::to_string(skeleton_payload.bone_matrices_16xn.size()));
+            }
+            skeleton_pose_sections[NormalizeRefKey(skeleton_payload.mesh_name)] = std::move(skeleton_payload);
+            ++pkg.format_decoded_section_count;
         } else if (*type == kSectionBlendShapePayload) {
             BlendShapeRenderPayload blendshape_payload;
             if (!ParseBlendShapePayloadSection(bytes, payload_offset, payload_size, &blendshape_payload)) {
@@ -879,6 +931,10 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         const auto bs_it = blendshape_sections.find(key);
         if (bs_it != blendshape_sections.end()) {
             pkg.blendshape_payloads.push_back(bs_it->second);
+        }
+        const auto skel_it = skeleton_pose_sections.find(key);
+        if (skel_it != skeleton_pose_sections.end()) {
+            pkg.skeleton_payloads.push_back(skel_it->second);
         }
     }
 
@@ -975,6 +1031,19 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             &pkg,
             "W_PAYLOAD: XAV2_SKIN_PARTIAL: skin sections=" + std::to_string(skin_sections.size()) +
             ", mesh refs=" + std::to_string(mesh_refs.size()));
+    }
+    if (format_version >= 3U && !skin_sections.empty()) {
+        for (const auto& skin : pkg.skin_payloads) {
+            const auto skel_it = skeleton_pose_sections.find(NormalizeRefKey(skin.mesh_name));
+            if (skel_it == skeleton_pose_sections.end()) {
+                PushWarning(&pkg, "W_PAYLOAD: XAV3_SKELETON_PAYLOAD_MISSING: mesh=" + skin.mesh_name);
+            }
+        }
+        for (const auto& [skeleton_mesh_key, _] : skeleton_pose_sections) {
+            if (skin_sections.find(skeleton_mesh_key) == skin_sections.end()) {
+                PushWarning(&pkg, "W_PAYLOAD: XAV3_SKELETON_MESH_BIND_MISMATCH: mesh=" + skeleton_mesh_key);
+            }
+        }
     }
     if (!blendshape_sections.empty() && pkg.blendshape_payloads.size() != mesh_refs.size()) {
         PushWarning(

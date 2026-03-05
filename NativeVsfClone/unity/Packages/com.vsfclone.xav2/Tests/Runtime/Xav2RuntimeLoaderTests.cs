@@ -49,7 +49,7 @@ namespace VsfClone.Xav2.Runtime.Tests
         public void TryLoad_UnsupportedVersion_Fails()
         {
             var bytes = BuildValidXav2Bytes();
-            bytes[4] = 0x03;
+            bytes[4] = 0x04;
             bytes[5] = 0x00;
             var path = WriteTempFile(bytes);
             try
@@ -122,6 +122,25 @@ namespace VsfClone.Xav2.Runtime.Tests
                     diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED")),
                     Is.False);
                 Assert.That(diagnostics.WarningCodes, Does.Not.Contain("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_V3SkinWithoutSkeleton_Warns()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addSkinSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV3_SKELETON_PAYLOAD_MISSING")),
+                    Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV3_SKELETON_PAYLOAD_MISSING"));
             }
             finally
             {
@@ -293,7 +312,9 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool addTypedMaterialSection = false,
             bool unresolvedTypedTextureRef = false,
             string textureRefName = "texture_0",
-            string typedBaseTextureRefOverride = null)
+            string typedBaseTextureRefOverride = null,
+            bool addSkinSection = false,
+            bool addSkeletonSection = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -316,7 +337,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
 
             bw.Write(Encoding.ASCII.GetBytes("XAV2"));
-            bw.Write((ushort)1);
+            bw.Write((ushort)3);
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
@@ -339,6 +360,14 @@ namespace VsfClone.Xav2.Runtime.Tests
                         unresolvedTypedTextureRef
                             ? "texture_missing_typed"
                             : (typedBaseTextureRefOverride ?? textureRefName)));
+            }
+            if (addSkinSection)
+            {
+                WriteSection(bw, 0x0013, BuildSkinSection("mesh_0"));
+                if (addSkeletonSection)
+                {
+                    WriteSection(bw, 0x0016, BuildSkeletonSection("mesh_0"));
+                }
             }
 
             if (addUnknownSection)
@@ -436,6 +465,44 @@ namespace VsfClone.Xav2.Runtime.Tests
             WriteSizedString(bw, baseTextureRef);
 
             return ms.ToArray();
+        }
+
+        private static byte[] BuildSkinSection(string meshName)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, meshName);
+            bw.Write((uint)1);
+            bw.Write(0);
+            bw.Write((uint)16);
+            for (var i = 0; i < 16; i++)
+            {
+                bw.Write((i % 5) == 0 ? 1.0f : 0.0f);
+            }
+            var skinWeightBlob = new byte[32];
+            WriteFloat32(skinWeightBlob, 16, 1.0f);
+            bw.Write((uint)skinWeightBlob.Length);
+            bw.Write(skinWeightBlob);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildSkeletonSection(string meshName)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, meshName);
+            bw.Write((uint)16);
+            for (var i = 0; i < 16; i++)
+            {
+                bw.Write((i % 5) == 0 ? 1.0f : 0.0f);
+            }
+            return ms.ToArray();
+        }
+
+        private static void WriteFloat32(byte[] bytes, int offset, float value)
+        {
+            var raw = BitConverter.GetBytes(value);
+            Array.Copy(raw, 0, bytes, offset, 4);
         }
 
         private static void WriteSection(BinaryWriter bw, ushort type, byte[] payload)

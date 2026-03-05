@@ -54,6 +54,11 @@ struct SkinRenderPayload {
     std::vector<std::uint8_t> skin_weight_blob;
 };
 
+struct SkeletonRenderPayload {
+    std::string mesh_name;
+    std::vector<float> bone_matrices_16xn;
+};
+
 struct BlendShapeFramePayload {
     std::string name;
     float weight = 0.0f;
@@ -137,6 +142,7 @@ struct AvatarPackage {
     std::vector<MaterialAssetSummary> materials;
     std::vector<MeshRenderPayload> mesh_payloads;
     std::vector<SkinRenderPayload> skin_payloads;
+    std::vector<SkeletonRenderPayload> skeleton_payloads;
     std::vector<BlendShapeRenderPayload> blendshape_payloads;
     std::vector<MaterialRenderPayload> material_payloads;
     std::vector<TextureRenderPayload> texture_payloads;
