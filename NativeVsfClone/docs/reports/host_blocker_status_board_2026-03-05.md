@@ -33,12 +33,24 @@ Single status board for host-track closure work across WPF-first release gating 
      - startup null-guard + UI-ready gating added in `host/WpfHost/MainWindow.xaml.cs`
      - smoke report now includes scoped event-log window and probe-path inventory (`tools/wpf_launch_smoke.ps1`)
 
+4. WPF load-error cross-thread crash path was blocked.
+   - prior failure signature:
+     - `.NET Runtime` event `1026` with `System.InvalidOperationException` ("different thread owns this object")
+     - stack anchor: `WpfHost.MainWindow.Controller_ErrorRaised`
+   - closure change:
+     - `Controller_ErrorRaised` UI updates now run through a UI-thread marshal helper (`RunOnUiThread`).
+     - `Controller_LoadProgressChanged` also uses the same UI-thread marshal helper.
+   - latest evidence:
+     - host publish run: `2026-03-05T22:57:56+09:00` (`build/reports/host_publish_latest.txt`)
+     - WPF launch smoke: `PASS` at `2026-03-05T22:58:07+09:00` (`build/reports/wpf_launch_smoke_latest.txt`)
+
 ## Next Actions
 
 1. Compare WinUI diagnostics across CI matrix (`windows-latest`, `windows-2022`) and local run using `tools/compare_winui_diag_manifest.ps1`.
 2. Resolve WinUI `XamlCompiler.exe` publish-stage blocker (`MSB3073`/`WMC9999`) and validate whether auth-related feed hints (`401/403`) are causal or secondary.
 3. Validate CI matrix parity via uploaded per-OS manifest summary (`winui_manifest_summary_*.txt`) and local manifest diff.
 4. Capture quantitative before/after metrics for refresh-throttle (`LastFrameMs`, UI update cadence, logs-tab active/inactive impact).
+5. Execute manual `.vsfavatar` load-failure repro loop (3 runs) and confirm no new WpfHost `.NET Runtime 1026` events after the test start time.
 
 ## Latest Evidence Snapshot (2026-03-05, implementation follow-up)
 

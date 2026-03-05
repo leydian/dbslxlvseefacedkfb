@@ -175,3 +175,67 @@ Open:
 - `build/reports/winui/winui_diagnostic_manifest.json`
 - `build/reports/winui_manifest_diff_runA_vs_runB.txt`
 - `build/reports/winui_manifest_summary_*.txt` (CI matrix output)
+
+## Follow-up Hotfix Update (2026-03-05, WPF cross-thread crash guard)
+
+### Summary
+
+Applied a focused WPF-only hotfix after confirming load-path crashes during `.vsfavatar` operations.
+
+Primary outcome:
+
+1. Blocked UI-thread ownership violations caused by background-thread event callbacks.
+2. Preserved current operator policy on load failure (app remains running; status/logs update path).
+3. Re-verified WPF publish and launch smoke on `dist/wpf` runtime path.
+
+### Root Cause Captured
+
+- Event-log signature (`Application` -> `.NET Runtime`, `Id=1026`) showed:
+  - `System.InvalidOperationException` ("different thread owns this object")
+  - stack anchor: `WpfHost.MainWindow.Controller_ErrorRaised(...)`
+  - failing call: direct update of WPF controls from non-UI thread.
+
+### Code Changes in This Hotfix
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - `Controller_ErrorRaised`:
+    - moved all UI updates (`ErrorStatusText`, `QuickStatusText`, `_pendingLogsRefresh`) behind UI-thread marshalling.
+  - `Controller_LoadProgressChanged`:
+    - switched to the same UI-thread marshalling helper for consistency/safety.
+  - added helper:
+    - `RunOnUiThread(Action action)` using:
+      - `Dispatcher.CheckAccess()` for fast-path direct UI updates
+      - `Dispatcher.BeginInvoke(...)` for cross-thread callbacks
+
+### Verification Executed for Hotfix
+
+1. Build validation
+   - `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` -> PASS
+   - `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore` -> PASS
+
+2. Publish + smoke validation
+   - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1` -> PASS (`WPF_ONLY`)
+   - `build/reports/host_publish_latest.txt`:
+     - run timestamp: `2026-03-05T22:57:56+09:00`
+     - WPF publish: PASS
+     - WPF launch smoke: PASS
+   - `build/reports/wpf_launch_smoke_latest.txt`:
+     - run timestamp: `2026-03-05T22:58:07+09:00`
+     - `Status: PASS`
+     - `ExitCode: 0`
+
+3. Event-log spot check
+   - no new WPF crash event observed after the hotfix smoke window.
+   - historical failure records before hotfix remain as baseline evidence.
+
+### Scope Boundaries
+
+- Included:
+  - WPF crash-path hardening for cross-thread UI updates.
+- Excluded:
+  - WinUI compile blocker remediation (`MSB3073`/`WMC9999`).
+  - broad eventing/refactor beyond targeted hotfix paths.
+
+### Remaining Action
+
+- Execute manual `.vsfavatar` load-failure repro loop (3 runs) and confirm no new `.NET Runtime 1026` for `WpfHost.exe` after test start time.

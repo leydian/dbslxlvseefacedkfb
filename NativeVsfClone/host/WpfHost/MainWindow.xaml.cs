@@ -706,18 +706,21 @@ public partial class MainWindow : Window
 
     private void Controller_ErrorRaised(object? sender, HostLogEntry e)
     {
-        ErrorStatusText.Text = $"{e.Source}: {e.ResultCode}";
-        _pendingLogsRefresh = true;
-        var guide = _controller.GetLastErrorGuidance();
-        if (!string.IsNullOrWhiteSpace(guide))
+        RunOnUiThread(() =>
         {
-            QuickStatusText.Text = guide;
-        }
+            ErrorStatusText.Text = $"{e.Source}: {e.ResultCode}";
+            _pendingLogsRefresh = true;
+            var guide = _controller.GetLastErrorGuidance();
+            if (!string.IsNullOrWhiteSpace(guide))
+            {
+                QuickStatusText.Text = guide;
+            }
+        });
     }
 
     private void Controller_LoadProgressChanged(object? sender, LoadProgressState e)
     {
-        Dispatcher.Invoke(() =>
+        RunOnUiThread(() =>
         {
             LoadProgressBar.Value = e.Percent;
             LoadProgressText.Text = $"Load progress [{e.OperationId}]: {e.Stage} ({e.Percent}%) - {e.Message}";
@@ -727,6 +730,17 @@ public partial class MainWindow : Window
                 UpdateUiState();
             }
         });
+    }
+
+    private void RunOnUiThread(Action action)
+    {
+        if (Dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(action);
     }
 
     private void MarkAllDirty(bool includeLogs)

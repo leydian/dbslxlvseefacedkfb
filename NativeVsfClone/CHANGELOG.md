@@ -2,6 +2,29 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WPF cross-thread crash hotfix on avatar load-error path
+
+### Summary
+
+Applied a focused WPF hotfix to prevent process termination caused by cross-thread UI access during avatar load error reporting.
+
+### Changed
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - `Controller_ErrorRaised` no longer updates WPF controls directly from callback thread.
+  - introduced `RunOnUiThread(Action)` (`Dispatcher.CheckAccess` + `BeginInvoke`) and routed error/status updates through it.
+  - switched `Controller_LoadProgressChanged` to the same UI-thread marshal helper for consistent thread-safety.
+- reporting updates:
+  - `docs/reports/host_blocker_status_board_2026-03-05.md`
+  - `docs/reports/host_blocker_closure_implementation_pass_2026-03-05.md`
+
+### Verified
+
+- `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` PASS
+- `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1` PASS (`WPF_ONLY`)
+- `build/reports/wpf_launch_smoke_latest.txt` PASS (`2026-03-05T22:58:07+09:00`, `ExitCode=0`)
+
 ## 2026-03-05 - R01-R20 phase2 execution: WinUI parity lift and operational controls
 
 ### Summary
