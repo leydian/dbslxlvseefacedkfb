@@ -260,6 +260,51 @@ namespace VsfClone.Xav2.Editor
                     throw new InvalidOperationException(
                         $"XAV4 rig validation failed: rig bone count ({rigBoneCount}) < skin bone count ({skinBoneCount}) for mesh '{skin.MeshName}'.");
                 }
+
+                ValidateRigGraph(rig, skin.MeshName);
+            }
+        }
+
+        private static void ValidateRigGraph(Xav2SkeletonRigPayload rig, string meshName)
+        {
+            if (rig == null || rig.Bones == null || rig.Bones.Count == 0)
+            {
+                throw new InvalidOperationException($"XAV4 rig validation failed: empty rig for mesh '{meshName}'.");
+            }
+
+            var nameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < rig.Bones.Count; i++)
+            {
+                var bone = rig.Bones[i];
+                if (string.IsNullOrWhiteSpace(bone.Name))
+                {
+                    throw new InvalidOperationException($"XAV4 rig validation failed: empty bone name at index {i} for mesh '{meshName}'.");
+                }
+                if (!nameSet.Add(bone.Name))
+                {
+                    throw new InvalidOperationException($"XAV4 rig validation failed: duplicate bone name '{bone.Name}' for mesh '{meshName}'.");
+                }
+
+                if (bone.ParentIndex < -1 || bone.ParentIndex >= rig.Bones.Count || bone.ParentIndex == i)
+                {
+                    throw new InvalidOperationException(
+                        $"XAV4 rig validation failed: invalid parent index {bone.ParentIndex} at bone '{bone.Name}' for mesh '{meshName}'.");
+                }
+            }
+
+            for (var i = 0; i < rig.Bones.Count; i++)
+            {
+                var visited = new HashSet<int>();
+                var cursor = i;
+                while (cursor >= 0)
+                {
+                    if (!visited.Add(cursor))
+                    {
+                        throw new InvalidOperationException(
+                            $"XAV4 rig validation failed: parent cycle detected at bone '{rig.Bones[i].Name}' for mesh '{meshName}'.");
+                    }
+                    cursor = rig.Bones[cursor].ParentIndex;
+                }
             }
         }
 

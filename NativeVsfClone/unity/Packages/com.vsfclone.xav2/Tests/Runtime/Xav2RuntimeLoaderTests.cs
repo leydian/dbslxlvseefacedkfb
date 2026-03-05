@@ -188,6 +188,42 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_V4RigDuplicateBoneName_WarnsSchemaInvalid()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addSkinSection: true, addRigSection: true, formatVersion: 4, rigDuplicateBoneName: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV4_RIG_SCHEMA_INVALID"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_V4RigCycle_Strict_Fails()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addSkinSection: true, addRigSection: true, formatVersion: 4, rigCycle: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { StrictValidation = true });
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.StrictValidationFailed));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_ManifestTruncated_Fails()
         {
             var bytes = BuildValidXav2Bytes();
@@ -355,7 +391,9 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool addSkinSection = false,
             bool addSkeletonSection = false,
             bool addRigSection = false,
-            ushort formatVersion = 3)
+            ushort formatVersion = 3,
+            bool rigDuplicateBoneName = false,
+            bool rigCycle = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -411,7 +449,7 @@ namespace VsfClone.Xav2.Runtime.Tests
                 }
                 if (addRigSection)
                 {
-                    WriteSection(bw, 0x0017, BuildRigSection("mesh_0"));
+                    WriteSection(bw, 0x0017, BuildRigSection("mesh_0", rigDuplicateBoneName, rigCycle));
                 }
             }
 
@@ -544,14 +582,21 @@ namespace VsfClone.Xav2.Runtime.Tests
             return ms.ToArray();
         }
 
-        private static byte[] BuildRigSection(string meshName)
+        private static byte[] BuildRigSection(string meshName, bool duplicateBoneName, bool cycle)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, meshName);
-            bw.Write((uint)1);
+            bw.Write((uint)2);
             WriteSizedString(bw, "Root");
             bw.Write(-1);
+            bw.Write((uint)16);
+            for (var i = 0; i < 16; i++)
+            {
+                bw.Write((i % 5) == 0 ? 1.0f : 0.0f);
+            }
+            WriteSizedString(bw, duplicateBoneName ? "Root" : "Spine");
+            bw.Write(cycle ? 1 : 0);
             bw.Write((uint)16);
             for (var i = 0; i < 16; i++)
             {

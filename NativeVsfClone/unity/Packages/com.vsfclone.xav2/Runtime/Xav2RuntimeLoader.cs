@@ -735,12 +735,83 @@ namespace VsfClone.Xav2.Runtime
                 });
             }
 
+            if (!ValidateRigGraph(rig, diagnostics, options))
+            {
+                return false;
+            }
+
             if (ms.Position != ms.Length)
             {
                 return AddWarningOrFail(diagnostics, options, $"XAV4_RIG_TRAILING_BYTES: mesh={meshName}");
             }
 
             payload.SkeletonRigs.Add(rig);
+            return true;
+        }
+
+        private static bool ValidateRigGraph(
+            Xav2SkeletonRigPayload rig,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            var nameSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < rig.Bones.Count; i++)
+            {
+                var bone = rig.Bones[i];
+                if (string.IsNullOrWhiteSpace(bone.Name))
+                {
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV4_RIG_SCHEMA_INVALID: mesh='{rig.MeshName}', issue=empty_bone_name, index={i}"))
+                    {
+                        return false;
+                    }
+                }
+                else if (!nameSet.Add(bone.Name))
+                {
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV4_RIG_SCHEMA_INVALID: mesh='{rig.MeshName}', issue=duplicate_bone_name, bone='{bone.Name}'"))
+                    {
+                        return false;
+                    }
+                }
+
+                if (bone.ParentIndex < -1 || bone.ParentIndex >= rig.Bones.Count || bone.ParentIndex == i)
+                {
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV4_RIG_SCHEMA_INVALID: mesh='{rig.MeshName}', issue=invalid_parent_index, bone='{bone.Name}', parent={bone.ParentIndex}"))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            for (var i = 0; i < rig.Bones.Count; i++)
+            {
+                var visited = new HashSet<int>();
+                var cursor = i;
+                while (cursor >= 0 && cursor < rig.Bones.Count)
+                {
+                    if (!visited.Add(cursor))
+                    {
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV4_RIG_SCHEMA_INVALID: mesh='{rig.MeshName}', issue=parent_cycle, bone='{rig.Bones[i].Name}'"))
+                        {
+                            return false;
+                        }
+                        break;
+                    }
+                    cursor = rig.Bones[cursor].ParentIndex;
+                }
+            }
+
             return true;
         }
 

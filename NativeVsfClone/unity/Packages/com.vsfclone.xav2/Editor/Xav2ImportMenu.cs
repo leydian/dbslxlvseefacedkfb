@@ -43,6 +43,10 @@ namespace VsfClone.Xav2.Editor
             {
                 sb.AppendLine($"Recoverable errors: {report.RecoverableErrors.Count}");
             }
+            if (report.RigDiagnostics.Count > 0)
+            {
+                sb.AppendLine($"Rig diagnostics: {report.RigDiagnostics.Count}");
+            }
 
             var message = sb.ToString().TrimEnd();
             Debug.Log($"[XAV2] Import completed.\n{message}");

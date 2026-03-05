@@ -343,15 +343,15 @@ namespace VsfClone.Xav2.Editor
                         rig.Bones.Count > 0)
                     {
                         var bones = CreateSkeletonBonesFromRig(root.transform, rig, report);
-                        smr.bones = MapSkinBones(bones, skin.BoneIndices);
-                        smr.rootBone = ResolveRootBone(bones, rig, root.transform);
+                        smr.bones = MapSkinBones(bones, skin.BoneIndices, report, meshPayload.Name);
+                        smr.rootBone = ResolveRootBone(bones, rig, skin.BoneIndices, root.transform);
                         fullRigCount++;
                     }
                     else
                     {
                         report.Warnings.Add($"XAV4_RIG_MISSING: mesh='{meshPayload.Name}'");
                         report.SkippedAssets.Add($"rig:{meshPayload.Name}");
-                        if (options.FailOnRigDataMissing)
+                        if (options.FailOnRigDataMissing || options.RigRecoveryPolicy == Xav2RigRecoveryPolicy.Strict)
                         {
                             UnityEngine.Object.DestroyImmediate(root);
                             report.ErrorMessage = $"Rig payload missing for skinned mesh '{meshPayload.Name}'.";
@@ -418,14 +418,25 @@ namespace VsfClone.Xav2.Editor
             for (var i = 0; i < rig.Bones.Count; i++)
             {
                 var parentIndex = rig.Bones[i].ParentIndex;
-                var parentTransform = (parentIndex >= 0 && parentIndex < bones.Length)
-                    ? bones[parentIndex]
-                    : parent;
+                var parentTransform = parent;
+                if (parentIndex >= 0 && parentIndex < bones.Length && parentIndex != i)
+                {
+                    parentTransform = bones[parentIndex];
+                }
+                else if (parentIndex >= bones.Length || parentIndex == i)
+                {
+                    AddRigDiagnostic(
+                        report,
+                        "XAV4_RIG_PARENT_INDEX_INVALID",
+                        rig.MeshName,
+                        rig.Bones[i].Name,
+                        $"Invalid parent index '{parentIndex}' for bone '{rig.Bones[i].Name}'.");
+                }
                 bones[i].SetParent(parentTransform, false);
 
                 if (TryParseMatrix(rig.Bones[i].LocalMatrix16, out var matrix))
                 {
-                    ApplyLocalMatrix(bones[i], matrix);
+                    ApplyLocalMatrix(bones[i], matrix, report, rig.MeshName, rig.Bones[i].Name);
                 }
                 else
                 {
@@ -436,7 +447,7 @@ namespace VsfClone.Xav2.Editor
             return bones;
         }
 
-        private static Transform[] MapSkinBones(Transform[] rigBones, int[] skinBoneIndices)
+        private static Transform[] MapSkinBones(Transform[] rigBones, int[] skinBoneIndices, Xav2ImportReport report, string meshName)
         {
             if (skinBoneIndices == null || skinBoneIndices.Length == 0)
             {
@@ -450,11 +461,20 @@ namespace VsfClone.Xav2.Editor
                 mapped[i] = (index >= 0 && rigBones != null && index < rigBones.Length)
                     ? rigBones[index]
                     : null;
+                if (mapped[i] == null)
+                {
+                    AddRigDiagnostic(
+                        report,
+                        "XAV4_RIG_BONE_UNRESOLVED",
+                        meshName,
+                        $"index:{index}",
+                        $"Skin bone index '{index}' is unresolved.");
+                }
             }
             return mapped;
         }
 
-        private static Transform ResolveRootBone(Transform[] bones, Xav2SkeletonRigPayload rig, Transform fallback)
+        private static Transform ResolveRootBone(Transform[] bones, Xav2SkeletonRigPayload rig, int[] skinBoneIndices, Transform fallback)
         {
             if (bones == null || bones.Length == 0 || rig == null || rig.Bones == null)
             {
@@ -466,6 +486,37 @@ namespace VsfClone.Xav2.Editor
                 if (rig.Bones[i].ParentIndex < 0 && bones[i] != null)
                 {
                     return bones[i];
+                }
+            }
+
+            if (skinBoneIndices != null && skinBoneIndices.Length > 0)
+            {
+                var usageCount = new Dictionary<int, int>();
+                for (var i = 0; i < skinBoneIndices.Length; i++)
+                {
+                    var index = skinBoneIndices[i];
+                    if (index < 0 || index >= bones.Length || bones[index] == null)
+                    {
+                        continue;
+                    }
+
+                    usageCount[index] = usageCount.TryGetValue(index, out var count) ? count + 1 : 1;
+                }
+
+                var bestIndex = -1;
+                var bestCount = -1;
+                foreach (var pair in usageCount)
+                {
+                    if (pair.Value > bestCount)
+                    {
+                        bestCount = pair.Value;
+                        bestIndex = pair.Key;
+                    }
+                }
+
+                if (bestIndex >= 0 && bestIndex < bones.Length && bones[bestIndex] != null)
+                {
+                    return bones[bestIndex];
                 }
             }
 
@@ -488,7 +539,12 @@ namespace VsfClone.Xav2.Editor
             return true;
         }
 
-        private static void ApplyLocalMatrix(Transform target, Matrix4x4 matrix)
+        private static void ApplyLocalMatrix(
+            Transform target,
+            Matrix4x4 matrix,
+            Xav2ImportReport report,
+            string meshName,
+            string boneName)
         {
             var position = new Vector3(matrix.m03, matrix.m13, matrix.m23);
             var x = new Vector3(matrix.m00, matrix.m10, matrix.m20);
@@ -502,6 +558,16 @@ namespace VsfClone.Xav2.Editor
 
             var forward = z / scale.z;
             var upwards = y / scale.y;
+            if (!IsOrthonormalBasis(x, y, z))
+            {
+                AddRigDiagnostic(
+                    report,
+                    "XAV4_RIG_MATRIX_NON_ORTHONORMAL",
+                    meshName,
+                    boneName,
+                    "Bone matrix basis is non-orthonormal; applied normalized fallback.");
+            }
+
             var rotation = (forward.sqrMagnitude > 1e-8f && upwards.sqrMagnitude > 1e-8f)
                 ? Quaternion.LookRotation(forward, upwards)
                 : Quaternion.identity;
@@ -509,6 +575,17 @@ namespace VsfClone.Xav2.Editor
             target.localPosition = position;
             target.localRotation = rotation;
             target.localScale = scale;
+        }
+
+        private static bool IsOrthonormalBasis(Vector3 x, Vector3 y, Vector3 z)
+        {
+            var nx = x.normalized;
+            var ny = y.normalized;
+            var nz = z.normalized;
+            var dotXY = Mathf.Abs(Vector3.Dot(nx, ny));
+            var dotYZ = Mathf.Abs(Vector3.Dot(ny, nz));
+            var dotZX = Mathf.Abs(Vector3.Dot(nz, nx));
+            return dotXY < 0.02f && dotYZ < 0.02f && dotZX < 0.02f;
         }
 
         private static Material ResolveMaterialForMesh(
@@ -1036,6 +1113,31 @@ namespace VsfClone.Xav2.Editor
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? string.Empty;
             var relative = NormalizeAssetPath(assetPath);
             return Path.Combine(projectRoot, relative.Replace('/', Path.DirectorySeparatorChar));
+        }
+
+        private static void AddRigDiagnostic(
+            Xav2ImportReport report,
+            string code,
+            string meshName,
+            string boneName,
+            string message)
+        {
+            if (report == null)
+            {
+                return;
+            }
+
+            report.RigDiagnostics.Add(new Xav2RigDiagnostic
+            {
+                Code = code ?? string.Empty,
+                MeshName = meshName ?? string.Empty,
+                BoneName = boneName ?? string.Empty,
+                Message = message ?? string.Empty
+            });
+
+            var warning = $"{code}: mesh={meshName}, bone={boneName}";
+            report.Warnings.Add(warning);
+            report.WarningCodes.Add(code ?? string.Empty);
         }
 
         private static float ReadSingle(byte[] bytes, int offset)
