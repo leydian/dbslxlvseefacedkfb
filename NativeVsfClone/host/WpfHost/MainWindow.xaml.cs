@@ -405,6 +405,26 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!int.TryParse(TrackingInferenceFpsTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var inferenceFpsCap))
+        {
+            inferenceFpsCap = 30;
+            TrackingInferenceFpsTextBox.Text = "30";
+        }
+        inferenceFpsCap = Math.Clamp(inferenceFpsCap, 5, 120);
+
+        var sourceType = TrackingSourceComboBox.SelectedIndex == 1
+            ? TrackingSourceType.WebcamOnnx
+            : TrackingSourceType.OscIfacial;
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            listenPort,
+            current.StaleTimeoutMs,
+            sourceType,
+            TrackingWebcamDeviceTextBox.Text.Trim(),
+            TrackingOnnxModelPathTextBox.Text.Trim(),
+            inferenceFpsCap);
+
         var rc = _controller.StartTracking(
             listenPort,
             staleTimeoutMs: _controller.GetTrackingInputSettings().StaleTimeoutMs);
@@ -413,8 +433,6 @@ public partial class MainWindow : Window
             MessageBox.Show(this, $"Start tracking failed: {rc}", "Tracking", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-
-        _controller.ConfigureTrackingInputSettings(listenPort, _controller.GetTrackingInputSettings().StaleTimeoutMs);
     }
 
     private void StopTracking_Click(object sender, RoutedEventArgs e)
@@ -924,9 +942,13 @@ public partial class MainWindow : Window
         StopTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive;
         RecenterTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive && !tracking.IsStale;
         TrackingPortTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingSourceComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingWebcamDeviceTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingOnnxModelPathTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -1035,7 +1057,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1220,6 +1242,10 @@ public partial class MainWindow : Window
         OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
         OscPublishAddressTextBox.Text = session.OscPublishAddress;
         TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
+        TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType == TrackingSourceType.WebcamOnnx ? 1 : 0;
+        TrackingWebcamDeviceTextBox.Text = session.Tracking.WebcamDeviceId;
+        TrackingOnnxModelPathTextBox.Text = session.Tracking.OnnxModelPath;
+        TrackingInferenceFpsTextBox.Text = session.Tracking.InferenceFpsCap.ToString(CultureInfo.InvariantCulture);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
         SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);

@@ -23,6 +23,8 @@ Primary intent:
 - `host/HostCore/NativeCoreInterop.cs`
 - `host/HostCore/PlatformFeatures.cs`
 - `host/HostCore/TrackingInputService.cs`
+- `host/WinUiHost/MainWindow.xaml.cs`
+- `host/WpfHost/MainWindow.xaml`
 - `host/WpfHost/MainWindow.xaml.cs`
 - `include/vsfclone/nativecore/api.h`
 - `src/nativecore/native_core.cpp`
@@ -73,6 +75,9 @@ Updated:
 - `host/HostCore/NativeCoreInterop.cs`
 - `host/HostCore/TrackingInputService.cs`
 - `include/vsfclone/nativecore/api.h`
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+- `host/WinUiHost/MainWindow.xaml.cs`
 
 Key changes:
 
@@ -106,6 +111,12 @@ Key changes:
   - OSC vs webcam-onnx source-mode startup routing
   - source status text transitions (`udp-listening`, `udp-receiving`, `udp-parse-failed`, `stopped`, etc.)
   - expression cache snapshot export via `TryGetLatestExpressionWeights(...)`
+- WPF/WinUI tracking control surfaces now persist/apply extended source options at start:
+  - source selector (`OSC` vs `Webcam ONNX`)
+  - webcam device id
+  - ONNX model path
+  - inference FPS cap (validated and clamped)
+- WPF tracking panel layout expanded to expose the new source/model/FPS inputs.
 
 Behavioral outcome:
 

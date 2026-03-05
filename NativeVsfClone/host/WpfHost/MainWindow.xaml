@@ -224,9 +224,24 @@
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Listen Port" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Source" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
+                                <ComboBoxItem Content="OSC (iFacialMocap)"/>
+                                <ComboBoxItem Content="Webcam (ONNX)"/>
+                            </ComboBox>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Webcam Id" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" x:Name="TrackingWebcamDeviceTextBox" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="ONNX Path" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingOnnxModelPathTextBox" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Infer FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
                             <Button x:Name="StartTrackingButton" Content="Start Tracking" Click="StartTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
