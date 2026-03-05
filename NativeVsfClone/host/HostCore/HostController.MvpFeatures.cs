@@ -351,6 +351,27 @@ public sealed partial class HostController
         return $"[{LastUserFacingError.ErrorCode}] {LastUserFacingError.Title} | {LastUserFacingError.ActionHint}";
     }
 
+    public string GetLastLoadFailureDetails()
+    {
+        if (string.IsNullOrWhiteSpace(_lastLoadFailureGuidance) &&
+            string.IsNullOrWhiteSpace(_lastLoadFailureTechnical))
+        {
+            return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(_lastLoadFailureGuidance))
+        {
+            return _lastLoadFailureTechnical;
+        }
+
+        if (string.IsNullOrWhiteSpace(_lastLoadFailureTechnical))
+        {
+            return _lastLoadFailureGuidance;
+        }
+
+        return $"{_lastLoadFailureGuidance}{Environment.NewLine}{Environment.NewLine}{_lastLoadFailureTechnical}";
+    }
+
     public Task<NcResultCode> LoadAvatarAsync(string path, int timeoutMs)
     {
         if (_activeLoadTask is { IsCompleted: false })
@@ -540,11 +561,19 @@ public sealed partial class HostController
             return LastUserFacingError;
         }
 
+        var isLoadOrRenderUnsupported =
+            rc == NcResultCode.Unsupported &&
+            (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase) ||
+             source.Contains("RenderTick", StringComparison.OrdinalIgnoreCase) ||
+             detail.Contains("renderable mesh payloads", StringComparison.OrdinalIgnoreCase) ||
+             detail.Contains("render resources", StringComparison.OrdinalIgnoreCase));
+
         var category = rc switch
         {
             NcResultCode.NotInitialized => HostErrorCategory.Initialization,
             NcResultCode.InvalidArgument => HostErrorCategory.InputValidation,
             NcResultCode.Io => HostErrorCategory.FileIo,
+            NcResultCode.Unsupported when isLoadOrRenderUnsupported => HostErrorCategory.Runtime,
             NcResultCode.Unsupported => HostErrorCategory.Toolchain,
             NcResultCode.Internal => source.Contains("Spout", StringComparison.OrdinalIgnoreCase) || source.Contains("Osc", StringComparison.OrdinalIgnoreCase)
                 ? HostErrorCategory.Output
@@ -576,7 +605,14 @@ public sealed partial class HostController
 
         if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
         {
-            action = "Check avatar file extension/path, then retry. If it fails again, export diagnostics.";
+            if (detail.Contains("renderable mesh payloads", StringComparison.OrdinalIgnoreCase))
+            {
+                action = "VSFAvatar metadata loaded, but render mesh payload is missing. Export diagnostics and convert via supported runtime path.";
+            }
+            else
+            {
+                action = "Check avatar file extension/path, then retry. If it fails again, export diagnostics.";
+            }
         }
         else if (source.Contains("StartSpout", StringComparison.OrdinalIgnoreCase) ||
                  source.Contains("StartOsc", StringComparison.OrdinalIgnoreCase))

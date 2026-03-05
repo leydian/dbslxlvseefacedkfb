@@ -204,11 +204,15 @@ public sealed partial class MainWindow : Window
         UpdateUiState();
         if (rc != NcResultCode.Ok)
         {
-            var guidance = _controller.GetLastErrorGuidance();
-            var technical = NativeCoreInterop.FormatLastError();
-            var detail = string.IsNullOrWhiteSpace(guidance)
-                ? technical
-                : $"{guidance}\n\n{technical}";
+            var detail = _controller.GetLastLoadFailureDetails();
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                var guidance = _controller.GetLastErrorGuidance();
+                var technical = NativeCoreInterop.FormatLastError();
+                detail = string.IsNullOrWhiteSpace(guidance)
+                    ? technical
+                    : $"{guidance}\n\n{technical}";
+            }
             await ShowMessageAsync("Load Failed", $"Load failed: {rc}\n\n{detail}");
         }
     }

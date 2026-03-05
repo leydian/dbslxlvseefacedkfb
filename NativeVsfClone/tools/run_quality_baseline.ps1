@@ -1,5 +1,6 @@
 param(
     [switch]$SkipVsfAvatar,
+    [switch]$SkipVsfRender,
     [switch]$SkipVrm,
     [switch]$SkipVxAvatar,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
@@ -47,6 +48,12 @@ if (-not $SkipVsfAvatar) {
         -Command "powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet"))
 }
 
+if (-not $SkipVsfRender) {
+    $results.Add((Invoke-Gate `
+        -Name "VSFAvatar render gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet"))
+}
+
 if (-not $SkipVrm) {
     $results.Add((Invoke-Gate `
         -Name "VRM fixed5 gate" `
@@ -73,6 +80,7 @@ foreach ($result in $results) {
 $lines.Add("")
 $lines.Add("Artifacts:")
 $lines.Add("- VSFAvatar: build/reports/vsfavatar_gate_summary.txt")
+$lines.Add("- VSFAvatarRender: build/reports/vsfavatar_render_gate_summary.txt")
 $lines.Add("- VRM: build/reports/vrm_gate_fixed5.txt")
 $lines.Add("- VXAvatar: build/reports/vxavatar_gate_summary.txt")
 

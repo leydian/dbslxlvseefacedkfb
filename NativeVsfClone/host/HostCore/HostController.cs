@@ -24,6 +24,8 @@ public sealed partial class HostController
     private bool _desiredOscActive;
     private DateTimeOffset _lastOutputStateSyncLogUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastOutputRecoveryAttemptUtc = DateTimeOffset.MinValue;
+    private string _lastLoadFailureGuidance = string.Empty;
+    private string _lastLoadFailureTechnical = string.Empty;
 
     public HostController()
         : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore())
@@ -190,6 +192,8 @@ public sealed partial class HostController
                 // Re-apply host-side render controls after avatar load in case
                 // the native side resets camera/quality state during load.
                 ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
+                _lastLoadFailureGuidance = string.Empty;
+                _lastLoadFailureTechnical = string.Empty;
             }
 
             RefreshState();
@@ -726,8 +730,30 @@ public sealed partial class HostController
 
         var detail = NativeCoreInterop.FormatLastError();
         var userFacing = BuildUserFacingError(source, rc, detail);
+        if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
+        {
+            _lastLoadFailureGuidance = $"[{userFacing.ErrorCode}] {userFacing.Title} | {userFacing.ActionHint}";
+            _lastLoadFailureTechnical = BuildLoadFailureTechnical(detail);
+        }
         var entry = new HostLogEntry(DateTimeOffset.UtcNow, source, $"{userFacing.Title}: {userFacing.ActionHint} | {userFacing.TechnicalDetail}", rc);
         AddLog(entry, true);
+    }
+
+    private string BuildLoadFailureTechnical(string detail)
+    {
+        var parts = new List<string>();
+        var info = _sessionService.LastLoadAttemptInfo;
+        if (info.HasValue)
+        {
+            parts.Add(
+                $"AvatarInfo: format={info.Value.DetectedFormat}, compat={info.Value.CompatLevel}, parser_stage={info.Value.ParserStage}, primary_error={info.Value.PrimaryErrorCode}, mesh_payloads={info.Value.MeshPayloadCount}, materials={info.Value.MaterialCount}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(detail))
+        {
+            parts.Add(detail);
+        }
+        return string.Join(Environment.NewLine, parts);
     }
 
     private void AddLog(HostLogEntry entry, bool raiseError)

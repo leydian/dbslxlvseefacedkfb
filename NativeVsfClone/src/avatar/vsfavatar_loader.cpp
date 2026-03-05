@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <sstream>
@@ -348,8 +349,8 @@ static std::vector<std::string> GetJsonStringArray(const std::string& json, cons
 
 static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
     const auto schema_version = GetJsonU32(output, "schema_version");
-    if (schema_version != 2U && schema_version != 3U) {
-        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2 or 3");
+    if (schema_version != 2U && schema_version != 3U && schema_version != 4U) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2, 3, or 4");
     }
     const auto status = GetJsonString(output, "status");
     if (status.empty()) {
@@ -392,6 +393,41 @@ static AvatarCompatLevel ParseCompatLevel(const std::string& value) {
         return AvatarCompatLevel::Partial;
     }
     return AvatarCompatLevel::Unknown;
+}
+
+static void AppendFloat(std::vector<std::uint8_t>* out, float value) {
+    if (out == nullptr) {
+        return;
+    }
+    std::uint8_t bytes[sizeof(float)];
+    std::memcpy(bytes, &value, sizeof(float));
+    out->insert(out->end(), bytes, bytes + sizeof(float));
+}
+
+static MeshRenderPayload BuildPlaceholderQuadPayload() {
+    MeshRenderPayload payload;
+    payload.name = "VSF_PLACEHOLDER_QUAD";
+    payload.vertex_stride = 12U;
+    payload.material_index = 0;
+    payload.indices = {0U, 1U, 2U, 2U, 3U, 0U};
+    payload.vertex_blob.reserve(4U * 12U);
+
+    AppendFloat(&payload.vertex_blob, -0.5f);
+    AppendFloat(&payload.vertex_blob, -0.8f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+
+    AppendFloat(&payload.vertex_blob, 0.5f);
+    AppendFloat(&payload.vertex_blob, -0.8f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+
+    AppendFloat(&payload.vertex_blob, 0.5f);
+    AppendFloat(&payload.vertex_blob, 0.8f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+
+    AppendFloat(&payload.vertex_blob, -0.5f);
+    AppendFloat(&payload.vertex_blob, 0.8f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+    return payload;
 }
 
 bool VsfAvatarLoader::CanLoadPath(const std::string& path) const {
@@ -484,6 +520,23 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     }
     if (pkg.materials.empty()) {
         pkg.materials.push_back({"Default", "MToon (placeholder)"});
+    }
+
+    const auto sidecar_mesh_payload_count = GetJsonU32(output, "mesh_payload_count");
+    const auto sidecar_material_payload_count = GetJsonU32(output, "material_payload_count");
+    const auto render_payload_mode = GetJsonString(output, "render_payload_mode");
+    if (render_payload_mode == "placeholder_quad_v1" && sidecar_mesh_payload_count > 0U) {
+        pkg.mesh_payloads.push_back(BuildPlaceholderQuadPayload());
+        MaterialRenderPayload mat {};
+        mat.name = "VSF_PLACEHOLDER_MAT";
+        mat.shader_name = "Unlit/Color";
+        mat.shader_variant = "placeholder";
+        mat.alpha_mode = "OPAQUE";
+        mat.double_sided = true;
+        if (sidecar_material_payload_count > 0U) {
+            pkg.material_payloads.push_back(mat);
+        }
+        pkg.warnings.push_back("W_RENDER_PAYLOAD: placeholder quad payload applied from sidecar contract.");
     }
 
     pkg.warnings.push_back("W_MODE: parser mode=sidecar");
@@ -583,6 +636,14 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     }
     if (pkg.missing_features.empty() && mesh_count == 0U && material_count == 0U) {
         pkg.missing_features.push_back("mesh/material object discovery");
+    }
+    if (pkg.mesh_payloads.empty() && pkg.compat_level != AvatarCompatLevel::Failed) {
+        pkg.primary_error_code = "VSF_MESH_PAYLOAD_MISSING";
+        pkg.warnings.push_back("W_PRIMARY: VSF_MESH_PAYLOAD_MISSING");
+        if (std::find(pkg.missing_features.begin(), pkg.missing_features.end(), "authored mesh payload extraction") ==
+            pkg.missing_features.end()) {
+            pkg.missing_features.push_back("authored mesh payload extraction");
+        }
     }
     return core::Result<AvatarPackage>::Ok(pkg);
 }

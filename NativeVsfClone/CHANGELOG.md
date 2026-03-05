@@ -2,6 +2,48 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - VSFAvatar render gate v1 + load-failure error contract refinement
+
+### Summary
+
+Implemented a VSFAvatar v1 renderability bridge (sidecar/loader contract extension) and refined host load-failure diagnostics so runtime unsupported cases retain actionable load-context details.
+
+### Changed
+
+- sidecar contract update:
+  - `tools/vsfavatar_sidecar.cpp`
+  - schema bumped to `v4`, added `render_payload_mode`, `mesh_payload_count`, `material_payload_count`
+  - emits placeholder render payload mode hint for complete/object-table-parsed cases with zero discovered meshes
+- loader bridge update:
+  - `src/avatar/vsfavatar_loader.cpp`
+  - accepts sidecar schema `2/3/4`
+  - creates placeholder quad mesh/material payload when sidecar emits `placeholder_quad_v1`
+  - sets `VSF_MESH_PAYLOAD_MISSING` diagnostics when payload remains unavailable
+- host diagnostics and UI messaging:
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/AvatarSessionService.cs`
+  - `host/HostCore/HostController.cs`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - preserves load-attempt avatar info and exposes `GetLastLoadFailureDetails()` for failure dialogs
+  - refines `Unsupported` mapping for load/render paths from generic toolchain messaging to runtime/asset guidance
+- tooling:
+  - added `tools/vsfavatar_render_gate.ps1`
+  - updated `tools/run_quality_baseline.ps1` to include VSFAvatar render gate
+- docs:
+  - added `docs/reports/vsfavatar_render_gate_and_error_contract_2026-03-05.md`
+  - updated `docs/INDEX.md`
+
+### Verified
+
+- `cmake --build NativeVsfClone\build --config Release --target vsfavatar_sidecar nativecore avatar_tool` PASS
+- `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` PASS
+- `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore -nr:false` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet` PASS
+  - `build/reports/vsfavatar_render_gate_summary.txt`
+  - `renderable_mesh_payload_rows: 1`
+
 ## 2026-03-05 - Session rollup docs refresh (hotfix + policy trim + XAV2 relaxed menu context)
 
 ### Summary

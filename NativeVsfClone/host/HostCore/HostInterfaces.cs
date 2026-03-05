@@ -7,6 +7,7 @@ public interface IAvatarSessionService
     bool IsInitialized { get; }
     ulong? ActiveAvatarHandle { get; }
     NcAvatarInfo? ActiveAvatarInfo { get; }
+    NcAvatarInfo? LastLoadAttemptInfo { get; }
     NcResultCode Initialize();
     NcResultCode Shutdown();
     NcResultCode LoadAvatar(string path);

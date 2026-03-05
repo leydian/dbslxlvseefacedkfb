@@ -7,6 +7,7 @@ public sealed class AvatarSessionService : IAvatarSessionService
     public bool IsInitialized { get; private set; }
     public ulong? ActiveAvatarHandle { get; private set; }
     public NcAvatarInfo? ActiveAvatarInfo { get; private set; }
+    public NcAvatarInfo? LastLoadAttemptInfo { get; private set; }
 
     public NcResultCode Initialize()
     {
@@ -17,6 +18,10 @@ public sealed class AvatarSessionService : IAvatarSessionService
         };
         var rc = NativeCoreInterop.nc_initialize(ref options);
         IsInitialized = rc == NcResultCode.Ok;
+        if (rc == NcResultCode.Ok)
+        {
+            LastLoadAttemptInfo = null;
+        }
         return rc;
     }
 
@@ -24,6 +29,7 @@ public sealed class AvatarSessionService : IAvatarSessionService
     {
         ActiveAvatarHandle = null;
         ActiveAvatarInfo = null;
+        LastLoadAttemptInfo = null;
         IsInitialized = false;
         return NativeCoreInterop.nc_shutdown();
     }
@@ -40,13 +46,17 @@ public sealed class AvatarSessionService : IAvatarSessionService
         var rc = NativeCoreInterop.nc_load_avatar(ref req, out var handle, out var info);
         if (rc != NcResultCode.Ok)
         {
+            LastLoadAttemptInfo = null;
             return rc;
         }
+        LastLoadAttemptInfo = info;
 
         rc = NativeCoreInterop.nc_create_render_resources(handle);
         if (rc != NcResultCode.Ok)
         {
             _ = NativeCoreInterop.nc_unload_avatar(handle);
+            ActiveAvatarHandle = null;
+            ActiveAvatarInfo = null;
             return rc;
         }
 

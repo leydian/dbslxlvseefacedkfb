@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -41,8 +42,8 @@ std::string EscapeJson(const std::string& s) {
 void PrintErrorJson(const std::string& error) {
     std::cout << "{"
               << "\"status\":\"error\","
-              << "\"schema_version\":3,"
-              << "\"extractor_version\":\"inhouse-sidecar-v3\","
+              << "\"schema_version\":4,"
+              << "\"extractor_version\":\"inhouse-sidecar-v4\","
               << "\"error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"primary_error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"error_message\":\"" << EscapeJson(error) << "\","
@@ -175,11 +176,19 @@ int main(int argc, char** argv) {
     if (p.probe_stage == "complete" && p.object_table_parsed) {
         primary_error_code = "NONE";
     }
+    const bool can_emit_placeholder_payload = p.probe_stage == "complete" && p.object_table_parsed && mesh_count == 0U;
+    const std::string render_payload_mode = can_emit_placeholder_payload ? "placeholder_quad_v1" : "none";
+    const std::uint32_t mesh_payload_count = can_emit_placeholder_payload ? 1U : 0U;
+    const std::uint32_t material_payload_count = can_emit_placeholder_payload ? 1U : 0U;
+    if (can_emit_placeholder_payload) {
+        warnings.push_back("W_RENDER_PAYLOAD: placeholder quad emitted (mesh extraction pending).");
+        missing_features.push_back("authored mesh payload extraction");
+    }
 
     std::cout << "{"
               << "\"status\":\"ok\","
-              << "\"schema_version\":3,"
-              << "\"extractor_version\":\"inhouse-sidecar-v3\","
+              << "\"schema_version\":4,"
+              << "\"extractor_version\":\"inhouse-sidecar-v4\","
               << "\"display_name\":\"" << EscapeJson(fs::path(path).stem().string()) << "\","
               << "\"compat_level\":\"" << compat_level << "\","
               << "\"probe_stage\":\"" << EscapeJson(p.probe_stage) << "\","
@@ -187,6 +196,9 @@ int main(int argc, char** argv) {
               << "\"object_table_parsed\":" << (p.object_table_parsed ? "true" : "false") << ","
               << "\"mesh_count\":" << mesh_count << ","
               << "\"material_count\":" << material_count << ","
+              << "\"render_payload_mode\":\"" << render_payload_mode << "\","
+              << "\"mesh_payload_count\":" << mesh_payload_count << ","
+              << "\"material_payload_count\":" << material_payload_count << ","
               << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","
               << "\"selected_block0_hypothesis\":\"" << EscapeJson(p.selected_block0_hypothesis) << "\","
               << "\"block0_attempt_count\":" << p.block0_attempt_count << ","
