@@ -2,6 +2,26 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Session rollup docs refresh (hotfix + policy trim + XAV2 relaxed menu context)
+
+### Summary
+
+Added a detailed cross-commit session summary document that consolidates the latest implementation line and clarifies the runtime meaning of host `Load failed: Unsupported` observations.
+
+### Changed
+
+- added report:
+  - `docs/reports/session_change_summary_2026-03-05.md`
+- index update:
+  - `docs/INDEX.md` report link added
+
+### Notes
+
+- this update is documentation-focused and references latest change tracks:
+  - WPF cross-thread crash hotfix (`396f267`)
+  - Unity XAV2 relaxed export menu (`f1d013b`)
+  - avatar extension policy trim (`dc33918`)
+
 ## 2026-03-05 - WPF cross-thread crash hotfix on avatar load-error path
 
 ### Summary
