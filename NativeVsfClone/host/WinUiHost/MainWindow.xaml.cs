@@ -18,10 +18,22 @@ public sealed partial class MainWindow : Window
     private readonly HostController _controller = new();
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private readonly DispatcherQueueTimer _timer;
+    private readonly DispatcherQueueTimer _uiRefreshTimer;
     private readonly DispatcherQueueTimer _resizeTimer;
     private readonly DispatcherQueueTimer _renderApplyTimer;
     private bool _isSyncingRenderUi;
     private bool _isSyncingPresetUi;
+    private bool _isLogsTabActive;
+    private bool _pendingUiStateRefresh;
+    private bool _pendingRuntimeRefresh;
+    private bool _pendingAvatarRefresh;
+    private bool _pendingLogsRefresh;
+    private long _lastRuntimeSnapshotVersion = -1;
+    private long _lastAvatarSnapshotVersion = -1;
+    private long _lastLogVersion = -1;
+    private string _lastRuntimeText = string.Empty;
+    private string _lastAvatarText = string.Empty;
+    private string _lastLogsText = string.Empty;
     private readonly IntPtr _hwnd;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
 
@@ -32,6 +44,9 @@ public sealed partial class MainWindow : Window
         _timer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(16.0);
         _timer.Tick += Timer_Tick;
+        _uiRefreshTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _uiRefreshTimer.Interval = TimeSpan.FromMilliseconds(100.0);
+        _uiRefreshTimer.Tick += UiRefreshTimer_Tick;
         _resizeTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _resizeTimer.Interval = TimeSpan.FromMilliseconds(90.0);
         _resizeTimer.IsRepeating = false;
@@ -46,14 +61,18 @@ public sealed partial class MainWindow : Window
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
+        _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         RefreshValidationState();
         SyncRenderControlsFromState();
-        RefreshAll();
+        MarkAllDirty(includeLogs: true);
+        ProcessPendingUpdates(force: true);
+        _uiRefreshTimer.Start();
     }
 
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         _timer.Stop();
+        _uiRefreshTimer.Stop();
         _resizeTimer.Stop();
         _renderApplyTimer.Stop();
         _ = _controller.Shutdown();
@@ -90,6 +109,9 @@ public sealed partial class MainWindow : Window
                 _timer.Start();
             }
         }
+
+        MarkAllDirty(includeLogs: true);
+        ProcessPendingUpdates(force: true);
     }
 
     private async void Shutdown_Click(object sender, RoutedEventArgs e)
@@ -106,6 +128,7 @@ public sealed partial class MainWindow : Window
 
         _timer.Stop();
         _ = _controller.Shutdown();
+        MarkAllDirty(includeLogs: true);
     }
 
     private async void BrowseAvatar_Click(object sender, RoutedEventArgs e)
@@ -442,6 +465,7 @@ public sealed partial class MainWindow : Window
 
     private void RenderApplyTimer_Tick(DispatcherQueueTimer sender, object args)
     {
+        _renderApplyTimer.Stop();
         _ = PushRenderUiState();
     }
 
@@ -479,6 +503,7 @@ public sealed partial class MainWindow : Window
 
     private void ResizeTimer_Tick(DispatcherQueueTimer sender, object args)
     {
+        _resizeTimer.Stop();
         var state = _controller.SessionState;
         if (!state.IsInitialized || !state.IsWindowAttached)
         {
@@ -490,20 +515,66 @@ public sealed partial class MainWindow : Window
         _ = _controller.ResizeWindow(metrics.pixelWidth, metrics.pixelHeight);
     }
 
-    private void Controller_StateChanged(object? sender, EventArgs e) => RefreshAll();
-    private void Controller_DiagnosticsUpdated(object? sender, EventArgs e) => RefreshAll();
+    private void DiagnosticsTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not TabView tabView)
+        {
+            return;
+        }
+
+        _isLogsTabActive = tabView.SelectedIndex == 2;
+        if (_isLogsTabActive)
+        {
+            _pendingLogsRefresh = true;
+            ProcessPendingUpdates(force: false);
+        }
+    }
+
+    private void UiRefreshTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        ProcessPendingUpdates(force: false);
+    }
+
+    private void Controller_StateChanged(object? sender, EventArgs e)
+    {
+        _pendingUiStateRefresh = true;
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = true;
+    }
+
+    private void Controller_DiagnosticsUpdated(object? sender, EventArgs e)
+    {
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = true;
+    }
 
     private void Controller_ErrorRaised(object? sender, HostLogEntry e)
     {
         ErrorStatusText.Text = $"LastError: {e.Source} {e.ResultCode}";
+        _pendingLogsRefresh = true;
     }
 
-    private void RefreshAll()
+    private void MarkAllDirty(bool includeLogs)
     {
-        UpdateRenderMetricsFromHost();
-        RefreshValidationState();
-        UpdateUiState();
-        UpdateDiagnostics();
+        _pendingUiStateRefresh = true;
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = includeLogs;
+    }
+
+    private void ProcessPendingUpdates(bool force)
+    {
+        if (_pendingUiStateRefresh || force)
+        {
+            UpdateRenderMetricsFromHost();
+            RefreshValidationState();
+            UpdateUiState();
+            _pendingUiStateRefresh = false;
+        }
+
+        UpdateDiagnostics(force);
     }
 
     private void UpdateUiState()
@@ -567,17 +638,65 @@ public sealed partial class MainWindow : Window
         OscPublishValidationText.Text = _validationState.OscPublishAddressValid ? string.Empty : _validationState.OscPublishAddressError;
     }
 
-    private void UpdateDiagnostics()
+    private void UpdateDiagnostics(bool force)
     {
         var snapshot = _controller.LastSnapshot;
         var runtime = snapshot.Runtime;
-        var avatarInfo = snapshot.AvatarInfo;
 
         FrameStatusText.Text = $"Frame: {runtime.LastFrameMs:F2} ms";
         ErrorStatusText.Text = $"LastError: {runtime.LastError}";
 
+        var runtimeChanged = force || _pendingRuntimeRefresh || snapshot.SnapshotVersion != _lastRuntimeSnapshotVersion;
+        if (runtimeChanged)
+        {
+            var runtimeText = BuildRuntimeText(snapshot);
+            if (!string.Equals(runtimeText, _lastRuntimeText, StringComparison.Ordinal))
+            {
+                RuntimeDiagnosticsTextBox.Text = runtimeText;
+                DebugOverlayText.Text = runtimeText;
+                _lastRuntimeText = runtimeText;
+            }
+
+            DebugOverlayPanel.Visibility = snapshot.Render.ShowDebugOverlay ? Visibility.Visible : Visibility.Collapsed;
+            _lastRuntimeSnapshotVersion = snapshot.SnapshotVersion;
+            _pendingRuntimeRefresh = false;
+        }
+
+        var avatarChanged = force || _pendingAvatarRefresh || snapshot.SnapshotVersion != _lastAvatarSnapshotVersion;
+        if (avatarChanged)
+        {
+            var avatarText = BuildAvatarText(snapshot);
+            if (!string.Equals(avatarText, _lastAvatarText, StringComparison.Ordinal))
+            {
+                AvatarDiagnosticsTextBox.Text = avatarText;
+                _lastAvatarText = avatarText;
+            }
+
+            _lastAvatarSnapshotVersion = snapshot.SnapshotVersion;
+            _pendingAvatarRefresh = false;
+        }
+
+        if ((force || _isLogsTabActive) && (force || _pendingLogsRefresh || snapshot.LogVersion != _lastLogVersion))
+        {
+            var logsText = BuildLogsText();
+            if (!string.Equals(logsText, _lastLogsText, StringComparison.Ordinal))
+            {
+                LogsTextBox.Text = logsText;
+                _lastLogsText = logsText;
+            }
+
+            _lastLogVersion = snapshot.LogVersion;
+            _pendingLogsRefresh = false;
+        }
+    }
+
+    private string BuildRuntimeText(DiagnosticsSnapshot snapshot)
+    {
+        var runtime = snapshot.Runtime;
         var runtimeSb = new StringBuilder();
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
+        runtimeSb.AppendLine($"SnapshotVersion: {snapshot.SnapshotVersion}");
+        runtimeSb.AppendLine($"LogVersion: {snapshot.LogVersion}");
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
@@ -586,15 +705,16 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
-        RuntimeDiagnosticsTextBox.Text = runtimeSb.ToString();
-        DebugOverlayPanel.Visibility = snapshot.Render.ShowDebugOverlay ? Visibility.Visible : Visibility.Collapsed;
-        DebugOverlayText.Text = runtimeSb.ToString();
+        return runtimeSb.ToString();
+    }
 
+    private string BuildAvatarText(DiagnosticsSnapshot snapshot)
+    {
         var avatarSb = new StringBuilder();
         avatarSb.AppendLine($"AvatarHandle: {snapshot.Session.ActiveAvatarHandle?.ToString() ?? "none"}");
-        if (avatarInfo.HasValue)
+        if (snapshot.AvatarInfo.HasValue)
         {
-            var info = avatarInfo.Value;
+            var info = snapshot.AvatarInfo.Value;
             avatarSb.AppendLine($"DisplayName: {info.DisplayName}");
             avatarSb.AppendLine($"Format: {info.DetectedFormat}");
             avatarSb.AppendLine($"ParserStage: {info.ParserStage}");
@@ -608,14 +728,19 @@ public sealed partial class MainWindow : Window
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
-        AvatarDiagnosticsTextBox.Text = avatarSb.ToString();
 
+        return avatarSb.ToString();
+    }
+
+    private string BuildLogsText()
+    {
         var logsSb = new StringBuilder();
         foreach (var log in _controller.LogEntries)
         {
             logsSb.AppendLine($"{log.TimestampUtc:HH:mm:ss.fff} [{log.Source}] {log.ResultCode} {log.Message}");
         }
-        LogsTextBox.Text = logsSb.ToString();
+
+        return logsSb.ToString();
     }
 
     private async Task<bool> ConfirmAsync(string content)

@@ -36,11 +36,12 @@ Target flow:
 
 ## Runtime Smoke Status (Current Round)
 
-- Non-interactive launch smoke: PASS
+- Non-interactive launch smoke: FAIL (latest run)
   - command shape:
     - launch `dist/wpf/WpfHost.exe` with working directory set to `dist/wpf`
-    - verify process remains alive for 5 seconds
-    - force-stop process after verification
+    - verify process remains alive for 6 seconds
+  - observed:
+    - process exited early with code `-532462766` (unhandled runtime exception path)
 - Full operator interactive smoke (7-step flow): NOT EXECUTED IN THIS ROUND
   - reason:
     - current validation round was executed in CLI/headless context
@@ -67,15 +68,15 @@ Quantitative runtime metrics capture status:
 Artifacts and outcomes:
 
 - `build/reports/host_publish_latest.txt`
-  - generated: `2026-03-05T14:50:03.7482246+09:00`
-  - `HostPublishMode: WPF_ONLY`
-  - WPF dist/exe evidence present
+  - generated: `2026-03-05T15:43:46.9334499+09:00`
+  - `HostPublishMode: WPF_PLUS_WINUI`
+  - WPF publish: PASS, WinUI publish: FAIL (`TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
 - `build/reports/vsfavatar_gate_summary.txt`
-  - generated: `2026-03-05T15:12:46`
+  - generated: `2026-03-05T15:38:52`
   - `Overall: PASS`
   - `HostTrackStatus: PASS_WPF_BASELINE`
 - `build/reports/quality_baseline_summary.txt`
-  - generated: `2026-03-05T15:13:41`
+  - generated: `2026-03-05T15:39:47`
   - `Overall: PASS`
 
 ## Acceptance Gate for Closure
@@ -83,7 +84,7 @@ Artifacts and outcomes:
 This evidence document is considered complete when:
 
 1. WPF publish/gate/baseline rerun evidence is attached with PASS outcomes
-2. non-interactive launch smoke evidence is attached
+2. non-interactive launch smoke evidence is attached (pass or fail must be recorded explicitly)
 3. remaining manual-only evidence is explicitly listed as deferred, not left as `PENDING`
 
 ## Notes
@@ -93,3 +94,5 @@ This evidence document is considered complete when:
 - Deferred manual evidence:
   - full 7-step interactive operator smoke
   - quantitative `LastFrameMs` before/after measurement table
+- Additional open item from latest run:
+  - diagnose startup exception path behind launch exit code `-532462766` in current CLI/headless environment

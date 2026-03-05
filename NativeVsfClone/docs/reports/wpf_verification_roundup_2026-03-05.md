@@ -101,3 +101,22 @@ Still deferred to a manual/operator-capable run:
 3. logs-tab active/inactive runtime resource impact measurements
 
 These are intentionally separated from this CLI-centric validation round.
+
+## Follow-up Update (2026-03-05, parity implementation round)
+
+Additional validation rerun executed after WinUI parity code changes:
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`, `WMC9999`/`XamlCompiler.exe`)
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Overall: PASS`
+
+WPF non-interactive launch smoke result in this follow-up run:
+
+- FAIL (`exit=-532462766`)
+- this differs from the earlier same-day snapshot and is tracked as an open environment/runtime investigation item.

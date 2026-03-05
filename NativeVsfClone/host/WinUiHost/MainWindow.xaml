@@ -203,33 +203,27 @@
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="1" Margin="0,8,0,8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-                <StackPanel Grid.Row="0">
-                    <TextBlock Text="Runtime" Margin="0,0,0,4"/>
+            <TabView Grid.Row="1" x:Name="DiagnosticsTabControl" Margin="0,8,0,8" SelectionChanged="DiagnosticsTabControl_SelectionChanged">
+                <TabViewItem Header="Runtime">
                     <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
-                </StackPanel>
-                <StackPanel Grid.Row="1" Margin="0,8,0,0">
-                    <TextBlock Text="Avatar" Margin="0,0,0,4"/>
+                </TabViewItem>
+                <TabViewItem Header="Avatar">
                     <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
-                </StackPanel>
-                <StackPanel Grid.Row="2" Margin="0,8,0,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Logs" VerticalAlignment="Center"/>
-                        <Button Grid.Column="1" Content="Copy Logs" Click="CopyLogs_Click"/>
-                    </Grid>
-                    <TextBox x:Name="LogsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,4,0,0"/>
-                </StackPanel>
-            </Grid>
+                </TabViewItem>
+                <TabViewItem Header="Logs">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Logs" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Content="Copy Logs" Click="CopyLogs_Click"/>
+                        </Grid>
+                        <TextBox x:Name="LogsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </TabViewItem>
+            </TabView>
 
             <Border Grid.Row="2" Padding="8" Background="#0F1720" BorderBrush="#2D3A48" BorderThickness="1">
                 <StackPanel>

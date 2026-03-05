@@ -2,6 +2,53 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI refresh-throttle parity implementation + verification rerun
+
+### Summary
+
+Implemented WinUI-side parity for the WPF refresh-throttle model and re-ran host/gate/baseline verification.
+
+- WinUI host now uses `60Hz render tick + 10Hz UI refresh` with dirty-flag processing
+- diagnostics text rebuild is gated by `SnapshotVersion`/`LogVersion`
+- logs text rebuild is now tied to Logs-tab activity (`TabView` selection)
+- WinUI publish remains blocked by XAML compiler platform-unsupported path (`WMC9999` / `XamlCompiler.exe`)
+
+### Changed
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - added `_uiRefreshTimer` (`100ms`) and dirty-flag processing path
+  - replaced immediate `RefreshAll()` event handlers with deferred update model
+  - added snapshot/log version cached text update strategy
+  - added log-tab-aware refresh gating
+- `host/WinUiHost/MainWindow.xaml`
+  - changed diagnostics area to `TabView` (`Runtime`, `Avatar`, `Logs`)
+  - wired `DiagnosticsTabControl_SelectionChanged` for logs-tab-aware updates
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md` (new)
+  - detailed implementation + validation outcomes + remaining blocker
+- `docs/reports/winui_ui_refresh_followup_ticket_2026-03-05.md`
+  - appended implementation-round status update
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - refreshed latest verification snapshot timestamps
+  - recorded latest non-interactive launch smoke as `FAIL` (`exit=-532462766`) in current CLI/headless run
+- `docs/INDEX.md`
+  - added WinUI parity implementation report entry
+
+### Verification (latest)
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release`: FAIL (`MSB3073`, `XamlCompiler.exe`)
+- `publish_hosts.ps1 -IncludeWinUi`:
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL
+  - failure class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`:
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`:
+  - `Overall: PASS`
+
 ## 2026-03-05 - WPF smoke/perf evidence refresh (WPF-only verification rerun)
 
 ### Summary

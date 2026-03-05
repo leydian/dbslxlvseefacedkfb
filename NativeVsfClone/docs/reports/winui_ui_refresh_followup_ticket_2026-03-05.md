@@ -43,3 +43,22 @@ Mirror the WPF-side refresh-throttle optimizations into WinUI host while keeping
 1. WinUI host compiles with parity refresh model.
 2. Manual runtime smoke passes in an environment where WinUI can run.
 3. New report documents behavior parity and any remaining deltas vs WPF.
+
+## Status Update (2026-03-05, parity implementation round)
+
+Implementation status:
+
+- required changes 1-5: DONE in code
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml`
+
+Validation status:
+
+- WinUI compile closure: BLOCKED
+  - current blocker: `WMC9999` / `XamlCompiler.exe` (`MSB3073`)
+  - classification: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- manual WinUI runtime smoke: NOT EXECUTED (toolchain blocker)
+
+Reference report:
+
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
