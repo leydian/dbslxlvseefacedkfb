@@ -273,6 +273,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        SyncRenderControlsFromState();
+        ProcessPendingUpdates(force: true);
         ClearFailureHint();
     }
 
@@ -1016,6 +1018,10 @@ public partial class MainWindow : Window
     private void RenderApplyTimer_Tick(object? sender, EventArgs e)
     {
         _renderApplyTimer.Stop();
+        if (IsLoadOperationActive())
+        {
+            return;
+        }
         _ = PushRenderUiState();
     }
 
@@ -1069,6 +1075,10 @@ public partial class MainWindow : Window
 
     private void QueueRenderApply()
     {
+        if (IsLoadOperationActive())
+        {
+            return;
+        }
         _renderApplyTimer.Stop();
         _renderApplyTimer.Start();
     }
@@ -1287,6 +1297,13 @@ public partial class MainWindow : Window
     private bool ShouldSkipRenderInteraction()
     {
         return _isSyncingRenderUi || _controller.OperationState.IsBusy;
+    }
+
+    private bool IsLoadOperationActive()
+    {
+        return _isLoadRunning ||
+               (_controller.OperationState.IsBusy &&
+                string.Equals(_controller.OperationState.CurrentOperation, "LoadAvatar", StringComparison.Ordinal));
     }
 
     private void ApplyDirectRenderInteraction(float yawDelta, float fovDelta)

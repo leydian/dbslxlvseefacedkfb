@@ -379,7 +379,7 @@ public static class NativeCoreInterop
             CameraMode = NcCameraMode.AutoFitBust,
             FramingTarget = 0.72f,
             Headroom = 0.12f,
-            YawDeg = 192.0f,
+            YawDeg = 0.0f,
             FovDeg = 45.0f,
             BackgroundR = 0.08f,
             BackgroundG = 0.12f,

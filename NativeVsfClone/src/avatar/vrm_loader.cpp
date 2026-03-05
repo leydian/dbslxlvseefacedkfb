@@ -2623,14 +2623,20 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     &info.alpha_source,
                     &info.alpha_cutoff);
             }
-            const bool opaque_from_contract =
-                info.alpha_mode == "OPAQUE" &&
-                (info.alpha_source == "default.opaque" || info.alpha_source == "gltf.alphaMode");
+            const bool opaque_from_default =
+                info.alpha_mode == "OPAQUE" && info.alpha_source == "default.opaque";
+            const bool opaque_from_gltf =
+                info.alpha_mode == "OPAQUE" && info.alpha_source == "gltf.alphaMode";
             const bool fallback_texture_signal = info.base_color_texture_alpha_capable;
             const bool fallback_name_signal = MaterialNameSuggestsBlend(info.name);
-            if (opaque_from_contract && (fallback_texture_signal || fallback_name_signal)) {
+            const bool should_promote_blend =
+                (opaque_from_default && (fallback_texture_signal || fallback_name_signal)) ||
+                (opaque_from_gltf && fallback_name_signal);
+            if (should_promote_blend) {
                 info.alpha_mode = "BLEND";
-                if (fallback_texture_signal) {
+                if (fallback_name_signal && opaque_from_gltf) {
+                    info.alpha_source = "fallback.material-name";
+                } else if (fallback_texture_signal) {
                     info.alpha_source = "fallback.texture-alpha";
                 } else {
                     info.alpha_source = "fallback.material-name";
