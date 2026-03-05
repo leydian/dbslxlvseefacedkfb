@@ -71,6 +71,7 @@ Domain-level report navigation hub.
 - [2026-03-02_ui_render_benchmark_plan.md](./weekly/2026-W10/2026-03-02_ui_render_benchmark_plan.md)
 
 ## vrm
+- [2026-03-06_vrm_springbone_mtoon_runtime_uplift.md](./weekly/2026-W10/2026-03-06_vrm_springbone_mtoon_runtime_uplift.md)
 - [2026-03-06_vrm_render_order_and_wpf_load_sequence_stabilization.md](./weekly/2026-W10/2026-03-06_vrm_render_order_and_wpf_load_sequence_stabilization.md)
 - [2026-03-06_vrm_to_xav2_v5_exporter_upgrade.md](./weekly/2026-W10/2026-03-06_vrm_to_xav2_v5_exporter_upgrade.md)
 - [2026-03-06_vrm_texture_alpha_fallback_recovery.md](./weekly/2026-W10/2026-03-06_vrm_texture_alpha_fallback_recovery.md)

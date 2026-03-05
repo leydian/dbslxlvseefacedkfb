@@ -583,6 +583,22 @@ std::array<float, 16U> MulMatrix4x4(
     return out;
 }
 
+bool AreMatrix4x4NearlyEqual(
+    const std::array<float, 16U>& a,
+    const std::array<float, 16U>& b,
+    float epsilon = 1e-5f) {
+    for (std::size_t i = 0U; i < 16U; ++i) {
+        if (std::abs(a[i] - b[i]) > epsilon) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IsIdentityMatrix4x4(const std::array<float, 16U>& m, float epsilon = 1e-5f) {
+    return AreMatrix4x4NearlyEqual(m, MakeIdentityMatrix4x4(), epsilon);
+}
+
 bool TryBuildNodeTransformMatrix(const JsonValue& node, std::array<float, 16U>* out_matrix, bool* out_non_identity) {
     if (out_matrix == nullptr || out_non_identity == nullptr) {
         return false;
@@ -1623,6 +1639,8 @@ struct MaterialInfo {
     std::string normal_texture_name;
     std::string emission_texture_name;
     std::string rim_texture_name;
+    std::string matcap_texture_name;
+    std::string uv_anim_mask_texture_name;
     bool base_color_texture_alpha_capable = false;
     bool double_sided = false;
     std::string alpha_mode = "OPAQUE";
@@ -1635,6 +1653,16 @@ struct MaterialInfo {
     float bump_scale = 0.0f;
     float rim_power = 2.0f;
     float rim_lighting_mix = 0.0f;
+    float matcap_strength = 0.0f;
+    std::array<float, 4U> matcap_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    float outline_width = 0.0f;
+    float outline_lighting_mix = 0.0f;
+    float uv_anim_scroll_x = 0.0f;
+    float uv_anim_scroll_y = 0.0f;
+    float uv_anim_rotation = 0.0f;
+    bool has_matcap_binding = false;
+    bool has_outline_binding = false;
+    bool has_uv_anim_binding = false;
     bool has_mtoon_binding = false;
 };
 
@@ -2070,6 +2098,306 @@ void ParseSpringBoneSummary(const JsonValue& root, SpringBoneSummary* out_summar
     }
 }
 
+std::string MakeNodePath(const JsonValue* nodes_v, std::size_t node_index) {
+    if (nodes_v != nullptr &&
+        nodes_v->type == JsonValue::Type::Array &&
+        node_index < nodes_v->array_value.size()) {
+        const auto& node = nodes_v->array_value[node_index];
+        if (node.type == JsonValue::Type::Object) {
+            std::string name;
+            if (TryGetString(node, "name", &name) && !name.empty()) {
+                return name;
+            }
+        }
+    }
+    return "node_" + std::to_string(node_index);
+}
+
+void ParseVrmSpringBonePayloads(
+    const JsonValue& root,
+    const JsonValue* nodes_v,
+    std::vector<PhysicsColliderPayload>* out_colliders,
+    std::vector<SpringBonePayload>* out_springs) {
+    if (out_colliders == nullptr || out_springs == nullptr) {
+        return;
+    }
+    out_colliders->clear();
+    out_springs->clear();
+
+    const auto* extensions = FindKey(root, "extensions");
+    if (extensions == nullptr || extensions->type != JsonValue::Type::Object) {
+        return;
+    }
+
+    const auto* vrmc_spring = FindKey(*extensions, "VRMC_springBone");
+    if (vrmc_spring != nullptr && vrmc_spring->type == JsonValue::Type::Object) {
+        std::vector<std::vector<std::size_t>> collider_groups;
+        const auto* colliders = FindKey(*vrmc_spring, "colliders");
+        if (colliders != nullptr && colliders->type == JsonValue::Type::Array) {
+            out_colliders->reserve(colliders->array_value.size());
+            for (std::size_t ci = 0U; ci < colliders->array_value.size(); ++ci) {
+                const auto& collider = colliders->array_value[ci];
+                if (collider.type != JsonValue::Type::Object) {
+                    continue;
+                }
+                PhysicsColliderPayload payload;
+                payload.name = "vrm1_collider_" + std::to_string(ci);
+                std::size_t node_index = std::numeric_limits<std::size_t>::max();
+                if (TryGetIndex(collider, "node", &node_index)) {
+                    payload.bone_path = MakeNodePath(nodes_v, node_index);
+                }
+                const auto* shape = FindKey(collider, "shape");
+                if (shape != nullptr && shape->type == JsonValue::Type::Object) {
+                    const auto* sphere = FindKey(*shape, "sphere");
+                    if (sphere != nullptr && sphere->type == JsonValue::Type::Object) {
+                        payload.shape = PhysicsColliderShape::Sphere;
+                        std::vector<float> offset;
+                        if (TryGetNumberArray(*sphere, "offset", 3U, &offset)) {
+                            payload.local_position[0] = offset[0];
+                            payload.local_position[1] = offset[1];
+                            payload.local_position[2] = offset[2];
+                        }
+                        double radius = 0.0;
+                        if (TryGetNumber(*sphere, "radius", &radius)) {
+                            payload.radius = static_cast<float>(radius);
+                        }
+                    }
+                    const auto* capsule = FindKey(*shape, "capsule");
+                    if (capsule != nullptr && capsule->type == JsonValue::Type::Object) {
+                        payload.shape = PhysicsColliderShape::Capsule;
+                        std::vector<float> offset;
+                        if (TryGetNumberArray(*capsule, "offset", 3U, &offset)) {
+                            payload.local_position[0] = offset[0];
+                            payload.local_position[1] = offset[1];
+                            payload.local_position[2] = offset[2];
+                        }
+                        std::vector<float> tail;
+                        if (TryGetNumberArray(*capsule, "tail", 3U, &tail)) {
+                            payload.local_direction[0] = tail[0] - payload.local_position[0];
+                            payload.local_direction[1] = tail[1] - payload.local_position[1];
+                            payload.local_direction[2] = tail[2] - payload.local_position[2];
+                            payload.height = std::sqrt(
+                                payload.local_direction[0] * payload.local_direction[0] +
+                                payload.local_direction[1] * payload.local_direction[1] +
+                                payload.local_direction[2] * payload.local_direction[2]);
+                        }
+                        double radius = 0.0;
+                        if (TryGetNumber(*capsule, "radius", &radius)) {
+                            payload.radius = static_cast<float>(radius);
+                        }
+                    }
+                }
+                out_colliders->push_back(std::move(payload));
+            }
+        }
+        const auto* collider_groups_v = FindKey(*vrmc_spring, "colliderGroups");
+        if (collider_groups_v != nullptr && collider_groups_v->type == JsonValue::Type::Array) {
+            collider_groups.reserve(collider_groups_v->array_value.size());
+            for (const auto& group : collider_groups_v->array_value) {
+                std::vector<std::size_t> refs;
+                if (group.type == JsonValue::Type::Object) {
+                    const auto* cols = FindKey(group, "colliders");
+                    if (cols != nullptr && cols->type == JsonValue::Type::Array) {
+                        refs.reserve(cols->array_value.size());
+                        for (const auto& c : cols->array_value) {
+                            if (c.type != JsonValue::Type::Number || c.number_value < 0.0) {
+                                continue;
+                            }
+                            refs.push_back(static_cast<std::size_t>(c.number_value));
+                        }
+                    }
+                }
+                collider_groups.push_back(std::move(refs));
+            }
+        }
+        const auto* springs = FindKey(*vrmc_spring, "springs");
+        if (springs != nullptr && springs->type == JsonValue::Type::Array) {
+            out_springs->reserve(springs->array_value.size());
+            for (std::size_t si = 0U; si < springs->array_value.size(); ++si) {
+                const auto& spring = springs->array_value[si];
+                if (spring.type != JsonValue::Type::Object) {
+                    continue;
+                }
+                SpringBonePayload payload;
+                payload.name = "vrm1_spring_" + std::to_string(si);
+                (void)TryGetString(spring, "name", &payload.name);
+                const auto* joints = FindKey(spring, "joints");
+                if (joints != nullptr && joints->type == JsonValue::Type::Array) {
+                    payload.bone_paths.reserve(joints->array_value.size());
+                    for (std::size_t ji = 0U; ji < joints->array_value.size(); ++ji) {
+                        const auto& joint = joints->array_value[ji];
+                        if (joint.type != JsonValue::Type::Object) {
+                            continue;
+                        }
+                        std::size_t node_index = std::numeric_limits<std::size_t>::max();
+                        if (!TryGetIndex(joint, "node", &node_index)) {
+                            continue;
+                        }
+                        const auto node_path = MakeNodePath(nodes_v, node_index);
+                        payload.bone_paths.push_back(node_path);
+                        if (payload.root_bone_path.empty()) {
+                            payload.root_bone_path = node_path;
+                        }
+                        double stiffness = static_cast<double>(payload.stiffness);
+                        if (TryGetNumber(joint, "stiffness", &stiffness) || TryGetNumber(joint, "stiffnessForce", &stiffness)) {
+                            payload.stiffness = static_cast<float>(stiffness);
+                        }
+                        double drag = static_cast<double>(payload.drag);
+                        if (TryGetNumber(joint, "dragForce", &drag) || TryGetNumber(joint, "drag", &drag)) {
+                            payload.drag = static_cast<float>(drag);
+                        }
+                        double radius = static_cast<double>(payload.radius);
+                        if (TryGetNumber(joint, "hitRadius", &radius)) {
+                            payload.radius = static_cast<float>(radius);
+                        }
+                        double gravity_power = 0.0;
+                        std::vector<float> gravity_dir;
+                        if (TryGetNumber(joint, "gravityPower", &gravity_power) &&
+                            TryGetNumberArray(joint, "gravityDir", 3U, &gravity_dir)) {
+                            payload.gravity[0] = gravity_dir[0] * static_cast<float>(gravity_power);
+                            payload.gravity[1] = gravity_dir[1] * static_cast<float>(gravity_power);
+                            payload.gravity[2] = gravity_dir[2] * static_cast<float>(gravity_power);
+                        }
+                    }
+                }
+                const auto* group_refs = FindKey(spring, "colliderGroups");
+                if (group_refs != nullptr && group_refs->type == JsonValue::Type::Array) {
+                    for (const auto& ref : group_refs->array_value) {
+                        if (ref.type != JsonValue::Type::Number || ref.number_value < 0.0) {
+                            continue;
+                        }
+                        const auto gidx = static_cast<std::size_t>(ref.number_value);
+                        if (gidx >= collider_groups.size()) {
+                            continue;
+                        }
+                        for (const auto cidx : collider_groups[gidx]) {
+                            if (cidx < out_colliders->size()) {
+                                payload.collider_refs.push_back((*out_colliders)[cidx].name);
+                            }
+                        }
+                    }
+                }
+                out_springs->push_back(std::move(payload));
+            }
+        }
+        return;
+    }
+
+    const auto* vrm_legacy = FindKey(*extensions, "VRM");
+    if (vrm_legacy == nullptr || vrm_legacy->type != JsonValue::Type::Object) {
+        return;
+    }
+    const auto* secondary = FindKey(*vrm_legacy, "secondaryAnimation");
+    if (secondary == nullptr || secondary->type != JsonValue::Type::Object) {
+        return;
+    }
+    std::vector<std::vector<std::size_t>> collider_groups;
+    const auto* collider_groups_v = FindKey(*secondary, "colliderGroups");
+    if (collider_groups_v != nullptr && collider_groups_v->type == JsonValue::Type::Array) {
+        collider_groups.reserve(collider_groups_v->array_value.size());
+        for (std::size_t gi = 0U; gi < collider_groups_v->array_value.size(); ++gi) {
+            const auto& group = collider_groups_v->array_value[gi];
+            std::vector<std::size_t> refs;
+            if (group.type == JsonValue::Type::Object) {
+                std::size_t node_index = std::numeric_limits<std::size_t>::max();
+                (void)TryGetIndex(group, "node", &node_index);
+                const auto* colliders = FindKey(group, "colliders");
+                if (colliders != nullptr && colliders->type == JsonValue::Type::Array) {
+                    refs.reserve(colliders->array_value.size());
+                    for (std::size_t ci = 0U; ci < colliders->array_value.size(); ++ci) {
+                        const auto& collider = colliders->array_value[ci];
+                        if (collider.type != JsonValue::Type::Object) {
+                            continue;
+                        }
+                        PhysicsColliderPayload payload;
+                        payload.name = "vrm0_collider_" + std::to_string(gi) + "_" + std::to_string(ci);
+                        payload.shape = PhysicsColliderShape::Sphere;
+                        payload.bone_path = MakeNodePath(nodes_v, node_index);
+                        std::vector<float> offset;
+                        if (TryGetNumberArray(collider, "offset", 3U, &offset)) {
+                            payload.local_position[0] = offset[0];
+                            payload.local_position[1] = offset[1];
+                            payload.local_position[2] = offset[2];
+                        }
+                        double radius = 0.0;
+                        if (TryGetNumber(collider, "radius", &radius)) {
+                            payload.radius = static_cast<float>(radius);
+                        }
+                        refs.push_back(out_colliders->size());
+                        out_colliders->push_back(std::move(payload));
+                    }
+                }
+            }
+            collider_groups.push_back(std::move(refs));
+        }
+    }
+    const auto* bone_groups = FindKey(*secondary, "boneGroups");
+    if (bone_groups != nullptr && bone_groups->type == JsonValue::Type::Array) {
+        out_springs->reserve(bone_groups->array_value.size());
+        for (std::size_t bi = 0U; bi < bone_groups->array_value.size(); ++bi) {
+            const auto& group = bone_groups->array_value[bi];
+            if (group.type != JsonValue::Type::Object) {
+                continue;
+            }
+            SpringBonePayload payload;
+            payload.name = "vrm0_spring_" + std::to_string(bi);
+            (void)TryGetString(group, "comment", &payload.name);
+            const auto* bones = FindKey(group, "bones");
+            if (bones != nullptr && bones->type == JsonValue::Type::Array) {
+                payload.bone_paths.reserve(bones->array_value.size());
+                for (const auto& b : bones->array_value) {
+                    if (b.type != JsonValue::Type::Number || b.number_value < 0.0) {
+                        continue;
+                    }
+                    const auto node_idx = static_cast<std::size_t>(b.number_value);
+                    const auto node_path = MakeNodePath(nodes_v, node_idx);
+                    payload.bone_paths.push_back(node_path);
+                    if (payload.root_bone_path.empty()) {
+                        payload.root_bone_path = node_path;
+                    }
+                }
+            }
+            double stiffness = static_cast<double>(payload.stiffness);
+            if (TryGetNumber(group, "stiffness", &stiffness) || TryGetNumber(group, "stiffiness", &stiffness)) {
+                payload.stiffness = static_cast<float>(stiffness);
+            }
+            double drag = static_cast<double>(payload.drag);
+            if (TryGetNumber(group, "dragForce", &drag)) {
+                payload.drag = static_cast<float>(drag);
+            }
+            double radius = static_cast<double>(payload.radius);
+            if (TryGetNumber(group, "hitRadius", &radius)) {
+                payload.radius = static_cast<float>(radius);
+            }
+            std::vector<float> gravity_dir;
+            double gravity_power = 0.0;
+            if (TryGetNumberArray(group, "gravityDir", 3U, &gravity_dir) && TryGetNumber(group, "gravityPower", &gravity_power)) {
+                payload.gravity[0] = gravity_dir[0] * static_cast<float>(gravity_power);
+                payload.gravity[1] = gravity_dir[1] * static_cast<float>(gravity_power);
+                payload.gravity[2] = gravity_dir[2] * static_cast<float>(gravity_power);
+            }
+            const auto* group_refs = FindKey(group, "colliderGroups");
+            if (group_refs != nullptr && group_refs->type == JsonValue::Type::Array) {
+                for (const auto& ref : group_refs->array_value) {
+                    if (ref.type != JsonValue::Type::Number || ref.number_value < 0.0) {
+                        continue;
+                    }
+                    const auto gidx = static_cast<std::size_t>(ref.number_value);
+                    if (gidx >= collider_groups.size()) {
+                        continue;
+                    }
+                    for (const auto cidx : collider_groups[gidx]) {
+                        if (cidx < out_colliders->size()) {
+                            payload.collider_refs.push_back((*out_colliders)[cidx].name);
+                        }
+                    }
+                }
+            }
+            out_springs->push_back(std::move(payload));
+        }
+    }
+}
+
 bool ReadBufferViewBytes(const std::vector<std::uint8_t>& bin,
                          const std::vector<BufferViewMeta>& views,
                          std::size_t view_index,
@@ -2195,11 +2523,17 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     std::vector<std::size_t> node_to_skin_index;
     std::vector<std::array<float, 16U>> mesh_node_transforms;
     std::vector<bool> mesh_has_node_transform;
+    std::vector<bool> mesh_node_transform_conflict;
+    std::vector<bool> mesh_node_global_seen;
+    std::vector<std::array<float, 16U>> mesh_first_node_global;
     std::vector<std::uint32_t> mesh_node_ref_counts;
     std::vector<std::size_t> mesh_skin_index;
     std::vector<bool> mesh_has_skin;
     mesh_node_transforms.assign(meshes_v->array_value.size(), MakeIdentityMatrix4x4());
     mesh_has_node_transform.assign(meshes_v->array_value.size(), false);
+    mesh_node_transform_conflict.assign(meshes_v->array_value.size(), false);
+    mesh_node_global_seen.assign(meshes_v->array_value.size(), false);
+    mesh_first_node_global.assign(meshes_v->array_value.size(), MakeIdentityMatrix4x4());
     mesh_node_ref_counts.assign(meshes_v->array_value.size(), 0U);
     mesh_skin_index.assign(meshes_v->array_value.size(), std::numeric_limits<std::size_t>::max());
     mesh_has_skin.assign(meshes_v->array_value.size(), false);
@@ -2239,14 +2573,23 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                             pkg.warning_codes.push_back("VRM_MESH_MULTI_SKIN_REF");
                         }
                     }
-                    if (!mesh_has_node_transform[mesh_index]) {
-                        std::array<float, 16U> node_transform = MakeIdentityMatrix4x4();
-                        bool non_identity = false;
-                        if (TryBuildNodeTransformMatrix(node, &node_transform, &non_identity) && non_identity) {
-                            mesh_node_transforms[mesh_index] = node_transform;
-                            mesh_has_node_transform[mesh_index] = true;
-                        }
+                    std::array<float, 16U> node_transform = MakeIdentityMatrix4x4();
+                    if (node_i < node_global_transforms.size()) {
+                        node_transform = node_global_transforms[node_i];
                     }
+                    if (!mesh_node_global_seen[mesh_index]) {
+                        mesh_node_global_seen[mesh_index] = true;
+                        mesh_first_node_global[mesh_index] = node_transform;
+                    } else if (!AreMatrix4x4NearlyEqual(mesh_first_node_global[mesh_index], node_transform)) {
+                        mesh_node_transform_conflict[mesh_index] = true;
+                    }
+                    if (!mesh_node_transform_conflict[mesh_index] && !IsIdentityMatrix4x4(mesh_first_node_global[mesh_index])) {
+                        mesh_node_transforms[mesh_index] = mesh_first_node_global[mesh_index];
+                        mesh_has_node_transform[mesh_index] = true;
+                    } else {
+                        mesh_node_transforms[mesh_index] = MakeIdentityMatrix4x4();
+                        mesh_has_node_transform[mesh_index] = false;
+                        }
                 }
             }
         }
@@ -2261,6 +2604,18 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         pkg.warnings.push_back(
             "W_NODE: VRM_MESH_MULTI_NODE_REF: meshes=" + std::to_string(multi_ref_mesh_count));
         pkg.warning_codes.push_back("VRM_MESH_MULTI_NODE_REF");
+    }
+    std::uint32_t node_transform_conflict_mesh_count = 0U;
+    for (const bool has_conflict : mesh_node_transform_conflict) {
+        if (has_conflict) {
+            ++node_transform_conflict_mesh_count;
+        }
+    }
+    if (node_transform_conflict_mesh_count > 0U) {
+        pkg.warnings.push_back(
+            "W_NODE: VRM_NODE_TRANSFORM_CONFLICT: meshes=" + std::to_string(node_transform_conflict_mesh_count) +
+            ", bake=skipped");
+        pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_CONFLICT");
     }
 
     struct SkinDef {
@@ -2594,6 +2949,63 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                             (void)resolve_texture_name(texture_index, &info.rim_texture_name, "shadeMultiplyTexture for material '" + info.name + "'");
                         }
                     }
+                    std::vector<float> matcap_factor;
+                    if (TryGetNumberArray(*mtoon, "matcapFactor", 3U, &matcap_factor)) {
+                        info.matcap_color = {matcap_factor[0], matcap_factor[1], matcap_factor[2], 1.0f};
+                        info.matcap_strength = std::max(0.35f, info.matcap_strength);
+                        info.has_matcap_binding = true;
+                        info.has_mtoon_binding = true;
+                    }
+                    const auto* matcap_tex = FindKey(*mtoon, "matcapTexture");
+                    if (matcap_tex != nullptr && matcap_tex->type == JsonValue::Type::Object) {
+                        std::size_t texture_index = std::numeric_limits<std::size_t>::max();
+                        if (TryGetIndex(*matcap_tex, "index", &texture_index)) {
+                            if (resolve_texture_name(texture_index, &info.matcap_texture_name, "matcapTexture for material '" + info.name + "'")) {
+                                info.has_matcap_binding = true;
+                                info.has_mtoon_binding = true;
+                            }
+                        }
+                    }
+                    double outline_width = static_cast<double>(info.outline_width);
+                    if (TryGetNumber(*mtoon, "outlineWidthFactor", &outline_width)) {
+                        info.outline_width = static_cast<float>(outline_width);
+                        info.has_outline_binding = true;
+                        info.has_mtoon_binding = true;
+                    }
+                    double outline_mix = static_cast<double>(info.outline_lighting_mix);
+                    if (TryGetNumber(*mtoon, "outlineLightingMixFactor", &outline_mix)) {
+                        info.outline_lighting_mix = static_cast<float>(outline_mix);
+                        info.has_outline_binding = true;
+                        info.has_mtoon_binding = true;
+                    }
+                    const auto* uv_mask_tex = FindKey(*mtoon, "uvAnimationMaskTexture");
+                    if (uv_mask_tex != nullptr && uv_mask_tex->type == JsonValue::Type::Object) {
+                        std::size_t texture_index = std::numeric_limits<std::size_t>::max();
+                        if (TryGetIndex(*uv_mask_tex, "index", &texture_index)) {
+                            if (resolve_texture_name(texture_index, &info.uv_anim_mask_texture_name, "uvAnimationMaskTexture for material '" + info.name + "'")) {
+                                info.has_uv_anim_binding = true;
+                                info.has_mtoon_binding = true;
+                            }
+                        }
+                    }
+                    double uv_scroll_x = static_cast<double>(info.uv_anim_scroll_x);
+                    if (TryGetNumber(*mtoon, "uvAnimationScrollXSpeedFactor", &uv_scroll_x)) {
+                        info.uv_anim_scroll_x = static_cast<float>(uv_scroll_x);
+                        info.has_uv_anim_binding = true;
+                        info.has_mtoon_binding = true;
+                    }
+                    double uv_scroll_y = static_cast<double>(info.uv_anim_scroll_y);
+                    if (TryGetNumber(*mtoon, "uvAnimationScrollYSpeedFactor", &uv_scroll_y)) {
+                        info.uv_anim_scroll_y = static_cast<float>(uv_scroll_y);
+                        info.has_uv_anim_binding = true;
+                        info.has_mtoon_binding = true;
+                    }
+                    double uv_rot = static_cast<double>(info.uv_anim_rotation);
+                    if (TryGetNumber(*mtoon, "uvAnimationRotationSpeedFactor", &uv_rot)) {
+                        info.uv_anim_rotation = static_cast<float>(uv_rot);
+                        info.has_uv_anim_binding = true;
+                        info.has_mtoon_binding = true;
+                    }
                 }
             }
             const auto* extras = FindKey(material, "extras");
@@ -2625,22 +3037,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             }
             const bool opaque_from_default =
                 info.alpha_mode == "OPAQUE" && info.alpha_source == "default.opaque";
-            const bool opaque_from_gltf =
-                info.alpha_mode == "OPAQUE" && info.alpha_source == "gltf.alphaMode";
             const bool fallback_texture_signal = info.base_color_texture_alpha_capable;
-            const bool fallback_name_signal = MaterialNameSuggestsBlend(info.name);
             const bool should_promote_blend =
-                (opaque_from_default && (fallback_texture_signal || fallback_name_signal)) ||
-                (opaque_from_gltf && fallback_name_signal);
+                (opaque_from_default && fallback_texture_signal);
             if (should_promote_blend) {
                 info.alpha_mode = "BLEND";
-                if (fallback_name_signal && opaque_from_gltf) {
-                    info.alpha_source = "fallback.material-name";
-                } else if (fallback_texture_signal) {
-                    info.alpha_source = "fallback.texture-alpha";
-                } else {
-                    info.alpha_source = "fallback.material-name";
-                }
+                info.alpha_source = "fallback.texture-alpha";
             }
             parsed_materials.push_back(std::move(info));
         }
@@ -2666,6 +3068,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         material_payload.alpha_mode = m.alpha_mode;
         material_payload.alpha_cutoff = m.alpha_cutoff;
         material_payload.double_sided = m.double_sided;
+        material_payload.material_param_encoding = "typed-v1";
+        material_payload.typed_schema_version = 1U;
         std::ostringstream shader_params;
         shader_params << std::fixed << std::setprecision(6);
         shader_params << "_BaseColor=(" << m.base_color[0] << "," << m.base_color[1] << "," << m.base_color[2] << "," << m.base_color[3] << ")";
@@ -2679,6 +3083,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         shader_params << ",_BumpScale=" << m.bump_scale;
         shader_params << ",_RimFresnelPower=" << m.rim_power;
         shader_params << ",_RimLightingMix=" << m.rim_lighting_mix;
+        shader_params << ",_MatCapBlend=" << m.matcap_strength;
+        shader_params << ",_OutlineWidth=" << m.outline_width;
+        shader_params << ",_OutlineLightingMix=" << m.outline_lighting_mix;
+        shader_params << ",_UvAnimScrollX=" << m.uv_anim_scroll_x;
+        shader_params << ",_UvAnimScrollY=" << m.uv_anim_scroll_y;
+        shader_params << ",_UvAnimRotation=" << m.uv_anim_rotation;
         if (alpha_mode == "mask") {
             shader_params << ",_AlphaClip=1";
         } else if (alpha_mode == "blend") {
@@ -2689,12 +3099,19 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         material_payload.typed_color_params.push_back({"_ShadeColor", {m.shade_color[0], m.shade_color[1], m.shade_color[2], m.shade_color[3]}});
         material_payload.typed_color_params.push_back({"_EmissionColor", {m.emission_color[0], m.emission_color[1], m.emission_color[2], m.emission_color[3]}});
         material_payload.typed_color_params.push_back({"_RimColor", {m.rim_color[0], m.rim_color[1], m.rim_color[2], m.rim_color[3]}});
+        material_payload.typed_color_params.push_back({"_MatCapColor", {m.matcap_color[0], m.matcap_color[1], m.matcap_color[2], m.matcap_color[3]}});
         if (alpha_mode == "mask") {
             material_payload.typed_float_params.push_back({"_Cutoff", m.alpha_cutoff});
         }
         material_payload.typed_float_params.push_back({"_BumpScale", m.bump_scale});
         material_payload.typed_float_params.push_back({"_RimFresnelPower", m.rim_power});
         material_payload.typed_float_params.push_back({"_RimLightingMix", m.rim_lighting_mix});
+        material_payload.typed_float_params.push_back({"_MatCapBlend", m.matcap_strength});
+        material_payload.typed_float_params.push_back({"_OutlineWidth", m.outline_width});
+        material_payload.typed_float_params.push_back({"_OutlineLightingMix", m.outline_lighting_mix});
+        material_payload.typed_float_params.push_back({"_UvAnimScrollX", m.uv_anim_scroll_x});
+        material_payload.typed_float_params.push_back({"_UvAnimScrollY", m.uv_anim_scroll_y});
+        material_payload.typed_float_params.push_back({"_UvAnimRotation", m.uv_anim_rotation});
         if (!m.base_color_texture_name.empty()) {
             material_payload.typed_texture_params.push_back({"base", m.base_color_texture_name});
         }
@@ -2706,6 +3123,13 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         }
         if (!m.rim_texture_name.empty()) {
             material_payload.typed_texture_params.push_back({"rim", m.rim_texture_name});
+        }
+        if (!m.matcap_texture_name.empty()) {
+            material_payload.typed_texture_params.push_back({"matcap", m.matcap_texture_name});
+            material_payload.typed_texture_params.push_back({"_MatCapTex", m.matcap_texture_name});
+        }
+        if (!m.uv_anim_mask_texture_name.empty()) {
+            material_payload.typed_texture_params.push_back({"uvAnimationMask", m.uv_anim_mask_texture_name});
         }
         MaterialDiagnosticsEntry material_diag_entry;
         material_diag_entry.material_name = m.name;
@@ -3043,11 +3467,13 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count));
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
     }
+    pkg.warnings.push_back("W_NODE: VRM_NODE_TRANSFORM_BASIS: global");
     if (skinned_primitive_count > 0U) {
         pkg.warnings.push_back(
             "W_SKIN: VRM_SKIN_PAYLOAD_STATUS: skinnedPrimitives=" + std::to_string(skinned_primitive_count) +
             ", emitted=" + std::to_string(skinned_payload_emitted) +
             ", failed=" + std::to_string(skinned_payload_failed));
+        pkg.warnings.push_back("W_SKIN: VRM_SKINNING_CONVENTION: column-major jointGlobal*inverseBind");
         if (skinned_payload_failed > 0U) {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
         }
@@ -3113,26 +3539,48 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     ParseSpringBoneSummary(root, &pkg.springbone_summary);
+    ParseVrmSpringBonePayloads(root, nodes_v, &pkg.physics_colliders, &pkg.springbone_payloads);
     if (pkg.springbone_summary.present) {
         pkg.warnings.push_back(
             "W_SPRINGBONE: parsed springbone metadata spring=" + std::to_string(pkg.springbone_summary.spring_count) +
             ", joint=" + std::to_string(pkg.springbone_summary.joint_count) +
             ", collider=" + std::to_string(pkg.springbone_summary.collider_count));
+        if (!pkg.springbone_payloads.empty()) {
+            pkg.warnings.push_back(
+                "W_SPRINGBONE: extracted spring payloads spring=" + std::to_string(pkg.springbone_payloads.size()) +
+                ", colliders=" + std::to_string(pkg.physics_colliders.size()));
+        } else {
+            pkg.warnings.push_back("W_SPRINGBONE: metadata present but runtime payload extraction is partial");
+        }
         pkg.missing_features.push_back("SpringBone runtime simulation");
     } else {
         pkg.missing_features.push_back("SpringBone metadata");
     }
     bool has_mtoon_binding = false;
+    bool has_matcap_binding = false;
+    bool has_outline_binding = false;
+    bool has_uv_anim_binding = false;
     for (const auto& m : parsed_materials) {
         if (m.has_mtoon_binding) {
             has_mtoon_binding = true;
-            break;
         }
+        has_matcap_binding = has_matcap_binding || m.has_matcap_binding;
+        has_outline_binding = has_outline_binding || m.has_outline_binding;
+        has_uv_anim_binding = has_uv_anim_binding || m.has_uv_anim_binding;
     }
     if (!has_mtoon_binding) {
         pkg.missing_features.push_back("MToon advanced parameter binding");
     } else {
         pkg.warnings.push_back("W_MTOON: applied core material parameter binding");
+        if (!has_outline_binding) {
+            pkg.missing_features.push_back("MToon outline");
+        }
+        if (!has_uv_anim_binding) {
+            pkg.missing_features.push_back("MToon uv animation");
+        }
+        if (!has_matcap_binding) {
+            pkg.missing_features.push_back("MToon matcap");
+        }
     }
 
     pkg.parser_stage = "runtime-ready";

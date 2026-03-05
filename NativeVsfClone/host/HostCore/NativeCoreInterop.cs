@@ -92,6 +92,13 @@ public struct NcAvatarInfo
     public uint MissingFeatureCount;
     public uint ExpressionCount;
     public uint LastRenderDrawCalls;
+    public uint SpringActiveChainCount;
+    public uint SpringCorrectedChainCount;
+    public uint SpringDisabledChainCount;
+    public uint SpringUnsupportedColliderChainCount;
+    public uint MtoonAdvancedParamMaterialCount;
+    public uint MtoonFallbackMaterialCount;
+    public float SpringAvgSubsteps;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
     public string DisplayName;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
@@ -138,6 +145,11 @@ public struct NcSpringBoneInfo
     public uint JointCount;
     public uint ColliderCount;
     public uint ColliderGroupCount;
+    public uint ActiveChainCount;
+    public uint CorrectedChainCount;
+    public uint DisabledChainCount;
+    public uint UnsupportedColliderChainCount;
+    public float AvgSubsteps;
 }
 
 [StructLayout(LayoutKind.Sequential)]

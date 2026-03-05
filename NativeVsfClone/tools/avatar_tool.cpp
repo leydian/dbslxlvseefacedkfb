@@ -190,6 +190,8 @@ int main(int argc, char** argv) {
         expression_bind_total += expr.binds.size();
     }
     std::cout << "  ExpressionBindTotal: " << expression_bind_total << "\n";
+    std::cout << "  SpringPayloads: " << info.springbone_payloads.size() << "\n";
+    std::cout << "  PhysicsColliders: " << info.physics_colliders.size() << "\n";
     std::cout << "  LastRenderDrawCalls: " << info.last_render_draw_calls << "\n";
     std::cout << "  FormatSections: " << info.format_section_count << "\n";
     std::cout << "  FormatDecodedSections: " << info.format_decoded_section_count << "\n";
@@ -197,6 +199,8 @@ int main(int argc, char** argv) {
     std::cout << "  Warnings: " << info.warnings.size() << "\n";
     std::cout << "  WarningCodes: " << info.warning_codes.size() << "\n";
     std::cout << "  MaterialDiagnostics: " << info.material_diagnostics.size() << "\n";
+    std::size_t mtoon_advanced_material_count = 0U;
+    std::size_t mtoon_fallback_material_count = 0U;
     std::size_t opaque_material_count = 0U;
     std::size_t mask_material_count = 0U;
     std::size_t blend_material_count = 0U;
@@ -209,10 +213,22 @@ int main(int argc, char** argv) {
         } else {
             ++opaque_material_count;
         }
+        const std::size_t typed_total =
+            static_cast<std::size_t>(diag.typed_color_param_count) +
+            static_cast<std::size_t>(diag.typed_float_param_count) +
+            static_cast<std::size_t>(diag.typed_texture_param_count);
+        if (diag.has_mtoon_binding && (typed_total >= 12U || diag.has_rim_texture || diag.has_emission_texture)) {
+            ++mtoon_advanced_material_count;
+        }
+        if (!diag.has_mtoon_binding) {
+            ++mtoon_fallback_material_count;
+        }
     }
     std::cout << "  OpaqueMaterials: " << opaque_material_count << "\n";
     std::cout << "  MaskMaterials: " << mask_material_count << "\n";
     std::cout << "  BlendMaterials: " << blend_material_count << "\n";
+    std::cout << "  MtoonAdvancedMaterials: " << mtoon_advanced_material_count << "\n";
+    std::cout << "  MtoonFallbackMaterials: " << mtoon_fallback_material_count << "\n";
     std::size_t warning_info_count = 0U;
     std::size_t warning_warn_count = 0U;
     std::size_t warning_error_count = 0U;

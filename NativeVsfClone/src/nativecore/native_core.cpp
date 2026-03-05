@@ -121,6 +121,9 @@ struct SecondaryMotionChainRuntime {
     float phase = 0.0f;
     float velocity = 0.0f;
     float offset = 0.0f;
+    float fixed_dt_accumulator = 0.0f;
+    std::uint32_t unsupported_collider_count = 0U;
+    std::uint32_t last_substeps = 0U;
     std::uint32_t corrected_count = 0U;
 };
 
@@ -131,6 +134,8 @@ struct AvatarSecondaryMotionState {
     std::uint32_t active_chain_count = 0U;
     std::uint32_t corrected_chain_count = 0U;
     std::uint32_t disabled_chain_count = 0U;
+    std::uint32_t unsupported_collider_chain_count = 0U;
+    float avg_substeps = 0.0f;
 };
 
 struct CoreState {
@@ -235,6 +240,11 @@ struct MaterialModeCounts {
     std::uint32_t blend = 0U;
 };
 
+struct MtoonDiagnosticsCounts {
+    std::uint32_t advanced = 0U;
+    std::uint32_t fallback = 0U;
+};
+
 MaterialModeCounts CountMaterialModes(const AvatarPackage& pkg) {
     MaterialModeCounts counts {};
     for (const auto& diag : pkg.material_diagnostics) {
@@ -248,6 +258,22 @@ MaterialModeCounts CountMaterialModes(const AvatarPackage& pkg) {
             ++counts.blend;
         } else {
             ++counts.opaque;
+        }
+    }
+    return counts;
+}
+
+MtoonDiagnosticsCounts CountMtoonDiagnostics(const AvatarPackage& pkg) {
+    MtoonDiagnosticsCounts counts {};
+    for (const auto& diag : pkg.material_diagnostics) {
+        if (diag.has_mtoon_binding) {
+            const std::uint32_t typed_total =
+                diag.typed_color_param_count + diag.typed_float_param_count + diag.typed_texture_param_count;
+            if (typed_total >= 12U || diag.has_rim_texture || diag.has_emission_texture) {
+                ++counts.advanced;
+            }
+        } else {
+            ++counts.fallback;
         }
     }
     return counts;
@@ -387,6 +413,21 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         out_info->expression_count = 3U;
     }
     out_info->last_render_draw_calls = pkg.last_render_draw_calls;
+    {
+        const auto state_it = g_state.secondary_motion_states.find(handle);
+        if (state_it != g_state.secondary_motion_states.end()) {
+            out_info->spring_active_chain_count = state_it->second.active_chain_count;
+            out_info->spring_corrected_chain_count = state_it->second.corrected_chain_count;
+            out_info->spring_disabled_chain_count = state_it->second.disabled_chain_count;
+            out_info->spring_unsupported_collider_chain_count = state_it->second.unsupported_collider_chain_count;
+            out_info->spring_avg_substeps = state_it->second.avg_substeps;
+        }
+    }
+    {
+        const auto mtoon_counts = CountMtoonDiagnostics(pkg);
+        out_info->mtoon_advanced_param_material_count = mtoon_counts.advanced;
+        out_info->mtoon_fallback_material_count = mtoon_counts.fallback;
+    }
     CopyString(out_info->display_name, sizeof(out_info->display_name), pkg.display_name);
     CopyString(out_info->source_path, sizeof(out_info->source_path), pkg.source_path);
     CopyString(
@@ -981,6 +1022,7 @@ float ClampFinite(float value, float min_v, float max_v, float fallback) {
 std::vector<std::size_t> ResolveChainTargetMeshes(
     const std::vector<std::string>& bone_paths,
     const std::string& root_bone_path,
+    const AvatarPackage& avatar_pkg,
     const std::vector<GpuMeshResource>& meshes) {
     std::vector<std::string> tokens;
     for (const auto& path : bone_paths) {
@@ -997,7 +1039,32 @@ std::vector<std::size_t> ResolveChainTargetMeshes(
         return {};
     }
 
-    std::vector<std::size_t> target_mesh_indices;
+    std::unordered_set<std::size_t> target_mesh_index_set;
+    // Prefer explicit rig binding when available, then fall back to mesh-name token matching.
+    for (const auto& rig : avatar_pkg.skeleton_rig_payloads) {
+        const std::string rig_mesh_key = NormalizeMeshKey(rig.mesh_name);
+        bool bone_hit = false;
+        for (const auto& bone : rig.bones) {
+            const std::string bone_key = NormalizeRefKey(bone.bone_name);
+            for (const auto& token : tokens) {
+                if (!token.empty() && bone_key.find(token) != std::string::npos) {
+                    bone_hit = true;
+                    break;
+                }
+            }
+            if (bone_hit) {
+                break;
+            }
+        }
+        if (!bone_hit) {
+            continue;
+        }
+        for (std::size_t i = 0U; i < meshes.size(); ++i) {
+            if (NormalizeMeshKey(meshes[i].mesh_name) == rig_mesh_key) {
+                target_mesh_index_set.insert(i);
+            }
+        }
+    }
     for (std::size_t i = 0U; i < meshes.size(); ++i) {
         const auto mesh_key = NormalizeMeshKey(meshes[i].mesh_name);
         for (const auto& token : tokens) {
@@ -1005,12 +1072,34 @@ std::vector<std::size_t> ResolveChainTargetMeshes(
                 continue;
             }
             if (mesh_key.find(token) != std::string::npos) {
-                target_mesh_indices.push_back(i);
+                target_mesh_index_set.insert(i);
                 break;
             }
         }
     }
+    std::vector<std::size_t> target_mesh_indices;
+    target_mesh_indices.reserve(target_mesh_index_set.size());
+    for (const auto idx : target_mesh_index_set) {
+        target_mesh_indices.push_back(idx);
+    }
+    std::sort(target_mesh_indices.begin(), target_mesh_indices.end());
     return target_mesh_indices;
+}
+
+bool IsUnsupportedColliderShape(avatar::PhysicsColliderShape shape) {
+    return shape == avatar::PhysicsColliderShape::Plane || shape == avatar::PhysicsColliderShape::Unknown;
+}
+
+const char* PhysicsAutoCorrectedCodeFor(const AvatarPackage& pkg) {
+    return pkg.source_type == AvatarSourceType::Vrm ? "VRM_SPRING_AUTO_CORRECTED" : "XAV2_PHYSICS_AUTO_CORRECTED";
+}
+
+const char* PhysicsDisabledCodeFor(const AvatarPackage& pkg) {
+    return pkg.source_type == AvatarSourceType::Vrm ? "VRM_SPRING_CHAIN_DISABLED" : "XAV2_PHYSICS_CHAIN_DISABLED";
+}
+
+const char* PhysicsUnsupportedColliderCodeFor(const AvatarPackage& pkg) {
+    return pkg.source_type == AvatarSourceType::Vrm ? "VRM_SPRING_UNSUPPORTED_COLLIDER" : "XAV2_PHYSICS_UNSUPPORTED_COLLIDER";
 }
 
 void InitializeSecondaryMotionStateForAvatar(
@@ -1025,11 +1114,18 @@ void InitializeSecondaryMotionStateForAvatar(
     state.active_chain_count = 0U;
     state.corrected_chain_count = 0U;
     state.disabled_chain_count = 0U;
+    state.unsupported_collider_chain_count = 0U;
+    state.avg_substeps = 0.0f;
     const bool has_vrc = !avatar_pkg.physbone_payloads.empty();
 
     std::unordered_set<std::string> collider_keys;
+    std::unordered_set<std::string> unsupported_collider_keys;
     for (const auto& c : avatar_pkg.physics_colliders) {
-        collider_keys.insert(NormalizeRefKey(c.name));
+        const auto key = NormalizeRefKey(c.name);
+        collider_keys.insert(key);
+        if (IsUnsupportedColliderShape(c.shape)) {
+            unsupported_collider_keys.insert(key);
+        }
     }
 
     for (const auto& phys : avatar_pkg.physbone_payloads) {
@@ -1054,10 +1150,15 @@ void InitializeSecondaryMotionStateForAvatar(
                 ++chain.corrected_count;
             }
         }
-        chain.target_mesh_indices = ResolveChainTargetMeshes(corrected_bones, phys.root_bone_path, meshes);
+        chain.target_mesh_indices = ResolveChainTargetMeshes(corrected_bones, phys.root_bone_path, avatar_pkg, meshes);
         if (chain.target_mesh_indices.empty()) {
             chain.enabled = false;
             ++chain.corrected_count;
+        }
+        for (const auto& collider_ref : phys.collider_refs) {
+            if (unsupported_collider_keys.find(NormalizeRefKey(collider_ref)) != unsupported_collider_keys.end()) {
+                ++chain.unsupported_collider_count;
+            }
         }
         state.chains.push_back(std::move(chain));
     }
@@ -1083,10 +1184,15 @@ void InitializeSecondaryMotionStateForAvatar(
                 ++chain.corrected_count;
             }
         }
-        chain.target_mesh_indices = ResolveChainTargetMeshes(corrected_bones, spring.root_bone_path, meshes);
+        chain.target_mesh_indices = ResolveChainTargetMeshes(corrected_bones, spring.root_bone_path, avatar_pkg, meshes);
         if (chain.target_mesh_indices.empty()) {
             chain.enabled = false;
             ++chain.corrected_count;
+        }
+        for (const auto& collider_ref : spring.collider_refs) {
+            if (unsupported_collider_keys.find(NormalizeRefKey(collider_ref)) != unsupported_collider_keys.end()) {
+                ++chain.unsupported_collider_count;
+            }
         }
         if (has_vrc) {
             chain.enabled = false;
@@ -1102,6 +1208,9 @@ void InitializeSecondaryMotionStateForAvatar(
         }
         if (chain.corrected_count > 0U) {
             ++state.corrected_chain_count;
+        }
+        if (chain.unsupported_collider_count > 0U) {
+            ++state.unsupported_collider_chain_count;
         }
     }
     state.initialized = true;
@@ -1138,33 +1247,69 @@ bool ApplySecondaryMotionToAvatar(
     if (!state.warnings_emitted) {
         if (state.corrected_chain_count > 0U) {
             std::ostringstream oss;
-            oss << "W_RENDER: XAV2_PHYSICS_AUTO_CORRECTED: correctedChains=" << state.corrected_chain_count;
-            PushAvatarWarningUnique(avatar_pkg, oss.str(), "XAV2_PHYSICS_AUTO_CORRECTED");
+            oss << "W_RENDER: " << PhysicsAutoCorrectedCodeFor(*avatar_pkg)
+                << ": correctedChains=" << state.corrected_chain_count;
+            PushAvatarWarningUnique(avatar_pkg, oss.str(), PhysicsAutoCorrectedCodeFor(*avatar_pkg));
         }
         if (state.disabled_chain_count > 0U) {
             std::ostringstream oss;
-            oss << "W_RENDER: XAV2_PHYSICS_CHAIN_DISABLED: disabledChains=" << state.disabled_chain_count;
-            PushAvatarWarningUnique(avatar_pkg, oss.str(), "XAV2_PHYSICS_CHAIN_DISABLED");
+            oss << "W_RENDER: " << PhysicsDisabledCodeFor(*avatar_pkg)
+                << ": disabledChains=" << state.disabled_chain_count;
+            PushAvatarWarningUnique(avatar_pkg, oss.str(), PhysicsDisabledCodeFor(*avatar_pkg));
+        }
+        if (state.unsupported_collider_chain_count > 0U) {
+            std::ostringstream oss;
+            oss << "W_RENDER: " << PhysicsUnsupportedColliderCodeFor(*avatar_pkg)
+                << ": affectedChains=" << state.unsupported_collider_chain_count;
+            PushAvatarWarningUnique(avatar_pkg, oss.str(), PhysicsUnsupportedColliderCodeFor(*avatar_pkg));
         }
         state.warnings_emitted = true;
     }
 
     const float dt = ClampFinite(delta_time_seconds, 1.0f / 240.0f, 1.0f / 15.0f, 1.0f / 60.0f);
+    constexpr float kFixedStep = 1.0f / 120.0f;
+    constexpr std::uint32_t kMaxSubsteps = 8U;
+    std::uint32_t accumulated_substeps = 0U;
+    std::uint32_t stepped_chain_count = 0U;
     for (auto& chain : state.chains) {
         if (!chain.enabled || chain.target_mesh_indices.empty()) {
             continue;
         }
-        chain.phase += dt * (2.0f + chain.stiffness * 4.0f);
-        const float head_influence = ClampFinite(g_state.latest_tracking.head_pos[1], -1.0f, 1.0f, 0.0f) * 0.002f;
-        const float target =
-            std::sin(chain.phase) * (0.0015f + chain.radius * 0.20f) +
-            (chain.gravity_y * 0.0035f) +
-            head_influence;
-        const float accel = (target - chain.offset) * (chain.stiffness * 20.0f);
-        chain.velocity += accel * dt;
-        const float drag_decay = std::max(0.0f, 1.0f - chain.drag * (dt * 30.0f));
-        chain.velocity *= drag_decay;
-        chain.offset = ClampFinite(chain.offset + chain.velocity * dt, -0.05f, 0.05f, 0.0f);
+        chain.fixed_dt_accumulator = ClampFinite(chain.fixed_dt_accumulator + dt, 0.0f, 0.20f, 0.0f);
+        std::uint32_t chain_substeps = 0U;
+        while (chain.fixed_dt_accumulator >= kFixedStep && chain_substeps < kMaxSubsteps) {
+            chain.phase += kFixedStep * (2.0f + chain.stiffness * 4.0f);
+            const float head_influence = ClampFinite(g_state.latest_tracking.head_pos[1], -1.0f, 1.0f, 0.0f) * 0.002f;
+            const float target =
+                std::sin(chain.phase) * (0.0015f + chain.radius * 0.20f) +
+                (chain.gravity_y * 0.0035f) +
+                head_influence;
+            const float accel = (target - chain.offset) * (chain.stiffness * 20.0f);
+            chain.velocity += accel * kFixedStep;
+            const float drag_decay = std::max(0.0f, 1.0f - chain.drag * (kFixedStep * 30.0f));
+            chain.velocity *= drag_decay;
+            chain.offset += chain.velocity * kFixedStep;
+            const float length_limit = std::max(0.003f, chain.radius * 2.0f);
+            if (chain.offset > length_limit) {
+                chain.offset = length_limit;
+                chain.velocity *= 0.4f;
+            } else if (chain.offset < -length_limit) {
+                chain.offset = -length_limit;
+                chain.velocity *= 0.4f;
+            }
+            if (chain.unsupported_collider_count > 0U) {
+                chain.velocity *= 0.9f;
+            }
+            chain.offset = ClampFinite(chain.offset, -0.05f, 0.05f, 0.0f);
+            chain.fixed_dt_accumulator -= kFixedStep;
+            ++chain_substeps;
+        }
+        if (chain_substeps == kMaxSubsteps && chain.fixed_dt_accumulator >= kFixedStep) {
+            chain.fixed_dt_accumulator = std::fmod(chain.fixed_dt_accumulator, kFixedStep);
+        }
+        chain.last_substeps = chain_substeps;
+        accumulated_substeps += chain_substeps;
+        ++stepped_chain_count;
 
         for (const auto mesh_index : chain.target_mesh_indices) {
             if (mesh_index >= meshes.size()) {
@@ -1198,6 +1343,9 @@ bool ApplySecondaryMotionToAvatar(
             }
         }
     }
+    state.avg_substeps = stepped_chain_count > 0U
+        ? static_cast<float>(accumulated_substeps) / static_cast<float>(stepped_chain_count)
+        : 0.0f;
 
     return true;
 }
@@ -1453,25 +1601,73 @@ bool ApplyStaticSkinningToVertexBlob(
         return false;
     }
 
+    const auto load_matrix16 = [](const std::vector<float>& src, std::size_t matrix_index) {
+        std::array<float, 16U> out = {
+            1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f};
+        const std::size_t base = matrix_index * 16U;
+        if (base + 16U <= src.size()) {
+            for (std::size_t i = 0U; i < 16U; ++i) {
+                out[i] = src[base + i];
+            }
+        }
+        return out;
+    };
+    const auto mul_matrix4x4_col_major = [](const std::array<float, 16U>& a, const std::array<float, 16U>& b) {
+        std::array<float, 16U> out {};
+        for (std::size_t c = 0U; c < 4U; ++c) {
+            for (std::size_t r = 0U; r < 4U; ++r) {
+                out[c * 4U + r] =
+                    (a[0U * 4U + r] * b[c * 4U + 0U]) +
+                    (a[1U * 4U + r] * b[c * 4U + 1U]) +
+                    (a[2U * 4U + r] * b[c * 4U + 2U]) +
+                    (a[3U * 4U + r] * b[c * 4U + 3U]);
+            }
+        }
+        return out;
+    };
+    const auto invert_matrix4x4_col_major = [](const std::array<float, 16U>& in) {
+        DirectX::XMFLOAT4X4 row_major {};
+        for (std::size_t r = 0U; r < 4U; ++r) {
+            for (std::size_t c = 0U; c < 4U; ++c) {
+                reinterpret_cast<float*>(&row_major)[r * 4U + c] = in[c * 4U + r];
+            }
+        }
+        DirectX::XMVECTOR det = {};
+        const auto inv_row = DirectX::XMMatrixInverse(&det, DirectX::XMLoadFloat4x4(&row_major));
+        DirectX::XMFLOAT4X4 inv_row_store {};
+        DirectX::XMStoreFloat4x4(&inv_row_store, inv_row);
+        std::array<float, 16U> out {};
+        for (std::size_t c = 0U; c < 4U; ++c) {
+            for (std::size_t r = 0U; r < 4U; ++r) {
+                out[c * 4U + r] = reinterpret_cast<float*>(&inv_row_store)[r * 4U + c];
+            }
+        }
+        return out;
+    };
+
     const std::size_t bind_pose_count = skin_payload.bind_poses_16xn.size() / 16U;
-    std::vector<DirectX::XMMATRIX> skin_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
+    std::vector<std::array<float, 16U>> skin_matrices(
+        bind_pose_count,
+        std::array<float, 16U>{
+            1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f});
     const bool has_skeleton_pose =
         skeleton_payload != nullptr && IsValidSkeletonPosePayload(skin_payload, *skeleton_payload);
     for (std::size_t i = 0U; i < bind_pose_count; ++i) {
-        DirectX::XMFLOAT4X4 bind_pose {};
-        for (std::size_t j = 0U; j < 16U; ++j) {
-            reinterpret_cast<float*>(&bind_pose)[j] = skin_payload.bind_poses_16xn[i * 16U + j];
-        }
-        const auto bind_m = DirectX::XMLoadFloat4x4(&bind_pose);
+        const auto bind_m = load_matrix16(skin_payload.bind_poses_16xn, i);
         if (has_skeleton_pose) {
-            DirectX::XMFLOAT4X4 bone_m {};
-            for (std::size_t j = 0U; j < 16U; ++j) {
-                reinterpret_cast<float*>(&bone_m)[j] = skeleton_payload->bone_matrices_16xn[i * 16U + j];
-            }
-            skin_matrices[i] = DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(&bone_m), bind_m);
+            const auto bone_world = load_matrix16(skeleton_payload->bone_matrices_16xn, i);
+            // glTF/VRM matrices are consumed as column-major. skin = jointGlobal * inverseBind.
+            skin_matrices[i] = mul_matrix4x4_col_major(bone_world, bind_m);
         } else {
-            DirectX::XMVECTOR det = {};
-            skin_matrices[i] = DirectX::XMMatrixInverse(&det, bind_m);
+            // Without a skeleton pose payload, use inverse(inverseBind) to recover
+            // bind-pose joint world so static fallback remains stable.
+            skin_matrices[i] = invert_matrix4x4_col_major(bind_m);
         }
     }
 
@@ -1483,10 +1679,10 @@ bool ApplyStaticSkinningToVertexBlob(
         std::memcpy(&px, vertex_blob->data() + base, sizeof(float));
         std::memcpy(&py, vertex_blob->data() + base + 4U, sizeof(float));
         std::memcpy(&pz, vertex_blob->data() + base + 8U, sizeof(float));
-        const auto p = DirectX::XMVectorSet(px, py, pz, 1.0f);
-
         const auto& sw = decoded_weights[vi];
-        DirectX::XMVECTOR accum = DirectX::XMVectorZero();
+        float ax = 0.0f;
+        float ay = 0.0f;
+        float az = 0.0f;
         float total_weight = 0.0f;
         for (std::size_t i = 0U; i < 4U; ++i) {
             const float w = sw.weights[i];
@@ -1494,21 +1690,27 @@ bool ApplyStaticSkinningToVertexBlob(
             if (w <= 0.000001f || bone_index < 0 || static_cast<std::size_t>(bone_index) >= skin_matrices.size()) {
                 continue;
             }
-            const auto tp = DirectX::XMVector3TransformCoord(p, skin_matrices[static_cast<std::size_t>(bone_index)]);
-            accum = DirectX::XMVectorAdd(accum, DirectX::XMVectorScale(tp, w));
+            const auto& m = skin_matrices[static_cast<std::size_t>(bone_index)];
+            const float tx = (m[0U] * px) + (m[4U] * py) + (m[8U] * pz) + m[12U];
+            const float ty = (m[1U] * px) + (m[5U] * py) + (m[9U] * pz) + m[13U];
+            const float tz = (m[2U] * px) + (m[6U] * py) + (m[10U] * pz) + m[14U];
+            ax += tx * w;
+            ay += ty * w;
+            az += tz * w;
             total_weight += w;
         }
         if (total_weight <= 0.000001f) {
             continue;
         }
         if (std::abs(total_weight - 1.0f) > 0.0001f) {
-            accum = DirectX::XMVectorScale(accum, 1.0f / total_weight);
+            const float inv = 1.0f / total_weight;
+            ax *= inv;
+            ay *= inv;
+            az *= inv;
         }
-        DirectX::XMFLOAT3 out_pos {};
-        DirectX::XMStoreFloat3(&out_pos, accum);
-        std::memcpy(vertex_blob->data() + base, &out_pos.x, sizeof(float));
-        std::memcpy(vertex_blob->data() + base + 4U, &out_pos.y, sizeof(float));
-        std::memcpy(vertex_blob->data() + base + 8U, &out_pos.z, sizeof(float));
+        std::memcpy(vertex_blob->data() + base, &ax, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 4U, &ay, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 8U, &az, sizeof(float));
     }
     return true;
 }
@@ -1652,6 +1854,15 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
             avatar_it->second.warnings.push_back(
                 "W_RENDER: XAV2_SKINNING_STATIC_DISABLED: skin payload detected; using original vertex positions.");
             avatar_it->second.warning_codes.push_back("XAV2_SKINNING_STATIC_DISABLED");
+        }
+    }
+    if (!avatar_pkg.skin_payloads.empty()) {
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            PushAvatarWarningUnique(
+                &avatar_it->second,
+                "W_RENDER: XAV2_SKINNING_CONVENTION: column-major skinMatrix=jointGlobal*inverseBind",
+                "XAV2_SKINNING_CONVENTION");
         }
     }
     std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
@@ -3278,6 +3489,14 @@ NcResultCode nc_get_springbone_info(NcAvatarHandle handle, NcSpringBoneInfo* out
     out_info->joint_count = it->second.springbone_summary.joint_count;
     out_info->collider_count = it->second.springbone_summary.collider_count;
     out_info->collider_group_count = it->second.springbone_summary.collider_group_count;
+    const auto state_it = vsfclone::nativecore::g_state.secondary_motion_states.find(handle);
+    if (state_it != vsfclone::nativecore::g_state.secondary_motion_states.end()) {
+        out_info->active_chain_count = state_it->second.active_chain_count;
+        out_info->corrected_chain_count = state_it->second.corrected_chain_count;
+        out_info->disabled_chain_count = state_it->second.disabled_chain_count;
+        out_info->unsupported_collider_chain_count = state_it->second.unsupported_collider_chain_count;
+        out_info->avg_substeps = state_it->second.avg_substeps;
+    }
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }

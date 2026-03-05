@@ -110,6 +110,9 @@ $gateD = $true  # expression extraction visibility
 $gateE = $true  # expression bind visibility
 $gateF = $true  # springbone metadata visibility
 $gateG = $true  # blend material coverage (informational when no blend samples)
+$gateH = $true  # spring payload completeness
+$gateI = $true  # runtime activation readiness (payload/collider linkage)
+$gateJ = $true  # spring payload stability guards
 $gateGMode = "enforced"
 $failReasons = @()
 
@@ -145,6 +148,8 @@ foreach ($f in $candidates) {
         Name = $f.Name
         ExpressionBindTotal = (To-Int "$($fields["ExpressionBindTotal"])")
         SpringBonePresent = "$($fields["SpringBonePresent"])"
+        SpringPayloads = (To-Int "$($fields["SpringPayloads"])")
+        PhysicsColliders = (To-Int "$($fields["PhysicsColliders"])")
     }
 }
 foreach ($r2 in $rows2) {
@@ -152,6 +157,20 @@ foreach ($r2 in $rows2) {
         $gateF = $false
         $failReasons += "GateF: $($r2.Name) expected SpringBonePresent to be true/false but got '$($r2.SpringBonePresent)'"
     }
+    if ($r2.SpringPayloads -gt 0 -and $r2.SpringPayloads -gt 256) {
+        $gateJ = $false
+        $failReasons += "GateJ: $($r2.Name) spring payload count exceeds sanity limit (256): $($r2.SpringPayloads)"
+    }
+}
+$hasSpringPayload = ($rows2 | Where-Object { $_.SpringPayloads -gt 0 } | Measure-Object).Count -gt 0
+if (-not $hasSpringPayload) {
+    $gateH = $false
+    $failReasons += "GateH: expected at least one sample with SpringPayloads > 0"
+}
+$hasSpringAndCollider = ($rows2 | Where-Object { $_.SpringPayloads -gt 0 -and $_.PhysicsColliders -gt 0 } | Measure-Object).Count -gt 0
+if ($hasSpringPayload -and -not $hasSpringAndCollider) {
+    $gateI = $false
+    $failReasons += "GateI: expected at least one spring-enabled sample with PhysicsColliders > 0"
 }
 $hasBoundExpression = ($rows2 | Where-Object { $_.ExpressionBindTotal -gt 0 } | Measure-Object).Count -gt 0
 if (-not $hasBoundExpression) {
@@ -179,7 +198,10 @@ $summary += "- GateD (expression count visibility): $(if($gateD){'PASS'}else{'FA
 $summary += "- GateE (expression bind visibility): $(if($gateE){'PASS'}else{'FAIL'})"
 $summary += "- GateF (springbone metadata visibility): $(if($gateF){'PASS'}else{'FAIL'})"
 $summary += "- GateG (blend material coverage): $(if($gateG){'PASS'}else{'FAIL'}) [mode=$gateGMode]"
-$overall = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF
+$summary += "- GateH (spring payload completeness): $(if($gateH){'PASS'}else{'FAIL'})"
+$summary += "- GateI (spring runtime activation readiness): $(if($gateI){'PASS'}else{'FAIL'})"
+$summary += "- GateJ (spring payload stability guard): $(if($gateJ){'PASS'}else{'FAIL'})"
+$overall = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateH -and $gateI -and $gateJ
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Per-sample"

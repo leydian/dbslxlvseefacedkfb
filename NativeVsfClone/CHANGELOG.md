@@ -2,6 +2,54 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - VRM SpringBone runtime uplift + MToon advanced typed binding expansion
+
+### Summary
+
+Implemented a VRM-focused compatibility uplift that expanded SpringBone runtime readiness and diagnostics, upgraded the native secondary motion path for practical stability, and extended MToon advanced typed parameter extraction/binding with clearer missing-feature granularity.
+
+### Changed
+
+- native API/interop diagnostics expansion:
+  - `include/vsfclone/nativecore/api.h`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - added Spring runtime counters (`active/corrected/disabled/unsupported`, `avg_substeps`) and MToon diagnostics counters (`advanced/fallback`) to native avatar/spring info contracts.
+- native runtime secondary motion quality pass:
+  - `src/nativecore/native_core.cpp`
+  - introduced fixed-step (`120Hz`) bounded substep integration for secondary motion chains.
+  - added offset-length stabilization and unsupported collider chain diagnostics.
+  - improved chain-to-mesh resolution with rig-bone-first matching plus existing heuristic fallback.
+  - split VRM-specific warning contracts:
+    - `VRM_SPRING_AUTO_CORRECTED`
+    - `VRM_SPRING_CHAIN_DISABLED`
+    - `VRM_SPRING_UNSUPPORTED_COLLIDER`
+- VRM loader SpringBone payload extraction:
+  - `src/avatar/vrm_loader.cpp`
+  - added runtime payload extraction into:
+    - `physics_colliders`
+    - `springbone_payloads`
+  - covers VRM1 (`VRMC_springBone`) and legacy VRM0 (`secondaryAnimation`) paths.
+- MToon advanced typed parameter uplift:
+  - `src/avatar/vrm_loader.cpp`
+  - expanded typed bindings for matcap/outline/uv-animation related fields and textures.
+  - normalized VRM material payload typed contract defaults (`typed-v1`, schema version `1`).
+  - missing feature reporting now includes:
+    - `MToon outline`
+    - `MToon uv animation`
+    - `MToon matcap`
+- tooling and gate expansion:
+  - `tools/avatar_tool.cpp`
+  - `tools/vrm_quality_gate.ps1`
+  - avatar diagnostics output now includes spring payload/collider and MToon advanced/fallback counts.
+  - VRM quality gate expanded with:
+    - GateH (spring payload completeness)
+    - GateI (spring runtime activation readiness)
+    - GateJ (spring payload stability guard)
+- implementation report:
+  - `docs/reports/vrm_springbone_mtoon_runtime_uplift_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_springbone_mtoon_runtime_uplift.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+
 ## 2026-03-06 - Native secondary motion v1 runtime execution (VRC-first, auto-correct, frame-pass integration)
 
 ### Summary

@@ -77,6 +77,13 @@ typedef struct NcAvatarInfo {
     uint32_t missing_feature_count;
     uint32_t expression_count;
     uint32_t last_render_draw_calls;
+    uint32_t spring_active_chain_count;
+    uint32_t spring_corrected_chain_count;
+    uint32_t spring_disabled_chain_count;
+    uint32_t spring_unsupported_collider_chain_count;
+    uint32_t mtoon_advanced_param_material_count;
+    uint32_t mtoon_fallback_material_count;
+    float spring_avg_substeps;
     char display_name[128];
     char source_path[260];
     char parser_stage[32];
@@ -105,6 +112,11 @@ typedef struct NcSpringBoneInfo {
     uint32_t joint_count;
     uint32_t collider_count;
     uint32_t collider_group_count;
+    uint32_t active_chain_count;
+    uint32_t corrected_chain_count;
+    uint32_t disabled_chain_count;
+    uint32_t unsupported_collider_chain_count;
+    float avg_substeps;
 } NcSpringBoneInfo;
 
 typedef struct NcTrackingFrame {
