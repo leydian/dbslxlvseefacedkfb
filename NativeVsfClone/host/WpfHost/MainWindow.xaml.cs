@@ -602,18 +602,7 @@ public partial class MainWindow : Window
                 Load_Click(sender, e);
                 break;
             case HostPrimaryActionKind.StartOutput:
-                if (!_controller.Outputs.SpoutActive)
-                {
-                    StartSpout_Click(sender, e);
-                }
-                if (!_controller.Outputs.SpoutActive && !_controller.Outputs.OscActive && StartOscButton.IsEnabled)
-                {
-                    StartOsc_Click(sender, e);
-                }
-                else if (!_controller.Outputs.OscActive)
-                {
-                    StartOsc_Click(sender, e);
-                }
+                QuickStartBroadcast_Click(sender, e);
                 break;
             default:
                 if (!string.IsNullOrWhiteSpace(_lastFailureSource))
@@ -621,6 +610,49 @@ public partial class MainWindow : Window
                     OpenDiagnosticsFromHint_Click(sender, e);
                 }
                 break;
+        }
+    }
+
+    private void QuickInitialize_Click(object sender, RoutedEventArgs e)
+    {
+        Initialize_Click(sender, e);
+    }
+
+    private void QuickLoadAvatar_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshValidationState();
+        if (!_validationState.AvatarPathValid && !_controller.SessionState.IsInitialized)
+        {
+            ActivateSection(UiSection.SessionAvatar);
+            return;
+        }
+
+        Load_Click(sender, e);
+    }
+
+    private void QuickStartBroadcast_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (!_controller.Outputs.SpoutActive && StartSpoutButton.IsEnabled)
+        {
+            StartSpout_Click(sender, e);
+        }
+
+        if (!_controller.Outputs.SpoutActive &&
+            !_controller.Outputs.OscActive &&
+            StartOscButton.IsEnabled)
+        {
+            StartOsc_Click(sender, e);
+            return;
+        }
+
+        if (!_controller.Outputs.OscActive && StartOscButton.IsEnabled)
+        {
+            StartOsc_Click(sender, e);
         }
     }
 
@@ -1810,6 +1842,9 @@ public partial class MainWindow : Window
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;
         StopOscButton.IsEnabled = uiState.StopOscEnabled;
+        QuickInitializeButton.IsEnabled = uiState.InitializeEnabled;
+        QuickLoadAvatarButton.IsEnabled = uiState.LoadEnabled && !_isLoadRunning;
+        QuickStartBroadcastButton.IsEnabled = (uiState.StartSpoutEnabled || uiState.StartOscEnabled) && !operation.IsBusy;
 
         BroadcastModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         CameraModeComboBox.IsEnabled = uiState.RenderControlsEnabled;
@@ -1888,6 +1923,9 @@ public partial class MainWindow : Window
         var onboardingRecovery = string.IsNullOrWhiteSpace(onboarding.BlockReason)
             ? string.Empty
             : $"{onboarding.BlockReason} {onboarding.RecoveryAction}".Trim();
+        ActionBlockReasonText.Text = string.IsNullOrWhiteSpace(onboardingRecovery)
+            ? "없음"
+            : onboardingRecovery;
         OnboardingRecoveryText.Text = string.IsNullOrWhiteSpace(_beginnerFailureHint)
             ? onboardingRecovery
             : _beginnerFailureHint;
@@ -1914,6 +1952,13 @@ public partial class MainWindow : Window
                 break;
         }
         PrimaryActionButton.Tag = onboarding.PrimaryAction;
+        var flowTiming = _controller.GetUiFlowTimingSnapshot();
+        FirstBroadcastTimingText.Text = flowTiming.LatestMs >= 0.0
+            ? $"최근: {flowTiming.LatestMs:F0} ms ({flowTiming.OutputKind}, {flowTiming.StartedTimestampUtc})"
+            : "최근: 측정 대기";
+        FlowMedianTimingText.Text = flowTiming.MedianMs >= 0.0
+            ? $"중앙값(최근 {flowTiming.SampleCount}회): {flowTiming.MedianMs:F0} ms"
+            : "중앙값(최근 20회): 측정 대기";
         RenderOnlyToggleButton.Content = _isRenderOnlyMode
             ? "일반 UI 복귀 (F11)"
             : "렌더 전용 모드 (F11)";
@@ -2049,6 +2094,9 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
         runtimeSb.AppendLine($"SnapshotVersion: {snapshot.SnapshotVersion}");
         runtimeSb.AppendLine($"LogVersion: {snapshot.LogVersion}");
+        runtimeSb.AppendLine($"UiFlowTimingVersion: {snapshot.UiFlowTimingVersion}");
+        runtimeSb.AppendLine($"FirstBroadcastStartMs: {(snapshot.FirstBroadcastStartMs >= 0.0 ? snapshot.FirstBroadcastStartMs.ToString("F1", CultureInfo.InvariantCulture) : "n/a")}");
+        runtimeSb.AppendLine($"FirstBroadcastStartTimestampUtc: {NormalizeDiagField(snapshot.FirstBroadcastStartTimestamp)}");
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
@@ -2747,7 +2795,10 @@ public partial class MainWindow : Window
         TrackingGroup.Visibility = showTracking ? Visibility.Visible : Visibility.Collapsed;
         PlatformOpsGroup.Visibility = showOps ? Visibility.Visible : Visibility.Collapsed;
         RenderAdvancedExpander.Visibility = showRender && canUseAdvancedSections ? Visibility.Visible : Visibility.Collapsed;
-        RenderAdvancedExpander.IsExpanded = showRender && canUseAdvancedSections;
+        if (RenderAdvancedExpander.Visibility != Visibility.Visible)
+        {
+            RenderAdvancedExpander.IsExpanded = false;
+        }
     }
 
     private void ApplyNavRailState()

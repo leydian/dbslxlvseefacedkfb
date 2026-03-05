@@ -10,6 +10,7 @@ namespace HostCore;
 public sealed partial class HostController
 {
     private const int MaxLogEntries = 200;
+    private const int UiFlowTimingSampleCapacity = 20;
     private static readonly TimeSpan TickDiagnosticsPublishInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RuntimeCaptureRefreshInterval = TimeSpan.FromMilliseconds(250);
 
@@ -43,6 +44,11 @@ public sealed partial class HostController
     private DiagnosticsModel _runtimeDiagnostics = DiagnosticsModel.Empty;
     private DateTimeOffset _lastDiagnosticsPublishUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastRuntimeCaptureUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset? _firstBroadcastFlowStartedUtc;
+    private DateTimeOffset? _firstBroadcastStartedUtc;
+    private string _firstBroadcastOutputKind = string.Empty;
+    private readonly Queue<double> _firstBroadcastStartSamplesMs = new();
+    private long _uiFlowTimingVersion;
     private ArmPoseTuningSettings _armPoseTuning = new(
         EnableSmoothing: true,
         SmoothingTauMs: 80.0f,
@@ -136,6 +142,7 @@ public sealed partial class HostController
     {
         return ExecuteOperation("Initialize", () =>
         {
+            BeginFirstBroadcastFlow();
             var rc = _sessionService.Initialize();
             TrackResult("Initialize", rc);
             if (rc == NcResultCode.Ok)
@@ -143,6 +150,10 @@ public sealed partial class HostController
                 MarkOnboardingInitialized();
                 ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsInit");
+            }
+            else
+            {
+                ResetFirstBroadcastFlow();
             }
 
             RefreshState();
@@ -185,6 +196,7 @@ public sealed partial class HostController
 
             var rc = _sessionService.Shutdown();
             TrackResult("Shutdown", rc);
+            ResetFirstBroadcastFlow();
             _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
             RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
             _poseOffsets = BuildDefaultPoseOffsets();
@@ -308,6 +320,7 @@ public sealed partial class HostController
             if (rc == NcResultCode.Ok)
             {
                 MarkOnboardingOutputStarted("spout");
+                CompleteFirstBroadcastFlow("spout");
             }
             RefreshState();
             return rc;
@@ -343,6 +356,7 @@ public sealed partial class HostController
             if (rc == NcResultCode.Ok)
             {
                 MarkOnboardingOutputStarted("osc");
+                CompleteFirstBroadcastFlow("osc");
             }
             RefreshState();
             return rc;
@@ -956,10 +970,17 @@ public sealed partial class HostController
 
     private DiagnosticsSnapshot BuildSnapshot()
     {
+        var firstBroadcastStartMs = TryGetLatestFirstBroadcastStartMs(out var latestMs) ? latestMs : -1.0;
+        var firstBroadcastTimestamp = _firstBroadcastStartedUtc.HasValue
+            ? _firstBroadcastStartedUtc.Value.ToString("O")
+            : string.Empty;
         return new DiagnosticsSnapshot(
             DateTimeOffset.UtcNow,
             _snapshotVersion,
             _logVersion,
+            _uiFlowTimingVersion,
+            firstBroadcastStartMs,
+            firstBroadcastTimestamp,
             SessionState,
             Outputs,
             RenderState,
@@ -967,6 +988,15 @@ public sealed partial class HostController
             _runtimeDiagnostics,
             _sessionService.ActiveAvatarInfo,
             SessionState.LastRenderRc);
+    }
+
+    public (double LatestMs, double MedianMs, int SampleCount, string OutputKind, string StartedTimestampUtc) GetUiFlowTimingSnapshot()
+    {
+        var latestMs = TryGetLatestFirstBroadcastStartMs(out var latest) ? latest : -1.0;
+        var startedTimestamp = _firstBroadcastStartedUtc.HasValue
+            ? _firstBroadcastStartedUtc.Value.ToString("O")
+            : string.Empty;
+        return (latestMs, GetMedianFirstBroadcastStartMs(), _firstBroadcastStartSamplesMs.Count, _firstBroadcastOutputKind, startedTimestamp);
     }
 
     private bool PublishDiagnostics(bool force, bool forceRuntimeRefresh)
@@ -1026,6 +1056,87 @@ public sealed partial class HostController
 
         _runtimeDiagnostics = DiagnosticsModel.Empty with { LastError = NativeCoreInterop.FormatLastError() };
         _lastRuntimeCaptureUtc = now;
+    }
+
+    private void BeginFirstBroadcastFlow()
+    {
+        if (_firstBroadcastFlowStartedUtc.HasValue && !_firstBroadcastStartedUtc.HasValue)
+        {
+            return;
+        }
+
+        _firstBroadcastFlowStartedUtc = DateTimeOffset.UtcNow;
+        _firstBroadcastStartedUtc = null;
+        _firstBroadcastOutputKind = string.Empty;
+        _uiFlowTimingVersion++;
+    }
+
+    private void CompleteFirstBroadcastFlow(string outputKind)
+    {
+        if (!_firstBroadcastFlowStartedUtc.HasValue || _firstBroadcastStartedUtc.HasValue)
+        {
+            return;
+        }
+
+        _firstBroadcastStartedUtc = DateTimeOffset.UtcNow;
+        _firstBroadcastOutputKind = outputKind;
+        var elapsedMs = (_firstBroadcastStartedUtc.Value - _firstBroadcastFlowStartedUtc.Value).TotalMilliseconds;
+        if (elapsedMs < 0.0)
+        {
+            elapsedMs = 0.0;
+        }
+
+        _firstBroadcastStartSamplesMs.Enqueue(elapsedMs);
+        while (_firstBroadcastStartSamplesMs.Count > UiFlowTimingSampleCapacity)
+        {
+            _ = _firstBroadcastStartSamplesMs.Dequeue();
+        }
+
+        _uiFlowTimingVersion++;
+    }
+
+    private void ResetFirstBroadcastFlow()
+    {
+        if (!_firstBroadcastFlowStartedUtc.HasValue &&
+            !_firstBroadcastStartedUtc.HasValue &&
+            string.IsNullOrWhiteSpace(_firstBroadcastOutputKind))
+        {
+            return;
+        }
+
+        _firstBroadcastFlowStartedUtc = null;
+        _firstBroadcastStartedUtc = null;
+        _firstBroadcastOutputKind = string.Empty;
+        _uiFlowTimingVersion++;
+    }
+
+    private bool TryGetLatestFirstBroadcastStartMs(out double latestMs)
+    {
+        if (_firstBroadcastStartSamplesMs.Count == 0)
+        {
+            latestMs = -1.0;
+            return false;
+        }
+
+        latestMs = _firstBroadcastStartSamplesMs.Last();
+        return true;
+    }
+
+    private double GetMedianFirstBroadcastStartMs()
+    {
+        if (_firstBroadcastStartSamplesMs.Count == 0)
+        {
+            return -1.0;
+        }
+
+        var ordered = _firstBroadcastStartSamplesMs.OrderBy(x => x).ToArray();
+        var mid = ordered.Length / 2;
+        if ((ordered.Length & 1) == 1)
+        {
+            return ordered[mid];
+        }
+
+        return (ordered[mid - 1] + ordered[mid]) * 0.5;
     }
 
     private NcResultCode ApplyRenderOptionsInternal(string source)

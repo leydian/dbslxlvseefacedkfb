@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF UI v4 operation hub + first-broadcast timing telemetry
+
+### Summary
+
+Implemented a WPF operator-flow optimization pass focused on reducing time-to-first-broadcast by introducing a compact action hub for the startup path and adding HostCore-backed automatic first-broadcast timing telemetry (latest + rolling median) exposed in UI/runtime diagnostics.
+
+### Changed
+
+- HostCore diagnostics/timing extensions:
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/HostController.cs`
+  - `DiagnosticsSnapshot` extended with UI flow timing fields:
+    - `UiFlowTimingVersion`
+    - `FirstBroadcastStartMs`
+    - `FirstBroadcastStartTimestamp`
+  - added first-broadcast timing lifecycle:
+    - start at `Initialize`
+    - complete on first successful `StartSpout` or `StartOsc`
+    - reset on shutdown/failed initialize
+  - added UI-facing timing accessor:
+    - `GetUiFlowTimingSnapshot()`
+- WPF operation hub and visibility polish:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added quick action hub controls in Getting Started:
+    - `QuickInitializeButton`
+    - `QuickLoadAvatarButton`
+    - `QuickStartBroadcastButton`
+  - added fixed block-reason panel (`ActionBlockReasonText`).
+  - added first-broadcast timing text surfaces (`FirstBroadcastTimingText`, `FlowMedianTimingText`).
+  - wired quick action handlers and unified primary output-start path via shared quick-start branch.
+  - changed render advanced section default behavior to collapsed-first to prioritize startup-critical controls.
+- Documentation updates:
+  - `docs/reports/wpf_ui_v4_operation_hub_and_flow_timing_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_ui_v4_operation_hub_and_flow_timing.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore`: PASS
+
 ## 2026-03-06 - Tracking threshold UX completion + native submit error surfacing + WinUI repro hints
 
 ### Summary
