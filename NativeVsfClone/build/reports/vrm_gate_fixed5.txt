@@ -1,5 +1,5 @@
 VRM Quality Gate Summary
-Generated: 2026-03-06T02:40:32
+Generated: 2026-03-06T03:14:53
 ReportPath: .\\build\\reports\\vrm_probe_fixed5.txt
 Profile: fixed5
 UseFixedSet: False
@@ -11,11 +11,12 @@ Gate Results
 - GateD (expression count visibility): PASS
 - GateE (expression bind visibility): PASS
 - GateF (springbone metadata visibility): PASS
+- GateG (blend material coverage): PASS [mode=no-blend-sample]
 - Overall: PASS
 
 Per-sample
-- Kikyo_FT Variant(Clone).vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=50, material=15, texture=11, expression=3, materialDiag=15
-- Kikyo_FT Variant.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=29, material=18, texture=22, expression=3, materialDiag=18
-- Kikyo_FT Variant111.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=29, material=18, texture=22, expression=17, materialDiag=18
-- Kikyo_FT Variant112.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=28, material=18, texture=22, expression=18, materialDiag=18
-- NewOnYou.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=30, material=12, texture=9, expression=18, materialDiag=12
+- Kikyo_FT Variant(Clone).vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=50, material=15, texture=11, expression=3, materialDiag=15, blendMat=0
+- Kikyo_FT Variant.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=29, material=18, texture=22, expression=3, materialDiag=18, blendMat=0
+- Kikyo_FT Variant111.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=29, material=18, texture=22, expression=17, materialDiag=18, blendMat=0
+- Kikyo_FT Variant112.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=28, material=18, texture=22, expression=18, materialDiag=18, blendMat=0
+- NewOnYou.vrm: format=VRM, compat=full, stage=runtime-ready, primary=NONE, mesh=30, material=12, texture=9, expression=18, materialDiag=12, blendMat=0

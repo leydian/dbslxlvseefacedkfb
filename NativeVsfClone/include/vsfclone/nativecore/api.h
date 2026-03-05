@@ -71,6 +71,9 @@ typedef struct NcAvatarInfo {
     uint32_t warning_code_count;
     uint32_t critical_warning_count;
     uint32_t material_diag_count;
+    uint32_t opaque_material_count;
+    uint32_t mask_material_count;
+    uint32_t blend_material_count;
     uint32_t missing_feature_count;
     uint32_t expression_count;
     uint32_t last_render_draw_calls;
@@ -84,6 +87,7 @@ typedef struct NcAvatarInfo {
     char last_expression_summary[128];
     char last_warning[256];
     char last_material_diag[256];
+    char last_render_pass_summary[128];
     char last_missing_feature[256];
 } NcAvatarInfo;
 

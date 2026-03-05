@@ -321,6 +321,175 @@ std::string NormalizeAlphaMode(const std::string& raw_alpha_mode) {
     return "OPAQUE";
 }
 
+const JsonValue* FindKey(const JsonValue& root, const std::string& key);
+bool TryGetString(const JsonValue& root, const std::string& key, std::string* out);
+bool TryGetNumber(const JsonValue& root, const std::string& key, double* out);
+bool TryGetBool(const JsonValue& root, const std::string& key, bool* out);
+
+float Clamp01(float v) {
+    return std::max(0.0f, std::min(1.0f, v));
+}
+
+bool TryGetBoolLike(const JsonValue& root, const std::string& key, bool* out) {
+    if (out == nullptr) {
+        return false;
+    }
+    if (TryGetBool(root, key, out)) {
+        return true;
+    }
+    double n = 0.0;
+    if (TryGetNumber(root, key, &n)) {
+        *out = n > 0.5;
+        return true;
+    }
+    std::string s;
+    if (TryGetString(root, key, &s)) {
+        const auto v = ToLower(s);
+        if (v == "true" || v == "on" || v == "1" || v == "yes") {
+            *out = true;
+            return true;
+        }
+        if (v == "false" || v == "off" || v == "0" || v == "no") {
+            *out = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string ResolveAlphaModeFromModeValue(double mode_number) {
+    const int mode = static_cast<int>(mode_number + 0.5);
+    if (mode == 1) {
+        return "MASK";
+    }
+    if (mode == 2 || mode == 3) {
+        return "BLEND";
+    }
+    return "OPAQUE";
+}
+
+bool TryResolveAlphaModeFromString(const std::string& raw, std::string* out_mode) {
+    if (out_mode == nullptr) {
+        return false;
+    }
+    const auto v = ToLower(raw);
+    if (v.find("blend") != std::string::npos || v.find("transparent") != std::string::npos) {
+        *out_mode = "BLEND";
+        return true;
+    }
+    if (v.find("mask") != std::string::npos || v.find("cutout") != std::string::npos || v.find("clip") != std::string::npos) {
+        *out_mode = "MASK";
+        return true;
+    }
+    if (v.find("opaque") != std::string::npos) {
+        *out_mode = "OPAQUE";
+        return true;
+    }
+    return false;
+}
+
+void TryApplyAlphaModeHint(
+    const std::string& candidate_mode,
+    const std::string& source,
+    std::string* io_alpha_mode,
+    std::string* io_alpha_source) {
+    if (io_alpha_mode == nullptr || io_alpha_source == nullptr || candidate_mode.empty()) {
+        return;
+    }
+    const std::string normalized = NormalizeAlphaMode(candidate_mode);
+    if (normalized == "OPAQUE") {
+        return;
+    }
+    if (*io_alpha_mode == "OPAQUE") {
+        *io_alpha_mode = normalized;
+        *io_alpha_source = source;
+    }
+}
+
+void ApplyAlphaHintsFromObject(
+    const JsonValue& object_root,
+    const std::string& source_prefix,
+    std::string* io_alpha_mode,
+    std::string* io_alpha_source,
+    float* io_alpha_cutoff,
+    int depth = 0) {
+    if (object_root.type != JsonValue::Type::Object || io_alpha_mode == nullptr || io_alpha_source == nullptr || io_alpha_cutoff == nullptr) {
+        return;
+    }
+    if (depth > 2) {
+        return;
+    }
+
+    bool b = false;
+    double n = 0.0;
+    std::string s;
+
+    if (TryGetBoolLike(object_root, "transparentWithZWrite", &b) && b) {
+        TryApplyAlphaModeHint("BLEND", source_prefix + ".transparentWithZWrite", io_alpha_mode, io_alpha_source);
+    }
+    if (TryGetString(object_root, "renderMode", &s)) {
+        std::string mode;
+        if (TryResolveAlphaModeFromString(s, &mode)) {
+            TryApplyAlphaModeHint(mode, source_prefix + ".renderMode", io_alpha_mode, io_alpha_source);
+        }
+    }
+    if (TryGetNumber(object_root, "renderMode", &n)) {
+        TryApplyAlphaModeHint(ResolveAlphaModeFromModeValue(n), source_prefix + ".renderMode", io_alpha_mode, io_alpha_source);
+    }
+    if (TryGetNumber(object_root, "_Mode", &n)) {
+        TryApplyAlphaModeHint(ResolveAlphaModeFromModeValue(n), source_prefix + "._Mode", io_alpha_mode, io_alpha_source);
+    }
+    if (TryGetNumber(object_root, "_Surface", &n) && n >= 0.5) {
+        TryApplyAlphaModeHint("BLEND", source_prefix + "._Surface", io_alpha_mode, io_alpha_source);
+    }
+    if (TryGetNumber(object_root, "renderQueue", &n)) {
+        if (n >= 3000.0) {
+            TryApplyAlphaModeHint("BLEND", source_prefix + ".renderQueue", io_alpha_mode, io_alpha_source);
+        } else if (n >= 2450.0) {
+            TryApplyAlphaModeHint("MASK", source_prefix + ".renderQueue", io_alpha_mode, io_alpha_source);
+        }
+    }
+    if (TryGetBoolLike(object_root, "_ALPHABLEND_ON", &b) && b) {
+        TryApplyAlphaModeHint("BLEND", source_prefix + "._ALPHABLEND_ON", io_alpha_mode, io_alpha_source);
+    }
+    if (TryGetBoolLike(object_root, "_ALPHATEST_ON", &b) && b) {
+        TryApplyAlphaModeHint("MASK", source_prefix + "._ALPHATEST_ON", io_alpha_mode, io_alpha_source);
+    }
+    const bool has_alpha_clip =
+        (TryGetBoolLike(object_root, "_AlphaClip", &b) && b) ||
+        (TryGetBoolLike(object_root, "_UseAlphaClipping", &b) && b);
+    if (has_alpha_clip) {
+        TryApplyAlphaModeHint("MASK", source_prefix + "._AlphaClip", io_alpha_mode, io_alpha_source);
+    }
+    if (TryGetNumber(object_root, "_Cutoff", &n) && std::isfinite(n)) {
+        const float cutoff = Clamp01(static_cast<float>(n));
+        if (*io_alpha_mode == "MASK" || has_alpha_clip) {
+            *io_alpha_cutoff = cutoff;
+        }
+    }
+
+    const auto* keyword_map = FindKey(object_root, "keywordMap");
+    if (keyword_map != nullptr) {
+        ApplyAlphaHintsFromObject(
+            *keyword_map,
+            source_prefix + ".keywordMap",
+            io_alpha_mode,
+            io_alpha_source,
+            io_alpha_cutoff,
+            depth + 1);
+    }
+    const auto* float_properties = FindKey(object_root, "floatProperties");
+    if (float_properties != nullptr) {
+        ApplyAlphaHintsFromObject(
+            *float_properties,
+            source_prefix + ".floatProperties",
+            io_alpha_mode,
+            io_alpha_source,
+            io_alpha_cutoff,
+            depth + 1);
+    }
+}
+
 const JsonValue* FindKey(const JsonValue& root, const std::string& key) {
     if (root.type != JsonValue::Type::Object) {
         return nullptr;
@@ -1364,6 +1533,7 @@ struct MaterialInfo {
     std::string rim_texture_name;
     bool double_sided = false;
     std::string alpha_mode = "OPAQUE";
+    std::string alpha_source = "default.opaque";
     float alpha_cutoff = 0.5f;
     std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -2135,6 +2305,30 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         }
     }
 
+    std::vector<const JsonValue*> vrm0_material_properties_by_index;
+    std::unordered_map<std::string, const JsonValue*> vrm0_material_properties_by_name;
+    const auto* root_extensions = FindKey(root, "extensions");
+    if (root_extensions != nullptr && root_extensions->type == JsonValue::Type::Object) {
+        const auto* vrm0 = FindKey(*root_extensions, "VRM");
+        if (vrm0 != nullptr && vrm0->type == JsonValue::Type::Object) {
+            const auto* material_props = FindKey(*vrm0, "materialProperties");
+            if (material_props != nullptr && material_props->type == JsonValue::Type::Array) {
+                vrm0_material_properties_by_index.reserve(material_props->array_value.size());
+                for (const auto& prop : material_props->array_value) {
+                    if (prop.type != JsonValue::Type::Object) {
+                        vrm0_material_properties_by_index.push_back(nullptr);
+                        continue;
+                    }
+                    vrm0_material_properties_by_index.push_back(&prop);
+                    std::string prop_name;
+                    if (TryGetString(prop, "name", &prop_name) && !prop_name.empty()) {
+                        vrm0_material_properties_by_name[prop_name] = &prop;
+                    }
+                }
+            }
+        }
+    }
+
     std::vector<MaterialInfo> parsed_materials;
     std::uint32_t missing_texture_refs = 0U;
     std::uint32_t unsupported_materials = 0U;
@@ -2171,13 +2365,25 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             info.name = "Material_" + std::to_string(i);
             TryGetString(material, "name", &info.name);
             TryGetBool(material, "doubleSided", &info.double_sided);
-            TryGetString(material, "alphaMode", &info.alpha_mode);
-            info.alpha_mode = NormalizeAlphaMode(info.alpha_mode);
+            std::string raw_alpha_mode;
+            if (TryGetString(material, "alphaMode", &raw_alpha_mode)) {
+                info.alpha_mode = NormalizeAlphaMode(raw_alpha_mode);
+                info.alpha_source = "gltf.alphaMode";
+            } else {
+                info.alpha_mode = "OPAQUE";
+                info.alpha_source = "default.opaque";
+            }
             double alpha_cutoff = static_cast<double>(info.alpha_cutoff);
             if (TryGetNumber(material, "alphaCutoff", &alpha_cutoff)) {
                 info.alpha_cutoff = static_cast<float>(alpha_cutoff);
             }
             info.alpha_cutoff = std::max(0.0f, std::min(1.0f, info.alpha_cutoff));
+            ApplyAlphaHintsFromObject(
+                material,
+                "material",
+                &info.alpha_mode,
+                &info.alpha_source,
+                &info.alpha_cutoff);
 
             const auto* pbr = FindKey(material, "pbrMetallicRoughness");
             if (pbr != nullptr && pbr->type == JsonValue::Type::Object) {
@@ -2233,8 +2439,20 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
             const auto* extensions = FindKey(material, "extensions");
             if (extensions != nullptr && extensions->type == JsonValue::Type::Object) {
+                ApplyAlphaHintsFromObject(
+                    *extensions,
+                    "material.extensions",
+                    &info.alpha_mode,
+                    &info.alpha_source,
+                    &info.alpha_cutoff);
                 const auto* mtoon = FindKey(*extensions, "VRMC_materials_mtoon");
                 if (mtoon != nullptr && mtoon->type == JsonValue::Type::Object) {
+                    ApplyAlphaHintsFromObject(
+                        *mtoon,
+                        "material.extensions.VRMC_materials_mtoon",
+                        &info.alpha_mode,
+                        &info.alpha_source,
+                        &info.alpha_cutoff);
                     std::vector<float> shade_color_factor;
                     if (TryGetNumberArray(*mtoon, "shadeColorFactor", 3U, &shade_color_factor)) {
                         info.shade_color = {shade_color_factor[0], shade_color_factor[1], shade_color_factor[2], 1.0f};
@@ -2263,6 +2481,33 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                         }
                     }
                 }
+            }
+            const auto* extras = FindKey(material, "extras");
+            if (extras != nullptr && extras->type == JsonValue::Type::Object) {
+                ApplyAlphaHintsFromObject(
+                    *extras,
+                    "material.extras",
+                    &info.alpha_mode,
+                    &info.alpha_source,
+                    &info.alpha_cutoff);
+            }
+            const JsonValue* vrm0_material_props = nullptr;
+            if (i < vrm0_material_properties_by_index.size()) {
+                vrm0_material_props = vrm0_material_properties_by_index[i];
+            }
+            if (vrm0_material_props == nullptr) {
+                const auto by_name_it = vrm0_material_properties_by_name.find(info.name);
+                if (by_name_it != vrm0_material_properties_by_name.end()) {
+                    vrm0_material_props = by_name_it->second;
+                }
+            }
+            if (vrm0_material_props != nullptr) {
+                ApplyAlphaHintsFromObject(
+                    *vrm0_material_props,
+                    "root.extensions.VRM.materialProperties",
+                    &info.alpha_mode,
+                    &info.alpha_source,
+                    &info.alpha_cutoff);
             }
             parsed_materials.push_back(std::move(info));
         }
@@ -2332,6 +2577,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         MaterialDiagnosticsEntry material_diag_entry;
         material_diag_entry.material_name = m.name;
         material_diag_entry.alpha_mode = m.alpha_mode;
+        material_diag_entry.alpha_source = m.alpha_source;
         material_diag_entry.alpha_cutoff = m.alpha_cutoff;
         material_diag_entry.double_sided = m.double_sided;
         material_diag_entry.has_mtoon_binding = m.has_mtoon_binding;
@@ -2347,6 +2593,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         std::ostringstream material_diag;
         material_diag << "W_MATERIAL: " << m.name
                       << ", alphaMode=" << m.alpha_mode
+                      << ", alphaSource=" << m.alpha_source
                       << ", alphaCutoff=" << m.alpha_cutoff
                       << ", doubleSided=" << (m.double_sided ? "true" : "false")
                       << ", mtoonBinding=" << (m.has_mtoon_binding ? "true" : "false");

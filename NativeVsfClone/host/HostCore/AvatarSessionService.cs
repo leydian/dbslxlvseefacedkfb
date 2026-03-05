@@ -36,6 +36,8 @@ public sealed class AvatarSessionService : IAvatarSessionService
 
     public NcResultCode LoadAvatar(string path)
     {
+        var previousHandle = ActiveAvatarHandle;
+        var previousInfo = ActiveAvatarInfo;
         var req = new NcAvatarLoadRequest
         {
             Path = path,
@@ -55,9 +57,15 @@ public sealed class AvatarSessionService : IAvatarSessionService
         if (rc != NcResultCode.Ok)
         {
             _ = NativeCoreInterop.nc_unload_avatar(handle);
-            ActiveAvatarHandle = null;
-            ActiveAvatarInfo = null;
+            ActiveAvatarHandle = previousHandle;
+            ActiveAvatarInfo = previousInfo;
             return rc;
+        }
+
+        if (previousHandle.HasValue)
+        {
+            _ = NativeCoreInterop.nc_destroy_render_resources(previousHandle.Value);
+            _ = NativeCoreInterop.nc_unload_avatar(previousHandle.Value);
         }
 
         ActiveAvatarHandle = handle;

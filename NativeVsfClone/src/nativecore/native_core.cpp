@@ -188,6 +188,7 @@ std::string BuildMaterialDiagSummary(const avatar::MaterialDiagnosticsEntry& dia
     std::ostringstream ss;
     ss << diag.material_name
        << ", alphaMode=" << diag.alpha_mode
+       << ", alphaSource=" << diag.alpha_source
        << ", alphaCutoff=" << diag.alpha_cutoff
        << ", doubleSided=" << (diag.double_sided ? "true" : "false")
        << ", mtoonBinding=" << (diag.has_mtoon_binding ? "true" : "false")

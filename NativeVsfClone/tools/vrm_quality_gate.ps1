@@ -99,6 +99,7 @@ foreach ($f in $candidates) {
         TexturePayloads = (To-Int "$($fields["TexturePayloads"])")
         ExpressionCount = (To-Int "$($fields["ExpressionCount"])")
         MaterialDiagnostics = (To-Int "$($fields["MaterialDiagnostics"])")
+        BlendMaterials = (To-Int "$($fields["BlendMaterials"])")
     }
 }
 
@@ -108,6 +109,8 @@ $gateC = $true  # material/texture minimum
 $gateD = $true  # expression extraction visibility
 $gateE = $true  # expression bind visibility
 $gateF = $true  # springbone metadata visibility
+$gateG = $true  # blend material coverage (informational when no blend samples)
+$gateGMode = "enforced"
 $failReasons = @()
 
 foreach ($r in $rows) {
@@ -155,6 +158,11 @@ if (-not $hasBoundExpression) {
     $gateE = $false
     $failReasons += "GateE: expected at least one sample with ExpressionBindTotal > 0"
 }
+$hasBlendMaterial = ($rows | Where-Object { $_.BlendMaterials -gt 0 } | Measure-Object).Count -gt 0
+if (-not $hasBlendMaterial) {
+    $gateG = $true
+    $gateGMode = "no-blend-sample"
+}
 
 $summary = @()
 $summary += "VRM Quality Gate Summary"
@@ -170,13 +178,14 @@ $summary += "- GateC (material+texture payload minimum): $(if($gateC){'PASS'}els
 $summary += "- GateD (expression count visibility): $(if($gateD){'PASS'}else{'FAIL'})"
 $summary += "- GateE (expression bind visibility): $(if($gateE){'PASS'}else{'FAIL'})"
 $summary += "- GateF (springbone metadata visibility): $(if($gateF){'PASS'}else{'FAIL'})"
+$summary += "- GateG (blend material coverage): $(if($gateG){'PASS'}else{'FAIL'}) [mode=$gateGMode]"
 $overall = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Per-sample"
 foreach ($r in $rows) {
-    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}, materialDiag={9}" -f
-        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount, $r.MaterialDiagnostics)
+    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}, materialDiag={9}, blendMat={10}" -f
+        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount, $r.MaterialDiagnostics, $r.BlendMaterials)
 }
 if ($failReasons.Count -gt 0) {
     $summary += ""

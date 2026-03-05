@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-06T02:40:20
+Generated: 2026-03-06T03:14:40
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -29,6 +29,13 @@ Load succeeded
   Warnings: 20
   WarningCodes: 0
   MaterialDiagnostics: 15
+  OpaqueMaterials: 15
+  MaskMaterials: 0
+  BlendMaterials: 0
+  WarningInfoCount: 0
+  WarningWarnCount: 0
+  WarningErrorCount: 0
+  CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Shoes_Black_02, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
@@ -63,6 +70,13 @@ Load succeeded
   Warnings: 23
   WarningCodes: 0
   MaterialDiagnostics: 18
+  OpaqueMaterials: 17
+  MaskMaterials: 1
+  BlendMaterials: 0
+  WarningInfoCount: 0
+  WarningWarnCount: 0
+  WarningErrorCount: 0
+  CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
@@ -97,6 +111,13 @@ Load succeeded
   Warnings: 23
   WarningCodes: 0
   MaterialDiagnostics: 18
+  OpaqueMaterials: 18
+  MaskMaterials: 0
+  BlendMaterials: 0
+  WarningInfoCount: 0
+  WarningWarnCount: 0
+  WarningErrorCount: 0
+  CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
@@ -131,6 +152,13 @@ Load succeeded
   Warnings: 23
   WarningCodes: 0
   MaterialDiagnostics: 18
+  OpaqueMaterials: 18
+  MaskMaterials: 0
+  BlendMaterials: 0
+  WarningInfoCount: 0
+  WarningWarnCount: 0
+  WarningErrorCount: 0
+  CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
@@ -165,6 +193,13 @@ Load succeeded
   Warnings: 17
   WarningCodes: 0
   MaterialDiagnostics: 12
+  OpaqueMaterials: 12
+  MaskMaterials: 0
+  BlendMaterials: 0
+  WarningInfoCount: 0
+  WarningWarnCount: 0
+  WarningErrorCount: 0
+  CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: hat, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 
 namespace HostCore;
 
@@ -17,6 +18,7 @@ public sealed partial class HostController
     private readonly IRenderPresetStore _presetStore;
     private readonly IPosePresetStore _posePresetStore;
     private readonly ITrackingInputService _trackingInputService;
+    private readonly object _runtimeSync = new();
     private readonly Queue<HostLogEntry> _logs = new();
     private RenderPresetStoreModel _presetStoreModel;
     private PosePresetStoreModel _posePresetStoreModel;
@@ -25,6 +27,7 @@ public sealed partial class HostController
     private long _logVersion;
     private bool _windowAttached;
     private IntPtr _windowHandle = IntPtr.Zero;
+    private bool _renderTickSuppressedByLoad;
     private bool _desiredSpoutActive;
     private bool _desiredOscActive;
     private DateTimeOffset _lastOutputStateSyncLogUtc = DateTimeOffset.MinValue;
@@ -219,21 +222,32 @@ public sealed partial class HostController
             var normalizedPath = path?.Trim() ?? string.Empty;
             _sessionPersistence = _sessionPersistence with { AvatarPath = normalizedPath, LastUpdatedUtc = DateTimeOffset.UtcNow };
             PersistSessionSnapshot();
-            if (_sessionService.ActiveAvatarHandle.HasValue)
-            {
-                TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
-            }
+            var previousHandle = _sessionService.ActiveAvatarHandle;
 
             var rc = _sessionService.LoadAvatar(normalizedPath);
             TrackResult("LoadAvatar", rc);
             if (rc == NcResultCode.Ok)
             {
+                if (previousHandle.HasValue)
+                {
+                    TrackResult("AvatarSwapCommitted", NcResultCode.Ok);
+                }
                 // Re-apply host-side render controls after avatar load in case
                 // the native side resets camera/quality state during load.
                 ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
                 _lastLoadFailureGuidance = string.Empty;
                 _lastLoadFailureTechnical = string.Empty;
+            }
+            else if (previousHandle.HasValue && _sessionService.ActiveAvatarHandle == previousHandle)
+            {
+                AddLog(
+                    new HostLogEntry(
+                        DateTimeOffset.UtcNow,
+                        "AvatarSwapAborted",
+                        $"load failed and active avatar preserved (rc={rc})",
+                        rc),
+                    false);
             }
 
             RefreshState();
@@ -631,6 +645,37 @@ public sealed partial class HostController
 
     public NcResultCode Tick(float deltaTimeSeconds)
     {
+        if (!Monitor.TryEnter(_runtimeSync))
+        {
+            if (OperationState.IsBusy &&
+                string.Equals(OperationState.CurrentOperation, "LoadAvatar", StringComparison.Ordinal) &&
+                !_renderTickSuppressedByLoad)
+            {
+                TrackResult("TickSuppressedByLoad", NcResultCode.Ok);
+                _renderTickSuppressedByLoad = true;
+            }
+            return SessionState.LastRenderRc;
+        }
+
+        try
+        {
+        var suppressRenderDuringLoad =
+            OperationState.IsBusy &&
+            string.Equals(OperationState.CurrentOperation, "LoadAvatar", StringComparison.Ordinal);
+        if (suppressRenderDuringLoad)
+        {
+            if (!_renderTickSuppressedByLoad)
+            {
+                TrackResult("RenderTickSkippedDuringLoad", NcResultCode.Ok);
+                _renderTickSuppressedByLoad = true;
+            }
+        }
+        else if (_renderTickSuppressedByLoad)
+        {
+            TrackResult("RenderTickResumedAfterLoad", NcResultCode.Ok);
+            _renderTickSuppressedByLoad = false;
+        }
+
         if (_trackingInputService.TryGetLatestFrame(out var trackingFrame))
         {
             var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref trackingFrame);
@@ -685,11 +730,15 @@ public sealed partial class HostController
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
         ReconcileTrackingDiagnostics();
 
-        var rc = _renderLoopService.Tick(deltaTimeSeconds);
-        SessionState = SessionState with { LastRenderRc = rc };
-        if (rc != NcResultCode.Ok)
+        var rc = NcResultCode.Ok;
+        if (!suppressRenderDuringLoad)
         {
-            TrackResult("RenderTick", rc);
+            rc = _renderLoopService.Tick(deltaTimeSeconds);
+            SessionState = SessionState with { LastRenderRc = rc };
+            if (rc != NcResultCode.Ok)
+            {
+                TrackResult("RenderTick", rc);
+            }
         }
 
         var refreshRc = _sessionService.RefreshAvatarInfo();
@@ -702,7 +751,9 @@ public sealed partial class HostController
         {
             CaptureRuntimeDiagnostics(runtimeStats);
 
-            if (_sessionService.ActiveAvatarHandle.HasValue && runtimeStats.RenderReadyAvatarCount == 0U)
+            if (!suppressRenderDuringLoad &&
+                _sessionService.ActiveAvatarHandle.HasValue &&
+                runtimeStats.RenderReadyAvatarCount == 0U)
             {
                 var recoverRc = NativeCoreInterop.nc_create_render_resources(_sessionService.ActiveAvatarHandle.Value);
                 TrackResult("RecoverRenderResources", recoverRc);
@@ -719,6 +770,11 @@ public sealed partial class HostController
 
         RefreshStateFastPath();
         return rc;
+        }
+        finally
+        {
+            Monitor.Exit(_runtimeSync);
+        }
     }
 
     public void RefreshState()
@@ -1247,7 +1303,10 @@ public sealed partial class HostController
         SetOperationState(true, operationName);
         try
         {
-            return action();
+            lock (_runtimeSync)
+            {
+                return action();
+            }
         }
         finally
         {

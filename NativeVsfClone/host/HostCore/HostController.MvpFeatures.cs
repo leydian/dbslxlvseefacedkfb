@@ -25,6 +25,7 @@ public sealed partial class HostController
     private bool _autoQualityDowngraded;
     private CancellationTokenSource? _loadCancellation;
     private Task<NcResultCode>? _activeLoadTask;
+    private Task<NcResultCode>? _activeLoadWorkerTask;
     private string _activeLoadOperationId = string.Empty;
     private long _loadOperationSequence;
     private SessionPersistenceModel _sessionPersistence = SessionPersistenceModel.CreateDefault();
@@ -556,6 +557,17 @@ public sealed partial class HostController
         {
             return _activeLoadTask;
         }
+        if (_activeLoadWorkerTask is { IsCompleted: false })
+        {
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "LoadAvatarAsync",
+                    "previous worker still active; rejecting overlapping load",
+                    NcResultCode.InvalidArgument),
+                false);
+            return Task.FromResult(NcResultCode.InvalidArgument);
+        }
 
         _loadCancellation?.Dispose();
         _loadCancellation = new CancellationTokenSource();
@@ -567,44 +579,97 @@ public sealed partial class HostController
 
         _activeLoadTask = Task.Run(async () =>
         {
+            Task<NcResultCode>? worker = null;
+            var timeoutObserved = false;
             try
             {
                 PublishLoadProgress(operationId, "validating", 15, "Validating avatar path and operation state.", false);
-                var worker = Task.Run(() => LoadAvatar(path), token);
+                worker = Task.Run(() => LoadAvatar(path));
+                _activeLoadWorkerTask = worker;
                 PublishLoadProgress(operationId, "loading", 70, "Loading avatar package and runtime payload.", false);
-                var rc = await worker.WaitAsync(TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs)), token);
+                var normalizedTimeout = TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs));
+                var completed = await Task.WhenAny(worker, Task.Delay(normalizedTimeout));
+                if (completed != worker)
+                {
+                    timeoutObserved = true;
+                    AddLog(
+                        new HostLogEntry(
+                            DateTimeOffset.UtcNow,
+                            "LoadTimeoutPendingWorker",
+                            $"timeout_ms={timeoutMs}; waiting for worker completion to prevent late state commit races",
+                            NcResultCode.Internal),
+                        false);
+                    PublishLoadProgress(operationId, "timeout-pending", 80, "Load timeout reached; waiting for worker to finish safely.", false);
+                }
+                if (token.IsCancellationRequested)
+                {
+                    AddLog(
+                        new HostLogEntry(
+                            DateTimeOffset.UtcNow,
+                            "LoadCancelPendingWorker",
+                            $"operation_id={operationId}; waiting for worker completion",
+                            NcResultCode.Internal),
+                        false);
+                    PublishLoadProgress(operationId, "cancel-pending", 80, "Cancel requested; waiting for safe worker completion.", false);
+                }
+
+                var rc = await worker;
                 if (!string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
                 {
+                    AddLog(
+                        new HostLogEntry(
+                            DateTimeOffset.UtcNow,
+                            "LoadLateCompletionDiscarded",
+                            $"operation_id={operationId}",
+                            rc),
+                        false);
                     return rc;
+                }
+                if (timeoutObserved)
+                {
+                    AddLog(
+                        new HostLogEntry(
+                            DateTimeOffset.UtcNow,
+                            "LoadCommitAccepted",
+                            $"operation_id={operationId}, rc={rc}",
+                            rc),
+                        false);
                 }
                 PublishLoadProgress(operationId, "finalizing", 95, "Finalizing avatar runtime state.", false);
                 PublishLoadProgress(operationId, "completed", rc == NcResultCode.Ok ? 100 : 0, rc == NcResultCode.Ok ? "Load completed." : $"Load failed: {rc}", true);
                 return rc;
             }
-            catch (OperationCanceledException)
+            catch (Exception ex)
             {
-                AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested", NcResultCode.Internal), false);
+                AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", $"unexpected failure: {ex.GetType().Name}", NcResultCode.Internal), true);
                 if (string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
                 {
-                    PublishLoadProgress(operationId, "canceled", 0, "Load canceled.", true);
-                }
-                return NcResultCode.Internal;
-            }
-            catch (TimeoutException)
-            {
-                AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "timeout exceeded", NcResultCode.Internal), true);
-                if (string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
-                {
-                    PublishLoadProgress(operationId, "timeout", 0, "Load timed out.", true);
+                    PublishLoadProgress(operationId, "failed", 0, "Load failed unexpectedly.", true);
                 }
                 return NcResultCode.Internal;
             }
             finally
             {
+                if (worker is { IsCompleted: false })
+                {
+                    try
+                    {
+                        _ = await worker;
+                    }
+                    catch
+                    {
+                        // Worker failure already represented in load state/logs.
+                    }
+                }
+
                 if (string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
                 {
                     _activeLoadOperationId = string.Empty;
                     _activeLoadTask = null;
+                }
+                if (_activeLoadWorkerTask == worker)
+                {
+                    _activeLoadWorkerTask = null;
                 }
                 RefreshState();
             }
@@ -621,9 +686,9 @@ public sealed partial class HostController
         }
 
         _loadCancellation.Cancel();
-        AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested by operator", NcResultCode.Ok), false);
+        AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested by operator (awaiting safe worker completion)", NcResultCode.Ok), false);
         var operationId = string.IsNullOrWhiteSpace(_activeLoadOperationId) ? "load-cancel" : _activeLoadOperationId;
-        PublishLoadProgress(operationId, "canceling", 0, "Cancel requested.", false);
+        PublishLoadProgress(operationId, "cancel-pending", 0, "Cancel requested; waiting for safe load finalization.", false);
     }
 
     private void RecordFrameMetricAndGuardrails(in NcRuntimeStats stats)

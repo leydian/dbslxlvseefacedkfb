@@ -49,18 +49,29 @@ namespace VsfClone.Xav2.Editor
             var modeLabel = relaxed ? "relaxed" : "strict";
             try
             {
-                var options = new Xav2ExportOptions
-                {
-                    FailOnMissingShader = !relaxed
-                };
+                var options = CreateDefaultExportOptions(relaxed);
                 Xav2Exporter.Export(output, selected, options);
-                Debug.Log($"[XAV2] Export complete ({modeLabel}): {Path.GetFullPath(output)}");
+                var compressionLabel = options.EnableCompression
+                    ? $"{options.CompressionCodec.ToString().ToLowerInvariant()}/{options.CompressionLevel.ToString().ToLowerInvariant()}"
+                    : "off";
+                Debug.Log($"[XAV2] Export complete ({modeLabel}, compression:{compressionLabel}): {Path.GetFullPath(output)}");
             }
             catch (System.Exception ex)
             {
                 Debug.LogError($"[XAV2] Export failed ({modeLabel}): {ex.Message}");
                 EditorUtility.DisplayDialog("XAV2 Export Failed", $"[{modeLabel}] {ex.Message}", "OK");
             }
+        }
+
+        internal static Xav2ExportOptions CreateDefaultExportOptions(bool relaxed)
+        {
+            return new Xav2ExportOptions
+            {
+                FailOnMissingShader = !relaxed,
+                EnableCompression = true,
+                CompressionCodec = Xav2CompressionCodec.Lz4,
+                CompressionLevel = Xav2CompressionLevel.Balanced
+            };
         }
     }
 }

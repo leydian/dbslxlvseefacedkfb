@@ -197,6 +197,22 @@ int main(int argc, char** argv) {
     std::cout << "  Warnings: " << info.warnings.size() << "\n";
     std::cout << "  WarningCodes: " << info.warning_codes.size() << "\n";
     std::cout << "  MaterialDiagnostics: " << info.material_diagnostics.size() << "\n";
+    std::size_t opaque_material_count = 0U;
+    std::size_t mask_material_count = 0U;
+    std::size_t blend_material_count = 0U;
+    for (const auto& diag : info.material_diagnostics) {
+        const auto alpha_mode = ToLower(diag.alpha_mode);
+        if (alpha_mode == "mask") {
+            ++mask_material_count;
+        } else if (alpha_mode == "blend") {
+            ++blend_material_count;
+        } else {
+            ++opaque_material_count;
+        }
+    }
+    std::cout << "  OpaqueMaterials: " << opaque_material_count << "\n";
+    std::cout << "  MaskMaterials: " << mask_material_count << "\n";
+    std::cout << "  BlendMaterials: " << blend_material_count << "\n";
     std::size_t warning_info_count = 0U;
     std::size_t warning_warn_count = 0U;
     std::size_t warning_error_count = 0U;
@@ -236,6 +252,7 @@ int main(int argc, char** argv) {
         const auto& diag = info.material_diagnostics.back();
         std::cout << "  LastMaterialDiag: " << diag.material_name
                   << ", alphaMode=" << diag.alpha_mode
+                  << ", alphaSource=" << diag.alpha_source
                   << ", alphaCutoff=" << diag.alpha_cutoff
                   << ", doubleSided=" << (diag.double_sided ? "true" : "false")
                   << ", mtoonBinding=" << (diag.has_mtoon_binding ? "true" : "false")

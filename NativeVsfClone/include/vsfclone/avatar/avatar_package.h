@@ -106,6 +106,7 @@ struct MaterialRenderPayload {
 struct MaterialDiagnosticsEntry {
     std::string material_name;
     std::string alpha_mode = "OPAQUE";
+    std::string alpha_source = "unknown";
     float alpha_cutoff = 0.5f;
     bool double_sided = false;
     bool has_mtoon_binding = false;

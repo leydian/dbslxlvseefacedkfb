@@ -1161,12 +1161,14 @@ public sealed partial class MainWindow : Window
             avatarSb.AppendLine($"WarningCodeCount: {info.WarningCodeCount}");
             avatarSb.AppendLine($"CriticalWarningCount: {info.CriticalWarningCount}");
             avatarSb.AppendLine($"MaterialDiagCount: {info.MaterialDiagCount}");
+            avatarSb.AppendLine($"MaterialModes: opaque={info.OpaqueMaterialCount}, mask={info.MaskMaterialCount}, blend={info.BlendMaterialCount}");
             avatarSb.AppendLine($"LastWarningCode: {NormalizeDiagField(info.LastWarningCode)}");
             avatarSb.AppendLine($"LastWarningSeverity: {NormalizeDiagField(info.LastWarningSeverity)}");
             avatarSb.AppendLine($"LastWarningCategory: {NormalizeDiagField(info.LastWarningCategory)}");
             avatarSb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
             avatarSb.AppendLine($"LastMaterialDiag: {info.LastMaterialDiag}");
+            avatarSb.AppendLine($"LastRenderPassSummary: {NormalizeDiagField(info.LastRenderPassSummary)}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
 

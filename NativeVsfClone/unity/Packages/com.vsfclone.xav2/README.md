@@ -21,6 +21,7 @@ If a material in the export target set references a shader outside this list, ex
 
 - Export:
   - `Tools/VsfClone/XAV2/Export Selected AvatarRoot`
+  - menu export defaults to compression enabled (`LZ4/Balanced`, format `v5`)
 - Import:
   - `Tools/VsfClone/XAV2/Import XAV2...`
   - Output root default: `Assets/ImportedXav2/<avatarId>/`

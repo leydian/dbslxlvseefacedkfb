@@ -4,6 +4,8 @@ param(
     [switch]$SkipNativeBuild,
     [switch]$IncludeWinUi,
     [switch]$NoRestore,
+    [ValidateSet("default", "offline-only")][string]$NuGetSourceMode = "default",
+    [string]$OfflineSourcePath = ".\build\nuget-mirror",
     [bool]$CollectWinUiDiagnostics = $true,
     [bool]$CollectManagedXamlDiagnostics = $true,
     [string]$WinUiDiagDir = ".\build\reports\winui",
@@ -188,6 +190,27 @@ function Invoke-DotNetCommandWithRetry {
     }
 }
 
+function Get-NuGetPublishArgs {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("default", "offline-only")][string]$SourceMode,
+        [Parameter(Mandatory = $true)][string]$ResolvedOfflineSourcePath
+    )
+
+    $args = [System.Collections.Generic.List[string]]::new()
+    # Avoid online vulnerability feed checks in restricted environments.
+    $args.Add("-p:NuGetAudit=false")
+    if ($SourceMode -eq "offline-only") {
+        if (-not (Test-Path $ResolvedOfflineSourcePath)) {
+            throw "Offline source path not found: $ResolvedOfflineSourcePath"
+        }
+        $args.Add("--source")
+        $args.Add($ResolvedOfflineSourcePath)
+        $args.Add("-p:RestoreIgnoreFailedSources=true")
+    }
+
+    return $args.ToArray()
+}
+
 function Get-NuGetSourceProbe {
     param([int]$TimeoutSeconds = 8)
 
@@ -324,6 +347,11 @@ $resolvedWpfLaunchSmokeReportPath = if ([System.IO.Path]::IsPathRooted($WpfLaunc
 } else {
     [System.IO.Path]::GetFullPath((Join-Path $repoRoot $WpfLaunchSmokeReportPath))
 }
+$resolvedOfflineSourcePath = if ([System.IO.Path]::IsPathRooted($OfflineSourcePath)) {
+    [System.IO.Path]::GetFullPath($OfflineSourcePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OfflineSourcePath))
+}
 $distRoot = Join-Path $repoRoot "dist"
 $wpfDist = Join-Path $distRoot "wpf"
 $winUiDist = Join-Path $distRoot "winui"
@@ -342,6 +370,8 @@ $log.Add("Configuration: $Configuration")
 $log.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $log.Add("IncludeWinUi: $IncludeWinUi")
 $log.Add("NoRestore: $NoRestore")
+$log.Add("NuGetSourceMode: $NuGetSourceMode")
+$log.Add("OfflineSourcePath: $resolvedOfflineSourcePath")
 $log.Add("CollectWinUiDiagnostics: $CollectWinUiDiagnostics")
 $log.Add("CollectManagedXamlDiagnostics: $CollectManagedXamlDiagnostics")
 $log.Add("WinUiDiagnosticsProfile: $WinUiDiagnosticsProfile")
@@ -362,6 +392,7 @@ $log.Add("NuGetProbeTimeoutSeconds: $NuGetProbeTimeoutSeconds")
 
 Assert-Command "cmake"
 Assert-Command "dotnet"
+$nugetPublishArgs = Get-NuGetPublishArgs -SourceMode $NuGetSourceMode -ResolvedOfflineSourcePath $resolvedOfflineSourcePath
 
 Stop-IfRunning "WpfHost"
 Stop-IfRunning "WinUiHost"
@@ -875,8 +906,10 @@ function Collect-WinUiDiagnostics {
         "-v:diag",
         "-bl:$binlogPath"
     )
+    $diagArgs += $nugetPublishArgs
     if ($NoRestore) {
         $diagArgs += "--no-restore"
+        $diagArgs += "/p:Restore=false"
     }
     $diagCommandText = "dotnet " + ($diagArgs -join " ")
     Push-Location $repoRoot
@@ -912,8 +945,10 @@ function Collect-WinUiDiagnostics {
             "-v:m",
             "-p:UseXamlCompilerExecutable=false"
         )
+        $managedDiagArgs += $nugetPublishArgs
         if ($NoRestore) {
             $managedDiagArgs += "--no-restore"
+            $managedDiagArgs += "/p:Restore=false"
         }
         $managedDiagCommandText = "dotnet " + ($managedDiagArgs -join " ")
         Push-Location $repoRoot
@@ -1024,8 +1059,10 @@ try {
         "/p:PublishTrimmed=false",
         "-o", $wpfDist
     )
+    $wpfPublishArgs += $nugetPublishArgs
     if ($NoRestore) {
         $wpfPublishArgs += "--no-restore"
+        $wpfPublishArgs += "/p:Restore=false"
     }
     Invoke-DotNetCommandWithRetry -Description "WPF publish" -Args $wpfPublishArgs -RetryCount $WinUiRestoreRetryCount
 
@@ -1123,8 +1160,10 @@ if ($IncludeWinUi) {
             "/p:WindowsAppSDKSelfContained=true",
             "-o", $winUiDist
         )
+        $winUiPublishArgs += $nugetPublishArgs
         if ($NoRestore) {
             $winUiPublishArgs += "--no-restore"
+            $winUiPublishArgs += "/p:Restore=false"
         }
         Invoke-DotNetCommandWithRetry -Description "WinUI publish" -Args $winUiPublishArgs -RetryCount $WinUiRestoreRetryCount
 

@@ -86,6 +86,9 @@ public struct NcAvatarInfo
     public uint WarningCodeCount;
     public uint CriticalWarningCount;
     public uint MaterialDiagCount;
+    public uint OpaqueMaterialCount;
+    public uint MaskMaterialCount;
+    public uint BlendMaterialCount;
     public uint MissingFeatureCount;
     public uint ExpressionCount;
     public uint LastRenderDrawCalls;
@@ -109,6 +112,8 @@ public struct NcAvatarInfo
     public string LastWarning;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
     public string LastMaterialDiag;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string LastRenderPassSummary;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
     public string LastMissingFeature;
 }
