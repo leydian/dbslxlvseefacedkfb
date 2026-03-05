@@ -8,6 +8,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <regex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -565,6 +566,29 @@ bool ParseMaterialShaderParamsSection(
     return cursor == end;
 }
 
+std::optional<bool> ExtractBoolField(const std::string& json, const std::string& key) {
+    const std::string token = "\"" + key + "\"";
+    const std::size_t key_pos = json.find(token);
+    if (key_pos == std::string::npos) {
+        return std::nullopt;
+    }
+    const std::size_t colon = json.find(':', key_pos + token.size());
+    if (colon == std::string::npos) {
+        return std::nullopt;
+    }
+    std::size_t i = colon + 1U;
+    while (i < json.size() && std::isspace(static_cast<unsigned char>(json[i])) != 0) {
+        ++i;
+    }
+    if (i + 4U <= json.size() && json.compare(i, 4U, "true") == 0) {
+        return true;
+    }
+    if (i + 5U <= json.size() && json.compare(i, 5U, "false") == 0) {
+        return false;
+    }
+    return std::nullopt;
+}
+
 bool ParseSkeletonPosePayloadSection(
     const std::vector<std::uint8_t>& bytes,
     std::size_t payload_offset,
@@ -661,6 +685,7 @@ bool ParseMaterialTypedParamsSection(
     const std::vector<std::uint8_t>& bytes,
     std::size_t payload_offset,
     std::size_t payload_size,
+    bool prefer_typed_v3,
     MaterialRenderPayload* out_payload) {
     if (out_payload == nullptr) {
         return false;
@@ -679,71 +704,115 @@ bool ParseMaterialTypedParamsSection(
     }
     cursor += 4U;
     out_payload->feature_flags = *feature_flags;
+    out_payload->typed_schema_version = 2U;
     out_payload->material_param_encoding = "typed-v2";
     out_payload->typed_float_params.clear();
     out_payload->typed_color_params.clear();
     out_payload->typed_texture_params.clear();
+    const auto parse_typed_body = [&](std::size_t body_cursor, std::uint16_t float_count, MaterialRenderPayload* dst) -> bool {
+        dst->typed_float_params.clear();
+        dst->typed_color_params.clear();
+        dst->typed_texture_params.clear();
 
-    const auto float_count = ReadU16Le(bytes, cursor);
-    if (!float_count) {
-        return false;
-    }
-    cursor += 2U;
-    out_payload->typed_float_params.reserve(*float_count);
-    for (std::size_t i = 0U; i < *float_count; ++i) {
-        MaterialRenderPayload::TypedFloatParam p;
-        if (!ReadSizedString(bytes, &cursor, end, &p.id) || p.id.empty()) {
-            return false;
-        }
-        const auto value_bits = ReadU32Le(bytes, cursor);
-        if (!value_bits) {
-            return false;
-        }
-        cursor += 4U;
-        std::memcpy(&p.value, &(*value_bits), sizeof(float));
-        out_payload->typed_float_params.push_back(std::move(p));
-    }
-
-    const auto color_count = ReadU16Le(bytes, cursor);
-    if (!color_count) {
-        return false;
-    }
-    cursor += 2U;
-    out_payload->typed_color_params.reserve(*color_count);
-    for (std::size_t i = 0U; i < *color_count; ++i) {
-        MaterialRenderPayload::TypedColorParam p;
-        if (!ReadSizedString(bytes, &cursor, end, &p.id) || p.id.empty()) {
-            return false;
-        }
-        for (std::size_t c = 0U; c < 4U; ++c) {
-            const auto f32_bits = ReadU32Le(bytes, cursor);
-            if (!f32_bits) {
+        dst->typed_float_params.reserve(float_count);
+        for (std::size_t i = 0U; i < float_count; ++i) {
+            MaterialRenderPayload::TypedFloatParam p;
+            if (!ReadSizedString(bytes, &body_cursor, end, &p.id) || p.id.empty()) {
                 return false;
             }
-            cursor += 4U;
-            std::memcpy(&p.rgba[c], &(*f32_bits), sizeof(float));
+            const auto value_bits = ReadU32Le(bytes, body_cursor);
+            if (!value_bits) {
+                return false;
+            }
+            body_cursor += 4U;
+            std::memcpy(&p.value, &(*value_bits), sizeof(float));
+            dst->typed_float_params.push_back(std::move(p));
         }
-        out_payload->typed_color_params.push_back(std::move(p));
-    }
 
-    const auto texture_count = ReadU16Le(bytes, cursor);
-    if (!texture_count) {
+        const auto color_count = ReadU16Le(bytes, body_cursor);
+        if (!color_count) {
+            return false;
+        }
+        body_cursor += 2U;
+        dst->typed_color_params.reserve(*color_count);
+        for (std::size_t i = 0U; i < *color_count; ++i) {
+            MaterialRenderPayload::TypedColorParam p;
+            if (!ReadSizedString(bytes, &body_cursor, end, &p.id) || p.id.empty()) {
+                return false;
+            }
+            for (std::size_t c = 0U; c < 4U; ++c) {
+                const auto f32_bits = ReadU32Le(bytes, body_cursor);
+                if (!f32_bits) {
+                    return false;
+                }
+                body_cursor += 4U;
+                std::memcpy(&p.rgba[c], &(*f32_bits), sizeof(float));
+            }
+            dst->typed_color_params.push_back(std::move(p));
+        }
+
+        const auto texture_count = ReadU16Le(bytes, body_cursor);
+        if (!texture_count) {
+            return false;
+        }
+        body_cursor += 2U;
+        dst->typed_texture_params.reserve(*texture_count);
+        for (std::size_t i = 0U; i < *texture_count; ++i) {
+            MaterialRenderPayload::TypedTextureParam p;
+            if (!ReadSizedString(bytes, &body_cursor, end, &p.slot) || p.slot.empty()) {
+                return false;
+            }
+            if (!ReadSizedString(bytes, &body_cursor, end, &p.texture_ref) || p.texture_ref.empty()) {
+                return false;
+            }
+            dst->typed_texture_params.push_back(std::move(p));
+        }
+        return body_cursor == end;
+    };
+
+    const auto first_u16 = ReadU16Le(bytes, cursor);
+    if (!first_u16) {
         return false;
     }
     cursor += 2U;
-    out_payload->typed_texture_params.reserve(*texture_count);
-    for (std::size_t i = 0U; i < *texture_count; ++i) {
-        MaterialRenderPayload::TypedTextureParam p;
-        if (!ReadSizedString(bytes, &cursor, end, &p.slot) || p.slot.empty()) {
-            return false;
+
+    MaterialRenderPayload parsed_payload = *out_payload;
+    bool parsed = false;
+
+    if (prefer_typed_v3 && *first_u16 >= 3U) {
+        const std::uint16_t schema_version = *first_u16;
+        std::size_t schema_cursor = cursor;
+        const auto float_count = ReadU16Le(bytes, schema_cursor);
+        if (float_count) {
+            schema_cursor += 2U;
+            parsed_payload.typed_schema_version = schema_version;
+            parsed_payload.material_param_encoding = "typed-v" + std::to_string(schema_version);
+            parsed = parse_typed_body(schema_cursor, *float_count, &parsed_payload);
         }
-        if (!ReadSizedString(bytes, &cursor, end, &p.texture_ref) || p.texture_ref.empty()) {
-            return false;
-        }
-        out_payload->typed_texture_params.push_back(std::move(p));
     }
 
-    return cursor == end;
+    if (!parsed) {
+        parsed_payload.typed_schema_version = 2U;
+        parsed_payload.material_param_encoding = "typed-v2";
+        parsed = parse_typed_body(cursor, *first_u16, &parsed_payload);
+    }
+    if (!parsed && (!prefer_typed_v3) && *first_u16 >= 3U) {
+        const std::uint16_t schema_version = *first_u16;
+        std::size_t schema_cursor = cursor;
+        const auto float_count = ReadU16Le(bytes, schema_cursor);
+        if (float_count) {
+            schema_cursor += 2U;
+            parsed_payload.typed_schema_version = schema_version;
+            parsed_payload.material_param_encoding = "typed-v" + std::to_string(schema_version);
+            parsed = parse_typed_body(schema_cursor, *float_count, &parsed_payload);
+        }
+    }
+    if (!parsed) {
+        return false;
+    }
+
+    *out_payload = std::move(parsed_payload);
+    return true;
 }
 
 bool Lz4DecompressRawBounded(
@@ -843,9 +912,44 @@ void AppendWarningCode(AvatarPackage* pkg, const std::string& warning) {
     if (sep == std::string::npos || sep == 0U) {
         return;
     }
-    const std::string code = warning.substr(0U, sep);
-    if (!code.empty()) {
-        pkg->warning_codes.push_back(code);
+    const auto trim = [](std::string s) {
+        const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
+        while (!s.empty() && is_space(static_cast<unsigned char>(s.front()))) {
+            s.erase(s.begin());
+        }
+        while (!s.empty() && is_space(static_cast<unsigned char>(s.back()))) {
+            s.pop_back();
+        }
+        return s;
+    };
+    const std::string prefix = trim(warning.substr(0U, sep));
+    if (prefix.empty()) {
+        return;
+    }
+    // Stage/event markers are useful for diagnostics text, but should not be treated as quality warning codes.
+    if (prefix == "W_STAGE") {
+        return;
+    }
+
+    std::string resolved_code = prefix;
+    if ((prefix.rfind("W_", 0U) == 0U) || (prefix.rfind("E_", 0U) == 0U)) {
+        const std::size_t payload_start = sep + 1U;
+        const std::size_t sep2 = warning.find(':', payload_start);
+        const std::string candidate =
+            trim(warning.substr(payload_start, sep2 == std::string::npos ? std::string::npos : (sep2 - payload_start)));
+        static const std::regex kCodePattern("^[A-Z0-9_]+$");
+        if (!candidate.empty() && std::regex_match(candidate, kCodePattern)) {
+            resolved_code = candidate;
+        } else if (prefix == "W_PAYLOAD") {
+            // Generic payload note without stable code: keep text warning only.
+            return;
+        }
+    }
+    if (!resolved_code.empty()) {
+        if (resolved_code.size() > 8U && resolved_code.rfind("_PARTIAL") == (resolved_code.size() - 8U)) {
+            return;
+        }
+        pkg->warning_codes.push_back(resolved_code);
     }
 }
 
@@ -939,6 +1043,11 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         return core::Result<AvatarPackage>::Ok(pkg);
     }
     PushWarning(&pkg, "W_STAGE: resolve");
+    std::string manifest_material_param_encoding = "legacy-json";
+    if (const auto encoding = ExtractStringField(manifest, "materialParamEncoding"); encoding && !encoding->empty()) {
+        manifest_material_param_encoding = ToLower(*encoding);
+    }
+    const bool expects_blendshapes = ExtractBoolField(manifest, "hasBlendShapes").value_or(false);
 
     for (const std::string& mesh_ref : mesh_refs) {
         pkg.meshes.push_back({mesh_ref, 0U, 0U});
@@ -1046,7 +1155,12 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionMaterialTypedParams) {
             MaterialRenderPayload typed_payload;
-            if (!ParseMaterialTypedParamsSection(section_payload, 0U, section_payload.size(), &typed_payload)) {
+            if (!ParseMaterialTypedParamsSection(
+                    section_payload,
+                    0U,
+                    section_payload.size(),
+                    manifest_material_param_encoding == "typed-v3",
+                    &typed_payload)) {
                 pkg.primary_error_code = "XAV2_MATERIAL_TYPED_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -1172,7 +1286,8 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         const auto typed_it = material_typed_sections.find(key);
         if (typed_it != material_typed_sections.end()) {
             payload.shader_family = typed_it->second.shader_family;
-            payload.material_param_encoding = "typed-v2";
+            payload.material_param_encoding = typed_it->second.material_param_encoding;
+            payload.typed_schema_version = typed_it->second.typed_schema_version;
             payload.feature_flags = typed_it->second.feature_flags;
             payload.typed_float_params = typed_it->second.typed_float_params;
             payload.typed_color_params = typed_it->second.typed_color_params;
@@ -1271,7 +1386,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             }
         }
     }
-    if (!blendshape_sections.empty() && pkg.blendshape_payloads.size() != mesh_refs.size()) {
+    if (expects_blendshapes && !blendshape_sections.empty() && pkg.blendshape_payloads.size() != mesh_refs.size()) {
         PushWarning(
             &pkg,
             "W_PAYLOAD: XAV2_BLENDSHAPE_PARTIAL: blendshape sections=" + std::to_string(blendshape_sections.size()) +

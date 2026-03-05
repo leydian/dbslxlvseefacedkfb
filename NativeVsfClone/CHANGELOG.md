@@ -2,6 +2,57 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 10/10 gate hardening baseline (sample-count + warning-zero + manifest checks)
+
+### Summary
+
+Implemented the baseline guardrails required for a stricter XAV2 quality target: minimum sample-count policy, zero-warning enforcement path, and manifest-based expected-result matching.
+
+### Changed
+
+- XAV2 warning-code accumulation normalization:
+  - `src/avatar/xav2_loader.cpp`
+  - stage/lifecycle warnings (`W_STAGE`) are no longer accumulated into `warning_codes[]`.
+  - generic payload notes without stable code token are excluded from `warning_codes[]`.
+  - compatibility-note codes with suffix `_PARTIAL` are excluded from `warning_codes[]` while text warnings remain.
+  - warning-code extraction now prefers stable second-token codes (for `W_*/E_*` records) when available.
+- XAV2 regression gate strictness expansion:
+  - `tools/xav2_render_regression_gate.ps1`
+  - default `-MinSampleCount` raised to `10`.
+  - added `-FailOnAnyWarnings` (`GateX6`) to enforce zero warning-code policy.
+  - added sample-manifest contract inputs:
+    - `-SampleManifestPath`
+    - `-FailOnManifestMismatch` (`GateX7`)
+  - summary/json output now includes sample class and expected-result fields.
+- sample-manifest template:
+  - `tools/xav2_gate_sample_manifest.example.json`
+  - includes a 10-sample target layout (`normal/boundary/corrupt`) with expected results.
+- docs sync:
+  - `docs/formats/xav2.md`
+  - documented warning-code accumulation notes for stage/generic/partial diagnostics.
+
+### Verification
+
+Executed in this environment:
+
+```powershell
+cmake --build NativeVsfClone\build --config Release --target avatar_tool
+NativeVsfClone\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"
+powershell -ExecutionPolicy Bypass -File NativeVsfClone\tools\xav2_render_regression_gate.ps1 `
+  -SampleDir D:\dbslxlvseefacedkfb `
+  -AvatarToolPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\Release\avatar_tool.exe `
+  -FailOnRenderWarnings -FailOnAnyWarnings
+```
+
+Result:
+
+- sample-level warning-code set reduced to zero (`WarningCodes=0`, `CriticalWarningCount=0`) on current local sample.
+- strict gate baseline currently fails only at sample-count policy:
+  - `GateX0` FAIL (`MinSampleCount=10`, current `SampleCount=1`)
+  - `GateX1..X7` PASS
+- detailed execution report:
+  - `docs/reports/xav2_10of10_gate_execution_2026-03-06.md`
+
 ## 2026-03-06 - XAV2 warning contract and regression gate upgrade
 
 ### Summary

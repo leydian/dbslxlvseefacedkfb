@@ -96,13 +96,14 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 
 `params_json` is a shader-specific payload (for example lilToon/Poiyomi parameter blocks).
 
-### `0x0015` Material typed params (v2)
+### `0x0015` Material typed params (v2/v3)
 
 - `name_len[2]`
 - `name[name_len]`
 - `shader_family_len[2]`
 - `shader_family[shader_family_len]` (`liltoon|legacy`)
 - `feature_flags[4]` (`uint32` bitmask)
+- optional `typed_schema_version[2]` (`v3+`, current value `3`)
 - `float_count[2]`
 - repeated float entry:
   - `id_len[2]`
@@ -120,7 +121,11 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
   - `texture_ref_len[2]`
   - `texture_ref[texture_ref_len]`
 
-For current implementation, `liltoon` typed fields are preferred over legacy `params_json` when both are present.
+For current implementation:
+
+- `typed-v3` is preferred when present.
+- `typed-v2` remains accepted for backward compatibility.
+- typed fields are preferred over legacy `params_json` when both are present.
 
 ### `0x0013` Skin payload
 
@@ -200,3 +205,7 @@ Notes:
     - `XAV3_SKELETON_MESH_BIND_MISMATCH`
     - `XAV3_SKINNING_MATRIX_INVALID`
     - `XAV2_UNKNOWN_SECTION_NOT_ALLOWED`
+- warning-code accumulation notes:
+  - `W_STAGE` is treated as lifecycle telemetry and is not accumulated into `warning_codes[]`.
+  - generic payload notes without stable code token are not accumulated into `warning_codes[]`.
+  - `*_PARTIAL` compatibility notes are kept in `warnings[]` but excluded from `warning_codes[]`.
