@@ -106,3 +106,15 @@ This evidence document is considered complete when:
 ## Status Board Link
 
 - consolidated tracker: `docs/reports/host_blocker_status_board_2026-03-05.md`
+
+## Follow-up Update (2026-03-05, post-automation rerun)
+
+- executed direct smoke probe using `tools/wpf_launch_smoke.ps1` against `dist/wpf/WpfHost.exe`
+- latest artifact:
+  - `build/reports/wpf_launch_smoke_latest.txt`
+  - `WPF launch smoke run: 2026-03-05T17:25:43.9247110+09:00`
+  - `Status: FAIL`
+  - `ExitCode: -532462766`
+- note:
+  - this run did not capture a fresh matching Application event within the script window
+  - historical evidence from same-day runs still shows `.NET Runtime` event `1026` with `System.DllNotFoundException`

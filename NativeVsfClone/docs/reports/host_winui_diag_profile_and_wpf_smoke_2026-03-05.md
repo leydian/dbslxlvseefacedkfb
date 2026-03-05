@@ -16,6 +16,7 @@ Implemented outcomes:
 
 - `tools/publish_hosts.ps1`
 - `tools/wpf_launch_smoke.ps1` (new)
+- `tools/compare_winui_diag_manifest.ps1` (new)
 - `.github/workflows/host-publish.yml`
 - `docs/reports/host_blocker_status_board_2026-03-05.md` (new)
 - report link updates in:
@@ -81,6 +82,10 @@ Behavior:
 - writes `build/reports/wpf_launch_smoke_latest.txt`
 - optional fail-fast mode via `TreatFailureAsError`
 
+Follow-up hardening in same day:
+
+- event-log collection now captures related `Application` log entries across IDs `1026/1000/1001` for `WpfHost.exe` and `DllNotFoundException` matching.
+
 ### 3) `.github/workflows/host-publish.yml`
 
 Workflow changes:
@@ -98,6 +103,22 @@ Workflow changes:
   - `build/reports/winui/winui_build_diag.log`
   - `build/reports/winui/winui_build_managed_diag.log`
   - `build/reports/winui/obj-dump/**`
+
+### 4) `tools/compare_winui_diag_manifest.ps1` (new)
+
+Behavior:
+
+- compares two WinUI diagnostic manifests and writes a deterministic diff report.
+- validates and reports drift for:
+  - `failure_class`
+  - `failure_class_confidence`
+  - preflight status/check list
+  - `root_cause_hints`
+  - `profiles[]` (`name`, `enabled`, `exit_code`, profile hints)
+
+Output:
+
+- default report path: `build/reports/winui_manifest_diff_latest.txt`
 
 ## Artifact Contract (Current)
 
@@ -117,6 +138,35 @@ Workflow changes:
 - smoke-script functional sanity check:
   - launched `notepad.exe` as probe target
   - report generated and returned `PASS`
+
+## Follow-up Execution Snapshot (2026-03-05, post-implementation rerun)
+
+Executed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
+powershell -ExecutionPolicy Bypass -File .\tools\compare_winui_diag_manifest.ps1 `
+  -BaseManifestPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\reports\winui\winui_diagnostic_manifest_run1.json `
+  -TargetManifestPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\reports\winui\winui_diagnostic_manifest_run2.json `
+  -OutputPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\reports\winui_manifest_diff_run1_vs_run2.txt
+powershell -ExecutionPolicy Bypass -File .\tools\wpf_launch_smoke.ps1 `
+  -ExePath D:\dbslxlvseefacedkfb\NativeVsfClone\dist\wpf\WpfHost.exe `
+  -WorkingDirectory D:\dbslxlvseefacedkfb\NativeVsfClone\dist\wpf
+```
+
+Observed outcomes:
+
+- host rerun (`run1`: `2026-03-05T17:22:15.0329753+09:00`, `run2`: `2026-03-05T17:23:04.7308102+09:00`)
+  - WPF publish: FAIL (`NU1301` network/restore path)
+  - WinUI preflight: FAIL (`MISSING_MSBUILD_DISCOVERY`)
+  - WinUI failure class: `TOOLCHAIN_VISUAL_STUDIO_INCOMPLETE`
+- manifest diff:
+  - `build/reports/winui_manifest_diff_run1_vs_run2.txt`
+  - result: all tracked fields `SAME` (decision path deterministic)
+- WPF launch smoke rerun:
+  - `2026-03-05T17:25:43.9247110+09:00`
+  - `Status=FAIL`, `ExitCode=-532462766`
 
 ## Open Follow-up Items
 

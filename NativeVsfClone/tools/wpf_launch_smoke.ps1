@@ -27,6 +27,7 @@ $resolvedReportPath = Resolve-AbsolutePath -Path $ReportPath -BaseDirectory $rep
 $reportDir = Split-Path -Parent $resolvedReportPath
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 
+$runStart = Get-Date
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("WPF launch smoke run: $(Get-Date -Format o)")
 $lines.Add("ExePath: $resolvedExePath")
@@ -70,26 +71,27 @@ try {
 $lines.Add("Status: $status")
 $lines.Add("ExitCode: $exitCode")
 
-$startTime = (Get-Date).AddMinutes(-20)
+$startTime = $runStart.AddMinutes(-10)
 try {
     $events = Get-WinEvent -FilterHashtable @{
         LogName = "Application"
-        ProviderName = ".NET Runtime"
-        Id = 1026
         StartTime = $startTime
-    } -ErrorAction SilentlyContinue | Select-Object -First 3
+    } -ErrorAction SilentlyContinue | Where-Object {
+        ($_.Id -in @(1026, 1000, 1001)) -and ($_.Message -match "WpfHost\.exe|DllNotFoundException")
+    } | Select-Object -First 5
+
     if ($null -ne $events -and @($events).Count -gt 0) {
-        $lines.Add("EventLog: .NET Runtime 1026 entries (latest up to 3)")
+        $lines.Add("EventLog: related Application entries (IDs 1026/1000/1001, latest up to 5)")
         foreach ($event in $events) {
             $msg = "$($event.Message)"
             $msg = $msg -replace "`r", " " -replace "`n", " "
             if ($msg.Length -gt 500) {
                 $msg = $msg.Substring(0, 500)
             }
-            $lines.Add(" - [$($event.TimeCreated.ToString("o"))] $msg")
+            $lines.Add(" - [$($event.TimeCreated.ToString("o"))] id=$($event.Id) provider=$($event.ProviderName) $msg")
         }
     } else {
-        $lines.Add("EventLog: no .NET Runtime 1026 entries found in last 20 minutes.")
+        $lines.Add("EventLog: no related entries found in last 10 minutes.")
     }
 } catch {
     $lines.Add("EventLog: query failed ($($_.Exception.Message))")

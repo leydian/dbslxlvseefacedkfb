@@ -2,6 +2,47 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Host follow-up execution: deterministic rerun evidence + manifest diff utility
+
+### Summary
+
+Executed the planned post-implementation verification loop and added a dedicated WinUI manifest diff utility for deterministic comparison.
+
+- ran `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi` twice and archived rerun snapshots (`run1`, `run2`)
+- observed stable failure classification across reruns:
+  - `failure_class=TOOLCHAIN_VISUAL_STUDIO_INCOMPLETE`
+  - preflight fail: `MISSING_MSBUILD_DISCOVERY`
+- captured persistent WPF launch smoke failure (`ExitCode=-532462766`) in direct rerun
+- expanded smoke event capture to include Application log IDs `1026/1000/1001`
+
+### Changed
+
+- `tools/compare_winui_diag_manifest.ps1` (new)
+  - compares two WinUI diagnostics manifests and outputs drift report for:
+    - `failure_class`
+    - preflight status/checks
+    - root-cause hints
+    - profile-level fields (`name`, `enabled`, `exit_code`, hints)
+  - output example:
+    - `build/reports/winui_manifest_diff_run1_vs_run2.txt`
+
+- `tools/wpf_launch_smoke.ps1`
+  - event-log collection broadened from only `.NET Runtime` `1026` to related Application entries:
+    - `.NET Runtime` `1026`
+    - `Application Error` `1000`
+    - `Windows Error Reporting` `1001`
+  - message filter aligned to `WpfHost.exe|DllNotFoundException`
+
+- `docs/reports/host_blocker_status_board_2026-03-05.md`
+  - refreshed latest blocker class and rerun evidence snapshot
+  - linked deterministic diff output evidence
+
+- `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md`
+  - appended follow-up execution results and utility/script updates
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - appended latest direct smoke rerun outcome and event-capture note
+
 ## 2026-03-05 - WinUI diagnostics profile expansion + CI matrix + WPF launch smoke automation
 
 ### Summary
