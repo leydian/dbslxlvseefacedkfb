@@ -23,6 +23,7 @@ Primary intent:
 - `host/HostCore/NativeCoreInterop.cs`
 - `host/HostCore/PlatformFeatures.cs`
 - `host/HostCore/TrackingInputService.cs`
+- `host/WinUiHost/MainWindow.xaml`
 - `host/WinUiHost/MainWindow.xaml.cs`
 - `host/WpfHost/MainWindow.xaml`
 - `host/WpfHost/MainWindow.xaml.cs`
@@ -77,6 +78,7 @@ Updated:
 - `include/vsfclone/nativecore/api.h`
 - `host/WpfHost/MainWindow.xaml`
 - `host/WpfHost/MainWindow.xaml.cs`
+- `host/WinUiHost/MainWindow.xaml`
 - `host/WinUiHost/MainWindow.xaml.cs`
 
 Key changes:
