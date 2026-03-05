@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private string _lastRuntimeText = string.Empty;
     private string _lastAvatarText = string.Empty;
     private string _lastLogsText = string.Empty;
+    private bool _isLoadRunning;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
     private bool _uiReady;
 
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
+        _controller.LoadProgressChanged += Controller_LoadProgressChanged;
 
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         ApplySessionDefaultsToUi();
@@ -205,11 +207,26 @@ public partial class MainWindow : Window
 
         var guidance = _controller.BuildImportGuidance(AvatarPathTextBox.Text.Trim());
         QuickStatusText.Text = guidance;
-        var rc = await _controller.LoadAvatarAsync(AvatarPathTextBox.Text.Trim(), 20000);
+        if (!int.TryParse(LoadTimeoutTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMs))
+        {
+            timeoutMs = 20000;
+            LoadTimeoutTextBox.Text = "20000";
+        }
+
+        _isLoadRunning = true;
+        UpdateUiState();
+        var rc = await _controller.LoadAvatarAsync(AvatarPathTextBox.Text.Trim(), timeoutMs);
+        _isLoadRunning = false;
+        UpdateUiState();
         if (rc != NcResultCode.Ok)
         {
             MessageBox.Show(this, $"Load failed: {rc}", "Load Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void CancelLoad_Click(object sender, RoutedEventArgs e)
+    {
+        _controller.CancelLoadAvatar();
     }
 
     private void Unload_Click(object sender, RoutedEventArgs e)
@@ -336,7 +353,16 @@ public partial class MainWindow : Window
         foreach (var c in preflight.Checks)
         {
             sb.AppendLine($"- {(c.Passed ? "PASS" : "FAIL")} {c.Name}: {c.Detail}");
+            if (!c.Passed)
+            {
+                sb.AppendLine($"  remediation: {c.Remediation}");
+            }
         }
+
+        var failed = preflight.Checks.Where(x => !x.Passed).ToList();
+        PreflightHintText.Text = failed.Count == 0
+            ? "Preflight passed. You can proceed with Initialize -> Load -> Start outputs."
+            : "Preflight failed checks: " + string.Join(" | ", failed.Select(x => $"{x.Name}: {x.Remediation}"));
         MessageBox.Show(this, sb.ToString(), "Preflight Result", MessageBoxButton.OK, preflight.Passed ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
@@ -397,6 +423,27 @@ public partial class MainWindow : Window
         var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "telemetry");
         var path = _controller.ExportTelemetry(Path.Combine(outputDir, $"telemetry_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.json"));
         MessageBox.Show(this, $"Telemetry exported:\n{path}", "Export Telemetry", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void ApplyAutoQualityPolicy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!float.TryParse(AutoQualityThresholdTextBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold))
+        {
+            threshold = 28.0f;
+            AutoQualityThresholdTextBox.Text = "28.0";
+        }
+        if (!int.TryParse(AutoQualityConsecutiveTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var consecutive))
+        {
+            consecutive = 120;
+            AutoQualityConsecutiveTextBox.Text = "120";
+        }
+        if (!int.TryParse(AutoQualityCooldownTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var cooldown))
+        {
+            cooldown = 30;
+            AutoQualityCooldownTextBox.Text = "30";
+        }
+
+        _controller.ConfigureAutoQualityPolicy(new AutoQualityPolicy(threshold, consecutive, cooldown));
     }
 
     private void BroadcastMode_Changed(object sender, RoutedEventArgs e)
@@ -650,6 +697,25 @@ public partial class MainWindow : Window
     {
         ErrorStatusText.Text = $"{e.Source}: {e.ResultCode}";
         _pendingLogsRefresh = true;
+        var guide = _controller.GetLastErrorGuidance();
+        if (!string.IsNullOrWhiteSpace(guide))
+        {
+            QuickStatusText.Text = guide;
+        }
+    }
+
+    private void Controller_LoadProgressChanged(object? sender, LoadProgressState e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            LoadProgressBar.Value = e.Percent;
+            LoadProgressText.Text = $"Load progress: {e.Stage} ({e.Percent}%) - {e.Message}";
+            if (e.IsTerminal)
+            {
+                _isLoadRunning = false;
+                UpdateUiState();
+            }
+        });
     }
 
     private void MarkAllDirty(bool includeLogs)
@@ -691,6 +757,7 @@ public partial class MainWindow : Window
         BrowseAvatarButton.IsEnabled = uiState.BrowseAvatarEnabled;
         LoadButton.IsEnabled = uiState.LoadEnabled;
         UnloadButton.IsEnabled = uiState.UnloadEnabled;
+        CancelLoadButton.IsEnabled = _isLoadRunning;
         StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;
@@ -720,6 +787,8 @@ public partial class MainWindow : Window
         SidecarStrictCheckBox.IsEnabled = !operation.IsBusy;
         TelemetryOptInCheckBox.IsEnabled = !operation.IsBusy;
         TelemetryRedactCheckBox.IsEnabled = !operation.IsBusy;
+        LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
+        LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -1014,6 +1083,11 @@ public partial class MainWindow : Window
             "sidecar-strict" => 2,
             _ => 0,
         };
+
+        var aq = _controller.GetAutoQualityPolicy();
+        AutoQualityThresholdTextBox.Text = aq.HighFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
+        AutoQualityConsecutiveTextBox.Text = aq.ConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
+        AutoQualityCooldownTextBox.Text = aq.CooldownSeconds.ToString(CultureInfo.InvariantCulture);
     }
 
     private void RefreshGuides()

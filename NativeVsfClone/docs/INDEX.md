@@ -15,6 +15,8 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [r01_r20_detailed_plan_and_execution_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_detailed_plan_and_execution_2026-03-05.md): detailed execution plan plus implementation result for the latest R01-R20 follow-up round (Top5 hardening)
+- [platform_persona_requirements_reassessment_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/platform_persona_requirements_reassessment_2026-03-05.md): latest-state reassessment of 20 platform requirements with 3 user personas + planner/developer, including coverage tags and updated Top 5 execution priorities
 - [r01_r20_mvp_implementation_round_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_mvp_implementation_round_2026-03-05.md): detailed implementation rollup for R01-R20 MVP feature code across HostCore/WPF/tools with verification and coverage snapshot
 - [platform_persona_requirements_review_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/platform_persona_requirements_review_2026-03-05.md): platform-wide 20-item requirement review with 3 user personas + planner/developer cross-perspective scoring and immediate Top 5 priorities
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report

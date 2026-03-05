@@ -2,6 +2,61 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - R01-R20 follow-up hardening (detailed plan + Top5 execution)
+
+### Summary
+
+Executed a follow-up hardening round after the R01-R20 MVP baseline, with a detailed execution plan and code delivery focused on the reassessed Top5 priorities (`R01/R02/R03/R05/R13`).
+
+This round improves operator guidance quality, import/load flow resilience, and runtime auto-quality tunability while preserving WPF-first host policy.
+
+### Changed
+
+- planning + reassessment docs:
+  - `docs/reports/platform_persona_requirements_reassessment_2026-03-05.md`
+    - latest-state 20-item re-evaluation with 5-persona cross-review
+    - added coverage tags (`implemented/partial`) and updated Top 5 priority order
+    - added immediate execution guidance block
+  - `docs/reports/r01_r20_detailed_plan_and_execution_2026-03-05.md`
+    - detailed plan-to-execution trace for this round
+    - records implementation scope, verification, and follow-ups
+  - `docs/INDEX.md`
+    - report links updated for new reassessment/execution docs
+- HostCore runtime hardening:
+  - `host/HostCore/PlatformFeatures.cs`
+    - added `LoadProgressState`
+    - added `AutoQualityPolicy` and `AutoQualityPolicyStore` for persisted guardrail tuning
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - added load progress event contract (`LoadProgressChanged`)
+    - added last user-facing error state and retrieval (`LastUserFacingError`, `GetLastErrorGuidance`)
+    - expanded import guidance with file-existence check + fallback-oriented messages
+    - refined user-facing error action hints by operation source
+    - changed auto-quality trigger from fixed constants to persisted policy values
+    - added runtime API for policy retrieval/update (`GetAutoQualityPolicy`, `ConfigureAutoQualityPolicy`)
+- WPF operator UX hardening:
+  - `host/WpfHost/MainWindow.xaml`
+    - avatar section now includes:
+      - load timeout input
+      - cancel-load button
+      - progress bar + progress text
+    - platform ops now includes:
+      - preflight remediation hint text
+      - auto-quality policy input controls + apply action
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - wired `LoadProgressChanged` UI updates
+    - switched load action to timeout-configurable async path with explicit running-state gating
+    - added cancel-load handler
+    - surfaced preflight remediation hints inline
+    - surfaced last error guidance in quick status
+    - added auto-quality policy parse/apply path and startup UI hydration
+
+### Verified
+
+- build:
+  - `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` PASS
+    - note: one transient `MSB3026` retry warning observed due to file lock, build succeeded
+  - `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+
 ## 2026-03-05 - R01-R20 platform MVP feature implementation (HostCore/WPF/tools)
 
 ### Summary

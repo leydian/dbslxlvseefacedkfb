@@ -14,6 +14,7 @@ public sealed partial class HostController
     };
 
     private readonly SessionStateStore _sessionStore = new();
+    private readonly AutoQualityPolicyStore _autoQualityStore = new();
     private readonly TelemetryService _telemetry = new();
     private readonly List<FrameMetric> _rollingMetrics = new();
     private DateTimeOffset _lastAutoQualityAdjustUtc = DateTimeOffset.MinValue;
@@ -21,14 +22,18 @@ public sealed partial class HostController
     private CancellationTokenSource? _loadCancellation;
     private Task<NcResultCode>? _activeLoadTask;
     private SessionPersistenceModel _sessionPersistence = SessionPersistenceModel.CreateDefault();
+    private AutoQualityPolicy _autoQualityPolicy = AutoQualityPolicy.CreateDefault();
 
     public PreflightSummary? LastPreflight { get; private set; }
+    public UserFacingError? LastUserFacingError { get; private set; }
+    public event EventHandler<LoadProgressState>? LoadProgressChanged;
 
     public SessionPersistenceModel SessionPersistence => _sessionPersistence;
 
     public void InitializeMvpFeatures()
     {
         _sessionPersistence = _sessionStore.Load();
+        _autoQualityPolicy = _autoQualityStore.Load();
         Outputs = Outputs with
         {
             SpoutChannelName = string.IsNullOrWhiteSpace(_sessionPersistence.SpoutChannelName) ? Outputs.SpoutChannelName : _sessionPersistence.SpoutChannelName,
@@ -50,15 +55,19 @@ public sealed partial class HostController
         {
             return "Select an avatar file path first.";
         }
+        if (!File.Exists(trimmed))
+        {
+            return "Selected avatar path does not exist. Verify path and try again.";
+        }
 
         var ext = Path.GetExtension(trimmed).ToLowerInvariant();
         return ext switch
         {
-            ".vrm" => "VRM route selected: runtime-ready mesh/material path.",
-            ".vxavatar" => "VXAvatar route selected: MVP container parser.",
-            ".vxa2" => "VXA2 route selected: manifest + TLV decode path.",
-            ".xav2" => "XAV2 route selected: vxa2-derived runtime container.",
-            ".vsfavatar" => $"VSFAvatar route selected: parser mode={_sessionPersistence.Sidecar.ParserMode}.",
+            ".vrm" => "VRM route selected: runtime-ready mesh/material path. Fallback: convert to XAV2 if runtime compatibility warnings appear.",
+            ".vxavatar" => "VXAvatar route selected: MVP container parser. Fallback: export to VXA2/XAV2 path when available.",
+            ".vxa2" => "VXA2 route selected: manifest + TLV decode path. Fallback: validate package and retry with XAV2.",
+            ".xav2" => "XAV2 route selected: vxa2-derived runtime container. Recommended for deterministic runtime loading.",
+            ".vsfavatar" => $"VSFAvatar route selected: parser mode={_sessionPersistence.Sidecar.ParserMode}. Fallback behavior follows current parser policy.",
             _ => "Unknown extension. Supported: .vrm, .vxavatar, .vxa2, .xav2, .vsfavatar",
         };
     }
@@ -246,6 +255,34 @@ public sealed partial class HostController
         return path;
     }
 
+    public AutoQualityPolicy GetAutoQualityPolicy() => _autoQualityPolicy;
+
+    public void ConfigureAutoQualityPolicy(AutoQualityPolicy policy)
+    {
+        _autoQualityPolicy = new AutoQualityPolicy(
+            Math.Clamp(policy.HighFrameMsThreshold, 10.0f, 80.0f),
+            Math.Clamp(policy.ConsecutiveFrameLimit, 10, 1200),
+            Math.Clamp(policy.CooldownSeconds, 5, 300));
+        _autoQualityStore.Save(_autoQualityPolicy);
+        AddLog(
+            new HostLogEntry(
+                DateTimeOffset.UtcNow,
+                "AutoQualityPolicy",
+                $"threshold_ms={_autoQualityPolicy.HighFrameMsThreshold:F1}, consecutive={_autoQualityPolicy.ConsecutiveFrameLimit}, cooldown_sec={_autoQualityPolicy.CooldownSeconds}",
+                NcResultCode.Ok),
+            false);
+    }
+
+    public string GetLastErrorGuidance()
+    {
+        if (LastUserFacingError is null)
+        {
+            return string.Empty;
+        }
+
+        return $"{LastUserFacingError.Title} | {LastUserFacingError.ActionHint}";
+    }
+
     public Task<NcResultCode> LoadAvatarAsync(string path, int timeoutMs)
     {
         if (_activeLoadTask is { IsCompleted: false })
@@ -257,23 +294,30 @@ public sealed partial class HostController
         _loadCancellation = new CancellationTokenSource();
         var token = _loadCancellation.Token;
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", $"started timeout_ms={timeoutMs}", NcResultCode.Ok), false);
+        PublishLoadProgress("queued", 5, "Load queued.", false);
 
         _activeLoadTask = Task.Run(async () =>
         {
             try
             {
+                PublishLoadProgress("validating", 15, "Validating avatar path and operation state.", false);
                 var worker = Task.Run(() => LoadAvatar(path), token);
+                PublishLoadProgress("loading", 70, "Loading avatar package and runtime payload.", false);
                 var rc = await worker.WaitAsync(TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs)));
+                PublishLoadProgress("finalizing", 95, "Finalizing avatar runtime state.", false);
+                PublishLoadProgress("completed", rc == NcResultCode.Ok ? 100 : 0, rc == NcResultCode.Ok ? "Load completed." : $"Load failed: {rc}", true);
                 return rc;
             }
             catch (OperationCanceledException)
             {
                 AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested", NcResultCode.Internal), false);
+                PublishLoadProgress("canceled", 0, "Load canceled.", true);
                 return NcResultCode.Internal;
             }
             catch (TimeoutException)
             {
                 AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "timeout exceeded", NcResultCode.Internal), true);
+                PublishLoadProgress("timeout", 0, "Load timed out.", true);
                 return NcResultCode.Internal;
             }
             finally
@@ -294,6 +338,7 @@ public sealed partial class HostController
 
         _loadCancellation.Cancel();
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested by operator", NcResultCode.Ok), false);
+        PublishLoadProgress("canceling", 0, "Cancel requested.", false);
     }
 
     private void RecordFrameMetricAndGuardrails()
@@ -315,7 +360,7 @@ public sealed partial class HostController
             _rollingMetrics.RemoveRange(0, _rollingMetrics.Count - 1800);
         }
 
-        if (stats.LastFrameMs > 28.0f)
+        if (stats.LastFrameMs > _autoQualityPolicy.HighFrameMsThreshold)
         {
             _highFrameCount++;
         }
@@ -324,11 +369,11 @@ public sealed partial class HostController
             _highFrameCount = Math.Max(0, _highFrameCount - 1);
         }
 
-        if (_highFrameCount < 120)
+        if (_highFrameCount < _autoQualityPolicy.ConsecutiveFrameLimit)
         {
             return;
         }
-        if ((DateTimeOffset.UtcNow - _lastAutoQualityAdjustUtc) < TimeSpan.FromSeconds(30))
+        if ((DateTimeOffset.UtcNow - _lastAutoQualityAdjustUtc) < TimeSpan.FromSeconds(_autoQualityPolicy.CooldownSeconds))
         {
             return;
         }
@@ -367,6 +412,16 @@ public sealed partial class HostController
 
     private UserFacingError BuildUserFacingError(string source, NcResultCode rc, string detail)
     {
+        if (source.EndsWith(".Blocked", StringComparison.OrdinalIgnoreCase))
+        {
+            LastUserFacingError = new UserFacingError(
+                HostErrorCategory.Initialization,
+                "Operation blocked by lifecycle policy",
+                "Follow the operation order: Initialize -> Load Avatar -> Start Outputs.",
+                detail);
+            return LastUserFacingError;
+        }
+
         var category = rc switch
         {
             NcResultCode.NotInitialized => HostErrorCategory.Initialization,
@@ -401,7 +456,22 @@ public sealed partial class HostController
             _ => "Collect diagnostics and inspect runtime logs.",
         };
 
-        return new UserFacingError(category, title, action, detail);
+        if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
+        {
+            action = "Check avatar file extension/path, then retry. If it fails again, export diagnostics.";
+        }
+        else if (source.Contains("StartSpout", StringComparison.OrdinalIgnoreCase) ||
+                 source.Contains("StartOsc", StringComparison.OrdinalIgnoreCase))
+        {
+            action = "Verify output settings and active avatar state, then restart outputs.";
+        }
+        else if (source.Contains("Preflight", StringComparison.OrdinalIgnoreCase))
+        {
+            action = "Apply the failed-check remediation from preflight report.";
+        }
+
+        LastUserFacingError = new UserFacingError(category, title, action, detail);
+        return LastUserFacingError;
     }
 
     private void TrackTelemetryEvent(string source, NcResultCode rc)
@@ -478,5 +548,15 @@ public sealed partial class HostController
         {
             return false;
         }
+    }
+
+    private void PublishLoadProgress(string stage, int percent, string message, bool terminal)
+    {
+        var normalized = new LoadProgressState(
+            stage,
+            Math.Clamp(percent, 0, 100),
+            message,
+            terminal);
+        LoadProgressChanged?.Invoke(this, normalized);
     }
 }

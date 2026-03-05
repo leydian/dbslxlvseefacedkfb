@@ -71,6 +71,23 @@ public sealed record TelemetrySettings(
     bool OptIn,
     bool RedactSensitiveFields);
 
+public sealed record LoadProgressState(
+    string Stage,
+    int Percent,
+    string Message,
+    bool IsTerminal);
+
+public sealed record AutoQualityPolicy(
+    float HighFrameMsThreshold,
+    int ConsecutiveFrameLimit,
+    int CooldownSeconds)
+{
+    public static AutoQualityPolicy CreateDefault() => new(
+        HighFrameMsThreshold: 28.0f,
+        ConsecutiveFrameLimit: 120,
+        CooldownSeconds: 30);
+}
+
 public sealed class SessionStateStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -116,6 +133,68 @@ public sealed class SessionStateStore
 
         var json = JsonSerializer.Serialize(model, JsonOptions);
         File.WriteAllText(_path, json, Encoding.UTF8);
+    }
+}
+
+public sealed class AutoQualityPolicyStore
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    private readonly string _path;
+
+    public AutoQualityPolicyStore(string? path = null)
+    {
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        _path = path ?? Path.Combine(root, "VsfCloneHost", "auto_quality_policy.json");
+    }
+
+    public AutoQualityPolicy Load()
+    {
+        if (!File.Exists(_path))
+        {
+            return AutoQualityPolicy.CreateDefault();
+        }
+
+        try
+        {
+            var json = File.ReadAllText(_path, Encoding.UTF8);
+            var model = JsonSerializer.Deserialize<AutoQualityPolicy>(json, JsonOptions);
+            if (model is null)
+            {
+                return AutoQualityPolicy.CreateDefault();
+            }
+
+            return Normalize(model);
+        }
+        catch
+        {
+            return AutoQualityPolicy.CreateDefault();
+        }
+    }
+
+    public void Save(AutoQualityPolicy policy)
+    {
+        var normalized = Normalize(policy);
+        var directory = Path.GetDirectoryName(_path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var json = JsonSerializer.Serialize(normalized, JsonOptions);
+        File.WriteAllText(_path, json, Encoding.UTF8);
+    }
+
+    private static AutoQualityPolicy Normalize(AutoQualityPolicy value)
+    {
+        var frame = Math.Clamp(value.HighFrameMsThreshold, 10.0f, 80.0f);
+        var count = Math.Clamp(value.ConsecutiveFrameLimit, 10, 1200);
+        var cooldown = Math.Clamp(value.CooldownSeconds, 5, 300);
+        return new AutoQualityPolicy(frame, count, cooldown);
     }
 }
 
