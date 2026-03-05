@@ -42,17 +42,31 @@ if(WIN32 AND VSFCLONE_ENABLE_SPOUT2)
         target_include_directories(vsfclone_core PRIVATE "${VSFCLONE_SPOUT2_INCLUDE_DIR}")
         target_compile_definitions(vsfclone_core PRIVATE VSFCLONE_SPOUT2_ENABLED=1)
 
-        set(VSFCLONE_SPOUT2_LIB_HINTS
-            "${VSFCLONE_SPOUT2_ROOT}/lib/SpoutLibrary.lib"
-            "${VSFCLONE_SPOUT2_ROOT}/lib/x64/SpoutLibrary.lib"
-            "${VSFCLONE_SPOUT2_ROOT}/Lib/x64/SpoutLibrary.lib")
-        foreach(_spout_lib IN LISTS VSFCLONE_SPOUT2_LIB_HINTS)
-            if(EXISTS "${_spout_lib}")
-                message(STATUS "Spout2 library detected: ${_spout_lib}")
-                target_link_libraries(vsfclone_core PRIVATE "${_spout_lib}")
+        set(VSFCLONE_SPOUT2_LIB_CANDIDATES
+            "SpoutDX.lib"
+            "SpoutLibrary.lib")
+        set(VSFCLONE_SPOUT2_LIB_SEARCH_DIRS
+            "${VSFCLONE_SPOUT2_ROOT}/lib"
+            "${VSFCLONE_SPOUT2_ROOT}/lib/x64"
+            "${VSFCLONE_SPOUT2_ROOT}/Lib/x64")
+        set(VSFCLONE_SPOUT2_LINKED FALSE)
+        foreach(_spout_name IN LISTS VSFCLONE_SPOUT2_LIB_CANDIDATES)
+            foreach(_spout_dir IN LISTS VSFCLONE_SPOUT2_LIB_SEARCH_DIRS)
+                set(_spout_lib "${_spout_dir}/${_spout_name}")
+                if(EXISTS "${_spout_lib}")
+                    message(STATUS "Spout2 library detected: ${_spout_lib}")
+                    target_link_libraries(vsfclone_core PRIVATE "${_spout_lib}")
+                    set(VSFCLONE_SPOUT2_LINKED TRUE)
+                    break()
+                endif()
+            endforeach()
+            if(VSFCLONE_SPOUT2_LINKED)
                 break()
             endif()
         endforeach()
+        if(NOT VSFCLONE_SPOUT2_LINKED)
+            message(STATUS "Spout2 include found but no import library detected; runtime will keep legacy fallback.")
+        endif()
     else()
         message(STATUS "Spout2 SDK not found at ${VSFCLONE_SPOUT2_INCLUDE_DIR}; falling back to legacy shared-memory sender.")
     endif()

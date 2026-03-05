@@ -48,6 +48,7 @@ class SpoutSender final : public IStreamingOutput {
     bool strict_mode_ = false;
     StreamConfig config_ {};
     void* mapping_ = nullptr;
+    void* spout_dx_sender_ = nullptr;
     std::string mapping_name_;
     std::uint64_t frame_counter_ = 0;
     std::uint64_t fallback_count_ = 0;

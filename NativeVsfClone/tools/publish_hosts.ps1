@@ -23,6 +23,31 @@ function Write-Step {
     Write-Host "[publish_hosts] $Message"
 }
 
+function Copy-SpoutRuntimeBinaries {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$DistDir,
+        [Parameter(Mandatory = $true)][System.Collections.Generic.List[string]]$Log
+    )
+
+    $spoutBinDir = Join-Path $RepoRoot "third_party\Spout2\bin"
+    if (-not (Test-Path $spoutBinDir)) {
+        $Log.Add("Spout runtime copy: skipped (bin dir not found: $spoutBinDir)")
+        return
+    }
+
+    $dlls = Get-ChildItem -Path $spoutBinDir -File -Filter "*.dll" -ErrorAction SilentlyContinue
+    if ($null -eq $dlls -or $dlls.Count -eq 0) {
+        $Log.Add("Spout runtime copy: skipped (no dll files in $spoutBinDir)")
+        return
+    }
+
+    foreach ($dll in $dlls) {
+        Copy-Item -Path $dll.FullName -Destination (Join-Path $DistDir $dll.Name) -Force
+    }
+    $Log.Add("Spout runtime copy: $($dlls.Count) dll(s) copied from $spoutBinDir to $DistDir")
+}
+
 function Assert-Command {
     param([string]$Name)
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -958,6 +983,7 @@ try {
     }
 
     Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
+    Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $wpfDist -Log $log
     $log.Add("WPF dist: $wpfDist")
     $log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
     if ($RunWpfLaunchSmoke) {
@@ -1054,6 +1080,7 @@ if ($IncludeWinUi) {
             throw "WinUI publish output not found: $winUiDist"
         }
         Copy-Item -Path $nativeCoreDll -Destination $winUiDist -Force
+        Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $winUiDist -Log $log
         $log.Add("WinUI dist: $winUiDist")
         $log.Add("WinUI exe: $(Join-Path $winUiDist 'WinUiHost.exe')")
     } catch {

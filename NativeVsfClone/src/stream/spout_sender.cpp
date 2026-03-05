@@ -6,6 +6,10 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#include <d3d11.h>
+#if defined(VSFCLONE_SPOUT2_ENABLED)
+#include "SpoutDX/SpoutDX.h"
+#endif
 #endif
 
 #include <algorithm>
@@ -13,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <new>
 
 namespace vsfclone::stream {
 
@@ -284,8 +289,36 @@ bool SpoutSender::TryInitSpout2(void* d3d11_device, void* d3d11_texture) {
     (void)d3d11_device;
     (void)d3d11_texture;
 #if defined(_WIN32) && defined(VSFCLONE_SPOUT2_ENABLED)
-    // SDK integration point: when Spout2 SDK is configured, initialize sender here.
-    return false;
+    if (d3d11_device == nullptr) {
+        last_error_code_ = "SPOUT2_DEVICE_NULL";
+        return false;
+    }
+
+    auto* sender = static_cast<spoutDX*>(spout_dx_sender_);
+    if (sender == nullptr) {
+        sender = new (std::nothrow) spoutDX();
+        if (sender == nullptr) {
+            last_error_code_ = "SPOUT2_ALLOC_FAILED";
+            return false;
+        }
+        spout_dx_sender_ = sender;
+    }
+
+    auto* device = static_cast<ID3D11Device*>(d3d11_device);
+    if (!sender->OpenDirectX11(device)) {
+        last_error_code_ = "SPOUT2_OPEN_DX11_FAILED";
+        return false;
+    }
+
+    if (!sender->SetSenderName(config_.channel_name.c_str())) {
+        last_error_code_ = "SPOUT2_SET_SENDER_NAME_FAILED";
+        return false;
+    }
+
+    sender->SetSenderFormat(DXGI_FORMAT_B8G8R8A8_UNORM);
+
+    last_error_code_.clear();
+    return true;
 #else
     return false;
 #endif
@@ -295,8 +328,37 @@ bool SpoutSender::TrySendSpout2(void* d3d11_device, void* d3d11_texture) {
     (void)d3d11_device;
     (void)d3d11_texture;
 #if defined(_WIN32) && defined(VSFCLONE_SPOUT2_ENABLED)
-    // SDK integration point: send ID3D11Texture2D frame through Spout2 here.
-    return false;
+    auto* sender = static_cast<spoutDX*>(spout_dx_sender_);
+    if (sender == nullptr) {
+        last_error_code_ = "SPOUT2_SENDER_NULL";
+        return false;
+    }
+
+    auto* texture = static_cast<ID3D11Texture2D*>(d3d11_texture);
+    if (texture == nullptr) {
+        last_error_code_ = "SPOUT2_TEXTURE_NULL";
+        return false;
+    }
+
+    D3D11_TEXTURE2D_DESC desc {};
+    texture->GetDesc(&desc);
+    if (desc.Width == 0U || desc.Height == 0U) {
+        last_error_code_ = "SPOUT2_TEXTURE_INVALID_SIZE";
+        return false;
+    }
+    if (desc.Width != config_.width || desc.Height != config_.height) {
+        config_.width = desc.Width;
+        config_.height = desc.Height;
+        // spoutDX internally updates sender size when the submitted texture size changes.
+    }
+
+    if (!sender->SendTexture(texture)) {
+        last_error_code_ = "SPOUT2_SEND_TEXTURE_FAILED";
+        return false;
+    }
+
+    last_error_code_.clear();
+    return true;
 #else
     return false;
 #endif
@@ -304,7 +366,13 @@ bool SpoutSender::TrySendSpout2(void* d3d11_device, void* d3d11_texture) {
 
 void SpoutSender::StopSpout2() {
 #if defined(_WIN32) && defined(VSFCLONE_SPOUT2_ENABLED)
-    // SDK integration point: release Spout2 sender resources here.
+    auto* sender = static_cast<spoutDX*>(spout_dx_sender_);
+    if (sender != nullptr) {
+        sender->ReleaseSender();
+        sender->CloseDirectX11();
+        delete sender;
+        spout_dx_sender_ = nullptr;
+    }
 #endif
 }
 
