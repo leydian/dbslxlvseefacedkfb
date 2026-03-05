@@ -3,6 +3,11 @@ param(
     [switch]$SkipVsfRender,
     [switch]$SkipVrm,
     [switch]$SkipVxAvatar,
+    [switch]$EnableVsfTrend,
+    [switch]$EnableRenderPerf,
+    [switch]$EnableSoak,
+    [switch]$EnableSessionMigration,
+    [switch]$EnableTrackingFuzz,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
 )
 
@@ -66,6 +71,36 @@ if (-not $SkipVxAvatar) {
         -Command "powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick"))
 }
 
+if ($EnableVsfTrend) {
+    $results.Add((Invoke-Gate `
+        -Name "VSFAvatar GateD trend summary" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_gated_trend.ps1"))
+}
+
+if ($EnableRenderPerf) {
+    $results.Add((Invoke-Gate `
+        -Name "Render performance numeric gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1"))
+}
+
+if ($EnableSoak) {
+    $results.Add((Invoke-Gate `
+        -Name "Avatar load soak gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1"))
+}
+
+if ($EnableSessionMigration) {
+    $results.Add((Invoke-Gate `
+        -Name "Session state migration check" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\session_state_migration_check.ps1"))
+}
+
+if ($EnableTrackingFuzz) {
+    $results.Add((Invoke-Gate `
+        -Name "Tracking parser fuzz gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\tracking_parser_fuzz_gate.ps1"))
+}
+
 $overallStatus = if ($results | Where-Object { $_.ExitCode -ne 0 }) { "FAIL" } else { "PASS" }
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("Quality Baseline Summary")
@@ -83,6 +118,11 @@ $lines.Add("- VSFAvatar: build/reports/vsfavatar_gate_summary.txt")
 $lines.Add("- VSFAvatarRender: build/reports/vsfavatar_render_gate_summary.txt")
 $lines.Add("- VRM: build/reports/vrm_gate_fixed5.txt")
 $lines.Add("- VXAvatar: build/reports/vxavatar_gate_summary.txt")
+$lines.Add("- VSFAvatarTrend: build/reports/vsfavatar_gate_trend_latest.txt")
+$lines.Add("- RenderPerf: build/reports/render_perf_gate_summary.txt")
+$lines.Add("- AvatarSoak: build/reports/avatar_load_soak_gate_summary.txt")
+$lines.Add("- SessionMigration: build/reports/session_state_migration_check_summary.txt")
+$lines.Add("- TrackingFuzz: build/reports/tracking_parser_fuzz_gate_summary.txt")
 
 $lines | Set-Content -Path $resolvedSummaryPath -Encoding UTF8
 Write-Host "[quality-baseline] Summary: $resolvedSummaryPath"

@@ -2,6 +2,41 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Release execution follow-up (trend/perf/soak/migration/fuzz + diagnostics bundle enrichment)
+
+### Summary
+
+Implemented follow-up automation for the 20-item execution board by adding GateD trend tracking, render numeric gate, avatar soak gate, session migration regression check, tracking parser fuzz gate, and diagnostics bundle payload enrichment.
+
+### Changed
+
+- new automation scripts:
+  - `tools/vsfavatar_gated_trend.ps1`
+  - `tools/render_perf_gate.ps1`
+  - `tools/avatar_load_soak_gate.ps1`
+  - `tools/session_state_migration_check.ps1`
+  - `tools/tracking_parser_fuzz_gate.ps1`
+- new checker helper projects:
+  - `tools/session_state_migration_check/` (dotnet-run migration checker)
+  - `tools/tracking_parser_fuzz_gate/` (dotnet-run fuzz checker)
+- diagnostics bundle enrichment:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `ExportDiagnosticsBundle` now writes:
+    - `repro_commands.txt`
+    - `environment_snapshot.json`
+- baseline integration (opt-in):
+  - `tools/run_quality_baseline.ps1`
+  - added:
+    - `-EnableVsfTrend`
+    - `-EnableRenderPerf`
+    - `-EnableSoak`
+    - `-EnableSessionMigration`
+    - `-EnableTrackingFuzz`
+- execution board/report updates:
+  - `docs/reports/release_execution_board_20_2026-03-06.md`
+  - `docs/reports/release_execution_followup_2026-03-06.md`
+  - `docs/INDEX.md`
+
 ## 2026-03-06 - Release execution board + fail-fast gate and dashboard split
 
 ### Summary

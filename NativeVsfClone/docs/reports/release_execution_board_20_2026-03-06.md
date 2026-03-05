@@ -42,10 +42,12 @@ Status legend:
    Current: fixed-set automation complete; extended real-world set curation pending
 
 8. VSFAvatar GateD pass-rate trend tracking  
-   Status: `TODO`
+   Status: `DONE`  
+   Automation: `tools/vsfavatar_gated_trend.ps1`
 
 9. Tracking parser fuzz tests (`format-a`/`format-b`)  
-   Status: `TODO`
+   Status: `DONE`  
+   Automation: `tools/tracking_parser_fuzz_gate.ps1`
 
 10. Tracking threshold config externalization  
     Status: `IN_PROGRESS`  
@@ -59,10 +61,12 @@ Status legend:
     Status: `TODO`
 
 13. Render performance numeric gate (`frame time`, drop rate)  
-    Status: `TODO`
+    Status: `DONE`  
+    Automation: `tools/render_perf_gate.ps1`
 
 14. Repeated load/unload soak test (leak detection)  
-    Status: `TODO`
+    Status: `DONE`  
+    Automation: `tools/avatar_load_soak_gate.ps1`
 
 15. Cross-layer error code contract unification (doc/code/UI)  
     Status: `IN_PROGRESS`  
@@ -73,11 +77,12 @@ Status legend:
     Current: core parser/runtime tests exist; edge matrix expansion pending
 
 17. Session schema migration regression (`v1/v2/v3 -> v4`)  
-    Status: `TODO`
+    Status: `DONE`  
+    Automation: `tools/session_state_migration_check.ps1`
 
 18. Diagnostics bundle enrichment (repro command + env snapshot)  
-    Status: `IN_PROGRESS`  
-    Current: environment and command logs present; unified bundle payload pending
+    Status: `DONE`  
+    Implementation: `host/HostCore/HostController.MvpFeatures.cs` (`repro_commands.txt`, `environment_snapshot.json`)
 
 19. Dashboard split: `WPF-only PASS` vs `Full PASS`  
     Status: `DONE`  
@@ -106,6 +111,21 @@ powershell -ExecutionPolicy Bypass -File .\tools\winui_diag_matrix_summary.ps1 `
     ".\build\reports\winui\winui_diagnostic_manifest_windows-latest.json",
     ".\build\reports\winui\winui_diagnostic_manifest_windows-2022.json"
   )
+
+# 5) VSFAvatar GateD trend summary
+powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_gated_trend.ps1
+
+# 6) Tracking parser fuzz gate
+powershell -ExecutionPolicy Bypass -File .\tools\tracking_parser_fuzz_gate.ps1
+
+# 7) Session schema migration check
+powershell -ExecutionPolicy Bypass -File .\tools\session_state_migration_check.ps1
+
+# 8) Avatar load soak gate
+powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1 -IterationsPerSample 10
+
+# 9) Render performance numeric gate (metrics csv required)
+powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1 -MetricsCsvPath ".\build\reports\metrics_latest.csv"
 ```
 
 ## Acceptance for This Pass
