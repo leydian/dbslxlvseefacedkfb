@@ -111,6 +111,7 @@ Report list for this week.
 - [2026-03-06_xav2_import_rig_accuracy_hardening_followup.md](./2026-03-06_xav2_import_rig_accuracy_hardening_followup.md)
 - [2026-03-06_xav2_import_v4_rig_hardening.md](./2026-03-06_xav2_import_v4_rig_hardening.md)
 - [2026-03-06_xav2_liltoon_parity_material_extension.md](./2026-03-06_xav2_liltoon_parity_material_extension.md)
+- [2026-03-06_xav2_poiyomi_typed_material_parity_extension.md](./2026-03-06_xav2_poiyomi_typed_material_parity_extension.md)
 - [2026-03-06_xav2_physics_typed_sections_and_pipeline.md](./2026-03-06_xav2_physics_typed_sections_and_pipeline.md)
 - [2026-03-06_xav2_render_breakage_guardrail_update.md](./2026-03-06_xav2_render_breakage_guardrail_update.md)
 - [2026-03-06_xav2_skinning_stabilization_and_v2_path.md](./2026-03-06_xav2_skinning_stabilization_and_v2_path.md)

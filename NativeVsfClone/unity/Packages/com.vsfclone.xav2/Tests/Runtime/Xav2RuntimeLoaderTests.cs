@@ -110,6 +110,33 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialParams_AdvancedPoiyomiEntries_Parses()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "poiyomi",
+                    typedIncludeAdvancedEntries: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(diagnostics.WarningCodes, Does.Not.Contain("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY"));
+                var material = payload.Materials[0];
+                Assert.That(material.ShaderFamily, Is.EqualTo("poiyomi"));
+                Assert.That(material.TypedFloatParams.Exists(p => p.Id == "_MatCapBlend"), Is.True);
+                Assert.That(material.TypedFloatParams.Exists(p => p.Id == "_EmissionStrength"), Is.True);
+                Assert.That(material.TypedColorParams.Exists(p => p.Id == "_MatCapColor"), Is.True);
+                Assert.That(material.TypedTextureParams.Exists(p => p.Slot == "matcap"), Is.True);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_TypedMaterialParamsV2_LegacyShape_Parses()
         {
             var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true, typedSchemaVersion: 2));

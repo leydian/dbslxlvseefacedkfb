@@ -811,8 +811,50 @@ namespace VsfClone.Xav2.Editor
             else if (shaderFamily == "poiyomi")
             {
                 AddTypedColor(item, material, "_BaseColor", "_BaseColor", "_Color");
+                AddTypedColor(item, material, "_ShadeColor", "_ShadeColor");
+                AddTypedColor(item, material, "_EmissionColor", "_EmissionColor");
+                AddTypedColor(item, material, "_RimColor", "_RimColor");
+                AddTypedColor(item, material, "_MatCapColor", "_MatCapColor", "_MatCapTexColor");
+
                 AddTypedFloat(item, material, "_Cutoff", "_Cutoff");
+                AddTypedFloat(item, material, "_BumpScale", "_BumpScale");
+                AddTypedFloat(item, material, "_RimFresnelPower", "_RimFresnelPower");
+                AddTypedFloat(item, material, "_RimLightingMix", "_RimLightingMix");
+                AddTypedFloat(item, material, "_EmissionStrength", "_EmissionMapStrength", "_EmissionStrength");
+                AddTypedFloat(item, material, "_MatCapBlend", "_MatCapBlend", "_MatCapBlendUV1", "_MatCapStrength");
+
                 AddTypedTexture(item, "base", baseTextureName);
+                var shadeTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_ShadeTexture", "_ShadowColorTex");
+                AddTypedTexture(item, "shade", shadeTextureName);
+                var normalTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_BumpMap", "_NormalMap");
+                AddTypedTexture(item, "normal", normalTextureName);
+                var emissionTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_EmissionMap");
+                AddTypedTexture(item, "emission", emissionTextureName);
+                var rimTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_RimColorTex", "_RimTex");
+                AddTypedTexture(item, "rim", rimTextureName);
+                var matcapTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_MatCapTex", "_MatCapTexture", "_MatCapBlendMask");
+                AddTypedTexture(item, "matcap", matcapTextureName);
+
+                if (!string.IsNullOrEmpty(shadeTextureName) || HasTypedColor(item, "_ShadeColor"))
+                {
+                    item.FeatureFlags |= FeatureShade;
+                }
+                if (!string.IsNullOrEmpty(normalTextureName))
+                {
+                    item.FeatureFlags |= FeatureNormalMap;
+                }
+                if (!string.IsNullOrEmpty(emissionTextureName) || HasTypedColor(item, "_EmissionColor"))
+                {
+                    item.FeatureFlags |= FeatureEmission;
+                }
+                if (!string.IsNullOrEmpty(rimTextureName) || HasTypedColor(item, "_RimColor"))
+                {
+                    item.FeatureFlags |= FeatureRim;
+                }
+                if (!string.IsNullOrEmpty(matcapTextureName) || HasTypedColor(item, "_MatCapColor"))
+                {
+                    item.FeatureFlags |= FeatureMatCap;
+                }
             }
             payload.Materials.Add(item);
             payload.Manifest.materialRefs.Add(item.Name);

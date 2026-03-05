@@ -2,6 +2,44 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 poiyomi typed material parity extension (unity/runtime tests)
+
+### Summary
+
+Extended the XAV2 parity path so Poiyomi materials emit richer typed-v3 entries aligned with existing lilToon advanced material transport, improving cross-family visual consistency without changing wire format.
+
+### Changed
+
+- Unity extractor parity uplift for Poiyomi:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - expanded Poiyomi typed extraction from minimal baseline to advanced typed coverage:
+    - typed colors: `_ShadeColor`, `_EmissionColor`, `_RimColor`, `_MatCapColor`
+    - typed floats: `_BumpScale`, `_RimFresnelPower`, `_RimLightingMix`, `_EmissionStrength`, `_MatCapBlend`
+    - typed textures: `shade`, `normal`, `emission`, `rim`, `matcap`
+  - feature flags now set for Poiyomi advanced signals:
+    - `FeatureShade`
+    - `FeatureNormalMap`
+    - `FeatureEmission`
+    - `FeatureRim`
+    - `FeatureMatCap`
+- Runtime loader regression coverage:
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - added test `TryLoad_TypedMaterialParams_AdvancedPoiyomiEntries_Parses` validating:
+    - `shader_family=poiyomi` accepted under parity contract
+    - advanced typed keys parsed (`_MatCapBlend`, `_EmissionStrength`, `_MatCapColor`, `slot=matcap`)
+    - no unsupported-family warning raised for Poiyomi.
+- Documentation update:
+  - `docs/reports/xav2_poiyomi_typed_material_parity_extension_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_xav2_poiyomi_typed_material_parity_extension.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- Unity runtime test source updated with Poiyomi advanced typed parse assertion.
+- Unity EditMode/PlayMode tests were not executed in this shell-only environment.
+
 ## 2026-03-06 - XAV2 full parity contract enforcement (Unity/native loader policy)
 
 ### Summary
