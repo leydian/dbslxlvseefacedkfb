@@ -784,9 +784,6 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         if (it != material_sections.end()) {
             payload = it->second;
         }
-        if (!texture_refs.empty() && payload.base_color_texture_name.empty()) {
-            payload.base_color_texture_name = texture_refs.front();
-        }
         const auto params_it = material_params_sections.find(key);
         if (params_it != material_params_sections.end()) {
             payload.shader_params_json = params_it->second;

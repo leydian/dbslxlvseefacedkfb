@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using UnityEditor;
 using UnityEngine;
 using VsfClone.Xav2.Runtime;
 
@@ -211,7 +212,7 @@ namespace VsfClone.Xav2.Editor
                 var encoded = EncodeTextureSafe(mainTexture);
                 if (encoded.Length > 0)
                 {
-                    textureName = mainTexture.name;
+                    textureName = BuildUniqueTextureName(mainTexture);
                     if (textureNameSet.Add(textureName))
                     {
                         payload.Textures.Add(new Xav2TexturePayload
@@ -231,12 +232,12 @@ namespace VsfClone.Xav2.Editor
             var shaderName = material.shader != null ? material.shader.name : "UnknownShader";
             var item = new Xav2MaterialPayload
             {
-                Name = material.name,
+                Name = BuildUniqueMaterialName(material, id),
                 ShaderName = shaderName,
                 ShaderVariant = ResolveShaderVariant(shaderName),
                 BaseColorTextureName = textureName,
-                AlphaMode = material.HasProperty("_Mode") && material.GetFloat("_Mode") >= 3.0f ? "BLEND" : "OPAQUE",
-                AlphaCutoff = material.HasProperty("_Cutoff") ? material.GetFloat("_Cutoff") : 0.5f,
+                AlphaMode = ResolveAlphaMode(material),
+                AlphaCutoff = ResolveAlphaCutoff(material),
                 DoubleSided = material.HasProperty("_Cull") && Mathf.Approximately(material.GetFloat("_Cull"), 0.0f),
                 ShaderParamsJson = BuildShaderParamsJson(material)
             };
@@ -394,6 +395,101 @@ namespace VsfClone.Xav2.Editor
                 }
             }
             return null;
+        }
+
+        private static string BuildUniqueTextureName(Texture2D texture)
+        {
+            if (texture == null)
+            {
+                return "Texture#null";
+            }
+
+            var baseName = string.IsNullOrWhiteSpace(texture.name) ? "Texture" : texture.name;
+            var assetPath = AssetDatabase.GetAssetPath(texture);
+            if (!string.IsNullOrWhiteSpace(assetPath))
+            {
+                return $"{baseName}@{assetPath.Replace('\\', '/')}";
+            }
+            return $"{baseName}#{texture.GetInstanceID()}";
+        }
+
+        private static string BuildUniqueMaterialName(Material material, int materialId)
+        {
+            if (material == null)
+            {
+                return "Material#null";
+            }
+
+            var baseName = string.IsNullOrWhiteSpace(material.name) ? "Material" : material.name;
+            var assetPath = AssetDatabase.GetAssetPath(material);
+            if (!string.IsNullOrWhiteSpace(assetPath))
+            {
+                return $"{baseName}@{assetPath.Replace('\\', '/')}";
+            }
+            return $"{baseName}#{materialId}";
+        }
+
+        private static string ResolveAlphaMode(Material material)
+        {
+            if (material == null)
+            {
+                return "OPAQUE";
+            }
+
+            var renderType = material.GetTag("RenderType", false, string.Empty);
+            if (!string.IsNullOrEmpty(renderType))
+            {
+                if (renderType.IndexOf("TransparentCutout", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "MASK";
+                }
+                if (renderType.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "BLEND";
+                }
+            }
+
+            if (material.renderQueue >= 3000)
+            {
+                return "BLEND";
+            }
+            if (material.renderQueue >= 2450)
+            {
+                return "MASK";
+            }
+
+            if ((material.HasProperty("_AlphaClip") && material.GetFloat("_AlphaClip") > 0.5f) ||
+                (material.HasProperty("_UseAlphaClipping") && material.GetFloat("_UseAlphaClipping") > 0.5f) ||
+                (material.HasProperty("_Cutoff") && material.GetFloat("_Cutoff") > 0.001f))
+            {
+                return "MASK";
+            }
+
+            if ((material.HasProperty("_Mode") && material.GetFloat("_Mode") >= 3.0f) ||
+                (material.HasProperty("_Surface") && material.GetFloat("_Surface") >= 1.0f) ||
+                (material.HasProperty("_BlendMode") && material.GetFloat("_BlendMode") > 0.0f))
+            {
+                return "BLEND";
+            }
+
+            return "OPAQUE";
+        }
+
+        private static float ResolveAlphaCutoff(Material material)
+        {
+            if (material == null)
+            {
+                return 0.5f;
+            }
+            if (material.HasProperty("_Cutoff"))
+            {
+                return Mathf.Clamp01(material.GetFloat("_Cutoff"));
+            }
+            if (material.HasProperty("_AlphaCutoff"))
+            {
+                return Mathf.Clamp01(material.GetFloat("_AlphaCutoff"));
+            }
+            return 0.5f;
         }
 
         private static byte[] EncodeTextureViaRenderTexture(Texture2D source)

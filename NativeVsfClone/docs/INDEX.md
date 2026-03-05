@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [xav2_front_view_and_material_alignment_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_front_view_and_material_alignment_2026-03-05.md): XAV2 front-view default orientation fix plus material/texture alignment and native shader-param interpretation updates
 - [xav2_native_uv_offset_fix_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_native_uv_offset_fix_2026-03-05.md): native XAV2 render-path UV decode fix for expanded-stride Unity payloads to resolve scrambled texture mapping
 - [xav2_liltoon_texture_export_fallback_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_liltoon_texture_export_fallback_2026-03-05.md): Unity XAV2 exporter texture-path hardening for lilToon/non-readable textures via RenderTexture fallback and expanded base map property probe
 - [session_change_summary_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/session_change_summary_2026-03-05.md): consolidated latest-session rollup covering WPF crash hotfix, Unity XAV2 relaxed export menu, avatar extension policy trim, and current host load-failure behavior

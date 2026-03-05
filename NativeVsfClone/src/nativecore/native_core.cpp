@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -67,6 +68,7 @@ struct GpuMaterialResource {
     std::string alpha_mode = "OPAQUE";
     float alpha_cutoff = 0.5f;
     bool double_sided = false;
+    std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
     ID3D11ShaderResourceView* base_color_srv = nullptr;
 };
 
@@ -316,6 +318,7 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
     material->alpha_mode = "OPAQUE";
     material->alpha_cutoff = 0.5f;
     material->double_sided = false;
+    material->base_color = {1.0f, 1.0f, 1.0f, 1.0f};
 }
 
 void ResetRendererResources(RendererResources* renderer) {
@@ -457,7 +460,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float alpha_cutoff;\n"
         "  float alpha_mode_mask;\n"
         "  float has_texture;\n"
-        "  float _pad;\n"
+        "  float use_texture_alpha;\n"
         "};\n"
         "struct VSIn { float3 pos : POSITION; float2 uv : TEXCOORD0; };\n"
         "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
@@ -475,7 +478,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float alpha_cutoff;\n"
         "  float alpha_mode_mask;\n"
         "  float has_texture;\n"
-        "  float _pad;\n"
+        "  float use_texture_alpha;\n"
         "};\n"
         "Texture2D tex0 : register(t0);\n"
         "SamplerState samp0 : register(s0);\n"
@@ -484,7 +487,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  if (has_texture > 0.5) {\n"
         "    float4 texel = tex0.Sample(samp0, uv);\n"
         "    out_color.rgb *= texel.rgb;\n"
-        "    if (alpha_mode_mask > 0.5) {\n"
+        "    if (use_texture_alpha > 0.5) {\n"
         "      out_color.a *= texel.a;\n"
         "    }\n"
         "  }\n"
@@ -580,7 +583,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         float alpha_cutoff;
         float alpha_mode_mask;
         float has_texture;
-        float _pad;
+        float use_texture_alpha;
     };
     D3D11_BUFFER_DESC cb_desc {};
     cb_desc.ByteWidth = static_cast<UINT>(sizeof(SceneConstants));
@@ -1035,6 +1038,113 @@ ID3D11ShaderResourceView* CreateTextureSrvFromPayload(ID3D11Device* device, cons
     return srv;
 }
 
+std::string ToUpperAscii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return s;
+}
+
+bool ParseFloatToken(const std::string& token, float* out_value) {
+    if (out_value == nullptr) {
+        return false;
+    }
+    char* end_ptr = nullptr;
+    const float parsed = std::strtof(token.c_str(), &end_ptr);
+    if (end_ptr == token.c_str()) {
+        return false;
+    }
+    *out_value = parsed;
+    return true;
+}
+
+bool TryExtractShaderParamFloat(const std::string& params_json, const std::string& key, float* out_value) {
+    if (out_value == nullptr) {
+        return false;
+    }
+    const std::string token = key + "=";
+    const std::size_t pos = params_json.find(token);
+    if (pos == std::string::npos) {
+        return false;
+    }
+    std::size_t value_begin = pos + token.size();
+    std::size_t value_end = value_begin;
+    while (value_end < params_json.size()) {
+        const char c = params_json[value_end];
+        if (c == ',' || c == '"' || c == ']' || c == '}') {
+            break;
+        }
+        ++value_end;
+    }
+    if (value_end <= value_begin) {
+        return false;
+    }
+    return ParseFloatToken(params_json.substr(value_begin, value_end - value_begin), out_value);
+}
+
+bool TryExtractShaderParamColor(const std::string& params_json, const std::string& key, std::array<float, 4U>* out_color) {
+    if (out_color == nullptr) {
+        return false;
+    }
+    const std::string token = key + "=(";
+    const std::size_t pos = params_json.find(token);
+    if (pos == std::string::npos) {
+        return false;
+    }
+    const std::size_t begin = pos + token.size();
+    const std::size_t end = params_json.find(')', begin);
+    if (end == std::string::npos || end <= begin) {
+        return false;
+    }
+    std::array<float, 4U> parsed = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::size_t cursor = begin;
+    for (std::size_t i = 0U; i < 4U; ++i) {
+        std::size_t comma = params_json.find(',', cursor);
+        const bool last = (i == 3U);
+        const std::size_t token_end = last ? end : comma;
+        if (token_end == std::string::npos || token_end <= cursor) {
+            return false;
+        }
+        float value = 0.0f;
+        if (!ParseFloatToken(params_json.substr(cursor, token_end - cursor), &value)) {
+            return false;
+        }
+        parsed[i] = value;
+        cursor = token_end + 1U;
+    }
+    *out_color = parsed;
+    return true;
+}
+
+std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
+    std::string alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : ToUpperAscii(payload.alpha_mode);
+    const std::string upper_json = ToUpperAscii(payload.shader_params_json);
+    if (upper_json.find("_ALPHATEST_ON") != std::string::npos) {
+        return "MASK";
+    }
+    if (upper_json.find("_ALPHABLEND_ON") != std::string::npos ||
+        upper_json.find("_ALPHAPREMULTIPLY_ON") != std::string::npos) {
+        return "BLEND";
+    }
+    float value = 0.0f;
+    if (TryExtractShaderParamFloat(payload.shader_params_json, "_AlphaClip", &value) && value > 0.5f) {
+        return "MASK";
+    }
+    if (TryExtractShaderParamFloat(payload.shader_params_json, "_UseAlphaClipping", &value) && value > 0.5f) {
+        return "MASK";
+    }
+    if (TryExtractShaderParamFloat(payload.shader_params_json, "_Cutoff", &value) && value > 0.001f) {
+        return "MASK";
+    }
+    if (TryExtractShaderParamFloat(payload.shader_params_json, "_Surface", &value) && value >= 1.0f) {
+        return "BLEND";
+    }
+    if (TryExtractShaderParamFloat(payload.shader_params_json, "_Mode", &value) && value >= 2.0f) {
+        return "BLEND";
+    }
+    return alpha_mode;
+}
+
 bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& avatar_pkg, std::uint64_t handle, ID3D11Device* device) {
     if (renderer == nullptr || device == nullptr) {
         return false;
@@ -1046,9 +1156,17 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
     materials.reserve(std::max<std::size_t>(avatar_pkg.material_payloads.size(), 1U));
     for (const auto& payload : avatar_pkg.material_payloads) {
         GpuMaterialResource material {};
-        material.alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : payload.alpha_mode;
+        material.alpha_mode = ResolveAlphaMode(payload);
         material.alpha_cutoff = payload.alpha_cutoff;
         material.double_sided = payload.double_sided;
+        std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
+        if (!TryExtractShaderParamColor(payload.shader_params_json, "_BaseColor", &base_color)) {
+            (void)TryExtractShaderParamColor(payload.shader_params_json, "_Color", &base_color);
+        }
+        for (float& c : base_color) {
+            c = std::max(0.0f, std::min(1.0f, c));
+        }
+        material.base_color = base_color;
         if (!payload.base_color_texture_name.empty()) {
             const auto tex_it = std::find_if(
                 avatar_pkg.texture_payloads.begin(),
@@ -1328,7 +1446,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         // Host UI currently operates in single-avatar mode, and slot offsets
         // can push the visible avatar out of frame after reload/recovery paths.
         const float x_offset = 0.0f;
-        const float preview_yaw = DirectX::XM_PI;
+        const float preview_yaw = (it->second.source_type == AvatarSourceType::Xav2)
+            ? 0.0f
+            : DirectX::XM_PI;
         const auto world =
             DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *
             DirectX::XMMatrixRotationY(preview_yaw) *
@@ -1382,7 +1502,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float alpha_cutoff;
         float alpha_mode_mask;
         float has_texture;
-        float _pad;
+        float use_texture_alpha;
     };
     auto draw_pass = [&](const DrawItem& item) {
         if (item.mesh == nullptr || item.mesh->vertex_buffer == nullptr || item.mesh->index_buffer == nullptr || item.pkg == nullptr) {
@@ -1404,7 +1524,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             return static_cast<char>(std::toupper(c));
         });
         const bool is_mask = (alpha_mode == "MASK");
-        const bool is_blend = (alpha_mode == "BLEND");
+        const bool is_blend = (alpha_mode == "BLEND") || (item.material != nullptr && item.material->base_color[3] < 0.999f);
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (is_blend) {
             device_ctx->OMSetBlendState(renderer.blend_alpha, blend_factor, 0xFFFFFFFFU);
@@ -1434,13 +1554,21 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         DirectX::XMFLOAT4X4 wvp_store {};
         DirectX::XMStoreFloat4x4(&wvp_store, world_view_proj_t);
         std::memcpy(cb.world_view_proj, &wvp_store, sizeof(cb.world_view_proj));
-        cb.base_color[0] = 1.0f;
-        cb.base_color[1] = 0.96f;
-        cb.base_color[2] = 0.92f;
-        cb.base_color[3] = is_blend ? 0.65f : 1.0f;
-        cb.alpha_cutoff = alpha_cutoff;
+        if (item.material != nullptr) {
+            cb.base_color[0] = item.material->base_color[0];
+            cb.base_color[1] = item.material->base_color[1];
+            cb.base_color[2] = item.material->base_color[2];
+            cb.base_color[3] = item.material->base_color[3];
+        } else {
+            cb.base_color[0] = 1.0f;
+            cb.base_color[1] = 1.0f;
+            cb.base_color[2] = 1.0f;
+            cb.base_color[3] = 1.0f;
+        }
+        cb.alpha_cutoff = is_mask ? alpha_cutoff : 0.0f;
         cb.alpha_mode_mask = is_mask ? 1.0f : 0.0f;
         cb.has_texture = srv != nullptr ? 1.0f : 0.0f;
+        cb.use_texture_alpha = (is_mask || is_blend) ? 1.0f : 0.0f;
 
         D3D11_MAPPED_SUBRESOURCE mapped {};
         if (SUCCEEDED(device_ctx->Map(renderer.constant_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
