@@ -119,6 +119,7 @@ Key changes:
   - startup/shutdown coordination
   - per-tick tracking frame submission attempt
   - tracking-specific error message routing
+  - tracking diagnostic reconciliation logs (`TrackingState`, `TrackingFormatDetected`, `TrackingParseError`)
 - Implemented `TrackingInputService`:
   - UDP receive loop
   - OSC packet parse paths (`format-a`/`format-b`, bundle handling)

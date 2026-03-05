@@ -28,6 +28,9 @@ public sealed partial class HostController
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
     private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped");
+    private string _lastTrackingFormat = "unknown";
+    private ulong _lastTrackingParseErrors;
+    private bool _lastTrackingActive;
 
     public HostController()
         : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new TrackingInputService())
@@ -480,6 +483,7 @@ public sealed partial class HostController
             }
         }
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+        ReconcileTrackingDiagnostics();
 
         if (_sessionService.ActiveAvatarHandle.HasValue)
         {
@@ -1034,6 +1038,48 @@ public sealed partial class HostController
         if (_desiredOscActive != runtimeOscActive)
         {
             ReconcileOsc(runtimeOscActive);
+        }
+    }
+
+    private void ReconcileTrackingDiagnostics()
+    {
+        if (_trackingDiagnostics.IsActive != _lastTrackingActive)
+        {
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "TrackingState",
+                    _trackingDiagnostics.IsActive ? "active" : "inactive",
+                    NcResultCode.Ok),
+                false);
+            _lastTrackingActive = _trackingDiagnostics.IsActive;
+        }
+
+        var currentFormat = string.IsNullOrWhiteSpace(_trackingDiagnostics.DetectedFormat)
+            ? "unknown"
+            : _trackingDiagnostics.DetectedFormat.Trim();
+        if (!string.Equals(currentFormat, _lastTrackingFormat, StringComparison.OrdinalIgnoreCase))
+        {
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "TrackingFormatDetected",
+                    currentFormat,
+                    NcResultCode.Ok),
+                false);
+            _lastTrackingFormat = currentFormat;
+        }
+
+        if (_trackingDiagnostics.ParseErrors > _lastTrackingParseErrors)
+        {
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "TrackingParseError",
+                    $"parse_errors={_trackingDiagnostics.ParseErrors}, dropped={_trackingDiagnostics.DroppedPackets}",
+                    NcResultCode.InvalidArgument),
+                false);
+            _lastTrackingParseErrors = _trackingDiagnostics.ParseErrors;
         }
     }
 
