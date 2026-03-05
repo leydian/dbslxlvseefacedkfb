@@ -115,6 +115,7 @@ struct CoreState {
     osc::OscEndpoint osc;
     NcTrackingFrame latest_tracking {};
     NcRenderQualityOptions render_quality {};
+    std::array<NcPoseBoneOffset, 9U> pose_offsets {};
     float last_frame_ms = 0.0f;
 
 #if defined(_WIN32)
@@ -805,10 +806,53 @@ void SanitizeTrackingFrame(NcTrackingFrame* frame) {
     frame->mouth_open = clamp_finite(frame->mouth_open, 0.0f, 1.0f, 0.0f);
 }
 
+bool IsValidPoseBoneId(std::uint32_t bone_id) {
+    return bone_id <= static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM);
+}
+
+NcPoseBoneOffset SanitizePoseOffset(const NcPoseBoneOffset& src) {
+    NcPoseBoneOffset out = src;
+    if (!IsValidPoseBoneId(out.bone_id)) {
+        out.bone_id = static_cast<std::uint32_t>(NC_POSE_BONE_UNKNOWN);
+    }
+    auto clamp_finite = [](float value, float min_v, float max_v) {
+        if (!std::isfinite(value)) {
+            return 0.0f;
+        }
+        return std::max(min_v, std::min(max_v, value));
+    };
+    out.pitch_deg = clamp_finite(out.pitch_deg, -45.0f, 45.0f);
+    out.yaw_deg = clamp_finite(out.yaw_deg, -45.0f, 45.0f);
+    out.roll_deg = clamp_finite(out.roll_deg, -45.0f, 45.0f);
+    return out;
+}
+
+NcPoseBoneOffset GetPoseOffset(std::uint32_t bone_id) {
+    if (!IsValidPoseBoneId(bone_id) || bone_id >= g_state.pose_offsets.size()) {
+        NcPoseBoneOffset out {};
+        out.bone_id = static_cast<std::uint32_t>(NC_POSE_BONE_UNKNOWN);
+        return out;
+    }
+    return g_state.pose_offsets[bone_id];
+}
+
 struct SkinWeight4 {
     std::array<std::int32_t, 4U> bone_indices = {0, 0, 0, 0};
     std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
 };
+
+constexpr std::size_t kPoseOffsetCapacity = 9U;
+
+std::array<NcPoseBoneOffset, kPoseOffsetCapacity> MakeDefaultPoseOffsets() {
+    std::array<NcPoseBoneOffset, kPoseOffsetCapacity> out {};
+    for (std::size_t i = 0U; i < out.size(); ++i) {
+        out[i].bone_id = static_cast<std::uint32_t>(i);
+        out[i].pitch_deg = 0.0f;
+        out[i].yaw_deg = 0.0f;
+        out[i].roll_deg = 0.0f;
+    }
+    return out;
+}
 
 struct SkinQualityCheck {
     bool valid = false;
@@ -1811,6 +1855,48 @@ DirectX::XMMATRIX ComputeProjectionMatrix(std::uint32_t width, std::uint32_t hei
     return XMMatrixPerspectiveFovRH(XMConvertToRadians(fov_deg), aspect, 0.01f, 100.0f);
 }
 
+DirectX::XMMATRIX PoseOffsetToMatrix(const NcPoseBoneOffset& pose) {
+    using namespace DirectX;
+    return XMMatrixRotationRollPitchYaw(
+        XMConvertToRadians(pose.pitch_deg),
+        XMConvertToRadians(pose.yaw_deg),
+        XMConvertToRadians(pose.roll_deg));
+}
+
+NcPoseBoneOffset ScalePoseOffset(const NcPoseBoneOffset& src, float weight) {
+    NcPoseBoneOffset out = src;
+    const float w = std::max(0.0f, std::min(1.0f, weight));
+    out.pitch_deg *= w;
+    out.yaw_deg *= w;
+    out.roll_deg *= w;
+    return out;
+}
+
+DirectX::XMMATRIX ComputeUpperBodyPoseOffsetMatrix() {
+    const auto hips = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_HIPS));
+    const auto spine = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_SPINE));
+    const auto chest = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_CHEST));
+    const auto upper_chest = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_UPPER_CHEST));
+    const auto neck = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_NECK));
+    const auto head = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_HEAD));
+    const auto left_arm = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
+    const auto right_arm = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
+    const auto arm_avg = ScalePoseOffset(
+        NcPoseBoneOffset{
+            static_cast<std::uint32_t>(NC_POSE_BONE_UNKNOWN),
+            (left_arm.pitch_deg + right_arm.pitch_deg) * 0.5f,
+            (left_arm.yaw_deg + right_arm.yaw_deg) * 0.5f,
+            (left_arm.roll_deg + right_arm.roll_deg) * 0.5f},
+        0.35f);
+    return PoseOffsetToMatrix(ScalePoseOffset(hips, 0.35f)) *
+           PoseOffsetToMatrix(ScalePoseOffset(spine, 0.55f)) *
+           PoseOffsetToMatrix(ScalePoseOffset(chest, 0.75f)) *
+           PoseOffsetToMatrix(upper_chest) *
+           PoseOffsetToMatrix(ScalePoseOffset(neck, 0.85f)) *
+           PoseOffsetToMatrix(head) *
+           PoseOffsetToMatrix(arm_avg);
+}
+
 bool CaptureRtvBgra(
     ID3D11Device* device,
     ID3D11DeviceContext* device_ctx,
@@ -2070,6 +2156,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const auto head_rot = (quat_len_sq > 1e-6f)
             ? DirectX::XMMatrixRotationQuaternion(DirectX::XMQuaternionNormalize(raw_head_rot))
             : DirectX::XMMatrixIdentity();
+        const auto user_pose_rot = ComputeUpperBodyPoseOffsetMatrix();
+        const auto composed_head_rot = user_pose_rot * head_rot;
         constexpr float kHeadPosScale = 0.20f;
         const auto head_pos = DirectX::XMMatrixTranslation(
             g_state.latest_tracking.head_pos[0] * kHeadPosScale,
@@ -2078,7 +2166,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const auto world =
             DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *
             DirectX::XMMatrixRotationY(preview_yaw) *
-            head_rot *
+            composed_head_rot *
             DirectX::XMMatrixScaling(fit_scale, fit_scale, fit_scale) *
             head_pos *
             DirectX::XMMatrixTranslation(x_offset, -look_at_y, 0.0f);
@@ -2278,6 +2366,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         }
 
         if (!submitted_on_gpu) {
+            if (g_state.spout.IsStrictMode()) {
+                SetError(
+                    NC_ERROR_INTERNAL,
+                    "spout",
+                    "strict spout mode enabled but gpu submit failed (" + g_state.spout.LastErrorCode() + ")",
+                    true);
+                return NC_ERROR_INTERNAL;
+            }
             std::vector<std::uint8_t> pixels;
             if (CaptureRtvBgra(device, device_ctx, rtv, ctx->width, ctx->height, &pixels)) {
                 g_state.spout.SubmitFrame(pixels.data(), static_cast<std::uint32_t>(pixels.size()));
@@ -2325,6 +2421,7 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.avatars.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
+    vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
     vsfclone::nativecore::g_state.last_frame_ms = 0.0f;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -2349,6 +2446,7 @@ NcResultCode nc_shutdown(void) {
     vsfclone::nativecore::g_state.avatars.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
+    vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
     vsfclone::nativecore::g_state.initialized = false;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -3015,6 +3113,39 @@ NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options) 
     return NC_OK;
 }
 
+NcResultCode nc_set_pose_offsets(const NcPoseBoneOffset* offsets, uint32_t count) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if ((count > 0U) && offsets == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "pose", "offsets must not be null when count > 0", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto next = vsfclone::nativecore::MakeDefaultPoseOffsets();
+    for (uint32_t i = 0U; i < count; ++i) {
+        const auto sanitized = vsfclone::nativecore::SanitizePoseOffset(offsets[i]);
+        if (!vsfclone::nativecore::IsValidPoseBoneId(sanitized.bone_id)) {
+            continue;
+        }
+        next[sanitized.bone_id] = sanitized;
+    }
+    vsfclone::nativecore::g_state.pose_offsets = next;
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_clear_pose_offsets(void) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
 NcResultCode nc_start_spout(const NcSpoutOptions* options) {
     std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
     if (!vsfclone::nativecore::EnsureInitialized()) {
@@ -3114,6 +3245,36 @@ NcResultCode nc_get_runtime_stats(NcRuntimeStats* out_stats) {
     out_stats->spout_active = vsfclone::nativecore::g_state.spout.IsActive() ? 1U : 0U;
     out_stats->osc_active = vsfclone::nativecore::g_state.osc.IsBound() ? 1U : 0U;
     out_stats->last_frame_ms = vsfclone::nativecore::g_state.last_frame_ms;
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_spout_diagnostics(NcSpoutDiagnostics* out_diag) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_diag == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "spout", "out_diag must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    std::memset(out_diag, 0, sizeof(*out_diag));
+    out_diag->strict_mode = vsfclone::nativecore::g_state.spout.IsStrictMode() ? 1U : 0U;
+    out_diag->fallback_count = vsfclone::nativecore::g_state.spout.FallbackCount();
+    const auto backend = vsfclone::nativecore::g_state.spout.ActiveBackendKind();
+    switch (backend) {
+        case vsfclone::stream::SpoutSender::BackendKind::Spout2Gpu:
+            out_diag->backend_kind = NC_SPOUT_BACKEND_SPOUT2_GPU;
+            break;
+        case vsfclone::stream::SpoutSender::BackendKind::LegacySharedMemory:
+            out_diag->backend_kind = NC_SPOUT_BACKEND_LEGACY_SHARED_MEMORY;
+            break;
+        default:
+            out_diag->backend_kind = NC_SPOUT_BACKEND_INACTIVE;
+            break;
+    }
+    vsfclone::nativecore::CopyString(out_diag->last_error_code, sizeof(out_diag->last_error_code), vsfclone::nativecore::g_state.spout.LastErrorCode());
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }

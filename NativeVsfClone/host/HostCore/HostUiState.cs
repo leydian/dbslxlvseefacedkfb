@@ -38,6 +38,24 @@ public enum BackgroundPreset
     GreenScreen = 2,
 }
 
+public enum PoseBoneKind
+{
+    Hips = 0,
+    Spine = 1,
+    Chest = 2,
+    UpperChest = 3,
+    Neck = 4,
+    Head = 5,
+    LeftUpperArm = 6,
+    RightUpperArm = 7,
+}
+
+public sealed record PoseBoneUiOffset(
+    PoseBoneKind Bone,
+    float PitchDeg,
+    float YawDeg,
+    float RollDeg);
+
 public sealed record RenderUiState(
     bool BroadcastMode,
     RenderCameraMode CameraMode,

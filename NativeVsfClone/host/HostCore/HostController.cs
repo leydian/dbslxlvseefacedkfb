@@ -8,14 +8,18 @@ namespace HostCore;
 public sealed partial class HostController
 {
     private const int MaxLogEntries = 200;
+    private static readonly TimeSpan TickDiagnosticsPublishInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan RuntimeCaptureRefreshInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly IAvatarSessionService _sessionService;
     private readonly IRenderLoopService _renderLoopService;
     private readonly IOutputService _outputService;
     private readonly IRenderPresetStore _presetStore;
+    private readonly IPosePresetStore _posePresetStore;
     private readonly ITrackingInputService _trackingInputService;
     private readonly Queue<HostLogEntry> _logs = new();
     private RenderPresetStoreModel _presetStoreModel;
+    private PosePresetStoreModel _posePresetStoreModel;
     private NcRenderQualityOptions _renderOptions;
     private long _snapshotVersion;
     private long _logVersion;
@@ -28,12 +32,16 @@ public sealed partial class HostController
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
     private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
+    private List<PoseBoneUiOffset> _poseOffsets = BuildDefaultPoseOffsets();
     private string _lastTrackingFormat = "unknown";
     private ulong _lastTrackingParseErrors;
     private bool _lastTrackingActive;
+    private DiagnosticsModel _runtimeDiagnostics = DiagnosticsModel.Empty;
+    private DateTimeOffset _lastDiagnosticsPublishUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastRuntimeCaptureUtc = DateTimeOffset.MinValue;
 
     public HostController()
-        : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new TrackingInputService())
+        : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new PosePresetStore(), new TrackingInputService())
     {
     }
 
@@ -43,14 +51,27 @@ public sealed partial class HostController
         IOutputService outputService,
         IRenderPresetStore presetStore,
         ITrackingInputService? trackingInputService = null)
+        : this(sessionService, renderLoopService, outputService, presetStore, new PosePresetStore(), trackingInputService)
+    {
+    }
+
+    public HostController(
+        IAvatarSessionService sessionService,
+        IRenderLoopService renderLoopService,
+        IOutputService outputService,
+        IRenderPresetStore presetStore,
+        IPosePresetStore posePresetStore,
+        ITrackingInputService? trackingInputService = null)
     {
         _sessionService = sessionService;
         _renderLoopService = renderLoopService;
         _outputService = outputService;
         _presetStore = presetStore;
+        _posePresetStore = posePresetStore;
         _trackingInputService = trackingInputService ?? new TrackingInputService();
         _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
         _presetStoreModel = EnsurePresetStoreModel(_presetStore.Load());
+        _posePresetStoreModel = EnsurePosePresetStoreModel(_posePresetStore.Load());
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
         Outputs = new OutputState(false, false, "VsfClone", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
         _desiredSpoutActive = false;
@@ -62,6 +83,7 @@ public sealed partial class HostController
             _renderOptions = ToNativeOptions(RenderState);
         }
         OperationState = new HostOperationState(false, string.Empty);
+        CaptureRuntimeDiagnostics(force: true);
         LastSnapshot = BuildSnapshot();
         InitializeMvpFeatures();
     }
@@ -79,7 +101,10 @@ public sealed partial class HostController
     public IReadOnlyCollection<HostLogEntry> LogEntries => _logs.ToArray();
     public IReadOnlyList<RenderPresetModel> RenderPresets => _presetStoreModel.Presets;
     public string? SelectedRenderPresetName => _presetStoreModel.LastSelectedPresetName;
+    public IReadOnlyList<PosePresetModel> PosePresets => _posePresetStoreModel.Presets;
+    public string? SelectedPosePresetName => _posePresetStoreModel.LastSelectedPresetName;
     public TrackingDiagnostics TrackingDiagnostics => _trackingDiagnostics;
+    public IReadOnlyList<PoseBoneUiOffset> PoseOffsets => _poseOffsets;
 
     public NcResultCode Initialize()
     {
@@ -90,6 +115,7 @@ public sealed partial class HostController
             if (rc == NcResultCode.Ok)
             {
                 ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
+                ApplyPoseOffsetsInternal("ApplyPoseOffsetsInit");
             }
 
             RefreshState();
@@ -134,8 +160,10 @@ public sealed partial class HostController
             TrackResult("Shutdown", rc);
             _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
             RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
+            _poseOffsets = BuildDefaultPoseOffsets();
+            _ = NativeCoreInterop.nc_clear_pose_offsets();
             SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
-            PublishDiagnostics();
+            _ = PublishDiagnostics(force: true, forceRuntimeRefresh: true);
             StateChanged?.Invoke(this, EventArgs.Empty);
             return rc;
         });
@@ -203,6 +231,7 @@ public sealed partial class HostController
                 // Re-apply host-side render controls after avatar load in case
                 // the native side resets camera/quality state during load.
                 ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
+                ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
                 _lastLoadFailureGuidance = string.Empty;
                 _lastLoadFailureTechnical = string.Empty;
             }
@@ -301,7 +330,11 @@ public sealed partial class HostController
                 trackingSettings.CameraDeviceKey,
                 trackingSettings.InferenceFpsCap,
                 trackingSettings.ParseErrorWarnThreshold,
-                trackingSettings.DroppedPacketWarnThreshold);
+                trackingSettings.DroppedPacketWarnThreshold,
+                trackingSettings.SourceLockMode,
+                trackingSettings.LatencyProfile,
+                trackingSettings.PoseFilterProfile,
+                trackingSettings.PoseDeadbandDeg);
             var rc = _trackingInputService.Start(options);
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
             if (rc == NcResultCode.Ok)
@@ -464,6 +497,122 @@ public sealed partial class HostController
         return ApplyRenderUiState(ToRenderUiState(defaultPreset));
     }
 
+    public NcResultCode SetPoseOffset(PoseBoneKind bone, float pitchDeg, float yawDeg, float rollDeg)
+    {
+        var idx = FindPoseIndex(bone);
+        if (idx < 0)
+        {
+            return NcResultCode.InvalidArgument;
+        }
+
+        _poseOffsets[idx] = new PoseBoneUiOffset(
+            bone,
+            Clamp(pitchDeg, -45.0f, 45.0f),
+            Clamp(yawDeg, -45.0f, 45.0f),
+            Clamp(rollDeg, -45.0f, 45.0f));
+        var rc = ApplyPoseOffsetsInternal("SetPoseOffset");
+        RefreshState();
+        return rc;
+    }
+
+    public NcResultCode ResetPoseOffset(PoseBoneKind bone)
+    {
+        return SetPoseOffset(bone, 0.0f, 0.0f, 0.0f);
+    }
+
+    public NcResultCode ResetAllPoseOffsets()
+    {
+        _poseOffsets = BuildDefaultPoseOffsets();
+        var rc = ApplyPoseOffsetsInternal("ResetAllPoseOffsets");
+        RefreshState();
+        return rc;
+    }
+
+    public PosePresetModel CreatePosePreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var tracking = _sessionPersistence.Tracking;
+        return new PosePresetModel(
+            normalizedName,
+            PosePresetStoreModel.CloneOffsets(_poseOffsets),
+            tracking.PoseFilterProfile,
+            tracking.PoseDeadbandDeg);
+    }
+
+    public bool SaveOrUpdatePosePreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        if (string.IsNullOrEmpty(normalizedName))
+        {
+            return false;
+        }
+
+        var preset = CreatePosePreset(normalizedName);
+        var index = _posePresetStoreModel.Presets.FindIndex(
+            p => string.Equals(p.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+        {
+            _posePresetStoreModel.Presets[index] = preset;
+        }
+        else
+        {
+            _posePresetStoreModel.Presets.Add(preset);
+        }
+
+        _posePresetStoreModel.LastSelectedPresetName = preset.Name;
+        PersistPosePresetStore();
+        RefreshState();
+        return true;
+    }
+
+    public NcResultCode ApplyPosePreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var preset = _posePresetStoreModel.Presets.FirstOrDefault(
+            p => string.Equals(p.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (preset is null)
+        {
+            return NcResultCode.InvalidArgument;
+        }
+
+        _posePresetStoreModel.LastSelectedPresetName = preset.Name;
+        _poseOffsets = PosePresetStoreModel.CloneOffsets(preset.Offsets);
+        PersistPosePresetStore();
+        var rc = ApplyPoseOffsetsInternal("ApplyPosePreset");
+
+        var currentTracking = _sessionPersistence.Tracking;
+        ConfigureTrackingInputSettings(
+            currentTracking.ListenPort,
+            currentTracking.StaleTimeoutMs,
+            poseFilterProfile: preset.FilterProfile,
+            poseDeadbandDeg: preset.PoseDeadbandDeg);
+
+        RefreshState();
+        return rc;
+    }
+
+    public bool DeletePosePreset(string name)
+    {
+        var normalizedName = NormalizePresetName(name);
+        var index = _posePresetStoreModel.Presets.FindIndex(
+            p => string.Equals(p.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+        if (index < 0 || _posePresetStoreModel.Presets.Count <= 1)
+        {
+            return false;
+        }
+
+        var removedName = _posePresetStoreModel.Presets[index].Name;
+        _posePresetStoreModel.Presets.RemoveAt(index);
+        if (string.Equals(_posePresetStoreModel.LastSelectedPresetName, removedName, StringComparison.OrdinalIgnoreCase))
+        {
+            _posePresetStoreModel.LastSelectedPresetName = _posePresetStoreModel.Presets[0].Name;
+        }
+
+        PersistPosePresetStore();
+        RefreshState();
+        return true;
+    }
+
     public HostValidationState ValidateInputs(string avatarPath, string oscBindPortText, string oscPublishAddress)
     {
         var avatarValid = TryValidateAvatarPath(avatarPath, out var avatarError);
@@ -534,16 +683,6 @@ public sealed partial class HostController
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
         ReconcileTrackingDiagnostics();
 
-        if (_sessionService.ActiveAvatarHandle.HasValue)
-        {
-            if (NativeCoreInterop.nc_get_runtime_stats(out var statsRc) == NcResultCode.Ok &&
-                statsRc.RenderReadyAvatarCount == 0U)
-            {
-                var recoverRc = NativeCoreInterop.nc_create_render_resources(_sessionService.ActiveAvatarHandle.Value);
-                TrackResult("RecoverRenderResources", recoverRc);
-            }
-        }
-
         var rc = _renderLoopService.Tick(deltaTimeSeconds);
         SessionState = SessionState with { LastRenderRc = rc };
         if (rc != NcResultCode.Ok)
@@ -557,9 +696,26 @@ public sealed partial class HostController
             TrackResult("RefreshAvatarInfo", refreshRc);
         }
 
-        ReconcileRuntimeOutputState();
-        RecordFrameMetricAndGuardrails();
-        RefreshState();
+        if (NativeCoreInterop.nc_get_runtime_stats(out var runtimeStats) == NcResultCode.Ok)
+        {
+            CaptureRuntimeDiagnostics(runtimeStats);
+
+            if (_sessionService.ActiveAvatarHandle.HasValue && runtimeStats.RenderReadyAvatarCount == 0U)
+            {
+                var recoverRc = NativeCoreInterop.nc_create_render_resources(_sessionService.ActiveAvatarHandle.Value);
+                TrackResult("RecoverRenderResources", recoverRc);
+            }
+
+            ReconcileRuntimeOutputState(runtimeStats);
+            RecordFrameMetricAndGuardrails(runtimeStats);
+        }
+        else
+        {
+            _runtimeDiagnostics = _runtimeDiagnostics with { LastError = NativeCoreInterop.FormatLastError() };
+            _lastRuntimeCaptureUtc = DateTimeOffset.UtcNow;
+        }
+
+        RefreshStateFastPath();
         return rc;
     }
 
@@ -576,7 +732,7 @@ public sealed partial class HostController
             SessionState.DpiScaleY,
             SessionState.RenderWidthPx,
             SessionState.RenderHeightPx);
-        PublishDiagnostics();
+        _ = PublishDiagnostics(force: true, forceRuntimeRefresh: true);
         PersistSessionSnapshot();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -617,13 +773,12 @@ public sealed partial class HostController
             RenderWidthPx = normalizedRenderWidth,
             RenderHeightPx = normalizedRenderHeight,
         };
-        PublishDiagnostics();
+        _ = PublishDiagnostics(force: true, forceRuntimeRefresh: true);
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private DiagnosticsSnapshot BuildSnapshot()
     {
-        var runtime = DiagnosticsModel.Capture();
         return new DiagnosticsSnapshot(
             DateTimeOffset.UtcNow,
             _snapshotVersion,
@@ -632,16 +787,68 @@ public sealed partial class HostController
             Outputs,
             RenderState,
             _trackingDiagnostics,
-            runtime,
+            _runtimeDiagnostics,
             _sessionService.ActiveAvatarInfo,
             SessionState.LastRenderRc);
     }
 
-    private void PublishDiagnostics()
+    private bool PublishDiagnostics(bool force, bool forceRuntimeRefresh)
     {
+        var now = DateTimeOffset.UtcNow;
+        if (!force &&
+            (now - _lastDiagnosticsPublishUtc) < TickDiagnosticsPublishInterval &&
+            LastSnapshot.LogVersion == _logVersion)
+        {
+            return false;
+        }
+
+        CaptureRuntimeDiagnostics(force: forceRuntimeRefresh);
         _snapshotVersion++;
         LastSnapshot = BuildSnapshot();
+        _lastDiagnosticsPublishUtc = now;
         DiagnosticsUpdated?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    private void RefreshStateFastPath()
+    {
+        SessionState = new HostSessionState(
+            _sessionService.IsInitialized,
+            _windowAttached && _windowHandle != IntPtr.Zero,
+            _sessionService.ActiveAvatarHandle,
+            SessionState.LastRenderRc,
+            SessionState.LogicalWidth,
+            SessionState.LogicalHeight,
+            SessionState.DpiScaleX,
+            SessionState.DpiScaleY,
+            SessionState.RenderWidthPx,
+            SessionState.RenderHeightPx);
+        _ = PublishDiagnostics(force: false, forceRuntimeRefresh: false);
+    }
+
+    private void CaptureRuntimeDiagnostics(in NcRuntimeStats stats)
+    {
+        _ = NativeCoreInterop.nc_get_spout_diagnostics(out var spout);
+        _runtimeDiagnostics = DiagnosticsModel.FromNative(stats, spout);
+        _lastRuntimeCaptureUtc = DateTimeOffset.UtcNow;
+    }
+
+    private void CaptureRuntimeDiagnostics(bool force)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (!force && (now - _lastRuntimeCaptureUtc) < RuntimeCaptureRefreshInterval)
+        {
+            return;
+        }
+
+        if (NativeCoreInterop.nc_get_runtime_stats(out var stats) == NcResultCode.Ok)
+        {
+            CaptureRuntimeDiagnostics(stats);
+            return;
+        }
+
+        _runtimeDiagnostics = DiagnosticsModel.Empty with { LastError = NativeCoreInterop.FormatLastError() };
+        _lastRuntimeCaptureUtc = now;
     }
 
     private NcResultCode ApplyRenderOptionsInternal(string source)
@@ -805,6 +1012,20 @@ public sealed partial class HostController
         return store;
     }
 
+    private static PosePresetStoreModel EnsurePosePresetStoreModel(PosePresetStoreModel store)
+    {
+        if (store.Presets.Count == 0)
+        {
+            return PosePresetStoreModel.CreateDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(store.LastSelectedPresetName))
+        {
+            store.LastSelectedPresetName = store.Presets[0].Name;
+        }
+        return store;
+    }
+
     private bool TryGetSelectedPreset(out RenderPresetModel preset)
     {
         var selectedName = _presetStoreModel.LastSelectedPresetName;
@@ -835,6 +1056,11 @@ public sealed partial class HostController
         _presetStore.Save(_presetStoreModel);
     }
 
+    private void PersistPosePresetStore()
+    {
+        _posePresetStore.Save(_posePresetStoreModel);
+    }
+
     private static float Clamp(float value, float min, float max)
     {
         return Math.Min(max, Math.Max(min, value));
@@ -853,6 +1079,61 @@ public sealed partial class HostController
                key.Equals("headposx", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("headposy", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("headposz", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private NcResultCode ApplyPoseOffsetsInternal(string source)
+    {
+        if (!_sessionService.IsInitialized)
+        {
+            return NcResultCode.Ok;
+        }
+
+        var payload = _poseOffsets.Select(static p => new NcPoseBoneOffset
+        {
+            BoneId = ToNativePoseBone(p.Bone),
+            PitchDeg = p.PitchDeg,
+            YawDeg = p.YawDeg,
+            RollDeg = p.RollDeg,
+        }).ToArray();
+        var rc = NativeCoreInterop.nc_set_pose_offsets(payload, (uint)payload.Length);
+        TrackResult(source, rc);
+        return rc;
+    }
+
+    private static List<PoseBoneUiOffset> BuildDefaultPoseOffsets()
+    {
+        return new List<PoseBoneUiOffset>
+        {
+            new(PoseBoneKind.Hips, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.Spine, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.Chest, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.UpperChest, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.Neck, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.Head, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftUpperArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightUpperArm, 0.0f, 0.0f, 0.0f),
+        };
+    }
+
+    private int FindPoseIndex(PoseBoneKind bone)
+    {
+        return _poseOffsets.FindIndex(p => p.Bone == bone);
+    }
+
+    private static NcPoseBoneId ToNativePoseBone(PoseBoneKind bone)
+    {
+        return bone switch
+        {
+            PoseBoneKind.Hips => NcPoseBoneId.Hips,
+            PoseBoneKind.Spine => NcPoseBoneId.Spine,
+            PoseBoneKind.Chest => NcPoseBoneId.Chest,
+            PoseBoneKind.UpperChest => NcPoseBoneId.UpperChest,
+            PoseBoneKind.Neck => NcPoseBoneId.Neck,
+            PoseBoneKind.Head => NcPoseBoneId.Head,
+            PoseBoneKind.LeftUpperArm => NcPoseBoneId.LeftUpperArm,
+            PoseBoneKind.RightUpperArm => NcPoseBoneId.RightUpperArm,
+            _ => NcPoseBoneId.Unknown,
+        };
     }
 
     private static NcTrackingFrame BuildNeutralTrackingFrame()
@@ -968,7 +1249,7 @@ public sealed partial class HostController
         }
 
         OperationState = new HostOperationState(isBusy, operationName);
-        PublishDiagnostics();
+        _ = PublishDiagnostics(force: true, forceRuntimeRefresh: true);
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1071,17 +1352,10 @@ public sealed partial class HostController
             false);
     }
 
-    private void ReconcileRuntimeOutputState()
+    private void ReconcileRuntimeOutputState(in NcRuntimeStats runtimeStats)
     {
         if (OperationState.IsBusy || !_sessionService.IsInitialized)
         {
-            return;
-        }
-
-        var statsRc = NativeCoreInterop.nc_get_runtime_stats(out var runtimeStats);
-        if (statsRc != NcResultCode.Ok)
-        {
-            TrackResult("RuntimeStatsSync", statsRc);
             return;
         }
 

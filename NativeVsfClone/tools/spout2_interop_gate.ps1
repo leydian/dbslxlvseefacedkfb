@@ -6,6 +6,8 @@ param(
     [switch]$IncludeWinUi,
     [switch]$SkipHostE2E,
     [switch]$RequireSpout2Configured,
+    [switch]$EnableStrictMode,
+    [switch]$RequireStrictContract,
     [string]$SummaryPath = ".\build\reports\spout2_interop_gate_summary.txt"
 )
 
@@ -55,6 +57,13 @@ if ($RequireSpout2Configured -and -not $spoutSdkDetected) {
     $steps.Add("- Spout2 configuration contract: PASS")
 }
 
+if ($RequireStrictContract -and -not $EnableStrictMode) {
+    $overall = $false
+    $steps.Add("- Strict contract: FAIL (EnableStrictMode not set)")
+} else {
+    $steps.Add("- Strict contract: $(if ($EnableStrictMode) { 'ENABLED' } else { 'DISABLED' })")
+}
+
 if (-not $SkipHostE2E) {
     Write-Host "[spout2-gate] START: Host E2E gate"
     $hostArgs = @(
@@ -69,12 +78,22 @@ if (-not $SkipHostE2E) {
 
     Push-Location $repoRoot
     try {
-        & powershell @hostArgs
-        if ($LASTEXITCODE -ne 0) {
-            $overall = $false
-            $steps.Add("- Host E2E gate: FAIL (exit=$LASTEXITCODE)")
-        } else {
-            $steps.Add("- Host E2E gate: PASS (exit=0)")
+        $prevMode = $env:VSF_SPOUT_MODE
+        try {
+            if ($EnableStrictMode) {
+                $env:VSF_SPOUT_MODE = "spout2-strict"
+                $steps.Add("- Runtime env VSF_SPOUT_MODE=spout2-strict")
+            }
+            & powershell @hostArgs
+            if ($LASTEXITCODE -ne 0) {
+                $overall = $false
+                $steps.Add("- Host E2E gate: FAIL (exit=$LASTEXITCODE)")
+            } else {
+                $steps.Add("- Host E2E gate: PASS (exit=0)")
+            }
+        }
+        finally {
+            $env:VSF_SPOUT_MODE = $prevMode
         }
     }
     finally {
@@ -95,6 +114,8 @@ $lines.Add("NoRestore: $NoRestore")
 $lines.Add("IncludeWinUi: $IncludeWinUi")
 $lines.Add("SkipHostE2E: $SkipHostE2E")
 $lines.Add("RequireSpout2Configured: $RequireSpout2Configured")
+$lines.Add("EnableStrictMode: $EnableStrictMode")
+$lines.Add("RequireStrictContract: $RequireStrictContract")
 $lines.Add("DurationSec: $duration")
 $lines.Add("")
 $lines.Add("Steps:")

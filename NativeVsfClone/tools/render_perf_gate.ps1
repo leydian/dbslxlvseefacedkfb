@@ -2,14 +2,32 @@ param(
     [string]$MetricsCsvPath = "",
     [string]$MetricsDir = ".\build\reports",
     [string]$SummaryPath = ".\build\reports\render_perf_gate_summary.txt",
-    [double]$MaxP95FrameMs = 33.0,
-    [double]$MaxP99FrameMs = 50.0,
-    [double]$MaxFrameDropRatio = 0.05,
+    [ValidateSet("realtime-stable", "legacy", "aggressive")]
+    [string]$Profile = "realtime-stable",
+    [double]$MaxP95FrameMs = 20.0,
+    [double]$MaxP99FrameMs = 28.0,
+    [double]$MaxFrameDropRatio = 0.02,
     [double]$DropFrameThresholdMs = 33.3,
     [int]$MinSamples = 120
 )
 
 $ErrorActionPreference = "Stop"
+
+$profileDefaults = switch ($Profile) {
+    "aggressive" { @{ MaxP95FrameMs = 16.7; MaxP99FrameMs = 24.0; MaxFrameDropRatio = 0.01 } }
+    "legacy" { @{ MaxP95FrameMs = 33.0; MaxP99FrameMs = 50.0; MaxFrameDropRatio = 0.05 } }
+    default { @{ MaxP95FrameMs = 20.0; MaxP99FrameMs = 28.0; MaxFrameDropRatio = 0.02 } }
+}
+
+if (-not $PSBoundParameters.ContainsKey("MaxP95FrameMs")) {
+    $MaxP95FrameMs = [double]$profileDefaults.MaxP95FrameMs
+}
+if (-not $PSBoundParameters.ContainsKey("MaxP99FrameMs")) {
+    $MaxP99FrameMs = [double]$profileDefaults.MaxP99FrameMs
+}
+if (-not $PSBoundParameters.ContainsKey("MaxFrameDropRatio")) {
+    $MaxFrameDropRatio = [double]$profileDefaults.MaxFrameDropRatio
+}
 
 function Resolve-AbsolutePath {
     param([string]$Path, [string]$BaseDirectory)
@@ -85,6 +103,7 @@ $summaryLines = [System.Collections.Generic.List[string]]::new()
 $summaryLines.Add("Render Performance Gate Summary")
 $summaryLines.Add("Generated: $(Get-Date -Format o)")
 $summaryLines.Add("MetricsCsv: $resolvedCsv")
+$summaryLines.Add("Profile: $Profile")
 $summaryLines.Add("SampleCount: $($sorted.Count)")
 $summaryLines.Add("AvgFrameMs: $([Math]::Round($avg, 3))")
 $summaryLines.Add("P50FrameMs: $([Math]::Round($p50, 3))")

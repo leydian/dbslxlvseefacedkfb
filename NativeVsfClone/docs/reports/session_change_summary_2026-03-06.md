@@ -171,6 +171,88 @@ Executed during this session:
 ```powershell
 dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release
 dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release
+
+## Final Consolidated Update (2026-03-06, latest)
+
+This final section consolidates the latest workspace-wide delta and the performance-focused HostCore/WPF optimization pass completed after the earlier addendums.
+
+### Consolidated scope (tracked + newly added)
+
+- Runtime/core and loader path hardening:
+  - `src/avatar/vrm_loader.cpp`, `src/avatar/xav2_loader.cpp`, `src/nativecore/native_core.cpp`
+  - `include/vsfclone/nativecore/api.h`, `include/vsfclone/avatar/avatar_package.h`
+  - `src/stream/spout_sender.cpp`, `include/vsfclone/stream/spout_sender.h`
+- HostCore contract and runtime behavior expansion:
+  - `host/HostCore/HostController.cs`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/TrackingInputService.cs`
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/DiagnosticsModel.cs`
+  - `host/HostCore/PlatformFeatures.cs`
+  - `host/HostCore/PosePresetStore.cs` (new)
+- Host app UX/operation surface updates:
+  - `host/WpfHost/MainWindow.xaml`, `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+- Gate/release/documentation/tooling track updates:
+  - `tools/render_perf_gate.ps1`, `tools/release_readiness_gate.ps1`
+  - `tools/run_quality_baseline.ps1`, `tools/spout2_interop_gate.ps1`
+  - `tools/avatar_tool.cpp`, `tools/docs_quality_gate.ps1` (new)
+  - `docs/INDEX.md`, `docs/CONTRIBUTING_DOCS.md`, `README.md`
+  - `build/reports/README.md` and related report snapshots
+  - `docs/reports/xav2_import_v4_rig_hardening_2026-03-06.md`
+  - `docs/reports/xav2_import_rig_accuracy_hardening_followup_2026-03-06.md`
+  - `docs/reports/TEMPLATE.md` (new)
+
+### Latest Host performance/refactor implementation details
+
+1. Tick-path slimming and diagnostics publish throttling
+   - `HostController.Tick()` no longer forces full `RefreshState()` on every frame.
+   - Added fast path state refresh to preserve runtime correctness while reducing event/snapshot churn:
+     - `RefreshStateFastPath()`
+     - throttled diagnostics publish cadence (`100ms`) for frame loop traffic.
+   - Snapshot generation now reuses cached runtime diagnostics model instead of forcing native stats capture every publish.
+
+2. Native stats capture de-duplication
+   - Reworked per-frame flow to capture runtime stats once and fan out:
+     - render-resource recovery check
+     - output state reconciliation
+     - frame metric recording/guardrail logic.
+   - Eliminated redundant native polling in high-frequency loop sections.
+
+3. Rolling metrics storage pressure reduction
+   - Replaced list+range-trim pattern with bounded queue behavior (`RollingMetricCapacity`) to reduce per-frame memory churn and trimming overhead.
+   - CSV export contract remains backward compatible.
+
+4. Auto-quality default profile retuning
+   - Updated default policy in `PlatformFeatures.cs` toward realtime stability:
+     - faster downgrade trigger
+     - tighter recovery threshold
+     - adjusted cooldown/recovery windows.
+
+5. Perf gate profile model upgrade
+   - `tools/render_perf_gate.ps1` now supports profile-driven thresholds:
+     - `realtime-stable` (default)
+     - `legacy`
+     - `aggressive`
+   - Summary output now records selected profile and applied gate interpretation context.
+
+### Verification snapshot (latest run)
+
+- Build checks:
+  - `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release`: PASS
+  - `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release`: PASS (existing nullable warning retained)
+- Perf gate script execution:
+  - `tools/render_perf_gate.ps1` ran with updated profile logic.
+  - current `metrics_latest.csv` sample did not pass `realtime-stable` thresholds (`p95/p99/drop`), which is expected baseline evidence for ongoing optimization work rather than a tooling failure.
+
+### Operational interpretation
+
+- This workspace now has:
+  - richer host/runtime contract surface (tracking, pose presets, diagnostics, spout path updates),
+  - expanded release/tooling guardrails,
+  - and a concrete first performance refactor pass that reduces frame-loop overhead while keeping external operator behavior and UI contracts intact.
 dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release --no-restore
 dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore
 ```

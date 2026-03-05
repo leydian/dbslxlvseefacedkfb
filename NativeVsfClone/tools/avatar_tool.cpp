@@ -126,6 +126,8 @@ int main(int argc, char** argv) {
     std::cout << "  Meshes: " << info.meshes.size() << "\n";
     std::cout << "  Materials: " << info.materials.size() << "\n";
     std::cout << "  MeshPayloads: " << info.mesh_payloads.size() << "\n";
+    std::cout << "  SkinPayloads: " << info.skin_payloads.size() << "\n";
+    std::cout << "  SkeletonPayloads: " << info.skeleton_payloads.size() << "\n";
     std::cout << "  MaterialPayloads: " << info.material_payloads.size() << "\n";
     std::cout << "  TexturePayloads: " << info.texture_payloads.size() << "\n";
     std::cout << "  ExpressionCount: " << info.expressions.size() << "\n";

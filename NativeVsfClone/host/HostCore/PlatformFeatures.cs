@@ -57,7 +57,9 @@ public sealed record TrackingInputSettings(
     int ParseErrorWarnThreshold = 10,
     int DroppedPacketWarnThreshold = 10,
     TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
-    TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced);
+    TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced,
+    PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
+    float PoseDeadbandDeg = 0.9f);
 
 public sealed record SessionPersistenceModel(
     int Version,
@@ -110,11 +112,11 @@ public sealed record AutoQualityPolicy(
     int RecoveryConsecutiveFrameLimit)
 {
     public static AutoQualityPolicy CreateDefault() => new(
-        HighFrameMsThreshold: 28.0f,
-        ConsecutiveFrameLimit: 120,
-        CooldownSeconds: 30,
-        RecoveryFrameMsThreshold: 22.0f,
-        RecoveryConsecutiveFrameLimit: 240);
+        HighFrameMsThreshold: 24.0f,
+        ConsecutiveFrameLimit: 90,
+        CooldownSeconds: 20,
+        RecoveryFrameMsThreshold: 18.0f,
+        RecoveryConsecutiveFrameLimit: 360);
 }
 
 public sealed class SessionStateStore
@@ -167,7 +169,7 @@ public sealed class SessionStateStore
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
                     LastUpdatedUtc: legacy.LastUpdatedUtc));
@@ -210,7 +212,7 @@ public sealed class SessionStateStore
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
@@ -224,9 +226,13 @@ public sealed class SessionStateStore
         var latencyProfile = Enum.IsDefined(typeof(TrackingLatencyProfile), value.LatencyProfile)
             ? value.LatencyProfile
             : TrackingLatencyProfile.Balanced;
+        var poseFilterProfile = Enum.IsDefined(typeof(PoseFilterProfile), value.PoseFilterProfile)
+            ? value.PoseFilterProfile
+            : PoseFilterProfile.Stable;
         var fpsCap = Math.Clamp(value.InferenceFpsCap <= 0 ? 30 : value.InferenceFpsCap, 5, 120);
         var parseThreshold = Math.Clamp(value.ParseErrorWarnThreshold <= 0 ? 10 : value.ParseErrorWarnThreshold, 1, 10000);
         var droppedThreshold = Math.Clamp(value.DroppedPacketWarnThreshold <= 0 ? 10 : value.DroppedPacketWarnThreshold, 1, 10000);
+        var deadbandDeg = Math.Clamp(float.IsFinite(value.PoseDeadbandDeg) ? value.PoseDeadbandDeg : 0.9f, 0.0f, 3.0f);
         return new TrackingInputSettings(
             port,
             stale,
@@ -237,7 +243,9 @@ public sealed class SessionStateStore
             parseThreshold,
             droppedThreshold,
             sourceLockMode,
-            latencyProfile);
+            latencyProfile,
+            poseFilterProfile,
+            deadbandDeg);
     }
 
     private static string NormalizeUiMode(string value)

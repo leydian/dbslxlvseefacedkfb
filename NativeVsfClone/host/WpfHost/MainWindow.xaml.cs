@@ -29,7 +29,10 @@ public partial class MainWindow : Window
     private const float DragPixelsPerYawDegree = 6.0f;
     private const float WheelNotchFovStep = 1.0f;
     private bool _isSyncingRenderUi;
+    private bool _isSyncingPoseUi;
+    private bool _isSyncingTrackingPoseFilterUi;
     private bool _isSyncingPresetUi;
+    private bool _isSyncingPosePresetUi;
     private bool _isLogsTabActive;
     private bool _pendingUiStateRefresh;
     private bool _pendingRuntimeRefresh;
@@ -50,6 +53,7 @@ public partial class MainWindow : Window
     private string _lastFailureSource = string.Empty;
     private bool _isRenderRightDragging;
     private int _lastRenderDragX;
+    private const int WebcamProbeLimit = 10;
 
     public MainWindow()
     {
@@ -82,8 +86,10 @@ public partial class MainWindow : Window
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         ApplySessionDefaultsToUi();
         RefreshValidationState();
-        RefreshTrackingWebcamDevices();
         SyncRenderControlsFromState();
+        SyncPoseControlsFromState();
+        SyncTrackingPoseFilterControlsFromState();
+        SyncPosePresetControlsFromState();
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
         RefreshGuides();
@@ -415,6 +421,10 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Defer webcam probing to user action path to avoid startup-time crashes from unstable virtual camera filters.
+        var currentSelection = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key;
+        RefreshTrackingWebcamDevices(currentSelection);
+
         if (!ushort.TryParse(TrackingPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var listenPort))
         {
             MessageBox.Show(this, "트래킹 수신 포트는 0~65535여야 합니다. (Tracking listen port must be 0-65535.)", "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -431,6 +441,24 @@ public partial class MainWindow : Window
         var sourceType = TrackingSourceComboBox.SelectedIndex == 1
             ? TrackingSourceType.WebcamMediapipe
             : TrackingSourceType.OscIfacial;
+        var sourceLockMode = TrackingSourceLockComboBox.SelectedIndex switch
+        {
+            1 => TrackingSourceLockMode.IfacialLocked,
+            2 => TrackingSourceLockMode.WebcamLocked,
+            _ => TrackingSourceLockMode.Auto,
+        };
+        var latencyProfile = TrackingLatencyProfileComboBox.SelectedIndex switch
+        {
+            0 => TrackingLatencyProfile.LowLatency,
+            2 => TrackingLatencyProfile.Stable,
+            _ => TrackingLatencyProfile.Balanced,
+        };
+        var poseFilterProfile = TrackingPoseFilterProfileComboBox.SelectedIndex switch
+        {
+            0 => PoseFilterProfile.Reactive,
+            1 => PoseFilterProfile.Balanced,
+            _ => PoseFilterProfile.Stable,
+        };
 
         var current = _controller.GetTrackingInputSettings();
         var cameraKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key
@@ -440,7 +468,11 @@ public partial class MainWindow : Window
             current.StaleTimeoutMs,
             sourceType,
             cameraKey,
-            inferenceFpsCap);
+            inferenceFpsCap,
+            sourceLockMode: sourceLockMode,
+            latencyProfile: latencyProfile,
+            poseFilterProfile: poseFilterProfile,
+            poseDeadbandDeg: (float)TrackingPoseDeadbandSlider.Value);
 
         var rc = _controller.StartTracking(
             listenPort,
@@ -482,9 +514,55 @@ public partial class MainWindow : Window
         RefreshTrackingWebcamDevices(selectedKey);
     }
 
+    private void TrackingPoseFilterProfile_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || _isSyncingTrackingPoseFilterUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        var profile = TrackingPoseFilterProfileComboBox.SelectedIndex switch
+        {
+            0 => PoseFilterProfile.Reactive,
+            1 => PoseFilterProfile.Balanced,
+            _ => PoseFilterProfile.Stable,
+        };
+
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            poseFilterProfile: profile);
+    }
+
+    private void TrackingPoseDeadbandSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        var deadbandSlider = TrackingPoseDeadbandSlider;
+        if (deadbandSlider is null)
+        {
+            return;
+        }
+
+        if (TrackingPoseDeadbandValueText is not null)
+        {
+            TrackingPoseDeadbandValueText.Text = $"{deadbandSlider.Value:F2}\u00b0";
+        }
+
+        if (!_uiReady || _isSyncingTrackingPoseFilterUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            poseDeadbandDeg: (float)deadbandSlider.Value);
+    }
+
     private void RefreshTrackingWebcamDevices(string? preferredKey = null)
     {
-        var devices = _controller.GetAvailableWebcamDevices();
+        var devices = _controller.GetAvailableWebcamDevices(maxProbe: WebcamProbeLimit);
         var items = devices
             .Select(d => new WebcamDeviceItem(
                 d.DeviceKey,
@@ -501,6 +579,21 @@ public partial class MainWindow : Window
         {
             TrackingWebcamDeviceComboBox.SelectedItem = selected;
         }
+    }
+
+    private void SetTrackingWebcamDevicesPending(string? preferredKey = null)
+    {
+        var target = preferredKey ?? _controller.GetTrackingInputSettings().CameraDeviceKey;
+        var items = new[]
+        {
+            new WebcamDeviceItem(string.Empty, "Default Camera (scan pending)"),
+            new WebcamDeviceItem("0", "Camera 0 (scan pending)"),
+        };
+        TrackingWebcamDeviceComboBox.ItemsSource = items;
+        TrackingWebcamDeviceComboBox.DisplayMemberPath = nameof(WebcamDeviceItem.Label);
+        var selected = items.FirstOrDefault(x => string.Equals(x.Key, target, StringComparison.OrdinalIgnoreCase))
+            ?? items[0];
+        TrackingWebcamDeviceComboBox.SelectedItem = selected;
     }
 
     private void CopyLogs_Click(object sender, RoutedEventArgs e)
@@ -725,6 +818,118 @@ public partial class MainWindow : Window
         QueueRenderApply();
     }
 
+    private void PoseBone_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingPoseUi)
+        {
+            return;
+        }
+        SyncPoseControlsFromState();
+    }
+
+    private void PoseSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (PosePitchValueText is not null && PosePitchSlider is not null)
+        {
+            PosePitchValueText.Text = PosePitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (PoseYawValueText is not null && PoseYawSlider is not null)
+        {
+            PoseYawValueText.Text = PoseYawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (PoseRollValueText is not null && PoseRollSlider is not null)
+        {
+            PoseRollValueText.Text = PoseRollSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (_isSyncingPoseUi || _controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        ApplySelectedPoseOffset();
+    }
+
+    private void PoseResetBone_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+        var bone = GetSelectedPoseBone();
+        if (bone is null)
+        {
+            return;
+        }
+        _ = _controller.ResetPoseOffset(bone.Value);
+        SyncPoseControlsFromState();
+    }
+
+    private void PoseResetAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+        _ = _controller.ResetAllPoseOffsets();
+        SyncPoseControlsFromState();
+    }
+
+    private void SavePosePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        var name = PosePresetNameTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            MessageBox.Show(this, "포즈 프리셋 이름이 필요합니다. (Pose preset name is required.)", "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (_controller.SaveOrUpdatePosePreset(name))
+        {
+            SyncPosePresetControlsFromState();
+        }
+    }
+
+    private void ApplyPosePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (PosePresetComboBox.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        _ = _controller.ApplyPosePreset(name);
+        SyncPoseControlsFromState();
+        SyncPosePresetControlsFromState();
+        SyncTrackingPoseFilterControlsFromState();
+    }
+
+    private void DeletePosePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (PosePresetComboBox.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (_controller.DeletePosePreset(name))
+        {
+            SyncPosePresetControlsFromState();
+        }
+    }
+
     private void SavePreset_Click(object sender, RoutedEventArgs e)
     {
         if (_controller.OperationState.IsBusy)
@@ -906,17 +1111,23 @@ public partial class MainWindow : Window
 
     private void Controller_StateChanged(object? sender, EventArgs e)
     {
-        _pendingUiStateRefresh = true;
-        _pendingRuntimeRefresh = true;
-        _pendingAvatarRefresh = true;
-        _pendingLogsRefresh = true;
+        RunOnUiThread(() =>
+        {
+            _pendingUiStateRefresh = true;
+            _pendingRuntimeRefresh = true;
+            _pendingAvatarRefresh = true;
+            _pendingLogsRefresh = true;
+        });
     }
 
     private void Controller_DiagnosticsUpdated(object? sender, EventArgs e)
     {
-        _pendingRuntimeRefresh = true;
-        _pendingAvatarRefresh = true;
-        _pendingLogsRefresh = true;
+        RunOnUiThread(() =>
+        {
+            _pendingRuntimeRefresh = true;
+            _pendingAvatarRefresh = true;
+            _pendingLogsRefresh = true;
+        });
     }
 
     private void Controller_ErrorRaised(object? sender, HostLogEntry e)
@@ -1015,6 +1226,17 @@ public partial class MainWindow : Window
         BackgroundPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
         MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        PoseBoneComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        PosePitchSlider.IsEnabled = uiState.RenderControlsEnabled;
+        PoseYawSlider.IsEnabled = uiState.RenderControlsEnabled;
+        PoseRollSlider.IsEnabled = uiState.RenderControlsEnabled;
+        PoseResetBoneButton.IsEnabled = uiState.RenderControlsEnabled;
+        PoseResetAllButton.IsEnabled = uiState.RenderControlsEnabled;
+        SavePosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        ApplyPosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        DeletePosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        PosePresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
+        PosePresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
         SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
         ApplyPresetButton.IsEnabled = uiState.RenderControlsEnabled;
         DeletePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -1038,9 +1260,13 @@ public partial class MainWindow : Window
         TrackingWebcamDeviceComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         RefreshTrackingWebcamButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingSourceLockComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingLatencyProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingPoseFilterProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingPoseDeadbandSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -1051,6 +1277,9 @@ public partial class MainWindow : Window
         QuickNextActionText.Text = $"{nextAction.Title}: {nextAction.Instruction}";
 
         SyncRenderControlsFromState();
+        SyncPoseControlsFromState();
+        SyncTrackingPoseFilterControlsFromState();
+        SyncPosePresetControlsFromState();
         SyncPresetControlsFromState();
         ApplyModeVisibility();
     }
@@ -1164,10 +1393,14 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
+        runtimeSb.AppendLine($"SpoutBackend: {runtime.SpoutBackend}");
+        runtimeSb.AppendLine($"SpoutStrictMode: {runtime.SpoutStrictMode}");
+        runtimeSb.AppendLine($"SpoutFallbackCount: {runtime.SpoutFallbackCount}");
+        runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, active_source={tracking.ActiveSource}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1290,6 +1523,79 @@ public partial class MainWindow : Window
         _isSyncingRenderUi = false;
     }
 
+    private void SyncPoseControlsFromState()
+    {
+        if (PoseBoneComboBox is null || PosePitchSlider is null || PoseYawSlider is null || PoseRollSlider is null)
+        {
+            return;
+        }
+        _isSyncingPoseUi = true;
+        if (PoseBoneComboBox.SelectedIndex < 0)
+        {
+            PoseBoneComboBox.SelectedIndex = 0;
+        }
+
+        var selected = GetSelectedPoseBone() ?? PoseBoneKind.Hips;
+        var current = _controller.PoseOffsets.FirstOrDefault(p => p.Bone == selected);
+        PosePitchSlider.Value = current?.PitchDeg ?? 0.0f;
+        PoseYawSlider.Value = current?.YawDeg ?? 0.0f;
+        PoseRollSlider.Value = current?.RollDeg ?? 0.0f;
+        PosePitchValueText.Text = PosePitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        PoseYawValueText.Text = PoseYawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        PoseRollValueText.Text = PoseRollSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        _isSyncingPoseUi = false;
+    }
+
+    private void SyncTrackingPoseFilterControlsFromState()
+    {
+        if (TrackingPoseFilterProfileComboBox is null || TrackingPoseDeadbandSlider is null || TrackingPoseDeadbandValueText is null)
+        {
+            return;
+        }
+
+        var tracking = _controller.GetTrackingInputSettings();
+        _isSyncingTrackingPoseFilterUi = true;
+        TrackingPoseFilterProfileComboBox.SelectedIndex = tracking.PoseFilterProfile switch
+        {
+            PoseFilterProfile.Reactive => 0,
+            PoseFilterProfile.Balanced => 1,
+            _ => 2,
+        };
+        TrackingPoseDeadbandSlider.Value = tracking.PoseDeadbandDeg;
+        TrackingPoseDeadbandValueText.Text = $"{tracking.PoseDeadbandDeg:F2}\u00b0";
+        _isSyncingTrackingPoseFilterUi = false;
+    }
+
+    private void ApplySelectedPoseOffset()
+    {
+        var selected = GetSelectedPoseBone();
+        if (selected is null)
+        {
+            return;
+        }
+        _ = _controller.SetPoseOffset(
+            selected.Value,
+            (float)PosePitchSlider.Value,
+            (float)PoseYawSlider.Value,
+            (float)PoseRollSlider.Value);
+    }
+
+    private PoseBoneKind? GetSelectedPoseBone()
+    {
+        return PoseBoneComboBox.SelectedIndex switch
+        {
+            0 => PoseBoneKind.Hips,
+            1 => PoseBoneKind.Spine,
+            2 => PoseBoneKind.Chest,
+            3 => PoseBoneKind.UpperChest,
+            4 => PoseBoneKind.Neck,
+            5 => PoseBoneKind.Head,
+            6 => PoseBoneKind.LeftUpperArm,
+            7 => PoseBoneKind.RightUpperArm,
+            _ => null,
+        };
+    }
+
     private void SyncPresetControlsFromState()
     {
         if (_isSyncingPresetUi)
@@ -1328,6 +1634,46 @@ public partial class MainWindow : Window
             PresetNameTextBox.Text = selectedName;
         }
         _isSyncingPresetUi = false;
+    }
+
+    private void SyncPosePresetControlsFromState()
+    {
+        if (_isSyncingPosePresetUi)
+        {
+            return;
+        }
+
+        _isSyncingPosePresetUi = true;
+        var selectedName = _controller.SelectedPosePresetName ?? string.Empty;
+        PosePresetComboBox.Items.Clear();
+        foreach (var preset in _controller.PosePresets)
+        {
+            PosePresetComboBox.Items.Add(preset.Name);
+        }
+
+        var matched = false;
+        foreach (var item in PosePresetComboBox.Items)
+        {
+            if (item is string name &&
+                string.Equals(name, selectedName, StringComparison.OrdinalIgnoreCase))
+            {
+                PosePresetComboBox.SelectedItem = item;
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched && PosePresetComboBox.Items.Count > 0)
+        {
+            PosePresetComboBox.SelectedIndex = 0;
+            selectedName = PosePresetComboBox.SelectedItem as string ?? selectedName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedName))
+        {
+            PosePresetNameTextBox.Text = selectedName;
+        }
+        _isSyncingPosePresetUi = false;
     }
 
     private NcResultCode PushRenderUiState()
@@ -1377,7 +1723,27 @@ public partial class MainWindow : Window
         TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
         TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType == TrackingSourceType.WebcamMediapipe ? 1 : 0;
         TrackingInferenceFpsTextBox.Text = session.Tracking.InferenceFpsCap.ToString(CultureInfo.InvariantCulture);
-        RefreshTrackingWebcamDevices(session.Tracking.CameraDeviceKey);
+        TrackingSourceLockComboBox.SelectedIndex = session.Tracking.SourceLockMode switch
+        {
+            TrackingSourceLockMode.IfacialLocked => 1,
+            TrackingSourceLockMode.WebcamLocked => 2,
+            _ => 0,
+        };
+        TrackingLatencyProfileComboBox.SelectedIndex = session.Tracking.LatencyProfile switch
+        {
+            TrackingLatencyProfile.LowLatency => 0,
+            TrackingLatencyProfile.Stable => 2,
+            _ => 1,
+        };
+        TrackingPoseFilterProfileComboBox.SelectedIndex = session.Tracking.PoseFilterProfile switch
+        {
+            PoseFilterProfile.Reactive => 0,
+            PoseFilterProfile.Balanced => 1,
+            _ => 2,
+        };
+        TrackingPoseDeadbandSlider.Value = session.Tracking.PoseDeadbandDeg;
+        TrackingPoseDeadbandValueText.Text = $"{session.Tracking.PoseDeadbandDeg:F2}\u00b0";
+        SetTrackingWebcamDevicesPending(session.Tracking.CameraDeviceKey);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
         SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);

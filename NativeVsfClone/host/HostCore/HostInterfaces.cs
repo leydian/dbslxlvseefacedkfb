@@ -37,6 +37,12 @@ public interface IRenderPresetStore
     void Save(RenderPresetStoreModel store);
 }
 
+public interface IPosePresetStore
+{
+    PosePresetStoreModel Load();
+    void Save(PosePresetStoreModel store);
+}
+
 public enum TrackingSourceType
 {
     OscIfacial = 0,
@@ -57,6 +63,13 @@ public enum TrackingLatencyProfile
     Stable = 2,
 }
 
+public enum PoseFilterProfile
+{
+    Reactive = 0,
+    Balanced = 1,
+    Stable = 2,
+}
+
 public sealed record TrackingStartOptions(
     ushort ListenPort,
     int StaleTimeoutMs,
@@ -66,7 +79,9 @@ public sealed record TrackingStartOptions(
     int ParseErrorWarnThreshold = 10,
     int DroppedPacketWarnThreshold = 10,
     TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
-    TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced);
+    TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced,
+    PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
+    float PoseDeadbandDeg = 0.9f);
 
 public sealed record WebcamDeviceOption(
     string DeviceKey,
@@ -100,7 +115,9 @@ public sealed record TrackingDiagnostics(
     double SmoothStageMs = 0.0,
     double SubmitStageMs = 0.0,
     TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
-    string SwitchBlockedReason = "");
+    string SwitchBlockedReason = "",
+    PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
+    float PoseDeadbandDeg = 0.9f);
 
 public interface ITrackingInputService
 {

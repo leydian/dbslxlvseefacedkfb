@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-06T01:42:53
+Generated: 2026-03-06T02:12:55
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -16,6 +16,8 @@ Load succeeded
   Meshes: 50
   Materials: 15
   MeshPayloads: 50
+  SkinPayloads: 50
+  SkeletonPayloads: 50
   MaterialPayloads: 15
   TexturePayloads: 11
   ExpressionCount: 3
@@ -24,7 +26,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 19
+  Warnings: 20
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -46,6 +48,8 @@ Load succeeded
   Meshes: 29
   Materials: 18
   MeshPayloads: 29
+  SkinPayloads: 29
+  SkeletonPayloads: 29
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 3
@@ -54,7 +58,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 22
+  Warnings: 23
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -76,6 +80,8 @@ Load succeeded
   Meshes: 29
   Materials: 18
   MeshPayloads: 29
+  SkinPayloads: 29
+  SkeletonPayloads: 29
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 17
@@ -84,7 +90,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 22
+  Warnings: 23
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -106,6 +112,8 @@ Load succeeded
   Meshes: 28
   Materials: 18
   MeshPayloads: 28
+  SkinPayloads: 28
+  SkeletonPayloads: 28
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 18
@@ -114,7 +122,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 22
+  Warnings: 23
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -136,6 +144,8 @@ Load succeeded
   Meshes: 30
   Materials: 12
   MeshPayloads: 30
+  SkinPayloads: 30
+  SkeletonPayloads: 30
   MaterialPayloads: 12
   TexturePayloads: 9
   ExpressionCount: 18
@@ -144,7 +154,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 16
+  Warnings: 17
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true

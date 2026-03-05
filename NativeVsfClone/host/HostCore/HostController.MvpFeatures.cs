@@ -3,7 +3,6 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using OpenCvSharp;
 
 namespace HostCore;
 
@@ -18,7 +17,8 @@ public sealed partial class HostController
     private readonly SessionStateStore _sessionStore = new();
     private readonly AutoQualityPolicyStore _autoQualityStore = new();
     private readonly TelemetryService _telemetry = new();
-    private readonly List<FrameMetric> _rollingMetrics = new();
+    private readonly Queue<FrameMetric> _rollingMetrics = new();
+    private const int RollingMetricCapacity = 1800;
     private DateTimeOffset _lastAutoQualityAdjustUtc = DateTimeOffset.MinValue;
     private int _highFrameCount;
     private int _recoveryFrameCount;
@@ -387,18 +387,8 @@ public sealed partial class HostController
         for (var i = 0; i < probeCount; i++)
         {
             var key = i.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            var available = false;
-            try
-            {
-                using var cap = new VideoCapture(i);
-                available = cap.IsOpened();
-            }
-            catch
-            {
-                available = false;
-            }
-
-            list.Add(new WebcamDeviceOption(key, $"Camera {i}", available));
+            // Avoid eager native camera open-probe here. Some virtual camera filters can crash the process.
+            list.Add(new WebcamDeviceOption(key, $"Camera {i}", true));
         }
 
         return list;
@@ -413,10 +403,17 @@ public sealed partial class HostController
         int? parseErrorWarnThreshold = null,
         int? droppedPacketWarnThreshold = null,
         TrackingSourceLockMode? sourceLockMode = null,
-        TrackingLatencyProfile? latencyProfile = null)
+        TrackingLatencyProfile? latencyProfile = null,
+        PoseFilterProfile? poseFilterProfile = null,
+        float? poseDeadbandDeg = null)
     {
         var current = _sessionPersistence.Tracking;
         var resolvedProfile = latencyProfile ?? current.LatencyProfile;
+        var resolvedPoseFilter = poseFilterProfile ?? current.PoseFilterProfile;
+        var resolvedDeadband = Math.Clamp(
+            float.IsFinite(poseDeadbandDeg ?? current.PoseDeadbandDeg) ? (poseDeadbandDeg ?? current.PoseDeadbandDeg) : 0.9f,
+            0.0f,
+            3.0f);
         var normalized = new TrackingInputSettings(
             listenPort == 0 ? (ushort)49983 : listenPort,
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
@@ -427,7 +424,9 @@ public sealed partial class HostController
             Math.Clamp(parseErrorWarnThreshold ?? current.ParseErrorWarnThreshold, 1, 10000),
             Math.Clamp(droppedPacketWarnThreshold ?? current.DroppedPacketWarnThreshold, 1, 10000),
             sourceLockMode ?? current.SourceLockMode,
-            resolvedProfile);
+            resolvedProfile,
+            resolvedPoseFilter,
+            resolvedDeadband);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -438,7 +437,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
                 NcResultCode.Ok),
             false);
     }
@@ -471,7 +470,9 @@ public sealed partial class HostController
             current.ParseErrorWarnThreshold,
             current.DroppedPacketWarnThreshold,
             current.SourceLockMode,
-            current.LatencyProfile);
+            current.LatencyProfile,
+            current.PoseFilterProfile,
+            current.PoseDeadbandDeg);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -623,23 +624,17 @@ public sealed partial class HostController
         PublishLoadProgress(operationId, "canceling", 0, "Cancel requested.", false);
     }
 
-    private void RecordFrameMetricAndGuardrails()
+    private void RecordFrameMetricAndGuardrails(in NcRuntimeStats stats)
     {
-        var statsRc = NativeCoreInterop.nc_get_runtime_stats(out var stats);
-        if (statsRc != NcResultCode.Ok)
-        {
-            return;
-        }
-
-        _rollingMetrics.Add(new FrameMetric(
+        _rollingMetrics.Enqueue(new FrameMetric(
             DateTimeOffset.UtcNow,
             stats.LastFrameMs,
             stats.RenderReadyAvatarCount,
             stats.SpoutActive != 0U,
             stats.OscActive != 0U));
-        if (_rollingMetrics.Count > 1800)
+        while (_rollingMetrics.Count > RollingMetricCapacity)
         {
-            _rollingMetrics.RemoveRange(0, _rollingMetrics.Count - 1800);
+            _ = _rollingMetrics.Dequeue();
         }
 
         if (stats.LastFrameMs > _autoQualityPolicy.HighFrameMsThreshold)

@@ -13,6 +13,8 @@ param(
     [switch]$EnableNuGetMirrorBootstrap,
     [switch]$EnableMediapipeSanity,
     [switch]$EnableSpout2Interop,
+    [switch]$EnableSpout2Strict,
+    [switch]$RequireSpout2StrictContract,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
@@ -133,9 +135,14 @@ if ($EnableMediapipeSanity) {
 }
 
 if ($EnableSpout2Interop) {
+    $spoutArgs = @(
+        "powershell -ExecutionPolicy Bypass -File .\tools\spout2_interop_gate.ps1 -SkipNativeBuild -NoRestore"
+    )
+    if ($EnableSpout2Strict) { $spoutArgs += "-EnableStrictMode" }
+    if ($RequireSpout2StrictContract) { $spoutArgs += "-RequireStrictContract" }
     $results.Add((Invoke-Gate `
         -Name "Spout2 interop gate" `
-        -Command "powershell -ExecutionPolicy Bypass -File .\tools\spout2_interop_gate.ps1 -SkipNativeBuild -NoRestore"))
+        -Command ($spoutArgs -join " ")))
 }
 
 if ($EnableXav2CompressionQuality) {

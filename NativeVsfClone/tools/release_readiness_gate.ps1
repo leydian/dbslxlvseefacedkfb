@@ -9,6 +9,8 @@ param(
     [switch]$EnableNuGetMirrorBootstrap,
     [switch]$EnableMediapipeSanity,
     [switch]$EnableSpout2Interop,
+    [switch]$EnableSpout2Strict,
+    [switch]$RequireSpout2StrictContract,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
     [switch]$SkipVersionContractCheck,
@@ -72,6 +74,8 @@ try {
             if ($EnableXav2CompressionQuality) { $args += "-EnableXav2CompressionQuality" }
             if ($EnableXav2Parity) { $args += "-EnableXav2Parity" }
             if ($EnableSpout2Interop) { $args += "-EnableSpout2Interop" }
+            if ($EnableSpout2Strict) { $args += "-EnableSpout2Strict" }
+            if ($RequireSpout2StrictContract) { $args += "-RequireSpout2StrictContract" }
             & powershell @args
         }))
     } else {
@@ -152,6 +156,8 @@ $lines.Add("EnableWinUiMinRepro: $EnableWinUiMinRepro")
 $lines.Add("EnableNuGetMirrorBootstrap: $EnableNuGetMirrorBootstrap")
 $lines.Add("EnableMediapipeSanity: $EnableMediapipeSanity")
 $lines.Add("EnableSpout2Interop: $EnableSpout2Interop")
+$lines.Add("EnableSpout2Strict: $EnableSpout2Strict")
+$lines.Add("RequireSpout2StrictContract: $RequireSpout2StrictContract")
 $lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
 $lines.Add("EnableXav2Parity: $EnableXav2Parity")
 $lines.Add("DurationSec: $durationSec")

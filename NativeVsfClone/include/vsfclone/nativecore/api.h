@@ -137,6 +137,25 @@ typedef struct NcRenderQualityOptions {
     uint32_t show_debug_overlay;
 } NcRenderQualityOptions;
 
+typedef enum NcPoseBoneId {
+    NC_POSE_BONE_UNKNOWN = 0,
+    NC_POSE_BONE_HIPS = 1,
+    NC_POSE_BONE_SPINE = 2,
+    NC_POSE_BONE_CHEST = 3,
+    NC_POSE_BONE_UPPER_CHEST = 4,
+    NC_POSE_BONE_NECK = 5,
+    NC_POSE_BONE_HEAD = 6,
+    NC_POSE_BONE_LEFT_UPPER_ARM = 7,
+    NC_POSE_BONE_RIGHT_UPPER_ARM = 8
+} NcPoseBoneId;
+
+typedef struct NcPoseBoneOffset {
+    uint32_t bone_id;
+    float pitch_deg;
+    float yaw_deg;
+    float roll_deg;
+} NcPoseBoneOffset;
+
 typedef struct NcSpoutOptions {
     uint32_t width;
     uint32_t height;
@@ -161,6 +180,19 @@ typedef struct NcRuntimeStats {
     uint32_t osc_active;
     float last_frame_ms;
 } NcRuntimeStats;
+
+typedef enum NcSpoutBackendKind {
+    NC_SPOUT_BACKEND_INACTIVE = 0,
+    NC_SPOUT_BACKEND_LEGACY_SHARED_MEMORY = 1,
+    NC_SPOUT_BACKEND_SPOUT2_GPU = 2
+} NcSpoutBackendKind;
+
+typedef struct NcSpoutDiagnostics {
+    uint32_t backend_kind;
+    uint32_t strict_mode;
+    uint64_t fallback_count;
+    char last_error_code[64];
+} NcSpoutDiagnostics;
 
 typedef struct NcErrorInfo {
     NcResultCode code;
@@ -190,6 +222,8 @@ VSFCLONE_API NcResultCode nc_destroy_window_render_target(void* hwnd);
 VSFCLONE_API NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time_seconds);
 VSFCLONE_API NcResultCode nc_set_render_quality_options(const NcRenderQualityOptions* options);
 VSFCLONE_API NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options);
+VSFCLONE_API NcResultCode nc_set_pose_offsets(const NcPoseBoneOffset* offsets, uint32_t count);
+VSFCLONE_API NcResultCode nc_clear_pose_offsets(void);
 
 VSFCLONE_API NcResultCode nc_start_spout(const NcSpoutOptions* options);
 VSFCLONE_API NcResultCode nc_stop_spout(void);
@@ -199,6 +233,7 @@ VSFCLONE_API NcResultCode nc_stop_osc(void);
 
 VSFCLONE_API NcResultCode nc_get_last_error(NcErrorInfo* out_error);
 VSFCLONE_API NcResultCode nc_get_runtime_stats(NcRuntimeStats* out_stats);
+VSFCLONE_API NcResultCode nc_get_spout_diagnostics(NcSpoutDiagnostics* out_diag);
 
 #ifdef __cplusplus
 }

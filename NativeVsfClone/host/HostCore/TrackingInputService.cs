@@ -84,6 +84,11 @@ public sealed class TrackingInputService : ITrackingInputService
     private string _calibrationState = "idle";
     private float _poseAlpha = 0.35f;
     private float _expressionAlpha = 0.60f;
+    private float _poseDeadbandDeg = 0.9f;
+    private float _poseAdaptiveMinAlpha = 0.18f;
+    private float _poseAdaptiveMaxAlpha = 0.52f;
+    private float _poseAdaptiveGain = 0.024f;
+    private int _recenterStabilizeFramesRemaining;
 
     private static readonly string[] ArkitBlendshapeOrder =
     {
@@ -126,6 +131,7 @@ public sealed class TrackingInputService : ITrackingInputService
                     : TrackingLatencyProfile.Balanced,
             };
             ApplyLatencyProfileTuning(_options.LatencyProfile);
+            ApplyPoseFilterTuning(_options.PoseFilterProfile, _options.PoseDeadbandDeg);
             ResetRuntimeState();
 
             if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
@@ -260,6 +266,7 @@ public sealed class TrackingInputService : ITrackingInputService
             }
 
             _diagnostics = _diagnostics with { StatusMessage = "recentered" };
+            _recenterStabilizeFramesRemaining = 10;
             return NcResultCode.Ok;
         }
     }
@@ -307,6 +314,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 SubmitStageMs = _smoothedSubmitStageMs,
                 SourceLockMode = _options.SourceLockMode,
                 SwitchBlockedReason = _switchBlockedReason,
+                PoseFilterProfile = _options.PoseFilterProfile,
+                PoseDeadbandDeg = _poseDeadbandDeg,
             };
 
             frame = stale ? BuildNeutralFrame() : _lastOutputFrame;
@@ -358,6 +367,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 SubmitStageMs = _smoothedSubmitStageMs,
                 SourceLockMode = _options.SourceLockMode,
                 SwitchBlockedReason = _switchBlockedReason,
+                PoseFilterProfile = _options.PoseFilterProfile,
+                PoseDeadbandDeg = _poseDeadbandDeg,
             };
             return _diagnostics;
         }
@@ -416,6 +427,7 @@ public sealed class TrackingInputService : ITrackingInputService
         _hasMediapipePacket = false;
         _latestMediapipeError = string.Empty;
         _lastMediapipeFrameId = 0;
+        _recenterStabilizeFramesRemaining = 0;
         _diagnostics = new TrackingDiagnostics(
             true,
             "unknown",
@@ -443,7 +455,9 @@ public sealed class TrackingInputService : ITrackingInputService
             0.0,
             0.0,
             _options.SourceLockMode,
-            string.Empty);
+            string.Empty,
+            _options.PoseFilterProfile,
+            _poseDeadbandDeg);
     }
 
     private async Task ReceiveLoopAsync(CancellationToken token)
@@ -1725,9 +1739,9 @@ public sealed class TrackingInputService : ITrackingInputService
 
             if (_hasHeadYpr)
             {
-                _smoothedHeadYaw = Ema(_smoothedHeadYaw, _rawHeadYaw, _poseAlpha);
-                _smoothedHeadPitch = Ema(_smoothedHeadPitch, _rawHeadPitch, _poseAlpha);
-                _smoothedHeadRoll = Ema(_smoothedHeadRoll, _rawHeadRoll, _poseAlpha);
+                _smoothedHeadYaw = SmoothPoseAxis(_smoothedHeadYaw, _rawHeadYaw, _poseAlpha);
+                _smoothedHeadPitch = SmoothPoseAxis(_smoothedHeadPitch, _rawHeadPitch, _poseAlpha);
+                _smoothedHeadRoll = SmoothPoseAxis(_smoothedHeadRoll, _rawHeadRoll, _poseAlpha);
             }
         }
 
@@ -1754,6 +1768,10 @@ public sealed class TrackingInputService : ITrackingInputService
         _lastOutputFrame.HeadRotY = q.y;
         _lastOutputFrame.HeadRotZ = q.z;
         _lastOutputFrame.HeadRotW = q.w;
+        if (_recenterStabilizeFramesRemaining > 0)
+        {
+            _recenterStabilizeFramesRemaining--;
+        }
     }
 
     private void UpdateInputFps()
@@ -1852,6 +1870,49 @@ public sealed class TrackingInputService : ITrackingInputService
                 _ifacialRecoveryStreakRequired = 10;
                 break;
         }
+    }
+
+    private void ApplyPoseFilterTuning(PoseFilterProfile profile, float deadbandDeg)
+    {
+        _poseDeadbandDeg = Math.Clamp(float.IsFinite(deadbandDeg) ? deadbandDeg : 0.9f, 0.0f, 3.0f);
+        switch (profile)
+        {
+            case PoseFilterProfile.Reactive:
+                _poseAdaptiveMinAlpha = 0.40f;
+                _poseAdaptiveMaxAlpha = 0.82f;
+                _poseAdaptiveGain = 0.045f;
+                break;
+            case PoseFilterProfile.Balanced:
+                _poseAdaptiveMinAlpha = 0.28f;
+                _poseAdaptiveMaxAlpha = 0.68f;
+                _poseAdaptiveGain = 0.032f;
+                break;
+            default:
+                _poseAdaptiveMinAlpha = 0.18f;
+                _poseAdaptiveMaxAlpha = 0.52f;
+                _poseAdaptiveGain = 0.024f;
+                break;
+        }
+    }
+
+    private float SmoothPoseAxis(float current, float incoming, float baseAlpha)
+    {
+        var delta = incoming - current;
+        if (MathF.Abs(delta) < _poseDeadbandDeg)
+        {
+            return current;
+        }
+
+        var adaptive = Math.Clamp(
+            MathF.Max(baseAlpha, _poseAdaptiveMinAlpha) + (MathF.Abs(delta) * _poseAdaptiveGain),
+            _poseAdaptiveMinAlpha,
+            _poseAdaptiveMaxAlpha);
+        if (_recenterStabilizeFramesRemaining > 0)
+        {
+            adaptive = MathF.Min(adaptive, MathF.Max(0.10f, baseAlpha * 0.65f));
+        }
+
+        return current + (delta * adaptive);
     }
 
     private void UpdateCaptureStageMs(double captureStageMs)

@@ -1,20 +1,20 @@
-# build/reports Policy
+﻿# build/reports Policy
 
-이 폴더는 실행/검증 과정에서 생성되는 리포트를 임시 보관합니다.
+Generated artifacts in this directory are temporary execution outputs.
 
-## 유지 기준
+## Retention Rules
 
-- 각 리포트군별 `latest` 1개 유지
-- 의미 있는 milestone 스냅샷 유지
+- Keep one `latest` file per report family.
+- Keep only high-signal milestone snapshots needed for comparisons.
 
-## 아카이브 기준
+## Archive Rules
 
-- 중간 단계 산출물/구버전 리포트는 `docs/archive/build-reports/`로 이동합니다.
-- 장기 보관/비교 기준 문서는 `docs/reports/`에 별도 Markdown 리포트로 정리합니다.
+- Move intermediate or noisy outputs to `docs/archive/build-reports/`.
+- Keep long-form analysis in `docs/reports/*.md` and link artifacts from there.
 
-## 현재 유지 파일(예시)
+## Example Keep Set
 
-- `vsfavatar_probe_latest_after_scoring.txt` (latest)
+- `vsfavatar_probe_latest_after_scoring.txt` (`latest`)
 - `vsfavatar_probe_latest_decode_tuning.txt` (milestone)
 - `vsfavatar_probe_latest_block0_hypothesis.txt` (milestone)
 - `vsfavatar_probe_sidecar.txt` (milestone)

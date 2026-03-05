@@ -28,6 +28,7 @@ constexpr std::uint16_t kSectionSkinPayload = 0x0013U;
 constexpr std::uint16_t kSectionBlendShapePayload = 0x0014U;
 constexpr std::uint16_t kSectionMaterialTypedParams = 0x0015U;
 constexpr std::uint16_t kSectionSkeletonPosePayload = 0x0016U;
+constexpr std::uint16_t kSectionSkeletonRigPayload = 0x0017U;
 constexpr std::uint16_t kSectionFlagPayloadCompressedLz4 = 0x0001U;
 constexpr std::uint16_t kSectionFlagKnownMask = kSectionFlagPayloadCompressedLz4;
 
@@ -45,6 +46,41 @@ std::string NormalizeRefKey(const std::string& raw) {
         out.push_back(c == '\\' ? '/' : c);
     }
     return ToLower(out);
+}
+
+HumanoidBoneId ToHumanoidBoneId(const std::string& bone_name_raw) {
+    std::string key;
+    key.reserve(bone_name_raw.size());
+    for (const unsigned char c : bone_name_raw) {
+        if (std::isalnum(c) != 0) {
+            key.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+    if (key == "hips") {
+        return HumanoidBoneId::Hips;
+    }
+    if (key == "spine") {
+        return HumanoidBoneId::Spine;
+    }
+    if (key == "chest") {
+        return HumanoidBoneId::Chest;
+    }
+    if (key == "upperchest") {
+        return HumanoidBoneId::UpperChest;
+    }
+    if (key == "neck") {
+        return HumanoidBoneId::Neck;
+    }
+    if (key == "head") {
+        return HumanoidBoneId::Head;
+    }
+    if (key == "leftupperarm" || key == "leftarm") {
+        return HumanoidBoneId::LeftUpperArm;
+    }
+    if (key == "rightupperarm" || key == "rightarm") {
+        return HumanoidBoneId::RightUpperArm;
+    }
+    return HumanoidBoneId::Unknown;
 }
 
 bool ReadFileBytes(const std::string& path, std::vector<std::uint8_t>* out) {
@@ -563,6 +599,64 @@ bool ParseSkeletonPosePayloadSection(
     return cursor == end;
 }
 
+bool ParseSkeletonRigPayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    SkeletonRigPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->mesh_name) || out_payload->mesh_name.empty()) {
+        return false;
+    }
+    const auto bone_count = ReadU32Le(bytes, cursor);
+    if (!bone_count) {
+        return false;
+    }
+    cursor += 4U;
+    out_payload->bones.clear();
+    out_payload->bones.reserve(*bone_count);
+    for (std::size_t i = 0U; i < *bone_count; ++i) {
+        SkeletonRigBonePayload bone;
+        if (!ReadSizedString(bytes, &cursor, end, &bone.bone_name) || bone.bone_name.empty()) {
+            return false;
+        }
+        const auto parent_index = ReadI32Le(bytes, cursor);
+        if (!parent_index) {
+            return false;
+        }
+        cursor += 4U;
+        const auto matrix_f32_count = ReadU32Le(bytes, cursor);
+        if (!matrix_f32_count) {
+            return false;
+        }
+        cursor += 4U;
+        const std::size_t value_count = static_cast<std::size_t>(*matrix_f32_count);
+        if (value_count != 16U) {
+            return false;
+        }
+        bone.parent_index = *parent_index;
+        bone.local_matrix_16.clear();
+        bone.local_matrix_16.reserve(value_count);
+        for (std::size_t mi = 0U; mi < value_count; ++mi) {
+            const auto f32_bits = ReadU32Le(bytes, cursor + mi * 4U);
+            if (!f32_bits) {
+                return false;
+            }
+            float value = 0.0f;
+            std::memcpy(&value, &(*f32_bits), sizeof(float));
+            bone.local_matrix_16.push_back(value);
+        }
+        cursor += value_count * 4U;
+        bone.humanoid_id = ToHumanoidBoneId(bone.bone_name);
+        out_payload->bones.push_back(std::move(bone));
+    }
+    return cursor == end;
+}
+
 bool ParseMaterialTypedParamsSection(
     const std::vector<std::uint8_t>& bytes,
     std::size_t payload_offset,
@@ -861,6 +955,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     std::unordered_map<std::string, MaterialRenderPayload> material_typed_sections;
     std::unordered_map<std::string, SkinRenderPayload> skin_sections;
     std::unordered_map<std::string, SkeletonRenderPayload> skeleton_pose_sections;
+    std::unordered_map<std::string, SkeletonRigPayload> skeleton_rig_sections;
     std::unordered_map<std::string, BlendShapeRenderPayload> blendshape_sections;
 
     std::size_t cursor = manifest_end;
@@ -988,6 +1083,15 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             }
             skeleton_pose_sections[NormalizeRefKey(skeleton_payload.mesh_name)] = std::move(skeleton_payload);
             ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionSkeletonRigPayload) {
+            SkeletonRigPayload rig_payload;
+            if (!ParseSkeletonRigPayloadSection(section_payload, 0U, section_payload.size(), &rig_payload)) {
+                pkg.primary_error_code = "XAV4_RIG_SCHEMA_INVALID";
+                PushWarning(&pkg, "E_PARSE: XAV4_RIG_SCHEMA_INVALID: invalid skeleton rig payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            skeleton_rig_sections[NormalizeRefKey(rig_payload.mesh_name)] = std::move(rig_payload);
+            ++pkg.format_decoded_section_count;
         } else if (*type == kSectionBlendShapePayload) {
             BlendShapeRenderPayload blendshape_payload;
             if (!ParseBlendShapePayloadSection(section_payload, 0U, section_payload.size(), &blendshape_payload)) {
@@ -1045,6 +1149,10 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         const auto skel_it = skeleton_pose_sections.find(key);
         if (skel_it != skeleton_pose_sections.end()) {
             pkg.skeleton_payloads.push_back(skel_it->second);
+        }
+        const auto rig_it = skeleton_rig_sections.find(key);
+        if (rig_it != skeleton_rig_sections.end()) {
+            pkg.skeleton_rig_payloads.push_back(rig_it->second);
         }
     }
 
@@ -1152,6 +1260,14 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         for (const auto& [skeleton_mesh_key, _] : skeleton_pose_sections) {
             if (skin_sections.find(skeleton_mesh_key) == skin_sections.end()) {
                 PushWarning(&pkg, "W_PAYLOAD: XAV3_SKELETON_MESH_BIND_MISMATCH: mesh=" + skeleton_mesh_key);
+            }
+        }
+    }
+    if (format_version >= 4U && !skin_sections.empty()) {
+        for (const auto& skin : pkg.skin_payloads) {
+            const auto rig_it = skeleton_rig_sections.find(NormalizeRefKey(skin.mesh_name));
+            if (rig_it == skeleton_rig_sections.end()) {
+                PushWarning(&pkg, "W_PAYLOAD: XAV4_RIG_MISSING: mesh=" + skin.mesh_name);
             }
         }
     }

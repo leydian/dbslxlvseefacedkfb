@@ -557,6 +557,18 @@ float ReadF32Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
     return f;
 }
 
+std::uint16_t ReadU16Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    return static_cast<std::uint16_t>(bytes[offset]) |
+           (static_cast<std::uint16_t>(bytes[offset + 1U]) << 8U);
+}
+
+std::int16_t ReadI16Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    const auto u = ReadU16Le(bytes, offset);
+    std::int16_t v = 0;
+    std::memcpy(&v, &u, sizeof(v));
+    return v;
+}
+
 struct GlbChunk {
     std::uint32_t type = 0U;
     std::vector<std::uint8_t> bytes;
@@ -850,6 +862,488 @@ bool ExtractTexcoord0(const std::vector<std::uint8_t>& bin,
     return true;
 }
 
+std::size_t GetTypeComponentCount(const std::string& type_name) {
+    if (type_name == "SCALAR") {
+        return 1U;
+    }
+    if (type_name == "VEC2") {
+        return 2U;
+    }
+    if (type_name == "VEC3") {
+        return 3U;
+    }
+    if (type_name == "VEC4") {
+        return 4U;
+    }
+    if (type_name == "MAT4") {
+        return 16U;
+    }
+    return 0U;
+}
+
+std::size_t GetComponentByteSize(std::uint32_t component_type) {
+    switch (component_type) {
+        case 5120U:  // BYTE
+        case 5121U:  // UBYTE
+            return 1U;
+        case 5122U:  // SHORT
+        case 5123U:  // USHORT
+            return 2U;
+        case 5125U:  // UINT
+        case 5126U:  // FLOAT
+            return 4U;
+        default:
+            return 0U;
+    }
+}
+
+bool ResolveAccessorDataRange(
+    const std::vector<std::uint8_t>& bin,
+    const std::vector<AccessorMeta>& accessors,
+    const std::vector<BufferViewMeta>& views,
+    std::size_t accessor_index,
+    std::size_t* out_start,
+    std::size_t* out_stride,
+    std::size_t* out_component_size,
+    std::size_t* out_component_count,
+    std::string* out_error) {
+    if (out_start == nullptr || out_stride == nullptr || out_component_size == nullptr || out_component_count == nullptr) {
+        return false;
+    }
+    if (accessor_index >= accessors.size()) {
+        if (out_error != nullptr) {
+            *out_error = "accessor index out of range";
+        }
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.buffer_view >= views.size()) {
+        if (out_error != nullptr) {
+            *out_error = "accessor bufferView index out of range";
+        }
+        return false;
+    }
+    const std::size_t component_count = GetTypeComponentCount(a.type);
+    const std::size_t component_size = GetComponentByteSize(a.component_type);
+    if (component_count == 0U || component_size == 0U) {
+        if (out_error != nullptr) {
+            *out_error = "unsupported accessor type/componentType";
+        }
+        return false;
+    }
+    const auto& bv = views[a.buffer_view];
+    const std::size_t start = static_cast<std::size_t>(bv.byte_offset) + static_cast<std::size_t>(a.byte_offset);
+    const std::size_t packed_stride = component_count * component_size;
+    const std::size_t stride = bv.byte_stride > 0U ? bv.byte_stride : packed_stride;
+    if (stride < packed_stride) {
+        if (out_error != nullptr) {
+            *out_error = "bufferView stride smaller than packed accessor element size";
+        }
+        return false;
+    }
+    if (a.count == 0U) {
+        if (out_error != nullptr) {
+            *out_error = "accessor count is zero";
+        }
+        return false;
+    }
+    const std::size_t needed = start + (static_cast<std::size_t>(a.count) - 1U) * stride + packed_stride;
+    if (needed > bin.size()) {
+        if (out_error != nullptr) {
+            *out_error = "accessor data out of BIN bounds";
+        }
+        return false;
+    }
+    *out_start = start;
+    *out_stride = stride;
+    *out_component_size = component_size;
+    *out_component_count = component_count;
+    return true;
+}
+
+bool ReadAccessorComponentAsFloat(
+    const std::vector<std::uint8_t>& bin,
+    std::size_t offset,
+    std::uint32_t component_type,
+    bool normalized,
+    float* out_value) {
+    if (out_value == nullptr) {
+        return false;
+    }
+    switch (component_type) {
+        case 5120U: {  // BYTE
+            const std::int8_t raw = static_cast<std::int8_t>(bin[offset]);
+            *out_value = normalized
+                ? std::max(-1.0f, static_cast<float>(raw) / 127.0f)
+                : static_cast<float>(raw);
+            return true;
+        }
+        case 5121U: {  // UBYTE
+            const std::uint8_t raw = bin[offset];
+            *out_value = normalized ? static_cast<float>(raw) / 255.0f : static_cast<float>(raw);
+            return true;
+        }
+        case 5122U: {  // SHORT
+            const std::int16_t raw = ReadI16Le(bin, offset);
+            *out_value = normalized
+                ? std::max(-1.0f, static_cast<float>(raw) / 32767.0f)
+                : static_cast<float>(raw);
+            return true;
+        }
+        case 5123U: {  // USHORT
+            const std::uint16_t raw = ReadU16Le(bin, offset);
+            *out_value = normalized ? static_cast<float>(raw) / 65535.0f : static_cast<float>(raw);
+            return true;
+        }
+        case 5125U: {  // UINT
+            const std::uint32_t raw = ReadU32Le(bin, offset);
+            *out_value = static_cast<float>(raw);
+            return true;
+        }
+        case 5126U: {  // FLOAT
+            *out_value = ReadF32Le(bin, offset);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+bool ReadAccessorComponentAsInt(
+    const std::vector<std::uint8_t>& bin,
+    std::size_t offset,
+    std::uint32_t component_type,
+    std::int32_t* out_value) {
+    if (out_value == nullptr) {
+        return false;
+    }
+    switch (component_type) {
+        case 5120U:  // BYTE
+            *out_value = static_cast<std::int8_t>(bin[offset]);
+            return true;
+        case 5121U:  // UBYTE
+            *out_value = static_cast<std::int32_t>(bin[offset]);
+            return true;
+        case 5122U:  // SHORT
+            *out_value = static_cast<std::int32_t>(ReadI16Le(bin, offset));
+            return true;
+        case 5123U:  // USHORT
+            *out_value = static_cast<std::int32_t>(ReadU16Le(bin, offset));
+            return true;
+        case 5125U: {  // UINT
+            const auto v = ReadU32Le(bin, offset);
+            if (v > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())) {
+                return false;
+            }
+            *out_value = static_cast<std::int32_t>(v);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+bool ExtractMat4FloatAccessor(
+    const std::vector<std::uint8_t>& bin,
+    const std::vector<AccessorMeta>& accessors,
+    const std::vector<BufferViewMeta>& views,
+    std::size_t accessor_index,
+    std::vector<float>* out_values,
+    std::string* out_error) {
+    if (out_values == nullptr) {
+        return false;
+    }
+    if (accessor_index >= accessors.size()) {
+        if (out_error != nullptr) {
+            *out_error = "MAT4 accessor index out of range";
+        }
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.component_type != 5126U || a.type != "MAT4") {
+        if (out_error != nullptr) {
+            *out_error = "inverseBindMatrices accessor must be FLOAT MAT4";
+        }
+        return false;
+    }
+    std::size_t start = 0U;
+    std::size_t stride = 0U;
+    std::size_t component_size = 0U;
+    std::size_t component_count = 0U;
+    if (!ResolveAccessorDataRange(
+            bin,
+            accessors,
+            views,
+            accessor_index,
+            &start,
+            &stride,
+            &component_size,
+            &component_count,
+            out_error)) {
+        return false;
+    }
+    if (component_size != 4U || component_count != 16U) {
+        if (out_error != nullptr) {
+            *out_error = "invalid MAT4 accessor component layout";
+        }
+        return false;
+    }
+    out_values->clear();
+    out_values->reserve(static_cast<std::size_t>(a.count) * 16U);
+    for (std::uint32_t i = 0U; i < a.count; ++i) {
+        const std::size_t base = start + static_cast<std::size_t>(i) * stride;
+        for (std::size_t c = 0U; c < 16U; ++c) {
+            out_values->push_back(ReadF32Le(bin, base + c * 4U));
+        }
+    }
+    return true;
+}
+
+bool ExtractSkinWeightBlob(
+    const std::vector<std::uint8_t>& bin,
+    const std::vector<AccessorMeta>& accessors,
+    const std::vector<BufferViewMeta>& views,
+    std::size_t joints_accessor_index,
+    std::size_t weights_accessor_index,
+    std::uint32_t expected_vertex_count,
+    std::vector<std::uint8_t>* out_weight_blob,
+    std::string* out_error) {
+    if (out_weight_blob == nullptr) {
+        return false;
+    }
+    if (joints_accessor_index >= accessors.size() || weights_accessor_index >= accessors.size()) {
+        if (out_error != nullptr) {
+            *out_error = "skin accessor index out of range";
+        }
+        return false;
+    }
+    const auto& joints_accessor = accessors[joints_accessor_index];
+    const auto& weights_accessor = accessors[weights_accessor_index];
+    if (joints_accessor.type != "VEC4") {
+        if (out_error != nullptr) {
+            *out_error = "JOINTS_0 accessor must be VEC4";
+        }
+        return false;
+    }
+    if (weights_accessor.type != "VEC4") {
+        if (out_error != nullptr) {
+            *out_error = "WEIGHTS_0 accessor must be VEC4";
+        }
+        return false;
+    }
+    if (joints_accessor.count != expected_vertex_count || weights_accessor.count != expected_vertex_count) {
+        if (out_error != nullptr) {
+            *out_error = "skin accessor count mismatch with vertex count";
+        }
+        return false;
+    }
+
+    std::size_t joints_start = 0U;
+    std::size_t joints_stride = 0U;
+    std::size_t joints_comp_size = 0U;
+    std::size_t joints_comp_count = 0U;
+    if (!ResolveAccessorDataRange(
+            bin,
+            accessors,
+            views,
+            joints_accessor_index,
+            &joints_start,
+            &joints_stride,
+            &joints_comp_size,
+            &joints_comp_count,
+            out_error)) {
+        return false;
+    }
+    std::size_t weights_start = 0U;
+    std::size_t weights_stride = 0U;
+    std::size_t weights_comp_size = 0U;
+    std::size_t weights_comp_count = 0U;
+    if (!ResolveAccessorDataRange(
+            bin,
+            accessors,
+            views,
+            weights_accessor_index,
+            &weights_start,
+            &weights_stride,
+            &weights_comp_size,
+            &weights_comp_count,
+            out_error)) {
+        return false;
+    }
+    if (joints_comp_count != 4U || weights_comp_count != 4U) {
+        if (out_error != nullptr) {
+            *out_error = "skin accessor must contain exactly four components";
+        }
+        return false;
+    }
+    if (!(joints_accessor.component_type == 5121U || joints_accessor.component_type == 5123U ||
+          joints_accessor.component_type == 5125U || joints_accessor.component_type == 5120U ||
+          joints_accessor.component_type == 5122U)) {
+        if (out_error != nullptr) {
+            *out_error = "unsupported JOINTS_0 componentType";
+        }
+        return false;
+    }
+    if (!(weights_accessor.component_type == 5126U || weights_accessor.component_type == 5121U ||
+          weights_accessor.component_type == 5123U || weights_accessor.component_type == 5120U ||
+          weights_accessor.component_type == 5122U || weights_accessor.component_type == 5125U)) {
+        if (out_error != nullptr) {
+            *out_error = "unsupported WEIGHTS_0 componentType";
+        }
+        return false;
+    }
+
+    out_weight_blob->clear();
+    out_weight_blob->reserve(static_cast<std::size_t>(expected_vertex_count) * 32U);
+    const bool weights_normalized = (weights_accessor.component_type != 5126U);
+    for (std::uint32_t i = 0U; i < expected_vertex_count; ++i) {
+        const std::size_t joints_base = joints_start + static_cast<std::size_t>(i) * joints_stride;
+        const std::size_t weights_base = weights_start + static_cast<std::size_t>(i) * weights_stride;
+        std::array<std::int32_t, 4U> joint_indices = {0, 0, 0, 0};
+        std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
+        for (std::size_t c = 0U; c < 4U; ++c) {
+            const std::size_t joint_off = joints_base + c * joints_comp_size;
+            const std::size_t weight_off = weights_base + c * weights_comp_size;
+            if (!ReadAccessorComponentAsInt(bin, joint_off, joints_accessor.component_type, &joint_indices[c])) {
+                if (out_error != nullptr) {
+                    *out_error = "failed to decode JOINTS_0 component";
+                }
+                return false;
+            }
+            if (!ReadAccessorComponentAsFloat(
+                    bin,
+                    weight_off,
+                    weights_accessor.component_type,
+                    weights_normalized,
+                    &weights[c])) {
+                if (out_error != nullptr) {
+                    *out_error = "failed to decode WEIGHTS_0 component";
+                }
+                return false;
+            }
+            if (!std::isfinite(weights[c])) {
+                weights[c] = 0.0f;
+            }
+            if (weights[c] < 0.0f) {
+                weights[c] = 0.0f;
+            }
+        }
+        const auto* joint_bytes = reinterpret_cast<const std::uint8_t*>(joint_indices.data());
+        const auto* weight_bytes = reinterpret_cast<const std::uint8_t*>(weights.data());
+        out_weight_blob->insert(out_weight_blob->end(), joint_bytes, joint_bytes + sizeof(joint_indices));
+        out_weight_blob->insert(out_weight_blob->end(), weight_bytes, weight_bytes + sizeof(weights));
+    }
+    return true;
+}
+
+std::array<float, 16U> ReadNodeLocalMatrixOrIdentity(const JsonValue& node) {
+    std::array<float, 16U> out = MakeIdentityMatrix4x4();
+    bool non_identity = false;
+    if (TryBuildNodeTransformMatrix(node, &out, &non_identity)) {
+        return out;
+    }
+    return MakeIdentityMatrix4x4();
+}
+
+void BuildNodeGlobalTransforms(
+    const JsonValue* nodes_v,
+    std::vector<std::array<float, 16U>>* out_global,
+    std::vector<std::size_t>* out_parent) {
+    if (out_global == nullptr || out_parent == nullptr) {
+        return;
+    }
+    out_global->clear();
+    out_parent->clear();
+    if (nodes_v == nullptr || nodes_v->type != JsonValue::Type::Array) {
+        return;
+    }
+    const std::size_t node_count = nodes_v->array_value.size();
+    out_global->assign(node_count, MakeIdentityMatrix4x4());
+    out_parent->assign(node_count, std::numeric_limits<std::size_t>::max());
+    std::vector<std::array<float, 16U>> locals(node_count, MakeIdentityMatrix4x4());
+    std::vector<std::vector<std::size_t>> children(node_count);
+
+    for (std::size_t node_i = 0U; node_i < node_count; ++node_i) {
+        const auto& node = nodes_v->array_value[node_i];
+        if (node.type != JsonValue::Type::Object) {
+            continue;
+        }
+        locals[node_i] = ReadNodeLocalMatrixOrIdentity(node);
+        const auto* children_v = FindKey(node, "children");
+        if (children_v == nullptr || children_v->type != JsonValue::Type::Array) {
+            continue;
+        }
+        for (const auto& child : children_v->array_value) {
+            if (child.type != JsonValue::Type::Number) {
+                continue;
+            }
+            const double n = child.number_value;
+            if (n < 0.0 || n > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
+                continue;
+            }
+            const auto child_index = static_cast<std::size_t>(static_cast<std::uint32_t>(n));
+            if (child_index >= node_count || child_index == node_i) {
+                continue;
+            }
+            children[node_i].push_back(child_index);
+            if ((*out_parent)[child_index] == std::numeric_limits<std::size_t>::max()) {
+                (*out_parent)[child_index] = node_i;
+            }
+        }
+    }
+
+    std::vector<std::size_t> stack;
+    stack.reserve(node_count);
+    std::vector<std::array<float, 16U>> stack_parent_world;
+    stack_parent_world.reserve(node_count);
+    std::vector<bool> visited(node_count, false);
+
+    for (std::size_t node_i = 0U; node_i < node_count; ++node_i) {
+        if ((*out_parent)[node_i] != std::numeric_limits<std::size_t>::max()) {
+            continue;
+        }
+        stack.push_back(node_i);
+        stack_parent_world.push_back(MakeIdentityMatrix4x4());
+        while (!stack.empty()) {
+            const auto current = stack.back();
+            const auto parent_world = stack_parent_world.back();
+            stack.pop_back();
+            stack_parent_world.pop_back();
+            if (current >= node_count) {
+                continue;
+            }
+            (*out_global)[current] = MulMatrix4x4(parent_world, locals[current]);
+            visited[current] = true;
+            const auto current_world = (*out_global)[current];
+            for (const auto child : children[current]) {
+                stack.push_back(child);
+                stack_parent_world.push_back(current_world);
+            }
+        }
+    }
+
+    // Handle disconnected/cyclic nodes defensively.
+    for (std::size_t node_i = 0U; node_i < node_count; ++node_i) {
+        if (visited[node_i]) {
+            continue;
+        }
+        std::size_t cur = node_i;
+        std::array<float, 16U> accum = MakeIdentityMatrix4x4();
+        std::size_t hop = 0U;
+        while (cur < node_count && hop <= node_count) {
+            accum = MulMatrix4x4(locals[cur], accum);
+            const auto parent = (*out_parent)[cur];
+            if (parent == std::numeric_limits<std::size_t>::max() || parent >= node_count) {
+                break;
+            }
+            cur = parent;
+            ++hop;
+        }
+        (*out_global)[node_i] = accum;
+        visited[node_i] = true;
+    }
+}
+
 struct MaterialInfo {
     std::string name;
     std::string shader_name = "MToon (minimal)";
@@ -943,6 +1437,109 @@ void AddHeuristicExpressionBinds(
                 }
                 if (match) {
                     AddExpressionBindIfMissing(&expr, mesh_bs.mesh_name, frame.name, 1.0f);
+                }
+            }
+        }
+    }
+}
+
+HumanoidBoneId ToHumanoidBoneId(std::string name) {
+    name = ToLower(name);
+    std::string key;
+    key.reserve(name.size());
+    for (const unsigned char c : name) {
+        if (std::isalnum(c) != 0) {
+            key.push_back(static_cast<char>(c));
+        }
+    }
+    if (key == "hips") {
+        return HumanoidBoneId::Hips;
+    }
+    if (key == "spine") {
+        return HumanoidBoneId::Spine;
+    }
+    if (key == "chest") {
+        return HumanoidBoneId::Chest;
+    }
+    if (key == "upperchest") {
+        return HumanoidBoneId::UpperChest;
+    }
+    if (key == "neck") {
+        return HumanoidBoneId::Neck;
+    }
+    if (key == "head") {
+        return HumanoidBoneId::Head;
+    }
+    if (key == "leftupperarm" || key == "leftarm") {
+        return HumanoidBoneId::LeftUpperArm;
+    }
+    if (key == "rightupperarm" || key == "rightarm") {
+        return HumanoidBoneId::RightUpperArm;
+    }
+    return HumanoidBoneId::Unknown;
+}
+
+void ParseVrmHumanoidNodeMap(
+    const JsonValue& root,
+    std::unordered_map<std::size_t, HumanoidBoneId>* out_node_to_humanoid) {
+    if (out_node_to_humanoid == nullptr) {
+        return;
+    }
+    out_node_to_humanoid->clear();
+    const auto* extensions = FindKey(root, "extensions");
+    if (extensions == nullptr || extensions->type != JsonValue::Type::Object) {
+        return;
+    }
+    const auto try_add = [&](const std::string& bone_name, const JsonValue& node_value) {
+        if (node_value.type != JsonValue::Type::Number) {
+            return;
+        }
+        const double n = node_value.number_value;
+        if (n < 0.0 || n > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
+            return;
+        }
+        const auto humanoid_id = ToHumanoidBoneId(bone_name);
+        if (humanoid_id == HumanoidBoneId::Unknown) {
+            return;
+        }
+        (*out_node_to_humanoid)[static_cast<std::size_t>(static_cast<std::uint32_t>(n))] = humanoid_id;
+    };
+
+    if (const auto* vrmc_vrm = FindKey(*extensions, "VRMC_vrm");
+        vrmc_vrm != nullptr && vrmc_vrm->type == JsonValue::Type::Object) {
+        if (const auto* humanoid = FindKey(*vrmc_vrm, "humanoid");
+            humanoid != nullptr && humanoid->type == JsonValue::Type::Object) {
+            if (const auto* human_bones = FindKey(*humanoid, "humanBones");
+                human_bones != nullptr && human_bones->type == JsonValue::Type::Object) {
+                for (const auto& kv : human_bones->object_value) {
+                    if (kv.second.type != JsonValue::Type::Object) {
+                        continue;
+                    }
+                    if (const auto* node = FindKey(kv.second, "node"); node != nullptr) {
+                        try_add(kv.first, *node);
+                    }
+                }
+            }
+        }
+    }
+
+    if (const auto* vrm_legacy = FindKey(*extensions, "VRM");
+        vrm_legacy != nullptr && vrm_legacy->type == JsonValue::Type::Object) {
+        if (const auto* humanoid = FindKey(*vrm_legacy, "humanoid");
+            humanoid != nullptr && humanoid->type == JsonValue::Type::Object) {
+            if (const auto* human_bones = FindKey(*humanoid, "humanBones");
+                human_bones != nullptr && human_bones->type == JsonValue::Type::Array) {
+                for (const auto& item : human_bones->array_value) {
+                    if (item.type != JsonValue::Type::Object) {
+                        continue;
+                    }
+                    std::string bone_name;
+                    if (!TryGetString(item, "bone", &bone_name)) {
+                        continue;
+                    }
+                    if (const auto* node = FindKey(item, "node"); node != nullptr) {
+                        try_add(bone_name, *node);
+                    }
                 }
             }
         }
@@ -1321,15 +1918,29 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     std::vector<std::size_t> node_to_mesh_index;
+    std::vector<std::size_t> node_to_skin_index;
     std::vector<std::array<float, 16U>> mesh_node_transforms;
     std::vector<bool> mesh_has_node_transform;
     std::vector<std::uint32_t> mesh_node_ref_counts;
+    std::vector<std::size_t> mesh_skin_index;
+    std::vector<bool> mesh_has_skin;
     mesh_node_transforms.assign(meshes_v->array_value.size(), MakeIdentityMatrix4x4());
     mesh_has_node_transform.assign(meshes_v->array_value.size(), false);
     mesh_node_ref_counts.assign(meshes_v->array_value.size(), 0U);
+    mesh_skin_index.assign(meshes_v->array_value.size(), std::numeric_limits<std::size_t>::max());
+    mesh_has_skin.assign(meshes_v->array_value.size(), false);
+
     const auto* nodes_v = FindKey(root, "nodes");
+    std::vector<std::array<float, 16U>> node_global_transforms;
+    std::vector<std::size_t> node_parent_indices;
+    std::unordered_map<std::size_t, HumanoidBoneId> node_to_humanoid;
+    BuildNodeGlobalTransforms(nodes_v, &node_global_transforms, &node_parent_indices);
+    ParseVrmHumanoidNodeMap(root, &node_to_humanoid);
     if (nodes_v != nullptr && nodes_v->type == JsonValue::Type::Array) {
         node_to_mesh_index.assign(
+            nodes_v->array_value.size(),
+            std::numeric_limits<std::size_t>::max());
+        node_to_skin_index.assign(
             nodes_v->array_value.size(),
             std::numeric_limits<std::size_t>::max());
         for (std::size_t node_i = 0U; node_i < nodes_v->array_value.size(); ++node_i) {
@@ -1342,6 +1953,18 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 node_to_mesh_index[node_i] = mesh_index;
                 if (mesh_index < mesh_node_ref_counts.size()) {
                     mesh_node_ref_counts[mesh_index] += 1U;
+                    std::size_t skin_index = std::numeric_limits<std::size_t>::max();
+                    if (TryGetIndex(node, "skin", &skin_index)) {
+                        node_to_skin_index[node_i] = skin_index;
+                        if (!mesh_has_skin[mesh_index]) {
+                            mesh_has_skin[mesh_index] = true;
+                            mesh_skin_index[mesh_index] = skin_index;
+                        } else if (mesh_skin_index[mesh_index] != skin_index) {
+                            pkg.warnings.push_back(
+                                "W_NODE: VRM_MESH_MULTI_SKIN_REF: mesh=" + mesh_names_by_index[mesh_index]);
+                            pkg.warning_codes.push_back("VRM_MESH_MULTI_SKIN_REF");
+                        }
+                    }
                     if (!mesh_has_node_transform[mesh_index]) {
                         std::array<float, 16U> node_transform = MakeIdentityMatrix4x4();
                         bool non_identity = false;
@@ -1364,6 +1987,83 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         pkg.warnings.push_back(
             "W_NODE: VRM_MESH_MULTI_NODE_REF: meshes=" + std::to_string(multi_ref_mesh_count));
         pkg.warning_codes.push_back("VRM_MESH_MULTI_NODE_REF");
+    }
+
+    struct SkinDef {
+        std::vector<std::int32_t> joints;
+        std::vector<float> bind_poses_16xn;
+        bool valid = false;
+    };
+    std::vector<SkinDef> skin_defs;
+    const auto* skins_v = FindKey(root, "skins");
+    if (skins_v != nullptr && skins_v->type == JsonValue::Type::Array) {
+        skin_defs.resize(skins_v->array_value.size());
+        for (std::size_t skin_i = 0U; skin_i < skins_v->array_value.size(); ++skin_i) {
+            const auto& skin = skins_v->array_value[skin_i];
+            if (skin.type != JsonValue::Type::Object) {
+                continue;
+            }
+            const auto* joints_v = FindKey(skin, "joints");
+            if (joints_v == nullptr || joints_v->type != JsonValue::Type::Array || joints_v->array_value.empty()) {
+                continue;
+            }
+            auto& dst = skin_defs[skin_i];
+            dst.joints.clear();
+            dst.joints.reserve(joints_v->array_value.size());
+            for (const auto& joint : joints_v->array_value) {
+                if (joint.type != JsonValue::Type::Number) {
+                    continue;
+                }
+                const double n = joint.number_value;
+                if (n < 0.0 || n > static_cast<double>(std::numeric_limits<std::int32_t>::max())) {
+                    continue;
+                }
+                dst.joints.push_back(static_cast<std::int32_t>(n));
+            }
+            if (dst.joints.empty()) {
+                continue;
+            }
+            dst.bind_poses_16xn.assign(dst.joints.size() * 16U, 0.0f);
+            for (std::size_t i = 0U; i < dst.joints.size(); ++i) {
+                dst.bind_poses_16xn[i * 16U + 0U] = 1.0f;
+                dst.bind_poses_16xn[i * 16U + 5U] = 1.0f;
+                dst.bind_poses_16xn[i * 16U + 10U] = 1.0f;
+                dst.bind_poses_16xn[i * 16U + 15U] = 1.0f;
+            }
+
+            std::size_t ibm_accessor_index = std::numeric_limits<std::size_t>::max();
+            if (TryGetIndex(skin, "inverseBindMatrices", &ibm_accessor_index)) {
+                std::vector<float> ibm_values;
+                std::string skin_error;
+                if (ExtractMat4FloatAccessor(
+                        bin_chunk.bytes,
+                        accessors,
+                        views,
+                        ibm_accessor_index,
+                        &ibm_values,
+                        &skin_error)) {
+                    const std::size_t matrix_count = ibm_values.size() / 16U;
+                    if (matrix_count >= dst.joints.size()) {
+                        dst.bind_poses_16xn.assign(
+                            ibm_values.begin(),
+                            ibm_values.begin() + static_cast<std::ptrdiff_t>(dst.joints.size() * 16U));
+                    } else {
+                        pkg.warnings.push_back(
+                            "W_SKIN: VRM_INVERSE_BIND_COUNT_MISMATCH: skin=" + std::to_string(skin_i));
+                        pkg.warning_codes.push_back("VRM_INVERSE_BIND_COUNT_MISMATCH");
+                    }
+                } else {
+                    pkg.warnings.push_back(
+                        "W_SKIN: VRM_INVERSE_BIND_READ_FAILED: skin=" + std::to_string(skin_i) + ", detail=" + skin_error);
+                    pkg.warning_codes.push_back("VRM_INVERSE_BIND_READ_FAILED");
+                }
+            } else {
+                pkg.warnings.push_back(
+                    "W_SKIN: VRM_INVERSE_BIND_MISSING: skin=" + std::to_string(skin_i));
+                pkg.warning_codes.push_back("VRM_INVERSE_BIND_MISSING");
+            }
+            dst.valid = true;
+        }
     }
 
     std::unordered_map<std::string, std::vector<std::string>> mesh_frame_names;
@@ -1629,6 +2329,9 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     std::size_t mesh_added = 0U;
+    std::uint32_t skinned_primitive_count = 0U;
+    std::uint32_t skinned_payload_emitted = 0U;
+    std::uint32_t skinned_payload_failed = 0U;
     for (std::size_t mesh_i = 0U; mesh_i < meshes_v->array_value.size(); ++mesh_i) {
         const auto& mesh = meshes_v->array_value[mesh_i];
         if (mesh.type != JsonValue::Type::Object) {
@@ -1697,7 +2400,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
-            if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
+            if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i] &&
+                (mesh_i >= mesh_has_skin.size() || !mesh_has_skin[mesh_i])) {
                 ApplyPositionTransformToVertexBlob(
                     &mesh_payload.vertex_blob,
                     mesh_payload.vertex_stride,
@@ -1742,6 +2446,123 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 mesh_payload.indices.reserve(vtx_count);
                 for (std::uint32_t i = 0U; i < vtx_count; ++i) {
                     mesh_payload.indices.push_back(i);
+                }
+            }
+
+            if (mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i]) {
+                ++skinned_primitive_count;
+                bool emitted = false;
+                const auto skin_index = mesh_skin_index[mesh_i];
+                if (skin_index < skin_defs.size() && skin_defs[skin_index].valid) {
+                    const auto* joints_v = FindKey(*attrs_v, "JOINTS_0");
+                    const auto* weights_v = FindKey(*attrs_v, "WEIGHTS_0");
+                    if (joints_v != nullptr && joints_v->type == JsonValue::Type::Number &&
+                        weights_v != nullptr && weights_v->type == JsonValue::Type::Number) {
+                        const std::size_t joints_accessor =
+                            static_cast<std::size_t>(static_cast<std::uint32_t>(joints_v->number_value));
+                        const std::size_t weights_accessor =
+                            static_cast<std::size_t>(static_cast<std::uint32_t>(weights_v->number_value));
+                        std::vector<std::uint8_t> skin_weight_blob;
+                        std::string skin_error;
+                        if (ExtractSkinWeightBlob(
+                                bin_chunk.bytes,
+                                accessors,
+                                views,
+                                joints_accessor,
+                                weights_accessor,
+                                vtx_count,
+                                &skin_weight_blob,
+                                &skin_error)) {
+                            SkinRenderPayload skin_payload;
+                            skin_payload.mesh_name = mesh_payload.name;
+                            skin_payload.bone_indices = skin_defs[skin_index].joints;
+                            skin_payload.bind_poses_16xn = skin_defs[skin_index].bind_poses_16xn;
+                            skin_payload.skin_weight_blob = std::move(skin_weight_blob);
+                            pkg.skin_payloads.push_back(std::move(skin_payload));
+
+                            SkeletonRenderPayload skeleton_payload;
+                            skeleton_payload.mesh_name = mesh_payload.name;
+                            skeleton_payload.bone_matrices_16xn.reserve(skin_defs[skin_index].joints.size() * 16U);
+                            for (const auto joint_index : skin_defs[skin_index].joints) {
+                                std::array<float, 16U> bone_m = MakeIdentityMatrix4x4();
+                                if (joint_index >= 0 &&
+                                    static_cast<std::size_t>(joint_index) < node_global_transforms.size()) {
+                                    bone_m = node_global_transforms[static_cast<std::size_t>(joint_index)];
+                                }
+                                skeleton_payload.bone_matrices_16xn.insert(
+                                    skeleton_payload.bone_matrices_16xn.end(),
+                                    bone_m.begin(),
+                                    bone_m.end());
+                            }
+                            pkg.skeleton_payloads.push_back(std::move(skeleton_payload));
+
+                            SkeletonRigPayload rig_payload;
+                            rig_payload.mesh_name = mesh_payload.name;
+                            rig_payload.bones.reserve(skin_defs[skin_index].joints.size());
+                            std::unordered_map<std::int32_t, std::size_t> joint_index_to_local;
+                            joint_index_to_local.reserve(skin_defs[skin_index].joints.size());
+                            for (std::size_t ji = 0U; ji < skin_defs[skin_index].joints.size(); ++ji) {
+                                joint_index_to_local[skin_defs[skin_index].joints[ji]] = ji;
+                            }
+                            for (std::size_t ji = 0U; ji < skin_defs[skin_index].joints.size(); ++ji) {
+                                const auto joint_index = skin_defs[skin_index].joints[ji];
+                                SkeletonRigBonePayload bone;
+                                bone.bone_name = "Bone_" + std::to_string(joint_index);
+                                bone.local_matrix_16.assign(16U, 0.0f);
+                                bone.local_matrix_16[0U] = 1.0f;
+                                bone.local_matrix_16[5U] = 1.0f;
+                                bone.local_matrix_16[10U] = 1.0f;
+                                bone.local_matrix_16[15U] = 1.0f;
+                                if (joint_index >= 0 &&
+                                    nodes_v != nullptr &&
+                                    nodes_v->type == JsonValue::Type::Array &&
+                                    static_cast<std::size_t>(joint_index) < nodes_v->array_value.size()) {
+                                    const auto& node = nodes_v->array_value[static_cast<std::size_t>(joint_index)];
+                                    if (node.type == JsonValue::Type::Object) {
+                                        std::string node_name;
+                                        if (TryGetString(node, "name", &node_name) && !node_name.empty()) {
+                                            bone.bone_name = node_name;
+                                        }
+                                        const auto local_matrix = ReadNodeLocalMatrixOrIdentity(node);
+                                        bone.local_matrix_16.assign(local_matrix.begin(), local_matrix.end());
+                                    }
+                                    auto humanoid_it = node_to_humanoid.find(static_cast<std::size_t>(joint_index));
+                                    if (humanoid_it != node_to_humanoid.end()) {
+                                        bone.humanoid_id = humanoid_it->second;
+                                    }
+                                    if (static_cast<std::size_t>(joint_index) < node_parent_indices.size()) {
+                                        const auto parent_global = node_parent_indices[static_cast<std::size_t>(joint_index)];
+                                        bone.parent_index = -1;
+                                        if (parent_global != std::numeric_limits<std::size_t>::max()) {
+                                            const auto parent_it = joint_index_to_local.find(static_cast<std::int32_t>(parent_global));
+                                            if (parent_it != joint_index_to_local.end()) {
+                                                bone.parent_index = static_cast<std::int32_t>(parent_it->second);
+                                            }
+                                        }
+                                    }
+                                }
+                                rig_payload.bones.push_back(std::move(bone));
+                            }
+                            pkg.skeleton_rig_payloads.push_back(std::move(rig_payload));
+                            emitted = true;
+                            ++skinned_payload_emitted;
+                        } else {
+                            pkg.warnings.push_back(
+                                "W_SKIN: VRM_SKIN_WEIGHT_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + skin_error);
+                            pkg.warning_codes.push_back("VRM_SKIN_WEIGHT_READ_FAILED");
+                        }
+                    } else {
+                        pkg.warnings.push_back(
+                            "W_SKIN: VRM_SKIN_ATTRIBUTES_MISSING: mesh=" + mesh_payload.name);
+                        pkg.warning_codes.push_back("VRM_SKIN_ATTRIBUTES_MISSING");
+                    }
+                } else {
+                    pkg.warnings.push_back(
+                        "W_SKIN: VRM_SKIN_DEF_MISSING: mesh=" + mesh_payload.name);
+                    pkg.warning_codes.push_back("VRM_SKIN_DEF_MISSING");
+                }
+                if (!emitted) {
+                    ++skinned_payload_failed;
                 }
             }
 
@@ -1804,8 +2625,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
     pkg.parser_stage = "payload";
     std::uint32_t transformed_mesh_count = 0U;
-    for (const bool has_transform : mesh_has_node_transform) {
-        if (has_transform) {
+    for (std::size_t i = 0U; i < mesh_has_node_transform.size(); ++i) {
+        if (mesh_has_node_transform[i] && (i >= mesh_has_skin.size() || !mesh_has_skin[i])) {
             ++transformed_mesh_count;
         }
     }
@@ -1813,6 +2634,15 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         pkg.warnings.push_back(
             "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count));
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
+    }
+    if (skinned_primitive_count > 0U) {
+        pkg.warnings.push_back(
+            "W_SKIN: VRM_SKIN_PAYLOAD_STATUS: skinnedPrimitives=" + std::to_string(skinned_primitive_count) +
+            ", emitted=" + std::to_string(skinned_payload_emitted) +
+            ", failed=" + std::to_string(skinned_payload_failed));
+        if (skinned_payload_failed > 0U) {
+            pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
+        }
     }
     if (pkg.mesh_payloads.empty()) {
         pkg.primary_error_code = "VRM_ASSET_MISSING";

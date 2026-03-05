@@ -31,6 +31,19 @@ public enum NcCameraMode : uint
     Manual = 2,
 }
 
+public enum NcPoseBoneId : uint
+{
+    Unknown = 0,
+    Hips = 1,
+    Spine = 2,
+    Chest = 3,
+    UpperChest = 4,
+    Neck = 5,
+    Head = 6,
+    LeftUpperArm = 7,
+    RightUpperArm = 8,
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NcInitOptions
 {
@@ -174,12 +187,38 @@ public struct NcRenderQualityOptions
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct NcPoseBoneOffset
+{
+    public NcPoseBoneId BoneId;
+    public float PitchDeg;
+    public float YawDeg;
+    public float RollDeg;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct NcRuntimeStats
 {
     public uint RenderReadyAvatarCount;
     public uint SpoutActive;
     public uint OscActive;
     public float LastFrameMs;
+}
+
+public enum NcSpoutBackendKind : uint
+{
+    Inactive = 0,
+    LegacySharedMemory = 1,
+    Spout2Gpu = 2,
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct NcSpoutDiagnostics
+{
+    public uint BackendKind;
+    public uint StrictMode;
+    public ulong FallbackCount;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string LastErrorCode;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
@@ -259,6 +298,12 @@ public static class NativeCoreInterop
     public static extern NcResultCode nc_get_render_quality_options(out NcRenderQualityOptions outOptions);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_set_pose_offsets([In] NcPoseBoneOffset[] offsets, uint count);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_clear_pose_offsets();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_start_spout(ref NcSpoutOptions options);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -275,6 +320,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_get_runtime_stats(out NcRuntimeStats outStats);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_spout_diagnostics(out NcSpoutDiagnostics outDiag);
 
     public static string FormatLastError()
     {
@@ -310,5 +358,15 @@ public static class NativeCoreInterop
         var options = BuildBroadcastPreset();
         options.ShowDebugOverlay = 1U;
         return options;
+    }
+
+    public static string FormatSpoutBackend(uint backendKind)
+    {
+        return backendKind switch
+        {
+            (uint)NcSpoutBackendKind.Spout2Gpu => "spout2-gpu",
+            (uint)NcSpoutBackendKind.LegacySharedMemory => "legacy-shared-memory",
+            _ => "inactive",
+        };
     }
 }

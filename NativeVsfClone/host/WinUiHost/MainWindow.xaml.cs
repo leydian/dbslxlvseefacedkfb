@@ -1126,6 +1126,10 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
+        runtimeSb.AppendLine($"SpoutBackend: {runtime.SpoutBackend}");
+        runtimeSb.AppendLine($"SpoutStrictMode: {runtime.SpoutStrictMode}");
+        runtimeSb.AppendLine($"SpoutFallbackCount: {runtime.SpoutFallbackCount}");
+        runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;

@@ -131,6 +131,30 @@ struct SpringBoneSummary {
     std::uint32_t collider_group_count = 0;
 };
 
+enum class HumanoidBoneId : std::uint32_t {
+    Unknown = 0,
+    Hips = 1,
+    Spine = 2,
+    Chest = 3,
+    UpperChest = 4,
+    Neck = 5,
+    Head = 6,
+    LeftUpperArm = 7,
+    RightUpperArm = 8,
+};
+
+struct SkeletonRigBonePayload {
+    std::string bone_name;
+    std::int32_t parent_index = -1;
+    std::vector<float> local_matrix_16;
+    HumanoidBoneId humanoid_id = HumanoidBoneId::Unknown;
+};
+
+struct SkeletonRigPayload {
+    std::string mesh_name;
+    std::vector<SkeletonRigBonePayload> bones;
+};
+
 struct AvatarPackage {
     AvatarSourceType source_type = AvatarSourceType::Unknown;
     AvatarCompatLevel compat_level = AvatarCompatLevel::Unknown;
@@ -143,6 +167,7 @@ struct AvatarPackage {
     std::vector<MeshRenderPayload> mesh_payloads;
     std::vector<SkinRenderPayload> skin_payloads;
     std::vector<SkeletonRenderPayload> skeleton_payloads;
+    std::vector<SkeletonRigPayload> skeleton_rig_payloads;
     std::vector<BlendShapeRenderPayload> blendshape_payloads;
     std::vector<MaterialRenderPayload> material_payloads;
     std::vector<TextureRenderPayload> texture_payloads;
