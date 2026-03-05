@@ -1,4 +1,4 @@
-# XAV2 Format (Draft v1/v2/v3)
+# XAV2 Format (Draft v1/v2/v3/v4)
 
 XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transport.
 
@@ -6,10 +6,10 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 - `.xav2`
 
-## Binary Layout (v1/v2/v3)
+## Binary Layout (v1/v2/v3/v4)
 
 1. `magic[4]`: ASCII `XAV2`
-2. `version[2]`: little-endian unsigned integer (`1|2|3`)
+2. `version[2]`: little-endian unsigned integer (`1|2|3|4`)
 3. `manifest_size[4]`: little-endian unsigned integer
 4. `manifest_json[manifest_size]`: UTF-8 JSON
 5. `asset_sections[...]`: zero or more TLV entries
@@ -40,7 +40,7 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED`.
 
-## Section Types (v1/v2/v3)
+## Section Types (v1/v2/v3/v4)
 
 - `0x0001` Legacy mesh blob
 - `0x0002` Texture blob
@@ -51,6 +51,7 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `0x0014` BlendShape payload
 - `0x0015` Material typed params (v2)
 - `0x0016` Skeleton pose payload (v3)
+- `0x0017` Skeleton rig payload (v4)
 
 ### `0x0011` Mesh render payload
 
@@ -152,6 +153,23 @@ Notes:
 - `matrix_f32_count` should be a multiple of `16`.
 - Each 16-float chunk is one `float4x4` bone matrix.
 - In v3 skinning path, runtime combines section `0x0016` matrices with `0x0013` bindposes.
+
+### `0x0017` Skeleton rig payload (v4)
+
+- `mesh_name_len[2]`
+- `mesh_name[mesh_name_len]`
+- `bone_count[4]`
+- repeated bone:
+  - `bone_name_len[2]`
+  - `bone_name[bone_name_len]`
+  - `parent_index[4]` (`int32`, root=`-1`)
+  - `local_matrix_f32_count[4]` (currently `16` required)
+  - `local_matrix[local_matrix_f32_count * 4]` (`float32`)
+
+Notes:
+
+- For v4 skinning payloads (`0x0013` present), matching `0x0017` rig payload is expected.
+- Missing rig for skinned mesh is reported as `XAV4_RIG_MISSING` (or strict-fail under strict validation).
 
 ## Loader behavior in this repository
 

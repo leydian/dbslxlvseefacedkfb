@@ -106,6 +106,19 @@ namespace VsfClone.Xav2.Runtime
         public float[] BoneMatrices16xN = Array.Empty<float>();
     }
 
+    public sealed class Xav2RigBonePayload
+    {
+        public string Name = string.Empty;
+        public int ParentIndex = -1;
+        public float[] LocalMatrix16 = Array.Empty<float>();
+    }
+
+    public sealed class Xav2SkeletonRigPayload
+    {
+        public string MeshName = string.Empty;
+        public List<Xav2RigBonePayload> Bones = new List<Xav2RigBonePayload>();
+    }
+
     public sealed class Xav2BlendShapePayload
     {
         public string MeshName = string.Empty;
@@ -153,6 +166,7 @@ namespace VsfClone.Xav2.Runtime
         public List<Xav2TexturePayload> Textures = new List<Xav2TexturePayload>();
         public List<Xav2SkinPayload> Skins = new List<Xav2SkinPayload>();
         public List<Xav2SkeletonPayload> Skeletons = new List<Xav2SkeletonPayload>();
+        public List<Xav2SkeletonRigPayload> SkeletonRigs = new List<Xav2SkeletonRigPayload>();
         public List<Xav2BlendShapePayload> BlendShapes = new List<Xav2BlendShapePayload>();
     }
 }

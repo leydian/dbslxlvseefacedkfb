@@ -49,7 +49,7 @@ namespace VsfClone.Xav2.Runtime.Tests
         public void TryLoad_UnsupportedVersion_Fails()
         {
             var bytes = BuildValidXav2Bytes();
-            bytes[4] = 0x04;
+            bytes[4] = 0x05;
             bytes[5] = 0x00;
             var path = WriteTempFile(bytes);
             try
@@ -141,6 +141,45 @@ namespace VsfClone.Xav2.Runtime.Tests
                     diagnostics.Warnings.Exists(w => w.Contains("XAV3_SKELETON_PAYLOAD_MISSING")),
                     Is.True);
                 Assert.That(diagnostics.WarningCodes, Does.Contain("XAV3_SKELETON_PAYLOAD_MISSING"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_V4SkinWithoutRig_Warns()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addSkinSection: true, formatVersion: 4));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV4_RIG_MISSING")),
+                    Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV4_RIG_MISSING"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_V4SkinWithRig_DoesNotWarnMissingRig()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addSkinSection: true, addRigSection: true, formatVersion: 4));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV4_RIG_MISSING")),
+                    Is.False);
+                Assert.That(payload.SkeletonRigs.Count, Is.EqualTo(1));
+                Assert.That(payload.SkeletonRigs[0].Bones.Count, Is.EqualTo(1));
             }
             finally
             {
@@ -314,7 +353,9 @@ namespace VsfClone.Xav2.Runtime.Tests
             string textureRefName = "texture_0",
             string typedBaseTextureRefOverride = null,
             bool addSkinSection = false,
-            bool addSkeletonSection = false)
+            bool addSkeletonSection = false,
+            bool addRigSection = false,
+            ushort formatVersion = 3)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -337,7 +378,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
 
             bw.Write(Encoding.ASCII.GetBytes("XAV2"));
-            bw.Write((ushort)3);
+            bw.Write(formatVersion);
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
@@ -367,6 +408,10 @@ namespace VsfClone.Xav2.Runtime.Tests
                 if (addSkeletonSection)
                 {
                     WriteSection(bw, 0x0016, BuildSkeletonSection("mesh_0"));
+                }
+                if (addRigSection)
+                {
+                    WriteSection(bw, 0x0017, BuildRigSection("mesh_0"));
                 }
             }
 
@@ -491,6 +536,22 @@ namespace VsfClone.Xav2.Runtime.Tests
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, meshName);
+            bw.Write((uint)16);
+            for (var i = 0; i < 16; i++)
+            {
+                bw.Write((i % 5) == 0 ? 1.0f : 0.0f);
+            }
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildRigSection(string meshName)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, meshName);
+            bw.Write((uint)1);
+            WriteSizedString(bw, "Root");
+            bw.Write(-1);
             bw.Write((uint)16);
             for (var i = 0; i < 16; i++)
             {

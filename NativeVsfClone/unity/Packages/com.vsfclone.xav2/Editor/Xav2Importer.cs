@@ -23,6 +23,12 @@ namespace VsfClone.Xav2.Editor
             }
 
             options ??= new Xav2ImportOptions();
+            if (options.CollisionPolicy != Xav2ImportCollisionPolicy.Suffix)
+            {
+                report.ErrorMessage = $"Unsupported collision policy: {options.CollisionPolicy}";
+                return report;
+            }
+
             var loadOptions = new Xav2LoadOptions
             {
                 StrictValidation = options.StrictValidation,
@@ -56,11 +62,40 @@ namespace VsfClone.Xav2.Editor
             var meshesDir = EnsureChildFolder(outputDir, "Meshes");
             var prefabsDir = EnsureChildFolder(outputDir, "Prefabs");
 
-            var textureByRef = CreateTextureAssets(payload, texturesDir, report);
-            var materialByName = CreateMaterialAssets(payload, materialsDir, textureByRef, report);
-            var meshByName = CreateMeshAssets(payload, meshesDir, report);
+            Dictionary<string, Texture2D> textureByRef;
+            try
+            {
+                textureByRef = CreateTextureAssets(payload, texturesDir, report);
+            }
+            catch (Exception ex)
+            {
+                report.ErrorMessage = $"Texture import failed: {ex.Message}";
+                return report;
+            }
 
-            var instanceRoot = BuildPrefabHierarchy(payload, meshByName, materialByName, report);
+            Dictionary<string, Material> materialByName;
+            try
+            {
+                materialByName = CreateMaterialAssets(payload, materialsDir, textureByRef, report, options);
+            }
+            catch (Exception ex)
+            {
+                report.ErrorMessage = $"Material import failed: {ex.Message}";
+                return report;
+            }
+
+            Dictionary<string, Mesh> meshByName;
+            try
+            {
+                meshByName = CreateMeshAssets(payload, meshesDir, report);
+            }
+            catch (Exception ex)
+            {
+                report.ErrorMessage = $"Mesh import failed: {ex.Message}";
+                return report;
+            }
+
+            var instanceRoot = BuildPrefabHierarchy(payload, meshByName, materialByName, report, options);
             if (instanceRoot == null)
             {
                 report.ErrorMessage = "Prefab hierarchy build failed.";
@@ -82,6 +117,10 @@ namespace VsfClone.Xav2.Editor
 
             report.PrefabPath = prefabPath;
             report.CreatedAssets.Add(prefabPath);
+            if (report.RecoverableErrors.Count > 0 || report.SkippedAssets.Count > 0)
+            {
+                report.IsPartial = true;
+            }
             report.Success = true;
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -146,7 +185,8 @@ namespace VsfClone.Xav2.Editor
             Xav2AvatarPayload payload,
             string materialsDir,
             IReadOnlyDictionary<string, Texture2D> textureByRef,
-            Xav2ImportReport report)
+            Xav2ImportReport report,
+            Xav2ImportOptions options)
         {
             var result = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
             if (payload == null)
@@ -157,18 +197,26 @@ namespace VsfClone.Xav2.Editor
             for (var i = 0; i < payload.Materials.Count; i++)
             {
                 var src = payload.Materials[i];
-                var shader = ResolveShader(src, report);
-                var material = new Material(shader)
+                try
                 {
-                    name = SanitizeName(string.IsNullOrWhiteSpace(src.Name) ? $"Material_{i}" : src.Name)
-                };
+                    var shader = ResolveShader(src, report);
+                    var material = new Material(shader)
+                    {
+                        name = SanitizeName(string.IsNullOrWhiteSpace(src.Name) ? $"Material_{i}" : src.Name)
+                    };
 
-                ApplyMaterialValues(material, src, textureByRef, report);
+                    ApplyMaterialValues(material, src, textureByRef, report, options);
 
-                var materialPath = AssetDatabase.GenerateUniqueAssetPath($"{materialsDir}/{material.name}.mat");
-                AssetDatabase.CreateAsset(material, materialPath);
-                report.CreatedAssets.Add(materialPath);
-                result[NormalizeRef(src.Name)] = material;
+                    var materialPath = AssetDatabase.GenerateUniqueAssetPath($"{materialsDir}/{material.name}.mat");
+                    AssetDatabase.CreateAsset(material, materialPath);
+                    report.CreatedAssets.Add(materialPath);
+                    result[NormalizeRef(src.Name)] = material;
+                }
+                catch (Exception ex)
+                {
+                    report.RecoverableErrors.Add($"XAV2_IMPORT_MATERIAL_FAILED: material={src.Name}, error={ex.Message}");
+                    report.SkippedAssets.Add($"material:{src.Name}");
+                }
             }
 
             return result;
@@ -198,26 +246,35 @@ namespace VsfClone.Xav2.Editor
             {
                 var src = payload.Meshes[i];
                 var meshName = string.IsNullOrWhiteSpace(src.Name) ? $"Mesh_{i}" : src.Name;
-                var mesh = BuildMesh(src, meshName, report);
-                if (mesh == null)
+                try
                 {
-                    continue;
-                }
+                    var mesh = BuildMesh(src, meshName, report);
+                    if (mesh == null)
+                    {
+                        report.SkippedAssets.Add($"mesh:{meshName}");
+                        continue;
+                    }
 
-                if (skinByMesh.TryGetValue(NormalizeRef(src.Name), out var skin))
+                    if (skinByMesh.TryGetValue(NormalizeRef(src.Name), out var skin))
+                    {
+                        ApplySkin(mesh, skin, report);
+                    }
+
+                    if (blendByMesh.TryGetValue(NormalizeRef(src.Name), out var blend))
+                    {
+                        ApplyBlendShapes(mesh, blend, report);
+                    }
+
+                    var meshPath = AssetDatabase.GenerateUniqueAssetPath($"{meshesDir}/{SanitizeName(meshName)}.asset");
+                    AssetDatabase.CreateAsset(mesh, meshPath);
+                    report.CreatedAssets.Add(meshPath);
+                    result[NormalizeRef(src.Name)] = mesh;
+                }
+                catch (Exception ex)
                 {
-                    ApplySkin(mesh, skin, report);
+                    report.RecoverableErrors.Add($"XAV2_IMPORT_MESH_FAILED: mesh={meshName}, error={ex.Message}");
+                    report.SkippedAssets.Add($"mesh:{meshName}");
                 }
-
-                if (blendByMesh.TryGetValue(NormalizeRef(src.Name), out var blend))
-                {
-                    ApplyBlendShapes(mesh, blend, report);
-                }
-
-                var meshPath = AssetDatabase.GenerateUniqueAssetPath($"{meshesDir}/{SanitizeName(meshName)}.asset");
-                AssetDatabase.CreateAsset(mesh, meshPath);
-                report.CreatedAssets.Add(meshPath);
-                result[NormalizeRef(src.Name)] = mesh;
             }
 
             return result;
@@ -227,7 +284,8 @@ namespace VsfClone.Xav2.Editor
             Xav2AvatarPayload payload,
             IReadOnlyDictionary<string, Mesh> meshByName,
             IReadOnlyDictionary<string, Material> materialByName,
-            Xav2ImportReport report)
+            Xav2ImportReport report,
+            Xav2ImportOptions options)
         {
             if (payload == null)
             {
@@ -250,6 +308,15 @@ namespace VsfClone.Xav2.Editor
                 skinByMesh[NormalizeRef(skin.MeshName)] = skin;
             }
 
+            var rigByMesh = new Dictionary<string, Xav2SkeletonRigPayload>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rig in payload.SkeletonRigs)
+            {
+                rigByMesh[NormalizeRef(rig.MeshName)] = rig;
+            }
+
+            var skinnedMeshCount = 0;
+            var fullRigCount = 0;
+
             for (var i = 0; i < payload.Meshes.Count; i++)
             {
                 var meshPayload = payload.Meshes[i];
@@ -267,12 +334,34 @@ namespace VsfClone.Xav2.Editor
                     skin.BoneIndices != null &&
                     skin.BoneIndices.Length > 0)
                 {
+                    skinnedMeshCount++;
                     var smr = child.AddComponent<SkinnedMeshRenderer>();
                     smr.sharedMesh = mesh;
                     smr.sharedMaterial = material;
-                    var bones = CreateSkeletonBones(root.transform, skin.BoneIndices.Length);
-                    smr.bones = bones;
-                    smr.rootBone = bones.Length > 0 ? bones[0] : root.transform;
+                    if (rigByMesh.TryGetValue(NormalizeRef(meshPayload.Name), out var rig) &&
+                        rig.Bones != null &&
+                        rig.Bones.Count > 0)
+                    {
+                        var bones = CreateSkeletonBonesFromRig(root.transform, rig, report);
+                        smr.bones = MapSkinBones(bones, skin.BoneIndices);
+                        smr.rootBone = ResolveRootBone(bones, rig, root.transform);
+                        fullRigCount++;
+                    }
+                    else
+                    {
+                        report.Warnings.Add($"XAV4_RIG_MISSING: mesh='{meshPayload.Name}'");
+                        report.SkippedAssets.Add($"rig:{meshPayload.Name}");
+                        if (options.FailOnRigDataMissing)
+                        {
+                            UnityEngine.Object.DestroyImmediate(root);
+                            report.ErrorMessage = $"Rig payload missing for skinned mesh '{meshPayload.Name}'.";
+                            return null;
+                        }
+
+                        var bones = CreateSkeletonBones(root.transform, skin.BoneIndices.Length);
+                        smr.bones = bones;
+                        smr.rootBone = bones.Length > 0 ? bones[0] : root.transform;
+                    }
                 }
                 else
                 {
@@ -281,6 +370,15 @@ namespace VsfClone.Xav2.Editor
                     var mr = child.AddComponent<MeshRenderer>();
                     mr.sharedMaterial = material;
                 }
+            }
+
+            if (skinnedMeshCount == 0)
+            {
+                report.RigQuality = "None";
+            }
+            else
+            {
+                report.RigQuality = (fullRigCount == skinnedMeshCount) ? "Full" : "Partial";
             }
 
             return root;
@@ -302,6 +400,115 @@ namespace VsfClone.Xav2.Editor
             }
 
             return bones;
+        }
+
+        private static Transform[] CreateSkeletonBonesFromRig(Transform parent, Xav2SkeletonRigPayload rig, Xav2ImportReport report)
+        {
+            if (rig == null || rig.Bones == null || rig.Bones.Count == 0)
+            {
+                return Array.Empty<Transform>();
+            }
+
+            var bones = new Transform[rig.Bones.Count];
+            for (var i = 0; i < rig.Bones.Count; i++)
+            {
+                bones[i] = new GameObject(SanitizeName(rig.Bones[i].Name)).transform;
+            }
+
+            for (var i = 0; i < rig.Bones.Count; i++)
+            {
+                var parentIndex = rig.Bones[i].ParentIndex;
+                var parentTransform = (parentIndex >= 0 && parentIndex < bones.Length)
+                    ? bones[parentIndex]
+                    : parent;
+                bones[i].SetParent(parentTransform, false);
+
+                if (TryParseMatrix(rig.Bones[i].LocalMatrix16, out var matrix))
+                {
+                    ApplyLocalMatrix(bones[i], matrix);
+                }
+                else
+                {
+                    report.Warnings.Add($"XAV4_RIG_MATRIX_INVALID: mesh={rig.MeshName}, bone={rig.Bones[i].Name}");
+                }
+            }
+
+            return bones;
+        }
+
+        private static Transform[] MapSkinBones(Transform[] rigBones, int[] skinBoneIndices)
+        {
+            if (skinBoneIndices == null || skinBoneIndices.Length == 0)
+            {
+                return rigBones ?? Array.Empty<Transform>();
+            }
+
+            var mapped = new Transform[skinBoneIndices.Length];
+            for (var i = 0; i < skinBoneIndices.Length; i++)
+            {
+                var index = skinBoneIndices[i];
+                mapped[i] = (index >= 0 && rigBones != null && index < rigBones.Length)
+                    ? rigBones[index]
+                    : null;
+            }
+            return mapped;
+        }
+
+        private static Transform ResolveRootBone(Transform[] bones, Xav2SkeletonRigPayload rig, Transform fallback)
+        {
+            if (bones == null || bones.Length == 0 || rig == null || rig.Bones == null)
+            {
+                return fallback;
+            }
+
+            for (var i = 0; i < rig.Bones.Count && i < bones.Length; i++)
+            {
+                if (rig.Bones[i].ParentIndex < 0 && bones[i] != null)
+                {
+                    return bones[i];
+                }
+            }
+
+            return bones[0] ?? fallback;
+        }
+
+        private static bool TryParseMatrix(float[] raw, out Matrix4x4 matrix)
+        {
+            matrix = Matrix4x4.identity;
+            if (raw == null || raw.Length != 16)
+            {
+                return false;
+            }
+
+            matrix = new Matrix4x4(
+                new Vector4(raw[0], raw[1], raw[2], raw[3]),
+                new Vector4(raw[4], raw[5], raw[6], raw[7]),
+                new Vector4(raw[8], raw[9], raw[10], raw[11]),
+                new Vector4(raw[12], raw[13], raw[14], raw[15]));
+            return true;
+        }
+
+        private static void ApplyLocalMatrix(Transform target, Matrix4x4 matrix)
+        {
+            var position = new Vector3(matrix.m03, matrix.m13, matrix.m23);
+            var x = new Vector3(matrix.m00, matrix.m10, matrix.m20);
+            var y = new Vector3(matrix.m01, matrix.m11, matrix.m21);
+            var z = new Vector3(matrix.m02, matrix.m12, matrix.m22);
+
+            var scale = new Vector3(x.magnitude, y.magnitude, z.magnitude);
+            if (scale.x <= 1e-6f) scale.x = 1.0f;
+            if (scale.y <= 1e-6f) scale.y = 1.0f;
+            if (scale.z <= 1e-6f) scale.z = 1.0f;
+
+            var forward = z / scale.z;
+            var upwards = y / scale.y;
+            var rotation = (forward.sqrMagnitude > 1e-8f && upwards.sqrMagnitude > 1e-8f)
+                ? Quaternion.LookRotation(forward, upwards)
+                : Quaternion.identity;
+
+            target.localPosition = position;
+            target.localRotation = rotation;
+            target.localScale = scale;
         }
 
         private static Material ResolveMaterialForMesh(
@@ -564,20 +771,23 @@ namespace VsfClone.Xav2.Editor
             }
 
             shader = Shader.Find("Standard") ?? Shader.Find("Universal Render Pipeline/Lit");
-            if (shader == null)
-            {
-                throw new InvalidOperationException("No fallback shader available.");
-            }
+            shader ??= Shader.Find("Sprites/Default");
+            shader ??= Shader.Find("Unlit/Texture");
 
             report.Warnings.Add($"XAV2_IMPORT_SHADER_FALLBACK: material={source.Name}, shader={source.ShaderName}");
-            return shader;
+            if (shader == null)
+            {
+                report.RecoverableErrors.Add($"XAV2_IMPORT_SHADER_UNRESOLVED: material={source.Name}");
+            }
+            return shader ?? Shader.Find("Hidden/InternalErrorShader");
         }
 
         private static void ApplyMaterialValues(
             Material material,
             Xav2MaterialPayload source,
             IReadOnlyDictionary<string, Texture2D> textureByRef,
-            Xav2ImportReport report)
+            Xav2ImportReport report,
+            Xav2ImportOptions options)
         {
             if (material == null || source == null)
             {
@@ -619,18 +829,15 @@ namespace VsfClone.Xav2.Editor
 
             if (string.Equals(source.AlphaMode, "BLEND", StringComparison.OrdinalIgnoreCase))
             {
-                SetupBlendMode(material, true);
+                SetupMaterialAlphaMode(material, "BLEND", source.AlphaCutoff, options.MaterialRecoveryProfile);
             }
             else if (string.Equals(source.AlphaMode, "MASK", StringComparison.OrdinalIgnoreCase))
             {
-                if (material.HasProperty("_Cutoff"))
-                {
-                    material.SetFloat("_Cutoff", source.AlphaCutoff);
-                }
+                SetupMaterialAlphaMode(material, "MASK", source.AlphaCutoff, options.MaterialRecoveryProfile);
             }
             else
             {
-                SetupBlendMode(material, false);
+                SetupMaterialAlphaMode(material, "OPAQUE", source.AlphaCutoff, options.MaterialRecoveryProfile);
             }
 
             if (source.DoubleSided && material.HasProperty("_Cull"))
@@ -717,20 +924,72 @@ namespace VsfClone.Xav2.Editor
             }
         }
 
-        private static void SetupBlendMode(Material material, bool transparent)
+        private static void SetupMaterialAlphaMode(
+            Material material,
+            string alphaMode,
+            float cutoff,
+            Xav2MaterialRecoveryProfile recoveryProfile)
         {
             if (material == null)
             {
                 return;
             }
 
-            if (!material.HasProperty("_Mode"))
+            var isBlend = string.Equals(alphaMode, "BLEND", StringComparison.OrdinalIgnoreCase);
+            var isMask = string.Equals(alphaMode, "MASK", StringComparison.OrdinalIgnoreCase);
+
+            if (material.HasProperty("_Surface"))
             {
+                material.SetFloat("_Surface", isBlend ? 1.0f : 0.0f);
+            }
+
+            if (material.HasProperty("_Mode"))
+            {
+                material.SetFloat("_Mode", isBlend ? 3.0f : (isMask ? 1.0f : 0.0f));
+            }
+
+            if (material.HasProperty("_AlphaClip"))
+            {
+                material.SetFloat("_AlphaClip", isMask ? 1.0f : 0.0f);
+            }
+
+            if (material.HasProperty("_Cutoff"))
+            {
+                material.SetFloat("_Cutoff", Mathf.Clamp01(cutoff));
+            }
+
+            if (isBlend)
+            {
+                material.SetOverrideTag("RenderType", "Transparent");
+                material.EnableKeyword("_ALPHABLEND_ON");
+                material.DisableKeyword("_ALPHATEST_ON");
+                material.renderQueue = 3000;
+                if (material.HasProperty("_SrcBlend")) material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                if (material.HasProperty("_DstBlend")) material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                if (material.HasProperty("_ZWrite")) material.SetFloat("_ZWrite", 0.0f);
                 return;
             }
 
-            material.SetFloat("_Mode", transparent ? 3.0f : 0.0f);
-            material.renderQueue = transparent ? 3000 : 2000;
+            if (isMask)
+            {
+                material.SetOverrideTag("RenderType", "TransparentCutout");
+                material.EnableKeyword("_ALPHATEST_ON");
+                material.DisableKeyword("_ALPHABLEND_ON");
+                material.renderQueue = 2450;
+                if (material.HasProperty("_ZWrite")) material.SetFloat("_ZWrite", 1.0f);
+                return;
+            }
+
+            material.SetOverrideTag("RenderType", "Opaque");
+            material.DisableKeyword("_ALPHATEST_ON");
+            material.DisableKeyword("_ALPHABLEND_ON");
+            material.renderQueue = 2000;
+            if (material.HasProperty("_ZWrite")) material.SetFloat("_ZWrite", 1.0f);
+
+            if (recoveryProfile == Xav2MaterialRecoveryProfile.Aggressive && material.HasProperty("_Blend"))
+            {
+                material.SetFloat("_Blend", 0.0f);
+            }
         }
 
         private static string EnsureChildFolder(string parent, string child)

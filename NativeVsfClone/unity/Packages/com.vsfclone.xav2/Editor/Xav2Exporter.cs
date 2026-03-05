@@ -19,6 +19,7 @@ namespace VsfClone.Xav2.Editor
         private const ushort SectionBlendShapePayload = 0x0014;
         private const ushort SectionMaterialTypedParams = 0x0015;
         private const ushort SectionSkeletonPosePayload = 0x0016;
+        private const ushort SectionSkeletonRigPayload = 0x0017;
 
         public static void Export(string outputPath, GameObject avatarRoot, Xav2ExportOptions options)
         {
@@ -43,7 +44,7 @@ namespace VsfClone.Xav2.Editor
             }
             ValidateShaderPolicy(payload, options);
             EnsureManifestDefaults(payload, options);
-            ValidateV3SkeletonCoverage(payload);
+            ValidateV4SkinningCoverage(payload);
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
             using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -52,7 +53,7 @@ namespace VsfClone.Xav2.Editor
             var manifestJson = JsonUtility.ToJson(payload.Manifest);
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
             bw.Write(Encoding.ASCII.GetBytes("XAV2"));
-            bw.Write((ushort)3);
+            bw.Write((ushort)4);
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
@@ -80,6 +81,10 @@ namespace VsfClone.Xav2.Editor
             foreach (var skeleton in payload.Skeletons)
             {
                 WriteSection(bw, SectionSkeletonPosePayload, BuildSkeletonPayload(skeleton));
+            }
+            foreach (var rig in payload.SkeletonRigs)
+            {
+                WriteSection(bw, SectionSkeletonRigPayload, BuildSkeletonRigPayload(rig));
             }
             foreach (var blendShape in payload.BlendShapes)
             {
@@ -182,7 +187,7 @@ namespace VsfClone.Xav2.Editor
             }
         }
 
-        private static void ValidateV3SkeletonCoverage(Xav2AvatarPayload payload)
+        private static void ValidateV4SkinningCoverage(Xav2AvatarPayload payload)
         {
             if (payload.Skins == null || payload.Skins.Count == 0)
             {
@@ -225,6 +230,35 @@ namespace VsfClone.Xav2.Editor
                 {
                     throw new InvalidOperationException(
                         $"XAV3 skeleton validation failed: skeleton matrix count ({skeletonCount}) < bindpose count ({bindPoseCount}) for mesh '{skin.MeshName}'.");
+                }
+            }
+
+            var rigByMesh = new Dictionary<string, Xav2SkeletonRigPayload>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rig in payload.SkeletonRigs ?? new List<Xav2SkeletonRigPayload>())
+            {
+                var key = NormalizeRefKey(rig.MeshName);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+                rigByMesh[key] = rig;
+            }
+
+            foreach (var skin in payload.Skins)
+            {
+                var key = NormalizeRefKey(skin.MeshName);
+                if (!rigByMesh.TryGetValue(key, out var rig))
+                {
+                    throw new InvalidOperationException(
+                        $"XAV4 rig validation failed: skeleton rig payload missing for mesh '{skin.MeshName}'.");
+                }
+
+                var rigBoneCount = rig.Bones?.Count ?? 0;
+                var skinBoneCount = skin.BoneIndices?.Length ?? 0;
+                if (rigBoneCount == 0 || rigBoneCount < skinBoneCount)
+                {
+                    throw new InvalidOperationException(
+                        $"XAV4 rig validation failed: rig bone count ({rigBoneCount}) < skin bone count ({skinBoneCount}) for mesh '{skin.MeshName}'.");
                 }
             }
         }
@@ -369,6 +403,26 @@ namespace VsfClone.Xav2.Editor
             foreach (var value in skeleton.BoneMatrices16xN)
             {
                 bw.Write(value);
+            }
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildSkeletonRigPayload(Xav2SkeletonRigPayload rig)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, rig.MeshName);
+            bw.Write((uint)(rig.Bones?.Count ?? 0));
+            foreach (var bone in rig.Bones ?? new List<Xav2RigBonePayload>())
+            {
+                WriteSizedString(bw, bone.Name);
+                bw.Write(bone.ParentIndex);
+                var matrix = bone.LocalMatrix16 ?? Array.Empty<float>();
+                bw.Write((uint)matrix.Length);
+                foreach (var value in matrix)
+                {
+                    bw.Write(value);
+                }
             }
             return ms.ToArray();
         }

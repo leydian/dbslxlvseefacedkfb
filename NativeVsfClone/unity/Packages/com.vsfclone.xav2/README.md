@@ -26,6 +26,7 @@ If a material in the export target set references a shader outside this list, ex
   - Output root default: `Assets/ImportedXav2/<avatarId>/`
   - Collision policy default: unique suffix (`_1`, `_2`, ...)
   - Partial import default: continue with warnings
+  - v4 skinning import prefers skeleton rig payload (`0x0017`) for bone hierarchy reconstruction
 
 ## Runtime loader API
 

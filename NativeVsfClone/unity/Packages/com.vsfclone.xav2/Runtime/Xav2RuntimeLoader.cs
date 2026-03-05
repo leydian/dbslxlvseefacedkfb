@@ -16,6 +16,7 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionBlendShapePayload = 0x0014;
         private const ushort SectionMaterialTypedParams = 0x0015;
         private const ushort SectionSkeletonPosePayload = 0x0016;
+        private const ushort SectionSkeletonRigPayload = 0x0017;
 
         public static Xav2AvatarPayload Load(string path)
         {
@@ -69,7 +70,7 @@ namespace VsfClone.Xav2.Runtime
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, "XAV2 version field is truncated.");
             }
-            if (version != 1 && version != 2 && version != 3)
+            if (version != 1 && version != 2 && version != 3 && version != 4)
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, $"Unsupported XAV2 version: {version}");
             }
@@ -210,6 +211,8 @@ namespace VsfClone.Xav2.Runtime
                     return TryParseMaterialTypedParams(bytes, sectionOffset, sectionLength, materialsByName, diagnostics, options);
                 case SectionSkeletonPosePayload:
                     return TryParseSkeletonPose(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
+                case SectionSkeletonRigPayload:
+                    return TryParseSkeletonRig(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 default:
                     return HandleUnknownSection(diagnostics, options, sectionType);
             }
@@ -677,6 +680,70 @@ namespace VsfClone.Xav2.Runtime
             return true;
         }
 
+        private static bool TryParseSkeletonRig(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+
+            if (!TryReadSizedString(br, out var meshName) || !TryReadUInt32(br, out var boneCount))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 skeleton rig section.");
+            }
+
+            var rig = new Xav2SkeletonRigPayload
+            {
+                MeshName = meshName
+            };
+
+            for (var i = 0; i < boneCount; i++)
+            {
+                if (!TryReadSizedString(br, out var boneName) ||
+                    !TryReadInt32(br, out var parentIndex) ||
+                    !TryReadUInt32(br, out var matrixValueCount))
+                {
+                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 skeleton rig bone entry.");
+                }
+
+                if (matrixValueCount != 16U)
+                {
+                    return Fail(
+                        diagnostics,
+                        Xav2LoadErrorCode.SectionSchemaInvalid,
+                        $"Invalid XAV4 rig matrix payload size for mesh '{meshName}' bone '{boneName}': {matrixValueCount}.");
+                }
+
+                var matrix = new float[matrixValueCount];
+                for (var j = 0; j < matrixValueCount; j++)
+                {
+                    if (!TryReadSingle(br, out matrix[j]))
+                    {
+                        return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 skeleton rig matrix payload.");
+                    }
+                }
+
+                rig.Bones.Add(new Xav2RigBonePayload
+                {
+                    Name = boneName,
+                    ParentIndex = parentIndex,
+                    LocalMatrix16 = matrix
+                });
+            }
+
+            if (ms.Position != ms.Length)
+            {
+                return AddWarningOrFail(diagnostics, options, $"XAV4_RIG_TRAILING_BYTES: mesh={meshName}");
+            }
+
+            payload.SkeletonRigs.Add(rig);
+            return true;
+        }
+
         private static void NormalizeManifest(Xav2Manifest manifest)
         {
             manifest.avatarId ??= string.Empty;
@@ -827,7 +894,51 @@ namespace VsfClone.Xav2.Runtime
                 }
             }
 
-            diagnostics.IsPartial = missingMeshRef || missingTextureRef;
+            var missingRig = false;
+            if (formatVersion >= 4 && payload.Skins.Count > 0)
+            {
+                var rigMeshSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var rigBoneCountByMesh = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var rig in payload.SkeletonRigs)
+                {
+                    var key = NormalizeRefKey(rig.MeshName);
+                    rigMeshSet.Add(key);
+                    rigBoneCountByMesh[key] = rig.Bones?.Count ?? 0;
+                }
+
+                foreach (var skin in payload.Skins)
+                {
+                    var key = NormalizeRefKey(skin.MeshName);
+                    if (!rigMeshSet.Contains(key))
+                    {
+                        missingRig = true;
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV4_RIG_MISSING: mesh='{skin.MeshName}'"))
+                        {
+                            return false;
+                        }
+                        continue;
+                    }
+
+                    var rigBoneCount = rigBoneCountByMesh.TryGetValue(key, out var count) ? count : 0;
+                    var skinBoneCount = skin.BoneIndices?.Length ?? 0;
+                    if (rigBoneCount < skinBoneCount)
+                    {
+                        missingRig = true;
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV4_RIG_BONE_COUNT_MISMATCH: mesh='{skin.MeshName}', rig={rigBoneCount}, skin={skinBoneCount}"))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            diagnostics.IsPartial = missingMeshRef || missingTextureRef || missingRig;
             return true;
         }
 

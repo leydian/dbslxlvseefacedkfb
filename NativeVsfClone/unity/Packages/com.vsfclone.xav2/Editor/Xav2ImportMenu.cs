@@ -30,6 +30,7 @@ namespace VsfClone.Xav2.Editor
             var sb = new StringBuilder();
             sb.AppendLine($"Prefab: {report.PrefabPath}");
             sb.AppendLine($"Assets created: {report.CreatedAssets.Count}");
+            sb.AppendLine($"Rig quality: {report.RigQuality}");
             if (report.IsPartial)
             {
                 sb.AppendLine("Result: partial import (see warnings)");
@@ -37,6 +38,10 @@ namespace VsfClone.Xav2.Editor
             if (report.Warnings.Count > 0)
             {
                 sb.AppendLine($"Warnings: {report.Warnings.Count}");
+            }
+            if (report.RecoverableErrors.Count > 0)
+            {
+                sb.AppendLine($"Recoverable errors: {report.RecoverableErrors.Count}");
             }
 
             var message = sb.ToString().TrimEnd();

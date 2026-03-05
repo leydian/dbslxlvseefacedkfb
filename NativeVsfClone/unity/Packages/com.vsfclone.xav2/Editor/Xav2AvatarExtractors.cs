@@ -85,6 +85,12 @@ namespace VsfClone.Xav2.Editor
                     {
                         payload.BlendShapes.Add(blendShapePayload);
                     }
+
+                    var rigPayload = BuildSkeletonRigPayload(meshName, smr);
+                    if (rigPayload != null)
+                    {
+                        payload.SkeletonRigs.Add(rigPayload);
+                    }
                 }
             }
 
@@ -166,6 +172,48 @@ namespace VsfClone.Xav2.Editor
                 payload.BoneMatrices16xN[o + 12] = skinMatrix.m30; payload.BoneMatrices16xN[o + 13] = skinMatrix.m31; payload.BoneMatrices16xN[o + 14] = skinMatrix.m32; payload.BoneMatrices16xN[o + 15] = skinMatrix.m33;
             }
             return payload;
+        }
+
+        private static Xav2SkeletonRigPayload BuildSkeletonRigPayload(string meshName, SkinnedMeshRenderer smr)
+        {
+            var bones = smr.bones ?? Array.Empty<Transform>();
+            if (bones.Length == 0)
+            {
+                return null;
+            }
+
+            var rig = new Xav2SkeletonRigPayload
+            {
+                MeshName = meshName
+            };
+
+            for (var i = 0; i < bones.Length; i++)
+            {
+                var bone = bones[i];
+                var matrix = (bone != null)
+                    ? Matrix4x4.TRS(bone.localPosition, bone.localRotation, bone.localScale)
+                    : Matrix4x4.identity;
+                var parentIndex = -1;
+                if (bone != null && bone.parent != null)
+                {
+                    parentIndex = Array.IndexOf(bones, bone.parent);
+                }
+
+                rig.Bones.Add(new Xav2RigBonePayload
+                {
+                    Name = bone != null ? bone.name : $"Bone_{i}",
+                    ParentIndex = parentIndex,
+                    LocalMatrix16 = new float[]
+                    {
+                        matrix.m00, matrix.m01, matrix.m02, matrix.m03,
+                        matrix.m10, matrix.m11, matrix.m12, matrix.m13,
+                        matrix.m20, matrix.m21, matrix.m22, matrix.m23,
+                        matrix.m30, matrix.m31, matrix.m32, matrix.m33
+                    }
+                });
+            }
+
+            return rig;
         }
 
         private static Xav2BlendShapePayload BuildBlendShapePayload(string meshName, Mesh mesh)
