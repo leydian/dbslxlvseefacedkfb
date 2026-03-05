@@ -47,6 +47,24 @@
                         <Button Grid.Column="1" x:Name="BrowseAvatarButton" Content="찾아보기..." Click="BrowseAvatar_Click" Margin="8,0,0,0"/>
                     </Grid>
                     <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <Border BorderBrush="#D7E0EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="132"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Width="120" Height="120" BorderBrush="#CCD8E6" BorderThickness="1" Background="#F5F9FE" CornerRadius="4" VerticalAlignment="Top">
+                                <Image x:Name="AvatarPreviewImage" Stretch="UniformToFill"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <TextBlock Text="현재 선택 미리보기" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="AvatarPreviewStatusText" Text="선택된 파일 없음" Margin="0,4,0,8" TextWrapping="Wrap" Foreground="#5E6B78"/>
+                                <Button x:Name="RetryAvatarPreviewButton" Content="미리보기 재생성" Click="RetryAvatarPreview_Click" MinWidth="120" HorizontalAlignment="Left"/>
+                                <TextBlock Text="최근 사용 아바타" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                                <ListBox x:Name="RecentAvatarListBox" Height="100" SelectionChanged="RecentAvatarList_SelectionChanged"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
                         <Button x:Name="LoadButton" Content="불러오기 (Load)" Click="Load_Click" MinWidth="92"/>
                         <Button x:Name="CancelLoadButton" Content="불러오기 취소" Click="CancelLoad_Click" MinWidth="92"/>
@@ -110,7 +128,7 @@
                             <ColumnDefinition Width="50"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
-                        <Slider Grid.Column="1" x:Name="YawSlider" Minimum="-45" Maximum="45" Value="0" StepFrequency="1" ValueChanged="YawSlider_ValueChanged"/>
+                        <Slider Grid.Column="1" x:Name="YawSlider" Minimum="-180" Maximum="180" Value="0" StepFrequency="1" ValueChanged="YawSlider_ValueChanged"/>
                         <TextBlock Grid.Column="2" x:Name="YawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
                     <Grid Margin="0,0,0,8">

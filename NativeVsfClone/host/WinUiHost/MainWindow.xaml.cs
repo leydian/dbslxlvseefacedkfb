@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -12,6 +13,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -22,6 +24,7 @@ public sealed partial class MainWindow : Window
 {
     private sealed record WebcamDeviceItem(string Key, string Label);
     private readonly HostController _controller = new();
+    private readonly AvatarThumbnailPipeline _thumbnailPipeline;
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
     private readonly DispatcherQueueTimer _timer;
     private readonly DispatcherQueueTimer _uiRefreshTimer;
@@ -50,6 +53,7 @@ public sealed partial class MainWindow : Window
     private const int MinWindowHeight = 760;
     private bool _isRenderRightDragging;
     private double _lastRenderDragX;
+    private bool _syncingRecentAvatarList;
 
     public MainWindow()
     {
@@ -82,8 +86,25 @@ public sealed partial class MainWindow : Window
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
         _controller.LoadProgressChanged += Controller_LoadProgressChanged;
+        _thumbnailPipeline = new AvatarThumbnailPipeline(async (job, token) =>
+        {
+            var exePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+            {
+                return false;
+            }
+
+            return await AvatarThumbnailWorker.RunWorkerProcessAsync(
+                exePath,
+                job,
+                TimeSpan.FromSeconds(20),
+                token);
+        });
+        _thumbnailPipeline.StateChanged += ThumbnailPipeline_StateChanged;
+        _thumbnailPipeline.WorkerRunningChanged += ThumbnailPipeline_WorkerRunningChanged;
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         ApplySessionDefaultsToUi();
+        RefreshRecentAvatarList();
         RefreshValidationState();
         RefreshTrackingWebcamDevices();
         SyncRenderControlsFromState();
@@ -109,6 +130,8 @@ public sealed partial class MainWindow : Window
         _uiRefreshTimer.Stop();
         _resizeTimer.Stop();
         _renderApplyTimer.Stop();
+        _thumbnailPipeline.StateChanged -= ThumbnailPipeline_StateChanged;
+        _thumbnailPipeline.WorkerRunningChanged -= ThumbnailPipeline_WorkerRunningChanged;
         _ = _controller.Shutdown();
     }
 
@@ -185,6 +208,140 @@ public sealed partial class MainWindow : Window
     {
         RefreshValidationState();
         UpdateUiState();
+        var path = AvatarPathTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        {
+            _controller.RecordAvatarSelection(path);
+            EnqueueThumbnailGeneration(path, force: false);
+            RefreshRecentAvatarList();
+        }
+        else
+        {
+            UpdateAvatarPreview(path);
+        }
+    }
+
+    private void RecentAvatarList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingRecentAvatarList || RecentAvatarListBox.SelectedItem is not ListBoxItem item || item.Tag is not string path)
+        {
+            return;
+        }
+
+        AvatarPathTextBox.Text = path;
+    }
+
+    private void RetryAvatarPreview_Click(object sender, RoutedEventArgs e)
+    {
+        var path = AvatarPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return;
+        }
+
+        EnqueueThumbnailGeneration(path, force: true);
+    }
+
+    private void RefreshRecentAvatarList()
+    {
+        if (RecentAvatarListBox is null)
+        {
+            return;
+        }
+
+        var selectedPath = (RecentAvatarListBox.SelectedItem as ListBoxItem)?.Tag as string ?? AvatarPathTextBox.Text.Trim();
+        _syncingRecentAvatarList = true;
+        RecentAvatarListBox.Items.Clear();
+        foreach (var entry in _controller.GetRecentAvatars())
+        {
+            var status = entry.ThumbnailStatus switch
+            {
+                "ready" => "ready",
+                "pending" => "pending",
+                "failed" => "failed",
+                _ => "none",
+            };
+            var item = new ListBoxItem
+            {
+                Tag = entry.AvatarPath,
+                Content = $"{entry.DisplayName} [{status}]",
+            };
+            item.ToolTip = entry.AvatarPath;
+            RecentAvatarListBox.Items.Add(item);
+            if (string.Equals(entry.AvatarPath, selectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                RecentAvatarListBox.SelectedItem = item;
+            }
+        }
+        _syncingRecentAvatarList = false;
+        UpdateAvatarPreview(AvatarPathTextBox.Text.Trim());
+    }
+
+    private void UpdateAvatarPreview(string avatarPath)
+    {
+        if (AvatarPreviewImage is null || AvatarPreviewStatusText is null || RetryAvatarPreviewButton is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(avatarPath))
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = "선택된 파일 없음";
+            RetryAvatarPreviewButton.IsEnabled = false;
+            return;
+        }
+
+        var recent = _controller.GetRecentAvatars()
+            .FirstOrDefault(item => string.Equals(item.AvatarPath, avatarPath, StringComparison.OrdinalIgnoreCase));
+        if (recent is not null &&
+            string.Equals(recent.ThumbnailStatus, "ready", StringComparison.Ordinal) &&
+            File.Exists(recent.ThumbnailPath))
+        {
+            AvatarPreviewImage.Source = LoadPreviewBitmap(recent.ThumbnailPath);
+            AvatarPreviewStatusText.Text = $"미리보기 준비됨: {Path.GetFileName(avatarPath)}";
+        }
+        else if (recent is not null && string.Equals(recent.ThumbnailStatus, "pending", StringComparison.Ordinal))
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = $"미리보기 생성 중: {Path.GetFileName(avatarPath)}";
+        }
+        else if (recent is not null && string.Equals(recent.ThumbnailStatus, "failed", StringComparison.Ordinal))
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = $"미리보기 실패: {Path.GetFileName(avatarPath)}";
+        }
+        else
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = $"미리보기 대기: {Path.GetFileName(avatarPath)}";
+        }
+
+        RetryAvatarPreviewButton.IsEnabled = File.Exists(avatarPath) && !_thumbnailPipeline.IsWorkerRunning;
+    }
+
+    private static BitmapImage? LoadPreviewBitmap(string path)
+    {
+        try
+        {
+            return new BitmapImage(new Uri(path, UriKind.Absolute));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void EnqueueThumbnailGeneration(string avatarPath, bool force)
+    {
+        var normalized = avatarPath.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || !File.Exists(normalized))
+        {
+            return;
+        }
+
+        _ = _thumbnailPipeline.Enqueue(normalized, force);
+        UpdateAvatarPreview(normalized);
     }
 
     private async void Load_Click(object sender, RoutedEventArgs e)
@@ -231,6 +388,15 @@ public sealed partial class MainWindow : Window
                     : $"{guidance}\n\n{technical}";
             }
             await ShowMessageAsync("불러오기 실패 (Load Failed)", $"Load failed: {rc}\n\n{detail}");
+            return;
+        }
+
+        var loadedPath = AvatarPathTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(loadedPath) && File.Exists(loadedPath))
+        {
+            _controller.RecordAvatarSelection(loadedPath);
+            EnqueueThumbnailGeneration(loadedPath, force: false);
+            RefreshRecentAvatarList();
         }
     }
 
@@ -888,6 +1054,7 @@ public sealed partial class MainWindow : Window
         _pendingRuntimeRefresh = true;
         _pendingAvatarRefresh = true;
         _pendingLogsRefresh = true;
+        _ = DispatcherQueue.TryEnqueue(RefreshRecentAvatarList);
     }
 
     private void Controller_DiagnosticsUpdated(object? sender, EventArgs e)
@@ -919,6 +1086,25 @@ public sealed partial class MainWindow : Window
                 _isLoadRunning = false;
                 UpdateUiState();
             }
+        });
+    }
+
+    private void ThumbnailPipeline_StateChanged(object? sender, AvatarThumbnailState e)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            _controller.UpdateRecentAvatarThumbnail(e.AvatarPath, e.ThumbnailPath, e.Status, e.LastError);
+            RefreshRecentAvatarList();
+            UpdateUiState();
+        });
+    }
+
+    private void ThumbnailPipeline_WorkerRunningChanged(object? sender, bool e)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            UpdateAvatarPreview(AvatarPathTextBox.Text.Trim());
+            UpdateUiState();
         });
     }
 
@@ -964,6 +1150,8 @@ public sealed partial class MainWindow : Window
         LoadButton.IsEnabled = uiState.LoadEnabled && !_isLoadRunning;
         CancelLoadButton.IsEnabled = _isLoadRunning;
         UnloadButton.IsEnabled = uiState.UnloadEnabled;
+        RecentAvatarListBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
+        RetryAvatarPreviewButton.IsEnabled = !operation.IsBusy && !_isLoadRunning && !_thumbnailPipeline.IsWorkerRunning && File.Exists(AvatarPathTextBox.Text.Trim());
         StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;
@@ -1002,7 +1190,7 @@ public sealed partial class MainWindow : Window
         RefreshTrackingWebcamButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} arkit52={tracking.Arkit52SubmittedCount}/52 missing={tracking.Arkit52MissingCount} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
@@ -1135,7 +1323,7 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, active_source={tracking.ActiveSource}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, active_source={tracking.ActiveSource}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_missing={tracking.Arkit52MissingCount}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1391,6 +1579,10 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(session.AvatarPath))
         {
             AvatarPathTextBox.Text = session.AvatarPath;
+            if (File.Exists(session.AvatarPath))
+            {
+                EnqueueThumbnailGeneration(session.AvatarPath, force: false);
+            }
         }
 
         SpoutChannelTextBox.Text = session.SpoutChannelName;

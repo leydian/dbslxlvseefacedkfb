@@ -4,9 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,7 +20,6 @@ namespace WpfHost;
 public partial class MainWindow : Window
 {
     private sealed record WebcamDeviceItem(string Key, string Label);
-    private sealed record ThumbnailJob(string AvatarPath, string ThumbnailPath, bool Force);
     private const string UiModeBeginner = "beginner";
     private const string UiModeAdvanced = "advanced";
     private readonly HostController _controller = new();
@@ -62,9 +59,7 @@ public partial class MainWindow : Window
     private DateTimeOffset _renderOnlyHintVisibleUntil = DateTimeOffset.MinValue;
     private static readonly TimeSpan RenderOnlyHintDuration = TimeSpan.FromSeconds(3.0);
     private const int WebcamProbeLimit = 10;
-    private readonly Queue<ThumbnailJob> _thumbnailJobs = new();
-    private readonly HashSet<string> _thumbnailPendingPaths = new(StringComparer.OrdinalIgnoreCase);
-    private bool _thumbnailWorkerRunning;
+    private readonly AvatarThumbnailPipeline _thumbnailPipeline;
     private bool _syncingRecentAvatarList;
 
     public MainWindow()
@@ -91,6 +86,22 @@ public partial class MainWindow : Window
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
         _controller.LoadProgressChanged += Controller_LoadProgressChanged;
+        _thumbnailPipeline = new AvatarThumbnailPipeline(async (job, token) =>
+        {
+            var exePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+            {
+                return false;
+            }
+
+            return await AvatarThumbnailWorker.RunWorkerProcessAsync(
+                exePath,
+                job,
+                TimeSpan.FromSeconds(20),
+                token);
+        });
+        _thumbnailPipeline.StateChanged += ThumbnailPipeline_StateChanged;
+        _thumbnailPipeline.WorkerRunningChanged += ThumbnailPipeline_WorkerRunningChanged;
         RenderHost.RenderRightDragStarted += RenderHost_RenderRightDragStarted;
         RenderHost.RenderRightDragMoved += RenderHost_RenderRightDragMoved;
         RenderHost.RenderRightDragCompleted += RenderHost_RenderRightDragCompleted;
@@ -104,6 +115,8 @@ public partial class MainWindow : Window
         SyncPoseControlsFromState();
         SyncTrackingPoseFilterControlsFromState();
         SyncPosePresetControlsFromState();
+        SyncArmSuggestionControlsFromState();
+        SyncArmTuningControlsFromState();
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
         RefreshGuides();
@@ -146,6 +159,8 @@ public partial class MainWindow : Window
         _uiRefreshTimer.Stop();
         _resizeTimer.Stop();
         _renderApplyTimer.Stop();
+        _thumbnailPipeline.StateChanged -= ThumbnailPipeline_StateChanged;
+        _thumbnailPipeline.WorkerRunningChanged -= ThumbnailPipeline_WorkerRunningChanged;
         _ = _controller.Shutdown();
     }
 
@@ -335,7 +350,7 @@ public partial class MainWindow : Window
             AvatarPreviewStatusText.Text = $"미리보기 대기: {Path.GetFileName(avatarPath)}";
         }
 
-        RetryAvatarPreviewButton.IsEnabled = File.Exists(avatarPath) && !_thumbnailWorkerRunning;
+        RetryAvatarPreviewButton.IsEnabled = File.Exists(avatarPath) && !_thumbnailPipeline.IsWorkerRunning;
     }
 
     private static BitmapImage? LoadPreviewBitmap(string path)
@@ -364,110 +379,27 @@ public partial class MainWindow : Window
         {
             return;
         }
-
-        var thumbnailPath = BuildThumbnailPath(normalized);
-        if (!force && File.Exists(thumbnailPath))
-        {
-            _controller.UpdateRecentAvatarThumbnail(normalized, thumbnailPath, "ready", string.Empty);
-            UpdateAvatarPreview(normalized);
-            return;
-        }
-
-        if (_thumbnailPendingPaths.Contains(normalized))
-        {
-            return;
-        }
-
-        _thumbnailPendingPaths.Add(normalized);
-        _thumbnailJobs.Enqueue(new ThumbnailJob(normalized, thumbnailPath, force));
-        _controller.UpdateRecentAvatarThumbnail(normalized, thumbnailPath, "pending", string.Empty);
+        _ = _thumbnailPipeline.Enqueue(normalized, force);
         UpdateAvatarPreview(normalized);
-        _ = ProcessThumbnailQueueAsync();
     }
 
-    private async Task ProcessThumbnailQueueAsync()
+    private void ThumbnailPipeline_StateChanged(object? sender, AvatarThumbnailState e)
     {
-        if (_thumbnailWorkerRunning)
+        RunOnUiThread(() =>
         {
-            return;
-        }
+            _controller.UpdateRecentAvatarThumbnail(e.AvatarPath, e.ThumbnailPath, e.Status, e.LastError);
+            RefreshRecentAvatarList();
+            UpdateUiState();
+        });
+    }
 
-        _thumbnailWorkerRunning = true;
-        try
+    private void ThumbnailPipeline_WorkerRunningChanged(object? sender, bool e)
+    {
+        RunOnUiThread(() =>
         {
-            while (_thumbnailJobs.Count > 0)
-            {
-                var job = _thumbnailJobs.Dequeue();
-                var success = await RunThumbnailWorkerAsync(job);
-                _thumbnailPendingPaths.Remove(job.AvatarPath);
-                if (success && File.Exists(job.ThumbnailPath))
-                {
-                    _controller.UpdateRecentAvatarThumbnail(job.AvatarPath, job.ThumbnailPath, "ready", string.Empty);
-                }
-                else
-                {
-                    _controller.UpdateRecentAvatarThumbnail(job.AvatarPath, job.ThumbnailPath, "failed", "thumbnail-worker-failed");
-                }
-                RefreshRecentAvatarList();
-            }
-        }
-        finally
-        {
-            _thumbnailWorkerRunning = false;
             UpdateAvatarPreview(AvatarPathTextBox.Text.Trim());
-        }
-    }
-
-    private async Task<bool> RunThumbnailWorkerAsync(ThumbnailJob job)
-    {
-        var exePath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
-        {
-            return false;
-        }
-
-        try
-        {
-            var psi = new ProcessStartInfo(exePath)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            psi.ArgumentList.Add("--thumbnail-worker");
-            psi.ArgumentList.Add("--avatar");
-            psi.ArgumentList.Add(job.AvatarPath);
-            psi.ArgumentList.Add("--output");
-            psi.ArgumentList.Add(job.ThumbnailPath);
-            psi.ArgumentList.Add("--width");
-            psi.ArgumentList.Add("256");
-            psi.ArgumentList.Add("--height");
-            psi.ArgumentList.Add("256");
-
-            using var process = Process.Start(psi);
-            if (process is null)
-            {
-                return false;
-            }
-
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            await process.WaitForExitAsync(timeout.Token);
-            return process.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string BuildThumbnailPath(string avatarPath)
-    {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VsfCloneHost",
-            "thumbnails");
-        Directory.CreateDirectory(root);
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(avatarPath.ToLowerInvariant())));
-        return Path.Combine(root, $"{hash}.png");
+            UpdateUiState();
+        });
     }
 
     private void BeginnerMode_Click(object sender, RoutedEventArgs e)
@@ -1186,6 +1118,129 @@ public partial class MainWindow : Window
         ApplySelectedPoseOffset();
     }
 
+    private void ArmPoseSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ArmBothPitchValueText is not null && ArmBothPitchSlider is not null)
+        {
+            ArmBothPitchValueText.Text = ArmBothPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ArmLeftPitchValueText is not null && ArmLeftPitchSlider is not null)
+        {
+            ArmLeftPitchValueText.Text = ArmLeftPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ArmRightPitchValueText is not null && ArmRightPitchSlider is not null)
+        {
+            ArmRightPitchValueText.Text = ArmRightPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ArmBothPitchSlider is null ||
+            ArmLeftPitchSlider is null ||
+            ArmRightPitchSlider is null ||
+            ArmBothPitchValueText is null ||
+            ArmLeftPitchValueText is null ||
+            ArmRightPitchValueText is null)
+        {
+            return;
+        }
+        if (_isSyncingPoseUi || _controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(sender, ArmBothPitchSlider))
+        {
+            _isSyncingPoseUi = true;
+            ArmLeftPitchSlider.Value = ArmBothPitchSlider.Value;
+            ArmRightPitchSlider.Value = ArmBothPitchSlider.Value;
+            ArmLeftPitchValueText.Text = ArmLeftPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+            ArmRightPitchValueText.Text = ArmRightPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+            _isSyncingPoseUi = false;
+            ApplyArmPitchOffset(PoseBoneKind.LeftUpperArm, (float)ArmBothPitchSlider.Value);
+            ApplyArmPitchOffset(PoseBoneKind.RightUpperArm, (float)ArmBothPitchSlider.Value);
+            return;
+        }
+
+        if (ReferenceEquals(sender, ArmLeftPitchSlider))
+        {
+            ApplyArmPitchOffset(PoseBoneKind.LeftUpperArm, (float)ArmLeftPitchSlider.Value);
+        }
+        else if (ReferenceEquals(sender, ArmRightPitchSlider))
+        {
+            ApplyArmPitchOffset(PoseBoneKind.RightUpperArm, (float)ArmRightPitchSlider.Value);
+        }
+
+        _isSyncingPoseUi = true;
+        ArmBothPitchSlider.Value = (ArmLeftPitchSlider.Value + ArmRightPitchSlider.Value) * 0.5;
+        ArmBothPitchValueText.Text = ArmBothPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        _isSyncingPoseUi = false;
+    }
+
+    private void ArmTuning_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady || _controller.OperationState.IsBusy || ArmDeadbandSlider is null)
+        {
+            return;
+        }
+
+        if (ArmDeadbandValueText is not null)
+        {
+            ArmDeadbandValueText.Text = $"{ArmDeadbandSlider.Value:F2}\u00b0";
+        }
+
+        var current = _controller.ArmPoseTuning;
+        _controller.ConfigureArmPoseTuning(current with
+        {
+            EnableSmoothing = ArmSmoothingCheckBox.IsChecked == true,
+            DeadbandDeg = (float)ArmDeadbandSlider.Value,
+        });
+    }
+
+    private void ArmTuning_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        ArmTuning_Changed(sender, new RoutedEventArgs());
+    }
+
+    private void ApplySuggestedArmPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (SuggestedArmPresetComboBox.SelectedItem is not string selected || string.IsNullOrWhiteSpace(selected))
+        {
+            return;
+        }
+
+        _ = _controller.ApplySuggestedArmPreset(selected);
+        SyncPoseControlsFromState();
+        SyncArmSuggestionControlsFromState();
+    }
+
+    private void SaveSuggestedArmPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (SuggestedArmPresetComboBox.SelectedItem is not string selected || string.IsNullOrWhiteSpace(selected))
+        {
+            return;
+        }
+
+        if (_controller.ApplySuggestedArmPreset(selected) == NcResultCode.Ok)
+        {
+            var presetName = string.IsNullOrWhiteSpace(PosePresetNameTextBox.Text)
+                ? selected
+                : PosePresetNameTextBox.Text.Trim();
+            if (_controller.SaveOrUpdatePosePreset(presetName))
+            {
+                SyncPosePresetControlsFromState();
+            }
+        }
+        SyncPoseControlsFromState();
+    }
+
     private void PoseResetBone_Click(object sender, RoutedEventArgs e)
     {
         if (_controller.OperationState.IsBusy)
@@ -1574,7 +1629,7 @@ public partial class MainWindow : Window
         UnloadButton.IsEnabled = uiState.UnloadEnabled;
         CancelLoadButton.IsEnabled = _isLoadRunning;
         RecentAvatarListBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
-        RetryAvatarPreviewButton.IsEnabled = !operation.IsBusy && !_isLoadRunning && !_thumbnailWorkerRunning && File.Exists(AvatarPathTextBox.Text.Trim());
+        RetryAvatarPreviewButton.IsEnabled = !operation.IsBusy && !_isLoadRunning && !_thumbnailPipeline.IsWorkerRunning && File.Exists(AvatarPathTextBox.Text.Trim());
         StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;
@@ -1593,6 +1648,9 @@ public partial class MainWindow : Window
         PosePitchSlider.IsEnabled = uiState.RenderControlsEnabled;
         PoseYawSlider.IsEnabled = uiState.RenderControlsEnabled;
         PoseRollSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ArmBothPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ArmLeftPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ArmRightPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
         PoseResetBoneButton.IsEnabled = uiState.RenderControlsEnabled;
         PoseResetAllButton.IsEnabled = uiState.RenderControlsEnabled;
         SavePosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -1600,6 +1658,11 @@ public partial class MainWindow : Window
         DeletePosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
         PosePresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
         PosePresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        ArmSmoothingCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        ArmDeadbandSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ApplySuggestedArmPresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        SaveSuggestedArmPresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        SuggestedArmPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
         SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
         ApplyPresetButton.IsEnabled = uiState.RenderControlsEnabled;
         DeletePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -1629,7 +1692,7 @@ public partial class MainWindow : Window
         TrackingPoseDeadbandSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 missing={tracking.Arkit52MissingCount} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -1680,6 +1743,8 @@ public partial class MainWindow : Window
         SyncPoseControlsFromState();
         SyncTrackingPoseFilterControlsFromState();
         SyncPosePresetControlsFromState();
+        SyncArmSuggestionControlsFromState();
+        SyncArmTuningControlsFromState();
         SyncPresetControlsFromState();
         ApplyModeVisibility();
     }
@@ -1812,7 +1877,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_missing={tracking.Arkit52MissingCount}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1977,6 +2042,23 @@ public partial class MainWindow : Window
         PosePitchValueText.Text = PosePitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
         PoseYawValueText.Text = PoseYawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
         PoseRollValueText.Text = PoseRollSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        var leftArm = _controller.PoseOffsets.FirstOrDefault(p => p.Bone == PoseBoneKind.LeftUpperArm);
+        var rightArm = _controller.PoseOffsets.FirstOrDefault(p => p.Bone == PoseBoneKind.RightUpperArm);
+        if (ArmLeftPitchSlider is not null && ArmLeftPitchValueText is not null)
+        {
+            ArmLeftPitchSlider.Value = leftArm?.PitchDeg ?? 0.0f;
+            ArmLeftPitchValueText.Text = ArmLeftPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ArmRightPitchSlider is not null && ArmRightPitchValueText is not null)
+        {
+            ArmRightPitchSlider.Value = rightArm?.PitchDeg ?? 0.0f;
+            ArmRightPitchValueText.Text = ArmRightPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ArmBothPitchSlider is not null && ArmBothPitchValueText is not null)
+        {
+            ArmBothPitchSlider.Value = ((leftArm?.PitchDeg ?? 0.0f) + (rightArm?.PitchDeg ?? 0.0f)) * 0.5f;
+            ArmBothPitchValueText.Text = ArmBothPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
         _isSyncingPoseUi = false;
     }
 
@@ -2012,6 +2094,20 @@ public partial class MainWindow : Window
             (float)PosePitchSlider.Value,
             (float)PoseYawSlider.Value,
             (float)PoseRollSlider.Value);
+        if (selected == PoseBoneKind.LeftUpperArm || selected == PoseBoneKind.RightUpperArm)
+        {
+            SyncPoseControlsFromState();
+        }
+    }
+
+    private void ApplyArmPitchOffset(PoseBoneKind bone, float pitchDeg)
+    {
+        var current = _controller.PoseOffsets.FirstOrDefault(p => p.Bone == bone);
+        _ = _controller.SetPoseOffset(
+            bone,
+            pitchDeg,
+            current?.YawDeg ?? 0.0f,
+            current?.RollDeg ?? 0.0f);
     }
 
     private PoseBoneKind? GetSelectedPoseBone()
@@ -2108,6 +2204,56 @@ public partial class MainWindow : Window
             PosePresetNameTextBox.Text = selectedName;
         }
         _isSyncingPosePresetUi = false;
+    }
+
+    private void SyncArmSuggestionControlsFromState()
+    {
+        if (SuggestedArmPresetComboBox is null)
+        {
+            return;
+        }
+
+        var selected = SuggestedArmPresetComboBox.SelectedItem as string;
+        SuggestedArmPresetComboBox.Items.Clear();
+        foreach (var preset in _controller.SuggestedArmPresets)
+        {
+            SuggestedArmPresetComboBox.Items.Add(preset.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selected))
+        {
+            foreach (var item in SuggestedArmPresetComboBox.Items)
+            {
+                if (item is string name &&
+                    string.Equals(name, selected, StringComparison.OrdinalIgnoreCase))
+                {
+                    SuggestedArmPresetComboBox.SelectedItem = item;
+                    return;
+                }
+            }
+        }
+
+        if (SuggestedArmPresetComboBox.Items.Count > 0)
+        {
+            SuggestedArmPresetComboBox.SelectedIndex = 0;
+        }
+    }
+
+    private void SyncArmTuningControlsFromState()
+    {
+        var tuning = _controller.ArmPoseTuning;
+        if (ArmSmoothingCheckBox is not null)
+        {
+            ArmSmoothingCheckBox.IsChecked = tuning.EnableSmoothing;
+        }
+        if (ArmDeadbandSlider is not null)
+        {
+            ArmDeadbandSlider.Value = tuning.DeadbandDeg;
+        }
+        if (ArmDeadbandValueText is not null)
+        {
+            ArmDeadbandValueText.Text = $"{tuning.DeadbandDeg:F2}\u00b0";
+        }
     }
 
     private NcResultCode PushRenderUiState()
