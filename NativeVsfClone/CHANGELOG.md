@@ -2,6 +2,44 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 skinning stabilization + v2 path activation (native/runtime/exporter)
+
+### Summary
+
+Implemented the first execution slice for XAV2 avatar quality recovery by fixing mesh collapse on skinned avatars in native rendering and wiring a v2-capable version path across native loader and Unity SDK runtime/export.
+
+### Changed
+
+- native render stabilization:
+  - `src/nativecore/native_core.cpp`
+  - added static skinning application from XAV2 `0x0013` payload data (`bind_poses_16xn`, `skin_weight_blob`) before GPU vertex upload
+  - added mesh-name normalization for robust mesh-to-skin payload matching
+  - switched rasterizer cull policy to honor material `double_sided` instead of always forcing no-cull
+- liltoon-focused material uplift (phase-1 quality pass):
+  - `src/nativecore/native_core.cpp`
+  - extended material runtime state with shade/emission controls
+  - added `_ShadeColor` and `_EmissionColor` parse/apply path from `shader_params_json`
+  - expanded shader constant buffer + pixel shader composition for simple toon shade mix and emission add
+- XAV2 version path update:
+  - `src/avatar/xav2_loader.cpp`
+  - native loader now accepts both `v1` and `v2` XAV2 container versions
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - Unity runtime loader now accepts `v1` and `v2`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - Unity exporter now writes `version=2`
+- docs:
+  - added `docs/reports/xav2_skinning_stabilization_and_v2_path_2026-03-06.md`
+  - updated `docs/INDEX.md`
+
+### Verified
+
+- `cmake --build NativeVsfClone\build --config Release --target nativecore avatar_tool` PASS
+- `NativeVsfClone\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"` PASS
+  - `Format=XAV2`
+  - `Compat=full`
+  - `ParserStage=runtime-ready`
+  - `PrimaryError=NONE`
+
 ## 2026-03-05 - VSFAvatar render gate v1 + load-failure error contract refinement
 
 ### Summary

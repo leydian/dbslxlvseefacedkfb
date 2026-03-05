@@ -69,6 +69,10 @@ struct GpuMaterialResource {
     float alpha_cutoff = 0.5f;
     bool double_sided = false;
     std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    float shade_mix = 0.0f;
+    float emission_strength = 0.0f;
     ID3D11ShaderResourceView* base_color_srv = nullptr;
 };
 
@@ -319,6 +323,10 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
     material->alpha_cutoff = 0.5f;
     material->double_sided = false;
     material->base_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    material->shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    material->emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    material->shade_mix = 0.0f;
+    material->emission_strength = 0.0f;
 }
 
 void ResetRendererResources(RendererResources* renderer) {
@@ -457,6 +465,9 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "cbuffer SceneCB : register(b0) {\n"
         "  float4x4 world_view_proj;\n"
         "  float4 base_color;\n"
+        "  float4 shade_color;\n"
+        "  float4 emission_color;\n"
+        "  float4 liltoon_mix;\n"
         "  float alpha_cutoff;\n"
         "  float alpha_mode_mask;\n"
         "  float has_texture;\n"
@@ -475,6 +486,9 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "cbuffer SceneCB : register(b0) {\n"
         "  float4x4 world_view_proj;\n"
         "  float4 base_color;\n"
+        "  float4 shade_color;\n"
+        "  float4 emission_color;\n"
+        "  float4 liltoon_mix;\n"
         "  float alpha_cutoff;\n"
         "  float alpha_mode_mask;\n"
         "  float has_texture;\n"
@@ -491,6 +505,8 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "      out_color.a *= texel.a;\n"
         "    }\n"
         "  }\n"
+        "  out_color.rgb = lerp(out_color.rgb, out_color.rgb * shade_color.rgb, saturate(liltoon_mix.x));\n"
+        "  out_color.rgb += emission_color.rgb * saturate(liltoon_mix.y);\n"
         "  if (alpha_mode_mask > 0.5 && out_color.a < alpha_cutoff) {\n"
         "    clip(-1.0);\n"
         "  }\n"
@@ -580,6 +596,9 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     struct alignas(16) SceneConstants {
         float world_view_proj[16];
         float base_color[4];
+        float shade_color[4];
+        float emission_color[4];
+        float liltoon_mix[4];
         float alpha_cutoff;
         float alpha_mode_mask;
         float has_texture;
@@ -658,7 +677,124 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     return true;
 }
 
-bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Device* device, GpuMeshResource* out_mesh) {
+std::string NormalizeMeshKey(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        if (c == '\\') {
+            return static_cast<char>('/');
+        }
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+struct SkinWeight4 {
+    std::array<std::int32_t, 4U> bone_indices = {0, 0, 0, 0};
+    std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
+};
+
+bool DecodeSkinWeights(
+    const std::vector<std::uint8_t>& skin_weight_blob,
+    std::uint32_t vertex_count,
+    std::vector<SkinWeight4>* out_weights) {
+    if (out_weights == nullptr) {
+        return false;
+    }
+    constexpr std::size_t kBytesPerVertex = 32U;  // 4*int32 + 4*float32
+    const std::size_t expected = static_cast<std::size_t>(vertex_count) * kBytesPerVertex;
+    if (skin_weight_blob.size() != expected) {
+        return false;
+    }
+    out_weights->assign(static_cast<std::size_t>(vertex_count), SkinWeight4{});
+    for (std::uint32_t vi = 0U; vi < vertex_count; ++vi) {
+        const std::size_t base = static_cast<std::size_t>(vi) * kBytesPerVertex;
+        auto& dst = (*out_weights)[vi];
+        for (std::size_t i = 0U; i < 4U; ++i) {
+            std::memcpy(&dst.bone_indices[i], skin_weight_blob.data() + base + i * 4U, sizeof(std::int32_t));
+        }
+        for (std::size_t i = 0U; i < 4U; ++i) {
+            std::memcpy(&dst.weights[i], skin_weight_blob.data() + base + 16U + i * 4U, sizeof(float));
+        }
+    }
+    return true;
+}
+
+bool ApplyStaticSkinningToVertexBlob(
+    std::vector<std::uint8_t>* vertex_blob,
+    std::uint32_t vertex_stride,
+    const avatar::SkinRenderPayload& skin_payload) {
+    if (vertex_blob == nullptr || vertex_stride < 12U || vertex_blob->empty()) {
+        return false;
+    }
+    if ((vertex_blob->size() % vertex_stride) != 0U) {
+        return false;
+    }
+    if (skin_payload.bind_poses_16xn.empty() || skin_payload.skin_weight_blob.empty()) {
+        return false;
+    }
+    if ((skin_payload.bind_poses_16xn.size() % 16U) != 0U) {
+        return false;
+    }
+    const std::uint32_t vertex_count = static_cast<std::uint32_t>(vertex_blob->size() / vertex_stride);
+    std::vector<SkinWeight4> decoded_weights;
+    if (!DecodeSkinWeights(skin_payload.skin_weight_blob, vertex_count, &decoded_weights)) {
+        return false;
+    }
+
+    const std::size_t bind_pose_count = skin_payload.bind_poses_16xn.size() / 16U;
+    std::vector<DirectX::XMMATRIX> skin_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
+    for (std::size_t i = 0U; i < bind_pose_count; ++i) {
+        DirectX::XMFLOAT4X4 bind_pose {};
+        for (std::size_t j = 0U; j < 16U; ++j) {
+            reinterpret_cast<float*>(&bind_pose)[j] = skin_payload.bind_poses_16xn[i * 16U + j];
+        }
+        const auto bind_m = DirectX::XMLoadFloat4x4(&bind_pose);
+        DirectX::XMVECTOR det = {};
+        skin_matrices[i] = DirectX::XMMatrixInverse(&det, bind_m);
+    }
+
+    for (std::uint32_t vi = 0U; vi < vertex_count; ++vi) {
+        const std::size_t base = static_cast<std::size_t>(vi) * vertex_stride;
+        float px = 0.0f;
+        float py = 0.0f;
+        float pz = 0.0f;
+        std::memcpy(&px, vertex_blob->data() + base, sizeof(float));
+        std::memcpy(&py, vertex_blob->data() + base + 4U, sizeof(float));
+        std::memcpy(&pz, vertex_blob->data() + base + 8U, sizeof(float));
+        const auto p = DirectX::XMVectorSet(px, py, pz, 1.0f);
+
+        const auto& sw = decoded_weights[vi];
+        DirectX::XMVECTOR accum = DirectX::XMVectorZero();
+        float total_weight = 0.0f;
+        for (std::size_t i = 0U; i < 4U; ++i) {
+            const float w = sw.weights[i];
+            const auto bone_index = sw.bone_indices[i];
+            if (w <= 0.000001f || bone_index < 0 || static_cast<std::size_t>(bone_index) >= skin_matrices.size()) {
+                continue;
+            }
+            const auto tp = DirectX::XMVector3TransformCoord(p, skin_matrices[static_cast<std::size_t>(bone_index)]);
+            accum = DirectX::XMVectorAdd(accum, DirectX::XMVectorScale(tp, w));
+            total_weight += w;
+        }
+        if (total_weight <= 0.000001f) {
+            continue;
+        }
+        if (std::abs(total_weight - 1.0f) > 0.0001f) {
+            accum = DirectX::XMVectorScale(accum, 1.0f / total_weight);
+        }
+        DirectX::XMFLOAT3 out_pos {};
+        DirectX::XMStoreFloat3(&out_pos, accum);
+        std::memcpy(vertex_blob->data() + base, &out_pos.x, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 4U, &out_pos.y, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 8U, &out_pos.z, sizeof(float));
+    }
+    return true;
+}
+
+bool BuildGpuMeshForPayload(
+    const avatar::MeshRenderPayload& payload,
+    const avatar::SkinRenderPayload* skin_payload,
+    ID3D11Device* device,
+    GpuMeshResource* out_mesh) {
     if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty() || payload.indices.empty()) {
         return false;
     }
@@ -686,6 +822,10 @@ bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Devi
             const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uv_zero.data());
             gpu_vertex_blob.insert(gpu_vertex_blob.end(), uv_bytes, uv_bytes + 8U);
         }
+    }
+
+    if (skin_payload != nullptr) {
+        (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 20U, *skin_payload);
     }
 
     D3D11_BUFFER_DESC vb_desc {};
@@ -722,9 +862,9 @@ bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Devi
         -std::numeric_limits<float>::max(),
         -std::numeric_limits<float>::max(),
         -std::numeric_limits<float>::max()};
-    const auto* bytes = payload.vertex_blob.data();
+    const auto* bytes = gpu_vertex_blob.data();
     for (std::uint32_t i = 0U; i < vertex_count; ++i) {
-        const std::size_t base = static_cast<std::size_t>(i) * src_stride;
+        const std::size_t base = static_cast<std::size_t>(i) * 20U;
         float px = 0.0f;
         float py = 0.0f;
         float pz = 0.0f;
@@ -768,11 +908,22 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
     if (renderer->avatar_meshes.find(handle) != renderer->avatar_meshes.end()) {
         return true;
     }
+    std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
+    skin_by_mesh.reserve(avatar_pkg.skin_payloads.size());
+    for (const auto& skin : avatar_pkg.skin_payloads) {
+        skin_by_mesh[NormalizeMeshKey(skin.mesh_name)] = &skin;
+    }
+
     std::vector<GpuMeshResource> meshes;
     meshes.reserve(avatar_pkg.mesh_payloads.size());
     for (const auto& payload : avatar_pkg.mesh_payloads) {
         GpuMeshResource mesh {};
-        if (!BuildGpuMeshForPayload(payload, device, &mesh)) {
+        const avatar::SkinRenderPayload* skin_payload = nullptr;
+        const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
+        if (skin_it != skin_by_mesh.end()) {
+            skin_payload = skin_it->second;
+        }
+        if (!BuildGpuMeshForPayload(payload, skin_payload, device, &mesh)) {
             for (auto& created : meshes) {
                 ReleaseGpuMeshResource(&created);
             }
@@ -1167,6 +1318,24 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             c = std::max(0.0f, std::min(1.0f, c));
         }
         material.base_color = base_color;
+        std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
+        if (TryExtractShaderParamColor(payload.shader_params_json, "_ShadeColor", &shade_color)) {
+            for (float& c : shade_color) {
+                c = std::max(0.0f, std::min(1.0f, c));
+            }
+            material.shade_mix = 0.28f;
+        }
+        material.shade_color = shade_color;
+        std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
+        if (TryExtractShaderParamColor(payload.shader_params_json, "_EmissionColor", &emission_color)) {
+            for (float& c : emission_color) {
+                c = std::max(0.0f, std::min(1.0f, c));
+            }
+            material.emission_strength = std::max(emission_color[0], std::max(emission_color[1], emission_color[2])) > 0.001f
+                ? 1.0f
+                : 0.0f;
+        }
+        material.emission_color = emission_color;
         if (!payload.base_color_texture_name.empty()) {
             const auto tex_it = std::find_if(
                 avatar_pkg.texture_payloads.begin(),
@@ -1499,6 +1668,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     struct alignas(16) SceneConstants {
         float world_view_proj[16];
         float base_color[4];
+        float shade_color[4];
+        float emission_color[4];
+        float liltoon_mix[4];
         float alpha_cutoff;
         float alpha_mode_mask;
         float has_texture;
@@ -1533,8 +1705,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);
         }
-        (void)double_sided;
-        device_ctx->RSSetState(renderer.raster_cull_none);
+        device_ctx->RSSetState(double_sided ? renderer.raster_cull_none : renderer.raster_cull_back);
 
         const UINT stride = item.mesh->vertex_stride;
         const UINT offset = 0U;
@@ -1559,11 +1730,35 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.base_color[1] = item.material->base_color[1];
             cb.base_color[2] = item.material->base_color[2];
             cb.base_color[3] = item.material->base_color[3];
+            cb.shade_color[0] = item.material->shade_color[0];
+            cb.shade_color[1] = item.material->shade_color[1];
+            cb.shade_color[2] = item.material->shade_color[2];
+            cb.shade_color[3] = item.material->shade_color[3];
+            cb.emission_color[0] = item.material->emission_color[0];
+            cb.emission_color[1] = item.material->emission_color[1];
+            cb.emission_color[2] = item.material->emission_color[2];
+            cb.emission_color[3] = item.material->emission_color[3];
+            cb.liltoon_mix[0] = item.material->shade_mix;
+            cb.liltoon_mix[1] = item.material->emission_strength;
+            cb.liltoon_mix[2] = 0.0f;
+            cb.liltoon_mix[3] = 0.0f;
         } else {
             cb.base_color[0] = 1.0f;
             cb.base_color[1] = 1.0f;
             cb.base_color[2] = 1.0f;
             cb.base_color[3] = 1.0f;
+            cb.shade_color[0] = 1.0f;
+            cb.shade_color[1] = 1.0f;
+            cb.shade_color[2] = 1.0f;
+            cb.shade_color[3] = 1.0f;
+            cb.emission_color[0] = 0.0f;
+            cb.emission_color[1] = 0.0f;
+            cb.emission_color[2] = 0.0f;
+            cb.emission_color[3] = 1.0f;
+            cb.liltoon_mix[0] = 0.0f;
+            cb.liltoon_mix[1] = 0.0f;
+            cb.liltoon_mix[2] = 0.0f;
+            cb.liltoon_mix[3] = 0.0f;
         }
         cb.alpha_cutoff = is_mask ? alpha_cutoff : 0.0f;
         cb.alpha_mode_mask = is_mask ? 1.0f : 0.0f;

@@ -67,7 +67,7 @@ namespace VsfClone.Xav2.Runtime
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, "XAV2 version field is truncated.");
             }
-            if (version != 1)
+            if (version != 1 && version != 2)
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, $"Unsupported XAV2 version: {version}");
             }

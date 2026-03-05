@@ -587,7 +587,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     }
     const auto version = ReadU16Le(bytes, 4U);
     const auto manifest_size = ReadU32Le(bytes, 6U);
-    if (!version || !manifest_size || *version != 1U) {
+    if (!version || !manifest_size || (*version != 1U && *version != 2U)) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
         PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: unsupported version.");
         return core::Result<AvatarPackage>::Ok(pkg);

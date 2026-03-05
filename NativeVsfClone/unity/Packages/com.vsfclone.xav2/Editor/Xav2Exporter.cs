@@ -49,7 +49,7 @@ namespace VsfClone.Xav2.Editor
             var manifestJson = JsonUtility.ToJson(payload.Manifest);
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
             bw.Write(Encoding.ASCII.GetBytes("XAV2"));
-            bw.Write((ushort)1);
+            bw.Write((ushort)2);
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
