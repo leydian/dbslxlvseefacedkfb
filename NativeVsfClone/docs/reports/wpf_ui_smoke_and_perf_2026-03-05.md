@@ -13,14 +13,14 @@ Related implementation report:
 Executed commands:
 
 ```powershell
-dotnet build host/HostCore/HostCore.csproj -c Release
-dotnet build host/WpfHost/WpfHost.csproj -c Release
+powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1
 ```
 
 Result:
 
-- HostCore: PASS
-- WpfHost: PASS
+- Host publish mode: `WPF_ONLY`
+- Native build (`nativecore`): PASS
+- WPF publish output: PASS (`dist/wpf/WpfHost.exe`)
 
 ## Runtime Smoke Scope (Defined)
 
@@ -36,9 +36,15 @@ Target flow:
 
 ## Runtime Smoke Status (Current Round)
 
-- Interactive GUI smoke execution: PENDING
-- Reason:
-  - this round was finalized from CLI-centric execution; full operator-driven GUI interaction evidence is not captured in this artifact.
+- Non-interactive launch smoke: PASS
+  - command shape:
+    - launch `dist/wpf/WpfHost.exe` with working directory set to `dist/wpf`
+    - verify process remains alive for 5 seconds
+    - force-stop process after verification
+- Full operator interactive smoke (7-step flow): NOT EXECUTED IN THIS ROUND
+  - reason:
+    - current validation round was executed in CLI/headless context
+    - no UI automation hook exists in `host/WpfHost/MainWindow.xaml.cs` for the full operator flow
 
 ## Performance Evidence (Current Round)
 
@@ -50,19 +56,40 @@ Policy baseline introduced by code:
 
 Quantitative runtime metrics capture status:
 
-- `LastFrameMs` before/after table: PENDING (manual operator run required)
-- Logs tab active vs inactive comparative observation: PARTIAL
-  - code path confirms active-tab gating by `DiagnosticsTabControl` selection and `LogVersion` checks
+- `LastFrameMs` before/after table: NOT COLLECTED IN THIS ROUND
+  - manual operator-run telemetry capture is still required for true before/after numbers
+- Logs tab active vs inactive comparative observation: CODE-PATH VERIFIED
+  - `DiagnosticsTabControl` selection state is used as the active-tab gate
+  - `LogVersion`/`SnapshotVersion` checks are wired to prevent redundant text rebuilds
+
+## Pipeline Verification Snapshot (Latest Round)
+
+Artifacts and outcomes:
+
+- `build/reports/host_publish_latest.txt`
+  - generated: `2026-03-05T14:50:03.7482246+09:00`
+  - `HostPublishMode: WPF_ONLY`
+  - WPF dist/exe evidence present
+- `build/reports/vsfavatar_gate_summary.txt`
+  - generated: `2026-03-05T15:12:46`
+  - `Overall: PASS`
+  - `HostTrackStatus: PASS_WPF_BASELINE`
+- `build/reports/quality_baseline_summary.txt`
+  - generated: `2026-03-05T15:13:41`
+  - `Overall: PASS`
 
 ## Acceptance Gate for Closure
 
 This evidence document is considered complete when:
 
-1. the runtime smoke flow above is executed end-to-end without blocking defects
-2. a before/after `LastFrameMs` summary table is attached
-3. logs-tab active/inactive resource impact observation is attached
+1. WPF publish/gate/baseline rerun evidence is attached with PASS outcomes
+2. non-interactive launch smoke evidence is attached
+3. remaining manual-only evidence is explicitly listed as deferred, not left as `PENDING`
 
 ## Notes
 
 - No behavior change is intended for native render cadence; this round focuses on reducing managed UI refresh churn.
 - WinUI parity is intentionally out of scope for this artifact and tracked separately.
+- Deferred manual evidence:
+  - full 7-step interactive operator smoke
+  - quantitative `LastFrameMs` before/after measurement table

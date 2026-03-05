@@ -2,6 +2,43 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WPF smoke/perf evidence refresh (WPF-only verification rerun)
+
+### Summary
+
+Re-ran the WPF-first verification path and refreshed the WPF smoke/performance evidence report with current artifact timestamps and outcomes.
+
+- host publish rerun (`WPF_ONLY`) succeeded
+- VSFAvatar quality gate rerun succeeded (`HostTrackStatus=PASS_WPF_BASELINE`)
+- quality baseline rerun succeeded (`Overall: PASS`)
+- non-interactive WPF launch smoke (process-alive check) succeeded when launched from `dist/wpf`
+
+### Changed
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - replaced open `PENDING` markers with explicit executed/deferred statuses
+  - added latest pipeline verification snapshot from generated artifacts
+  - recorded non-interactive launch smoke evidence and execution constraints
+- `docs/reports/wpf_verification_roundup_2026-03-05.md` (new)
+  - added consolidated command-level roundup for this verification refresh round
+  - included artifact timestamps, pass/fail outcomes, and explicit deferred manual checks
+
+- `docs/INDEX.md`
+  - updated WPF smoke/perf report entry description to reflect latest verification snapshot coverage
+  - added roundup report index entry for traceability
+
+### Verification Artifacts (latest)
+
+- `build/reports/host_publish_latest.txt`
+  - `Host publish run: 2026-03-05T14:50:03.7482246+09:00`
+  - `HostPublishMode: WPF_ONLY`
+- `build/reports/vsfavatar_gate_summary.txt`
+  - `Generated: 2026-03-05T15:12:46`
+  - `Overall: PASS`
+- `build/reports/quality_baseline_summary.txt`
+  - `Generated: 2026-03-05T15:13:41`
+  - `Overall: PASS`
+
 ## 2026-03-05 - WPF UI flow relayout + refresh throttle (60Hz render / 10Hz UI)
 
 ### Summary
