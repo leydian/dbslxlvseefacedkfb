@@ -140,6 +140,11 @@ Behavioral outcome:
 
 - Better rendering stability and clearer warning diagnostics for malformed skin payloads.
 - Expanded shading parameter support path with safer resource lifecycle handling.
+- Render transform now applies tracked head rotation/position in world composition (with normalization and bounded positional scale).
+- Implemented native `nc_set_expression_weights(...)` path:
+  - normalizes incoming expression keys
+  - maps direct/mapping-kind aliases (including blink/jaw/smile fallbacks)
+  - updates per-expression runtime weights and summary text per avatar
 
 ### 4) VSFAvatar quality-gate field rule adjustment
 

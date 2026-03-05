@@ -1921,10 +1921,30 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float preview_yaw = (it->second.source_type == AvatarSourceType::Xav2)
             ? 0.0f
             : DirectX::XM_PI;
+        const auto raw_head_rot = DirectX::XMVectorSet(
+            g_state.latest_tracking.head_rot_quat[0],
+            g_state.latest_tracking.head_rot_quat[1],
+            g_state.latest_tracking.head_rot_quat[2],
+            g_state.latest_tracking.head_rot_quat[3]);
+        const float quat_len_sq =
+            (g_state.latest_tracking.head_rot_quat[0] * g_state.latest_tracking.head_rot_quat[0]) +
+            (g_state.latest_tracking.head_rot_quat[1] * g_state.latest_tracking.head_rot_quat[1]) +
+            (g_state.latest_tracking.head_rot_quat[2] * g_state.latest_tracking.head_rot_quat[2]) +
+            (g_state.latest_tracking.head_rot_quat[3] * g_state.latest_tracking.head_rot_quat[3]);
+        const auto head_rot = (quat_len_sq > 1e-6f)
+            ? DirectX::XMMatrixRotationQuaternion(DirectX::XMQuaternionNormalize(raw_head_rot))
+            : DirectX::XMMatrixIdentity();
+        constexpr float kHeadPosScale = 0.20f;
+        const auto head_pos = DirectX::XMMatrixTranslation(
+            g_state.latest_tracking.head_pos[0] * kHeadPosScale,
+            g_state.latest_tracking.head_pos[1] * kHeadPosScale,
+            g_state.latest_tracking.head_pos[2] * kHeadPosScale);
         const auto world =
             DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *
             DirectX::XMMatrixRotationY(preview_yaw) *
+            head_rot *
             DirectX::XMMatrixScaling(fit_scale, fit_scale, fit_scale) *
+            head_pos *
             DirectX::XMMatrixTranslation(x_offset, -look_at_y, 0.0f);
         ++avatar_slot;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
@@ -2382,6 +2402,106 @@ NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame) {
         }
         pkg.last_expression_summary = summary;
     }
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32_t count) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if ((count > 0U) && weights == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "tracking", "weights must not be null when count > 0", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto normalize_key = [](const std::string& raw) -> std::string {
+        std::string out;
+        out.reserve(raw.size());
+        for (const unsigned char ch : raw) {
+            if (std::isalnum(ch) != 0) {
+                out.push_back(static_cast<char>(std::tolower(ch)));
+            }
+        }
+        return out;
+    };
+
+    std::unordered_map<std::string, float> incoming;
+    incoming.reserve(static_cast<std::size_t>(count));
+    for (uint32_t i = 0U; i < count; ++i) {
+        std::string key(weights[i].name);
+        key = normalize_key(key);
+        if (key.empty()) {
+            continue;
+        }
+        const float clamped = std::max(0.0f, std::min(1.0f, weights[i].weight));
+        incoming[key] = clamped;
+    }
+
+    for (auto& [handle, pkg] : vsfclone::nativecore::g_state.avatars) {
+        (void)handle;
+        if (pkg.expressions.empty()) {
+            continue;
+        }
+
+        std::string summary;
+        std::size_t shown = 0U;
+        for (auto& expr : pkg.expressions) {
+            const std::string expr_name = normalize_key(expr.name);
+            const std::string mapping = normalize_key(expr.mapping_kind);
+
+            float weight = std::max(0.0f, std::min(1.0f, expr.default_weight));
+            bool matched = false;
+            auto it = incoming.find(expr_name);
+            if (it != incoming.end()) {
+                weight = it->second;
+                matched = true;
+            }
+            if (!matched) {
+                it = incoming.find(mapping);
+                if (it != incoming.end()) {
+                    weight = it->second;
+                    matched = true;
+                }
+            }
+            if (!matched && mapping == "blink") {
+                const auto left_it = incoming.find("eyeblinkleft");
+                const auto right_it = incoming.find("eyeblinkright");
+                if (left_it != incoming.end() || right_it != incoming.end()) {
+                    const float left = (left_it == incoming.end()) ? 0.0f : left_it->second;
+                    const float right = (right_it == incoming.end()) ? 0.0f : right_it->second;
+                    weight = (left + right) * 0.5f;
+                    matched = true;
+                }
+            }
+            if (!matched && mapping == "visemeaa") {
+                const auto jaw_it = incoming.find("jawopen");
+                if (jaw_it != incoming.end()) {
+                    weight = jaw_it->second;
+                    matched = true;
+                }
+            }
+            if (!matched && mapping == "joy") {
+                const auto smile_it = incoming.find("mouthsmileleft");
+                if (smile_it != incoming.end()) {
+                    weight = smile_it->second;
+                    matched = true;
+                }
+            }
+
+            expr.runtime_weight = std::max(0.0f, std::min(1.0f, weight));
+            if (shown < 3U) {
+                if (!summary.empty()) {
+                    summary += ", ";
+                }
+                summary += expr.name + "=" + std::to_string(expr.runtime_weight);
+                ++shown;
+            }
+        }
+        pkg.last_expression_summary = summary;
+    }
+
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
