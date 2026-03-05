@@ -119,6 +119,23 @@ typedef struct NcSpringBoneInfo {
     float avg_substeps;
 } NcSpringBoneInfo;
 
+typedef struct NcAvatarRuntimeMetricsV2 {
+    uint32_t spring_active_chain_count;
+    uint32_t spring_constraint_hit_count;
+    uint32_t spring_damping_event_count;
+    float spring_avg_offset_magnitude;
+    float spring_peak_offset_magnitude;
+    uint32_t mtoon_outline_material_count;
+    uint32_t mtoon_uv_anim_material_count;
+    uint32_t mtoon_matcap_material_count;
+    uint32_t mtoon_blend_material_count;
+    uint32_t mtoon_mask_material_count;
+    float last_frame_ms;
+    float target_frame_ms;
+    char physics_solver[32];
+    char mtoon_runtime_mode[32];
+} NcAvatarRuntimeMetricsV2;
+
 typedef struct NcTrackingFrame {
     float head_pos[3];
     float head_rot_quat[4];
@@ -244,6 +261,7 @@ VSFCLONE_API NcResultCode nc_get_avatar_info(NcAvatarHandle handle, NcAvatarInfo
 VSFCLONE_API NcResultCode nc_get_expression_count(NcAvatarHandle handle, uint32_t* out_count);
 VSFCLONE_API NcResultCode nc_get_expression_infos(NcAvatarHandle handle, NcExpressionInfo* out_infos, uint32_t capacity, uint32_t* out_written);
 VSFCLONE_API NcResultCode nc_get_springbone_info(NcAvatarHandle handle, NcSpringBoneInfo* out_info);
+VSFCLONE_API NcResultCode nc_get_avatar_runtime_metrics_v2(NcAvatarHandle handle, NcAvatarRuntimeMetricsV2* out_info);
 
 VSFCLONE_API NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame);
 VSFCLONE_API NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32_t count);

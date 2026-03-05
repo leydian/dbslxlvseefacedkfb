@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-06T05:15:22
+Generated: 2026-03-06T05:28:36
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -73,18 +73,24 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 28
-  WarningCodes: 0
+  Warnings: 29
+  WarningCodes: 1
   MaterialDiagnostics: 18
   OpaqueMaterials: 15
   MaskMaterials: 3
   BlendMaterials: 0
   MtoonAdvancedMaterials: 18
   MtoonFallbackMaterials: 0
+  WarningCode[0]: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  WarningCodeMeta[0]: severity=warn, category=payload, critical=false
   WarningInfoCount: 0
-  WarningWarnCount: 0
+  WarningWarnCount: 1
   WarningErrorCount: 0
   CriticalWarningCount: 0
+  LastWarningCode: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  LastWarningSeverity: warn
+  LastWarningCategory: payload
+  LastWarningCritical: false
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaSource=gltf.alphaMode, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
@@ -118,18 +124,24 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 29
-  WarningCodes: 0
+  Warnings: 30
+  WarningCodes: 1
   MaterialDiagnostics: 18
   OpaqueMaterials: 18
   MaskMaterials: 0
   BlendMaterials: 0
   MtoonAdvancedMaterials: 18
   MtoonFallbackMaterials: 0
+  WarningCode[0]: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  WarningCodeMeta[0]: severity=warn, category=payload, critical=false
   WarningInfoCount: 0
-  WarningWarnCount: 0
+  WarningWarnCount: 1
   WarningErrorCount: 0
   CriticalWarningCount: 0
+  LastWarningCode: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  LastWarningSeverity: warn
+  LastWarningCategory: payload
+  LastWarningCritical: false
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaSource=gltf.alphaMode, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
@@ -163,18 +175,24 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 29
-  WarningCodes: 0
+  Warnings: 30
+  WarningCodes: 1
   MaterialDiagnostics: 18
   OpaqueMaterials: 16
   MaskMaterials: 2
   BlendMaterials: 0
   MtoonAdvancedMaterials: 18
   MtoonFallbackMaterials: 0
+  WarningCode[0]: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  WarningCodeMeta[0]: severity=warn, category=payload, critical=false
   WarningInfoCount: 0
-  WarningWarnCount: 0
+  WarningWarnCount: 1
   WarningErrorCount: 0
   CriticalWarningCount: 0
+  LastWarningCode: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  LastWarningSeverity: warn
+  LastWarningCategory: payload
+  LastWarningCritical: false
   LastWarning: W_STAGE: runtime-ready
   LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaSource=gltf.alphaMode, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true

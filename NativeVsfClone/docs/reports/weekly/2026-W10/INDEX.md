@@ -1,4 +1,4 @@
-﻿# Weekly Reports 2026-W10
+# Weekly Reports 2026-W10
 
 Report list for this week.
 
@@ -109,3 +109,4 @@ Report list for this week.
 - [2026-03-06_xav2_visibility_fallback_and_warning_gate.md](./2026-03-06_xav2_visibility_fallback_and_warning_gate.md)
 - [2026-03-06_xav2_warning_contract_gate_upgrade.md](./2026-03-06_xav2_warning_contract_gate_upgrade.md)
 - [2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md](./2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md)
+- [2026-03-06_vrm_runtime_metrics_v2_api.md](./2026-03-06_vrm_runtime_metrics_v2_api.md)

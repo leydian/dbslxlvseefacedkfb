@@ -152,6 +152,27 @@ public struct NcSpringBoneInfo
     public float AvgSubsteps;
 }
 
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct NcAvatarRuntimeMetricsV2
+{
+    public uint SpringActiveChainCount;
+    public uint SpringConstraintHitCount;
+    public uint SpringDampingEventCount;
+    public float SpringAvgOffsetMagnitude;
+    public float SpringPeakOffsetMagnitude;
+    public uint MtoonOutlineMaterialCount;
+    public uint MtoonUvAnimMaterialCount;
+    public uint MtoonMatcapMaterialCount;
+    public uint MtoonBlendMaterialCount;
+    public uint MtoonMaskMaterialCount;
+    public float LastFrameMs;
+    public float TargetFrameMs;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string PhysicsSolver;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string MtoonRuntimeMode;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NcTrackingFrame
 {
@@ -314,6 +335,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_get_springbone_info(ulong handle, out NcSpringBoneInfo outInfo);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_avatar_runtime_metrics_v2(ulong handle, out NcAvatarRuntimeMetricsV2 outInfo);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_set_tracking_frame(ref NcTrackingFrame frame);

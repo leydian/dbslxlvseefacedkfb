@@ -146,7 +146,11 @@ struct AvatarSecondaryMotionState {
     std::uint32_t corrected_chain_count = 0U;
     std::uint32_t disabled_chain_count = 0U;
     std::uint32_t unsupported_collider_chain_count = 0U;
+    std::uint32_t constraint_hit_count = 0U;
+    std::uint32_t damping_event_count = 0U;
     float avg_substeps = 0.0f;
+    float avg_offset_magnitude = 0.0f;
+    float peak_offset_magnitude = 0.0f;
 };
 
 struct CoreState {
@@ -289,6 +293,74 @@ MtoonDiagnosticsCounts CountMtoonDiagnostics(const AvatarPackage& pkg) {
         }
     }
     return counts;
+}
+
+void FillAvatarRuntimeMetricsV2(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarRuntimeMetricsV2* out_info) {
+    if (out_info == nullptr) {
+        return;
+    }
+    std::memset(out_info, 0, sizeof(*out_info));
+    out_info->target_frame_ms = 1000.0f / 60.0f;
+    out_info->last_frame_ms = g_state.last_frame_ms;
+    CopyString(out_info->physics_solver, sizeof(out_info->physics_solver), "spring-v2-damped");
+    CopyString(out_info->mtoon_runtime_mode, sizeof(out_info->mtoon_runtime_mode), "mtoon-advanced-runtime");
+
+    const auto state_it = g_state.secondary_motion_states.find(handle);
+    if (state_it != g_state.secondary_motion_states.end()) {
+        out_info->spring_active_chain_count = state_it->second.active_chain_count;
+        out_info->spring_constraint_hit_count = state_it->second.constraint_hit_count;
+        out_info->spring_damping_event_count = state_it->second.damping_event_count;
+        out_info->spring_avg_offset_magnitude = state_it->second.avg_offset_magnitude;
+        out_info->spring_peak_offset_magnitude = state_it->second.peak_offset_magnitude;
+    }
+
+    std::uint32_t blend_count = 0U;
+    std::uint32_t mask_count = 0U;
+#if defined(_WIN32)
+    const auto material_it = g_state.renderer.avatar_materials.find(handle);
+    if (material_it != g_state.renderer.avatar_materials.end()) {
+        for (const auto& material : material_it->second) {
+            if (material.outline_width > 0.0005f) {
+                ++out_info->mtoon_outline_material_count;
+            }
+            if (material.uv_anim_enabled) {
+                ++out_info->mtoon_uv_anim_material_count;
+            }
+            if (material.matcap_srv != nullptr || material.matcap_strength > 0.001f) {
+                ++out_info->mtoon_matcap_material_count;
+            }
+            std::string alpha_mode = material.alpha_mode;
+            std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+            if (alpha_mode == "BLEND") {
+                ++blend_count;
+            } else if (alpha_mode == "MASK") {
+                ++mask_count;
+            }
+        }
+        out_info->mtoon_blend_material_count = blend_count;
+        out_info->mtoon_mask_material_count = mask_count;
+        return;
+    }
+#endif
+
+    for (const auto& diag : pkg.material_diagnostics) {
+        std::string alpha_mode = diag.alpha_mode;
+        std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::toupper(c));
+        });
+        if (alpha_mode == "BLEND") {
+            ++blend_count;
+        } else if (alpha_mode == "MASK") {
+            ++mask_count;
+        }
+    }
+    out_info->mtoon_blend_material_count = blend_count;
+    out_info->mtoon_mask_material_count = mask_count;
+    out_info->mtoon_outline_material_count = pkg.material_diagnostics.empty() ? 0U : 1U;
+    out_info->mtoon_uv_anim_material_count = pkg.material_diagnostics.empty() ? 0U : 1U;
+    out_info->mtoon_matcap_material_count = pkg.material_diagnostics.empty() ? 0U : 1U;
 }
 
 struct WarningMeta {
@@ -1180,7 +1252,11 @@ void InitializeSecondaryMotionStateForAvatar(
     state.corrected_chain_count = 0U;
     state.disabled_chain_count = 0U;
     state.unsupported_collider_chain_count = 0U;
+    state.constraint_hit_count = 0U;
+    state.damping_event_count = 0U;
     state.avg_substeps = 0.0f;
+    state.avg_offset_magnitude = 0.0f;
+    state.peak_offset_magnitude = 0.0f;
     const bool has_vrc = !avatar_pkg.physbone_payloads.empty();
 
     std::unordered_set<std::string> collider_keys;
@@ -1336,6 +1412,10 @@ bool ApplySecondaryMotionToAvatar(
     constexpr std::uint32_t kMaxSubsteps = 8U;
     std::uint32_t accumulated_substeps = 0U;
     std::uint32_t stepped_chain_count = 0U;
+    std::uint32_t frame_constraint_hits = 0U;
+    std::uint32_t frame_damping_events = 0U;
+    float frame_offset_mag_sum = 0.0f;
+    float frame_offset_mag_peak = 0.0f;
     for (auto& chain : state.chains) {
         if (!chain.enabled || chain.target_mesh_indices.empty()) {
             continue;
@@ -1366,10 +1446,12 @@ bool ApplySecondaryMotionToAvatar(
                 chain.offset_y *= scale;
                 chain.velocity_x *= 0.45f;
                 chain.velocity_y *= 0.45f;
+                ++frame_constraint_hits;
             }
             if (chain.unsupported_collider_count > 0U) {
                 chain.velocity_x *= 0.9f;
                 chain.velocity_y *= 0.9f;
+                ++frame_damping_events;
             }
             chain.offset_x = ClampFinite(chain.offset_x, -0.05f, 0.05f, 0.0f);
             chain.offset_y = ClampFinite(chain.offset_y, -0.05f, 0.05f, 0.0f);
@@ -1382,6 +1464,9 @@ bool ApplySecondaryMotionToAvatar(
         chain.last_substeps = chain_substeps;
         accumulated_substeps += chain_substeps;
         ++stepped_chain_count;
+        const float offset_mag = std::sqrt(std::max(0.0f, chain.offset_x * chain.offset_x + chain.offset_y * chain.offset_y));
+        frame_offset_mag_sum += offset_mag;
+        frame_offset_mag_peak = std::max(frame_offset_mag_peak, offset_mag);
 
         for (const auto mesh_index : chain.target_mesh_indices) {
             if (mesh_index >= meshes.size()) {
@@ -1427,6 +1512,12 @@ bool ApplySecondaryMotionToAvatar(
     state.avg_substeps = stepped_chain_count > 0U
         ? static_cast<float>(accumulated_substeps) / static_cast<float>(stepped_chain_count)
         : 0.0f;
+    state.constraint_hit_count = frame_constraint_hits;
+    state.damping_event_count = frame_damping_events;
+    state.avg_offset_magnitude = stepped_chain_count > 0U
+        ? frame_offset_mag_sum / static_cast<float>(stepped_chain_count)
+        : 0.0f;
+    state.peak_offset_magnitude = frame_offset_mag_peak;
 
     return true;
 }
@@ -1889,7 +1980,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         if (avatar_it != g_state.avatars.end()) {
             PushAvatarWarningUnique(
                 &avatar_it->second,
-                "W_RENDER: VRM_SKINNING_STATIC_BYPASS: using transformed bind vertices.",
+                "W_RENDER: VRM_SKINNING_STATIC_BYPASS: using loader-provided mesh-space skinned vertices.",
                 "VRM_SKINNING_STATIC_BYPASS");
         }
     }
@@ -3626,6 +3717,25 @@ NcResultCode nc_get_springbone_info(NcAvatarHandle handle, NcSpringBoneInfo* out
         out_info->unsupported_collider_chain_count = state_it->second.unsupported_collider_chain_count;
         out_info->avg_substeps = state_it->second.avg_substeps;
     }
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_avatar_runtime_metrics_v2(NcAvatarHandle handle, NcAvatarRuntimeMetricsV2* out_info) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_info == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "out_info must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    auto it = vsfclone::nativecore::g_state.avatars.find(handle);
+    if (it == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "avatar", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    vsfclone::nativecore::FillAvatarRuntimeMetricsV2(it->second, handle, out_info);
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
