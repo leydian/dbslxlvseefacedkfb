@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF consumer UI onboarding uplift + 3-minute success telemetry instrumentation
+
+### Summary
+
+Implemented a WPF-first consumer UI uplift centered on first-run completion, including a policy-driven onboarding state model, a single primary CTA flow with output fallback behavior, app-wide visual style tokens, and telemetry milestones to measure `output start within 3 minutes`.
+
+### Changed
+
+- Host UI state/policy contract expansion:
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/HostUiPolicy.cs`
+  - added onboarding contract types (`HostOnboardingStep`, `HostPrimaryActionKind`, `HostOnboardingState`).
+  - added `BuildOnboardingState(...)` decision flow and consumer-facing action copy.
+- WPF onboarding UX and beginner-mode simplification:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - replaced quick-start block with onboarding card, primary CTA, step progress, and recovery panel.
+  - wired CTA routing (`Initialize -> Load Avatar -> Start Output`) with Spout-first then OSC fallback attempt in CTA path.
+  - reduced beginner cognitive load by hiding Session/Render/Outputs groups outside advanced mode.
+- WPF visual system baseline:
+  - `host/WpfHost/App.xaml`
+  - introduced app-wide color/style tokens and implicit styles for window, cards/groups, buttons, text inputs, combos, and text blocks.
+- Onboarding KPI telemetry instrumentation:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/HostController.cs`
+  - added onboarding milestone timestamps and success flag fields:
+    - `session_started_at`
+    - `initialized_at`
+    - `avatar_loaded_at`
+    - `output_started_at`
+    - `within_3min_success`
+  - added milestone event stream (`onboarding_milestone`) with step-specific markers.
+
+### Verification
+
+- `dotnet build host\\WpfHost\\WpfHost.csproj -c Release` PASS
+
+### Documentation
+
+- `docs/reports/wpf_consumer_ui_onboarding_and_telemetry_2026-03-06.md`
+- `docs/reports/weekly/2026-W10/2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md`
+- `docs/reports/weekly/2026-W10/INDEX.md`
+
 ## 2026-03-06 - VRM SpringBone runtime uplift + MToon advanced typed binding expansion
 
 ### Summary

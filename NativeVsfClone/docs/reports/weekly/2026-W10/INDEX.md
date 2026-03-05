@@ -91,6 +91,7 @@ Report list for this week.
 - [2026-03-06_webcam_onnx_tracking_implementation.md](./2026-03-06_webcam_onnx_tracking_implementation.md)
 - [2026-03-06_workspace_change_rollup.md](./2026-03-06_workspace_change_rollup.md)
 - [2026-03-06_workspace_interim_full_change_summary.md](./2026-03-06_workspace_interim_full_change_summary.md)
+- [2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md](./2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md)
 - [2026-03-06_wpf_render_drag_capture_stabilization.md](./2026-03-06_wpf_render_drag_capture_stabilization.md)
 - [2026-03-06_wpf_runtime_path_guard_and_dist_alignment.md](./2026-03-06_wpf_runtime_path_guard_and_dist_alignment.md)
 - [2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md](./2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md)

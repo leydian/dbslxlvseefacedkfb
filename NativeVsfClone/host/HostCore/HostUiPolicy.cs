@@ -132,4 +132,74 @@ public static class HostUiPolicy
             "Ready",
             "Broadcast pipeline is running.");
     }
+
+    public static HostOnboardingState BuildOnboardingState(
+        HostSessionState session,
+        OutputState outputs,
+        HostOperationState operation,
+        HostValidationState validation)
+    {
+        if (operation.IsBusy)
+        {
+            return new HostOnboardingState(
+                HostOnboardingStep.Blocked,
+                HostPrimaryActionKind.None,
+                "Working",
+                $"{operation.CurrentOperation} in progress.",
+                "Current operation must finish before the next step.",
+                "Wait for completion");
+        }
+
+        if (!session.IsInitialized)
+        {
+            return new HostOnboardingState(
+                HostOnboardingStep.Initialize,
+                HostPrimaryActionKind.InitializeSession,
+                "Step 1. Start Session",
+                "Click Start Session to prepare camera and output runtime.",
+                string.Empty,
+                string.Empty);
+        }
+
+        if (!validation.AvatarPathValid)
+        {
+            return new HostOnboardingState(
+                HostOnboardingStep.LoadAvatar,
+                HostPrimaryActionKind.None,
+                "Step 2. Load Avatar",
+                "Pick a valid avatar file, then continue.",
+                validation.AvatarPathError,
+                "Select a valid avatar file");
+        }
+
+        if (!session.ActiveAvatarHandle.HasValue)
+        {
+            return new HostOnboardingState(
+                HostOnboardingStep.LoadAvatar,
+                HostPrimaryActionKind.LoadAvatar,
+                "Step 2. Load Avatar",
+                "Click Load Avatar to import the selected file.",
+                string.Empty,
+                string.Empty);
+        }
+
+        if (!outputs.SpoutActive && !outputs.OscActive)
+        {
+            return new HostOnboardingState(
+                HostOnboardingStep.StartOutput,
+                HostPrimaryActionKind.StartOutput,
+                "Step 3. Start Broadcast",
+                "Click Start Output. The app tries Spout first, then OSC if needed.",
+                string.Empty,
+                string.Empty);
+        }
+
+        return new HostOnboardingState(
+            HostOnboardingStep.Ready,
+            HostPrimaryActionKind.None,
+            "Ready",
+            "Broadcast output is running.",
+            string.Empty,
+            string.Empty);
+    }
 }

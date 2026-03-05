@@ -22,12 +22,36 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="QuickActionsGroup" Header="Quick Start" Margin="0,0,0,8">
+                <GroupBox x:Name="QuickActionsGroup" Header="시작하기 (Getting Started)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="Recommended flow: 1) Initialize, 2) Load avatar, 3) Start output." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,6"/>
-                        <Border Background="#F8FBFF" BorderBrush="#D5E4F5" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,8">
-                            <TextBlock x:Name="QuickNextActionText" Text="Step 1: Click Initialize to start the session." TextWrapping="Wrap" Foreground="#19324B" FontWeight="SemiBold"/>
+                        <TextBlock Text="처음 실행 흐름: 세션 시작 -> 아바타 불러오기 -> 방송 출력 시작" TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
+                        <Border Background="#F4F8FF" BorderBrush="#D0DDF4" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock x:Name="QuickNextActionText" Text="Step 1. Start Session" FontSize="16" FontWeight="SemiBold" Foreground="#17324D"/>
+                                <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output pipeline." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#2B4865"/>
+                                <Button x:Name="PrimaryActionButton" Content="세션 시작" Click="PrimaryAction_Click" Margin="0,10,0,0" MinHeight="40" FontWeight="SemiBold"/>
+                            </StackPanel>
                         </Border>
+                        <UniformGrid Columns="3" Margin="0,0,0,8">
+                            <Border Background="#EEF4FD" BorderBrush="#D6E2F4" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <TextBlock Text="1) 세션 시작" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock x:Name="OnboardingStep1Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="#EEF4FD" BorderBrush="#D6E2F4" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,6,0">
+                                <StackPanel>
+                                    <TextBlock Text="2) 아바타 불러오기" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock x:Name="OnboardingStep2Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="#EEF4FD" BorderBrush="#D6E2F4" BorderThickness="1" CornerRadius="4" Padding="8">
+                                <StackPanel>
+                                    <TextBlock Text="3) 출력 시작" FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock x:Name="OnboardingStep3Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
                         <Border Background="#EDF3FA" BorderBrush="#CAD8E8" BorderThickness="1" CornerRadius="4" Padding="8,6">
                             <TextBlock x:Name="QuickStatusText" Text="Session=Stopped | Avatar=None | Outputs=Off" TextWrapping="Wrap" Foreground="#243548" FontWeight="SemiBold"/>
                         </Border>
@@ -36,6 +60,12 @@
                                 <TextBlock Text="Action needed" FontWeight="SemiBold" Foreground="#7F1D1D" Margin="0,0,0,2"/>
                                 <TextBlock x:Name="BeginnerFailureHintText" TextWrapping="Wrap" Foreground="#7F1D1D"/>
                                 <Button x:Name="OpenDiagnosticsFromHintButton" Content="Open Advanced Diagnostics" Click="OpenDiagnosticsFromHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="180"/>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="OnboardingRecoveryPanel" Visibility="Collapsed" Background="#FFF8EE" BorderBrush="#F3D2A7" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="복구 안내 (Recovery)" FontWeight="SemiBold" Foreground="#7C4012"/>
+                                <TextBlock x:Name="OnboardingRecoveryText" TextWrapping="Wrap" Foreground="#7C4012" Margin="0,2,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

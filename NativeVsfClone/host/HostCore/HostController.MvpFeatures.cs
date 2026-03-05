@@ -30,6 +30,11 @@ public sealed partial class HostController
     private long _loadOperationSequence;
     private SessionPersistenceModel _sessionPersistence = SessionPersistenceModel.CreateDefault();
     private AutoQualityPolicy _autoQualityPolicy = AutoQualityPolicy.CreateDefault();
+    private DateTimeOffset? _sessionStartedAtUtc;
+    private DateTimeOffset? _initializedAtUtc;
+    private DateTimeOffset? _avatarLoadedAtUtc;
+    private DateTimeOffset? _outputStartedAtUtc;
+    private bool _within3MinSuccess;
 
     public PreflightSummary? LastPreflight { get; private set; }
     public UserFacingError? LastUserFacingError { get; private set; }
@@ -60,6 +65,7 @@ public sealed partial class HostController
 
     public void InitializeMvpFeatures()
     {
+        _sessionStartedAtUtc ??= DateTimeOffset.UtcNow;
         _sessionPersistence = _sessionStore.Load();
         _autoQualityPolicy = _autoQualityStore.Load();
         Outputs = Outputs with
@@ -74,6 +80,8 @@ public sealed partial class HostController
         {
             _ = ApplyRenderProfile(_sessionPersistence.LastProfileName);
         }
+
+        TrackOnboardingMilestone("session_started");
     }
 
     public ImportPlan BuildImportPlan(string path)
@@ -912,7 +920,61 @@ public sealed partial class HostController
                 ["avatar_loaded"] = SessionState.ActiveAvatarHandle.HasValue,
                 ["spout_active"] = Outputs.SpoutActive,
                 ["osc_active"] = Outputs.OscActive,
+                ["session_started_at"] = ToIso8601(_sessionStartedAtUtc),
+                ["initialized_at"] = ToIso8601(_initializedAtUtc),
+                ["avatar_loaded_at"] = ToIso8601(_avatarLoadedAtUtc),
+                ["output_started_at"] = ToIso8601(_outputStartedAtUtc),
+                ["within_3min_success"] = _within3MinSuccess,
             });
+    }
+
+    private void MarkOnboardingInitialized()
+    {
+        _initializedAtUtc ??= DateTimeOffset.UtcNow;
+        TrackOnboardingMilestone("initialized");
+    }
+
+    private void MarkOnboardingAvatarLoaded()
+    {
+        _avatarLoadedAtUtc ??= DateTimeOffset.UtcNow;
+        TrackOnboardingMilestone("avatar_loaded");
+    }
+
+    private void MarkOnboardingOutputStarted(string outputType)
+    {
+        _outputStartedAtUtc ??= DateTimeOffset.UtcNow;
+        _within3MinSuccess = IsWithin3Minutes();
+        TrackOnboardingMilestone($"output_started:{outputType}");
+    }
+
+    private bool IsWithin3Minutes()
+    {
+        if (!_sessionStartedAtUtc.HasValue || !_outputStartedAtUtc.HasValue)
+        {
+            return false;
+        }
+
+        return (_outputStartedAtUtc.Value - _sessionStartedAtUtc.Value) <= TimeSpan.FromMinutes(3);
+    }
+
+    private void TrackOnboardingMilestone(string milestone)
+    {
+        _telemetry.Track(
+            "onboarding_milestone",
+            new Dictionary<string, object?>
+            {
+                ["milestone"] = milestone,
+                ["session_started_at"] = ToIso8601(_sessionStartedAtUtc),
+                ["initialized_at"] = ToIso8601(_initializedAtUtc),
+                ["avatar_loaded_at"] = ToIso8601(_avatarLoadedAtUtc),
+                ["output_started_at"] = ToIso8601(_outputStartedAtUtc),
+                ["within_3min_success"] = _within3MinSuccess,
+            });
+    }
+
+    private static string? ToIso8601(DateTimeOffset? value)
+    {
+        return value?.ToString("O");
     }
 
     private void PersistSessionSnapshot()

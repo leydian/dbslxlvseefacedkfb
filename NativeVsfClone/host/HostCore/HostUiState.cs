@@ -99,3 +99,28 @@ public sealed record HostValidationState(
 {
     public bool IsValid => AvatarPathValid && OscBindPortValid && OscPublishAddressValid;
 }
+
+public enum HostOnboardingStep
+{
+    Initialize = 0,
+    LoadAvatar = 1,
+    StartOutput = 2,
+    Ready = 3,
+    Blocked = 4,
+}
+
+public enum HostPrimaryActionKind
+{
+    None = 0,
+    InitializeSession = 1,
+    LoadAvatar = 2,
+    StartOutput = 3,
+}
+
+public sealed record HostOnboardingState(
+    HostOnboardingStep Step,
+    HostPrimaryActionKind PrimaryAction,
+    string StepTitle,
+    string Instruction,
+    string BlockReason,
+    string RecoveryAction);

@@ -29,3 +29,4 @@
 
 ## Next Steps
 - Pick three key reports and review promotion to long-term references.
+- Newly added: review `2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md` for onboarding KPI instrumentation (`within_3min_success`) rollout readiness.

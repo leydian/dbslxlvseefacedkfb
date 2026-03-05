@@ -117,6 +117,7 @@ public sealed partial class HostController
             TrackResult("Initialize", rc);
             if (rc == NcResultCode.Ok)
             {
+                MarkOnboardingInitialized();
                 ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsInit");
             }
@@ -228,6 +229,7 @@ public sealed partial class HostController
             TrackResult("LoadAvatar", rc);
             if (rc == NcResultCode.Ok)
             {
+                MarkOnboardingAvatarLoaded();
                 if (previousHandle.HasValue)
                 {
                     TrackResult("AvatarSwapCommitted", NcResultCode.Ok);
@@ -281,6 +283,10 @@ public sealed partial class HostController
                 SpoutHeightPx = height,
                 SpoutFps = fps,
             };
+            if (rc == NcResultCode.Ok)
+            {
+                MarkOnboardingOutputStarted("spout");
+            }
             RefreshState();
             return rc;
         });
@@ -312,6 +318,10 @@ public sealed partial class HostController
                 OscBindPort = bindPort,
                 OscPublishAddress = publishAddress,
             };
+            if (rc == NcResultCode.Ok)
+            {
+                MarkOnboardingOutputStarted("osc");
+            }
             RefreshState();
             return rc;
         });

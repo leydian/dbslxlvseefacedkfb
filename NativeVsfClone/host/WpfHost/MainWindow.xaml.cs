@@ -224,6 +224,49 @@ public partial class MainWindow : Window
         SetUiMode(UiModeAdvanced, persist: true);
     }
 
+    private void PrimaryAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        RefreshValidationState();
+        var action = PrimaryActionButton.Tag is HostPrimaryActionKind taggedAction
+            ? taggedAction
+            : HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState).PrimaryAction;
+
+        switch (action)
+        {
+            case HostPrimaryActionKind.InitializeSession:
+                Initialize_Click(sender, e);
+                break;
+            case HostPrimaryActionKind.LoadAvatar:
+                Load_Click(sender, e);
+                break;
+            case HostPrimaryActionKind.StartOutput:
+                if (!_controller.Outputs.SpoutActive)
+                {
+                    StartSpout_Click(sender, e);
+                }
+                if (!_controller.Outputs.SpoutActive && !_controller.Outputs.OscActive && StartOscButton.IsEnabled)
+                {
+                    StartOsc_Click(sender, e);
+                }
+                else if (!_controller.Outputs.OscActive)
+                {
+                    StartOsc_Click(sender, e);
+                }
+                break;
+            default:
+                if (!string.IsNullOrWhiteSpace(_lastFailureSource))
+                {
+                    OpenDiagnosticsFromHint_Click(sender, e);
+                }
+                break;
+        }
+    }
+
     private async void Load_Click(object sender, RoutedEventArgs e)
     {
         if (_controller.OperationState.IsBusy)
@@ -1225,7 +1268,7 @@ public partial class MainWindow : Window
             _controller.RenderState,
             CameraModeComboBox.SelectedIndex == 2);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
-        var nextAction = HostUiPolicy.BuildNextActionHint(session, outputs, operation, _validationState);
+        var onboarding = HostUiPolicy.BuildOnboardingState(session, outputs, operation, _validationState);
         var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
@@ -1296,7 +1339,40 @@ public partial class MainWindow : Window
         OutputStatusText.Text = statusText.OutputText;
         BusyStatusText.Text = statusText.BusyText;
         QuickStatusText.Text = statusText.QuickStatusText;
-        QuickNextActionText.Text = $"{nextAction.Title}: {nextAction.Instruction}";
+        QuickNextActionText.Text = onboarding.StepTitle;
+        PrimaryActionDescriptionText.Text = onboarding.Instruction;
+        SetOnboardingStepState(OnboardingStep1Text, session.IsInitialized);
+        SetOnboardingStepState(OnboardingStep2Text, session.ActiveAvatarHandle.HasValue);
+        SetOnboardingStepState(OnboardingStep3Text, outputs.SpoutActive || outputs.OscActive);
+        var onboardingRecovery = string.IsNullOrWhiteSpace(onboarding.BlockReason)
+            ? string.Empty
+            : $"{onboarding.BlockReason} {onboarding.RecoveryAction}".Trim();
+        OnboardingRecoveryText.Text = string.IsNullOrWhiteSpace(_beginnerFailureHint)
+            ? onboardingRecovery
+            : _beginnerFailureHint;
+        OnboardingRecoveryPanel.Visibility = string.IsNullOrWhiteSpace(OnboardingRecoveryText.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        switch (onboarding.PrimaryAction)
+        {
+            case HostPrimaryActionKind.InitializeSession:
+                PrimaryActionButton.Content = "세션 시작";
+                PrimaryActionButton.IsEnabled = uiState.InitializeEnabled;
+                break;
+            case HostPrimaryActionKind.LoadAvatar:
+                PrimaryActionButton.Content = "아바타 불러오기";
+                PrimaryActionButton.IsEnabled = uiState.LoadEnabled && !_isLoadRunning;
+                break;
+            case HostPrimaryActionKind.StartOutput:
+                PrimaryActionButton.Content = "출력 시작";
+                PrimaryActionButton.IsEnabled = (uiState.StartSpoutEnabled || uiState.StartOscEnabled) && !operation.IsBusy;
+                break;
+            default:
+                PrimaryActionButton.Content = "다음 단계 대기";
+                PrimaryActionButton.IsEnabled = false;
+                break;
+        }
+        PrimaryActionButton.Tag = onboarding.PrimaryAction;
 
         SyncRenderControlsFromState();
         SyncPoseControlsFromState();
@@ -1854,6 +1930,9 @@ public partial class MainWindow : Window
         BeginnerModeButton.FontWeight = advanced ? FontWeights.Normal : FontWeights.SemiBold;
         AdvancedModeButton.FontWeight = advanced ? FontWeights.SemiBold : FontWeights.Normal;
 
+        SessionGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        RenderGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        OutputsGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
         TrackingGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
         PlatformOpsGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
         RenderAdvancedExpander.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
@@ -1866,6 +1945,14 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         OpenDiagnosticsFromHintButton.Visibility = beginner ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static void SetOnboardingStepState(TextBlock target, bool completed)
+    {
+        target.Text = completed ? "완료" : "다음 단계";
+        target.Foreground = completed
+            ? new SolidColorBrush(Color.FromRgb(34, 120, 66))
+            : new SolidColorBrush(Color.FromRgb(53, 81, 107));
     }
 
     private void RevealDiagnosticsForFailure(string source)
