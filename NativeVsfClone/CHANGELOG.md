@@ -2,6 +2,48 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 Standard/MToon strict parity expansion
+
+### Summary
+
+Expanded `.xav2` strict material parity contract to include `Standard` and `MToon` families across Unity/native loader policy, exporter allowlist, and documentation, while preserving hard-fail behavior for unsupported families.
+
+### Changed
+
+- Native `.xav2` loader parity contract expansion:
+  - `src/avatar/xav2_loader.cpp`
+  - parity/supported family checks now include `standard` and `mtoon`.
+  - shader-name inference now maps:
+    - exact `Standard` -> `standard`
+    - contains `mtoon` -> `mtoon`
+  - unsupported family handling remains strict-fail with parity-contract error.
+- Unity runtime loader parity contract expansion:
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - parity/supported family checks now include `standard` and `mtoon`.
+  - shader-name inference now recognizes `Standard` and `MToon`.
+- Unity extractor/export policy update:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2ExportOptions.cs`
+  - `standard/mtoon` materials now emit `typed-v3` baseline payloads.
+  - default strict shader set now includes `Standard`, `MToon`, `lilToon`, `Poiyomi`.
+- Conversion manifest strict allowlist update:
+  - `tools/vrm_to_xav2.cpp`
+  - emitted `strictShaderSet` now includes `Standard` and `MToon`.
+- Docs/tests updates:
+  - `docs/formats/xav2.md`
+  - `unity/Packages/com.vsfclone.xav2/README.md`
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - `docs/reports/xav2_standard_mtoon_strict_parity_expansion_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- Source-level consistency checks completed for parity family policy, shader-family inference, and typed-v3 baseline emission paths.
+- Unity runner/native gate scripts were not executed in this shell session.
+
 ## 2026-03-06 - Arm deformation hotfix (upper-arm-only runtime policy)
 
 ### Summary

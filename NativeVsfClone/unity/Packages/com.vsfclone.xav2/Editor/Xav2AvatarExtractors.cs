@@ -743,16 +743,19 @@ namespace VsfClone.Xav2.Editor
                 ShaderName = shaderName,
                 ShaderVariant = shaderVariant,
                 ShaderFamily = shaderFamily,
-                MaterialParamEncoding = (shaderFamily == "liltoon" || shaderFamily == "poiyomi") ? "typed-v3" : "legacy-json",
+                MaterialParamEncoding = (shaderFamily == "liltoon" || shaderFamily == "poiyomi" || shaderFamily == "standard" || shaderFamily == "mtoon") ? "typed-v3" : "legacy-json",
                 BaseColorTextureName = baseTextureName,
                 AlphaMode = ResolveAlphaMode(material),
                 AlphaCutoff = ResolveAlphaCutoff(material),
                 DoubleSided = material.HasProperty("_Cull") && Mathf.Approximately(material.GetFloat("_Cull"), 0.0f),
                 ShaderParamsJson = BuildShaderParamsJson(material)
             };
-            if (shaderFamily == "liltoon" || shaderFamily == "poiyomi")
+            if (shaderFamily == "liltoon" || shaderFamily == "poiyomi" || shaderFamily == "standard" || shaderFamily == "mtoon")
             {
                 item.TypedSchemaVersion = 3;
+                AddTypedColor(item, material, "_BaseColor", "_BaseColor", "_Color");
+                AddTypedFloat(item, material, "_Cutoff", "_Cutoff");
+                AddTypedTexture(item, "base", baseTextureName);
             }
             if (item.AlphaMode == "MASK")
             {
@@ -778,7 +781,6 @@ namespace VsfClone.Xav2.Editor
                 AddTypedFloat(item, material, "_EmissionStrength", "_EmissionMapStrength", "_EmissionStrength");
                 AddTypedFloat(item, material, "_MatCapBlend", "_MatCapBlend", "_MatCapBlendUV1", "_MatCapStrength");
 
-                AddTypedTexture(item, "base", baseTextureName);
                 var shadeTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_ShadeTexture", "_ShadowColorTex");
                 AddTypedTexture(item, "shade", shadeTextureName);
                 var normalTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_BumpMap", "_NormalMap");
@@ -828,7 +830,6 @@ namespace VsfClone.Xav2.Editor
                 AddTypedFloat(item, material, "_EmissionStrength", "_EmissionMapStrength", "_EmissionStrength");
                 AddTypedFloat(item, material, "_MatCapBlend", "_MatCapBlend", "_MatCapBlendUV1", "_MatCapStrength");
 
-                AddTypedTexture(item, "base", baseTextureName);
                 var shadeTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_ShadeTexture", "_ShadowColorTex");
                 AddTypedTexture(item, "shade", shadeTextureName);
                 var normalTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_BumpMap", "_NormalMap");
@@ -870,6 +871,14 @@ namespace VsfClone.Xav2.Editor
 
         private static string ResolveShaderVariant(string shaderName)
         {
+            if (string.Equals(shaderName, "Standard", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Standard";
+            }
+            if (shaderName.IndexOf("MToon", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "MToon";
+            }
             if (shaderName.IndexOf("lilToon", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "lilToon";
@@ -891,7 +900,11 @@ namespace VsfClone.Xav2.Editor
 
         private static string ResolveShaderFamily(string shaderVariant)
         {
-            return string.Equals(shaderVariant, "lilToon", StringComparison.OrdinalIgnoreCase)
+            return string.Equals(shaderVariant, "Standard", StringComparison.OrdinalIgnoreCase)
+                ? "standard"
+                : string.Equals(shaderVariant, "MToon", StringComparison.OrdinalIgnoreCase)
+                    ? "mtoon"
+                : string.Equals(shaderVariant, "lilToon", StringComparison.OrdinalIgnoreCase)
                 ? "liltoon"
                 : string.Equals(shaderVariant, "Poiyomi", StringComparison.OrdinalIgnoreCase)
                     ? "poiyomi"

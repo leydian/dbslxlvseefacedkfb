@@ -20,6 +20,8 @@ namespace VsfClone.Xav2.Editor
         public bool FailOnMissingShader = true;
         public List<string> StrictShaderSet = new List<string>()
         {
+            "Standard",
+            "MToon",
             "lilToon",
             "Poiyomi"
         };

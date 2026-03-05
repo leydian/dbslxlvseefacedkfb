@@ -4,7 +4,7 @@
 - This summary groups weekly changes by domain.
 
 ## Highlights
-- `xav2`: 24 reports
+- `xav2`: 25 reports
 - `host`: 13 reports
 - `ui`: 9 reports
 - `vsfavatar`: 8 reports
@@ -46,6 +46,7 @@
 - Newly added: review `2026-03-06_arkit52_strict_full_support_pipeline.md` for strict ARKit52 channel binding policy, host/native coverage diagnostics, and non-fatal missing-channel warning behavior.
 - Newly added: review `2026-03-06_arkit52_quality_refinement_hybrid_fallback.md` for strict-first hybrid fallback routing, ARKit quality scoring, per-group calibration tuning, and fallback warning telemetry.
 - Newly added: review `2026-03-06_xav2_full_parity_contract_enforcement.md` for strict lilToon/Poiyomi parity contract enforcement, typed-v3 canonical migration policy, and hard-fail diagnostics behavior.
+- Newly added: review `2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md` for strict parity-family expansion to Standard/MToon, Unity/native shader-family inference alignment, and typed-v3 export policy widening.
 - Newly added: review `2026-03-06_xav2_poiyomi_typed_material_parity_extension.md` for Poiyomi advanced typed-v3 extraction uplift, feature-flag parity alignment, and runtime typed parse regression coverage.
 - Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.

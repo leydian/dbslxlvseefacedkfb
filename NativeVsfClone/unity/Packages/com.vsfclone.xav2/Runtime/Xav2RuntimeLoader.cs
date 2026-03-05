@@ -1462,6 +1462,14 @@ namespace VsfClone.Xav2.Runtime
         private static string InferShaderFamilyFromShaderName(string shaderName)
         {
             var key = NormalizeRefKey(shaderName);
+            if (string.Equals(key, "standard", StringComparison.Ordinal))
+            {
+                return "standard";
+            }
+            if (key.Contains("mtoon"))
+            {
+                return "mtoon";
+            }
             if (key.Contains("liltoon"))
             {
                 return "liltoon";
@@ -1493,13 +1501,15 @@ namespace VsfClone.Xav2.Runtime
         private static bool IsParityShaderFamily(string value)
         {
             var key = NormalizeShaderFamily(value);
-            return key == "liltoon" || key == "poiyomi";
+            return key == "liltoon" || key == "poiyomi" || key == "standard" || key == "mtoon";
         }
 
         private static bool IsSupportedShaderFamily(string value)
         {
             var key = NormalizeShaderFamily(value);
             return key == "legacy" ||
+                   key == "standard" ||
+                   key == "mtoon" ||
                    key == "liltoon" ||
                    key == "poiyomi" ||
                    key == "potatoon" ||

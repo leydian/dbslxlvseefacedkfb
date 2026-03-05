@@ -134,6 +134,7 @@ Domain-level report navigation hub.
 - [2026-03-05_wpf_verification_roundup.md](./weekly/2026-W10/2026-03-05_wpf_verification_roundup.md)
 
 ## xav2
+- [2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md](./weekly/2026-W10/2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md)
 - [2026-03-06_xav2_10of10_gate_execution.md](./weekly/2026-W10/2026-03-06_xav2_10of10_gate_execution.md)
 - [2026-03-06_xav2_import_rig_accuracy_hardening_followup.md](./weekly/2026-W10/2026-03-06_xav2_import_rig_accuracy_hardening_followup.md)
 - [2026-03-06_xav2_import_v4_rig_hardening.md](./weekly/2026-W10/2026-03-06_xav2_import_v4_rig_hardening.md)

@@ -125,6 +125,7 @@ Report list for this week.
 - [2026-03-06_xav2_physics_typed_sections_and_pipeline.md](./2026-03-06_xav2_physics_typed_sections_and_pipeline.md)
 - [2026-03-06_xav2_render_breakage_guardrail_update.md](./2026-03-06_xav2_render_breakage_guardrail_update.md)
 - [2026-03-06_xav2_skinning_stabilization_and_v2_path.md](./2026-03-06_xav2_skinning_stabilization_and_v2_path.md)
+- [2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md](./2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md)
 - [2026-03-06_xav2_typed_material_v2_liltoon_phase1.md](./2026-03-06_xav2_typed_material_v2_liltoon_phase1.md)
 - [2026-03-06_xav2_typed_v3_ultra_parity_foundation.md](./2026-03-06_xav2_typed_v3_ultra_parity_foundation.md)
 - [2026-03-06_xav2_visibility_fallback_and_warning_gate.md](./2026-03-06_xav2_visibility_fallback_and_warning_gate.md)

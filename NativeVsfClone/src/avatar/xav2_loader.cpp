@@ -60,6 +60,8 @@ std::string NormalizeShaderFamily(const std::string& raw) {
 bool IsSupportedShaderFamily(const std::string& raw) {
     const std::string key = NormalizeShaderFamily(raw);
     return key == "legacy" ||
+           key == "standard" ||
+           key == "mtoon" ||
            key == "liltoon" ||
            key == "poiyomi" ||
            key == "potatoon" ||
@@ -68,11 +70,17 @@ bool IsSupportedShaderFamily(const std::string& raw) {
 
 bool IsParityShaderFamily(const std::string& raw) {
     const std::string key = NormalizeShaderFamily(raw);
-    return key == "liltoon" || key == "poiyomi";
+    return key == "liltoon" || key == "poiyomi" || key == "standard" || key == "mtoon";
 }
 
 std::string InferShaderFamilyFromShaderName(const std::string& shader_name) {
     const std::string key = NormalizeRefKey(shader_name);
+    if (key == "standard") {
+        return "standard";
+    }
+    if (key.find("mtoon") != std::string::npos) {
+        return "mtoon";
+    }
     if (key.find("liltoon") != std::string::npos) {
         return "liltoon";
     }
@@ -1523,7 +1531,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             payload.shader_family = InferShaderFamilyFromShaderName(payload.shader_name);
         }
         if (!IsParityShaderFamily(payload.shader_family)) {
-            pkg.primary_error_code = "XAV2_MATERIAL_SHADER_FAMILY_NOT_ALLOWED";
+            pkg.primary_error_code = "XAV2_PARITY_CONTRACT_VIOLATION";
             PushWarning(
                 &pkg,
                 "E_PAYLOAD: XAV2_MATERIAL_SHADER_FAMILY_NOT_ALLOWED: material=" + payload.name +

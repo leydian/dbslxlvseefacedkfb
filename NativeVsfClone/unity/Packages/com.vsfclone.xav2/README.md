@@ -10,6 +10,8 @@ Unity package for XAV2 export/runtime parsing.
 
 ## Shader policy (strict)
 
+- `Standard`
+- `MToon`
 - `lilToon`
 - `Poiyomi`
 
@@ -42,6 +44,7 @@ Rig diagnosis workflow:
 - Run `Diagnose Rig (Strict/Fallback)...` on the same `.xav2` that shows rendering breakage.
 - Compare `success`, `rigQuality`, `rigDiagnostics`, and `rigCodes` between strict/fallback.
 - If strict fails but fallback succeeds, treat it as source rig data quality issue and regenerate the source avatar file.
+- The diagnosis menu shows a progress bar and supports cancel before fallback pass.
 
 ## Runtime loader API
 

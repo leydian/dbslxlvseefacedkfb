@@ -108,7 +108,7 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `name_len[2]`
 - `name[name_len]`
 - `shader_family_len[2]`
-- `shader_family[shader_family_len]` (`liltoon|legacy`)
+- `shader_family[shader_family_len]` (`standard|mtoon|liltoon|poiyomi|legacy`)
 - `feature_flags[4]` (`uint32` bitmask)
 - optional `typed_schema_version[2]` (`v3+`, current value `3`)
 - `float_count[2]`

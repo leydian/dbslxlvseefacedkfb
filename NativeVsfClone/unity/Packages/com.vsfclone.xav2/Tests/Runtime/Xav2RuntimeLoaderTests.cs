@@ -223,6 +223,70 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialStandardShaderFamily_DoesNotWarnUnsupported()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "standard"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(payload.Materials[0].ShaderFamily, Is.EqualTo("standard"));
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY")),
+                    Is.False);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialMtoonShaderFamily_DoesNotWarnUnsupported()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "mtoon"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(payload.Materials[0].ShaderFamily, Is.EqualTo("mtoon"));
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY")),
+                    Is.False);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialLegacyFamily_InfersStandardFromShaderName()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "legacy",
+                    materialShaderName: "Standard"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True, diagnostics.ErrorMessage);
+                Assert.That(payload.Materials[0].ShaderFamily, Is.EqualTo("standard"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_TypedMaterialUnsupportedShaderFamily_Fails()
         {
             var path = WriteTempFile(
@@ -639,6 +703,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             string textureRefName = "texture_0",
             string typedBaseTextureRefOverride = null,
             string typedShaderFamilyOverride = null,
+            string materialShaderName = "lilToon",
             bool typedIncludeBaseColor = true,
             bool typedIncludeAdvancedEntries = false,
             bool addSkinSection = false,
@@ -712,8 +777,8 @@ namespace VsfClone.Xav2.Runtime.Tests
                 bw,
                 0x0003,
                 legacyMaterialFormat
-                    ? BuildMaterialSectionLegacy("material_0", "lilToon", textureRefName)
-                    : BuildMaterialSectionV1("material_0", "lilToon", "default", textureRefName));
+                    ? BuildMaterialSectionLegacy("material_0", materialShaderName, textureRefName)
+                    : BuildMaterialSectionV1("material_0", materialShaderName, "default", textureRefName));
             WriteSection(bw, 0x0012, BuildMaterialParamsSection("material_0", "{}"));
             if (addTypedMaterialSection)
             {
