@@ -6,6 +6,9 @@ This rollup consolidates all current workspace changes into a single implementat
 
 Main themes:
 
+- Unity XAV2 SDK support hardening:
+  - minimum support floor expanded to Unity `2021.3.18f1+`
+  - self-hosted CI compatibility gate (`EditMode tests + export/load smoke`)
 - VRM runtime quality expansion:
   - expression bind visibility and runtime morph deformation path
   - SpringBone metadata extraction and diagnostics surface
@@ -66,6 +69,25 @@ Behavior:
 - GPU mesh vertex buffers switched to dynamic write usage for runtime deformation.
 - expression runtime weights are applied to blendshape deltas per mesh/frame bind.
 - deformed vertex blobs are uploaded before draw in render frame path.
+
+## 1.1) Unity SDK support and gate automation
+
+Updated / added:
+
+- `unity/Packages/com.vsfclone.xav2/package.json`
+- `unity/Packages/com.vsfclone.xav2/README.md`
+- `tools/unity_xav2_validate.ps1`
+- `unity/Packages/com.vsfclone.xav2/Editor/Xav2CiSmoke.cs`
+- `.github/workflows/unity-xav2-compat.yml`
+
+Behavior:
+
+- package minimum Unity changed to `2021.3` + `unityRelease=18f1`.
+- compatibility support is now operationalized as executable checks:
+  - EditMode test run
+  - XAV2 export smoke
+  - XAV2 load smoke (`runtime-ready`)
+- CI workflow runs on self-hosted Windows and uploads validation artifacts.
 
 ## 2) Host / Tooling / Reliability changes
 
@@ -143,12 +165,16 @@ Updated:
 - `README.md`
   - host capability note for runtime output-state reconciliation
   - WPF reliability loop command and report output
+  - Unity XAV2 SDK support contract (`2021.3.18f1` gate-backed support)
 - `CHANGELOG.md`
   - VRM expression/springbone + runtime morph + API extension entry
+  - Unity support-floor and gate automation entries
 - `docs/INDEX.md`
   - added links for latest reliability and rollup reports
+  - added Unity support/gate report link
 - added report:
   - `docs/reports/wpf_operational_reliability_loop_and_output_sync_2026-03-05.md`
+  - `docs/reports/xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md`
   - this rollup (`workspace_change_rollup_2026-03-05.md`)
 
 ## Validation Snapshot
@@ -159,6 +185,8 @@ Executed during this workspace update:
 dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release
 dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release
 powershell -ExecutionPolicy Bypass -File NativeVsfClone\tools\wpf_reliability_gate.ps1 -Iterations 1 -SkipNativeBuild
+cmake --build NativeVsfClone\build --config Release
+cd NativeVsfClone; powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5
 ```
 
 Outcome:
@@ -166,3 +194,11 @@ Outcome:
 - HostCore build: PASS
 - WPF host build: PASS
 - WPF reliability gate (1 loop): PASS (with WPF launch smoke)
+- Native build: PASS
+- VRM quality gate fixed5: PASS (GateA..GateF)
+
+## Commit snapshot
+
+- Latest consolidated implementation commit in this line:
+  - `5d94d73` (`feat: roll up VRM runtime expansion and WPF reliability hardening`)
+- This document update commit is a docs-only follow-up summary refresh.
