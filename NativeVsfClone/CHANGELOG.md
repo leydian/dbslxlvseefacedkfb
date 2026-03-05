@@ -2,6 +2,44 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - VSFAvatar error contract/target gate stabilization
+
+### Summary
+
+Stabilized VSFAvatar sidecar diagnostic output and fixed-set gate parsing contracts so the real failure-class sample (`*11-3.vsfavatar`) is deterministically included and evaluated, while keeping parser/host gate status green.
+
+### Changed
+
+- sidecar output contract:
+  - `tools/vsfavatar_sidecar.cpp`
+  - `serialized_best_candidate_path` now emits `NONE` when empty.
+- fixed sample set expansion:
+  - `tools/vsfavatar_sample_report.ps1`
+  - `tools/vsfavatar_quality_gate.ps1`
+  - `tools/vsfavatar_render_gate.ps1`
+  - added `*11-3.vsfavatar` to `-UseFixedSet` inputs.
+- render gate hardening:
+  - `tools/vsfavatar_render_gate.ps1`
+  - added `TargetSamplePattern` + `GateR3` (target row presence).
+  - summary now includes target metrics:
+    - `target_stage`
+    - `target_primary_error`
+    - `target_mesh_payloads`
+  - parser tightened to count only actual sample blocks.
+- quality gate required-field rule alignment:
+  - `tools/vsfavatar_quality_gate.ps1`
+  - `SidecarSerializedBestPath` now requires field presence (not non-empty string).
+- docs:
+  - `docs/reports/vsfavatar_error_contract_and_target_gate_update_2026-03-06.md` (new)
+  - `docs/INDEX.md` updated.
+
+### Verified
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release` PASS
+- `cmake --build .\build --config Release --target nativecore avatar_tool vsfavatar_sidecar` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet` PASS
+
 ## 2026-03-06 - XAV2 render breakage guardrail update (static skinning default-off + typed texture diagnostics hardening)
 
 ### Summary

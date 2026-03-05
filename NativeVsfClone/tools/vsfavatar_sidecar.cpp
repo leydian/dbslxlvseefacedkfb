@@ -180,6 +180,8 @@ int main(int argc, char** argv) {
     const std::string render_payload_mode = can_emit_placeholder_payload ? "placeholder_quad_v1" : "none";
     const std::uint32_t mesh_payload_count = can_emit_placeholder_payload ? 1U : 0U;
     const std::uint32_t material_payload_count = can_emit_placeholder_payload ? 1U : 0U;
+    const std::string serialized_best_candidate_path =
+        p.serialized_best_candidate_path.empty() ? "NONE" : p.serialized_best_candidate_path;
     if (can_emit_placeholder_payload) {
         warnings.push_back("W_RENDER_PAYLOAD: placeholder quad emitted (mesh extraction pending).");
         missing_features.push_back("authored mesh payload extraction");
@@ -214,7 +216,7 @@ int main(int argc, char** argv) {
               << "\"best_candidate_score\":" << p.best_candidate_score << ","
               << "\"serialized_candidate_count\":" << p.serialized_candidate_count << ","
               << "\"serialized_attempt_count\":" << p.serialized_attempt_count << ","
-              << "\"serialized_best_candidate_path\":\"" << EscapeJson(p.serialized_best_candidate_path) << "\","
+              << "\"serialized_best_candidate_path\":\"" << EscapeJson(serialized_best_candidate_path) << "\","
               << "\"serialized_best_candidate_score\":" << p.serialized_best_candidate_score << ","
               << "\"serialized_detail_error_code\":\"" << EscapeJson(p.serialized_detail_error_code) << "\","
               << "\"serialized_last_failure_offset\":" << p.serialized_last_failure_offset << ","
