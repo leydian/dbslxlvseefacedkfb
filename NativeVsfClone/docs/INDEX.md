@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [xav2_relaxed_export_menu_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_relaxed_export_menu_2026-03-05.md): Unity XAV2 strict-policy bypass path addition via opt-in relaxed export menu with mode-aware diagnostics/logging
 - [r01_r20_top5_execution_and_winui_sdk_contract_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_top5_execution_and_winui_sdk_contract_2026-03-05.md): Top5 (`R01/R02/R03/R05/R13`) implementation closure with HostCore contract upgrades, WPF/WinUI parity updates, and WinUI SDK-contract diagnostics execution
 - [r01_r20_phase2_winui_parity_execution_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_phase2_winui_parity_execution_2026-03-05.md): phase-2 execution report for WinUI parity lift (Platform Ops, async-load progress/cancel, guides/track status) with current XAML compiler blocker evidence
 - [r01_r20_detailed_plan_and_execution_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_detailed_plan_and_execution_2026-03-05.md): detailed execution plan plus implementation result for the latest R01-R20 follow-up round (Top5 hardening)
