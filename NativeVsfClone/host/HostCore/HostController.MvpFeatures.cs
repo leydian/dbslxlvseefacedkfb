@@ -68,11 +68,9 @@ public sealed partial class HostController
         return ext switch
         {
             ".vrm" => new ImportPlan("vrm", true, "VRM route selected: runtime-ready mesh/material path.", "Fallback: convert to XAV2 if runtime compatibility warnings appear."),
-            ".vxavatar" => new ImportPlan("vxavatar", true, "VXAvatar route selected: MVP container parser.", "Fallback: export to VXA2/XAV2 path when available."),
-            ".vxa2" => new ImportPlan("vxa2", true, "VXA2 route selected: manifest + TLV decode path.", "Fallback: validate package and retry with XAV2."),
             ".xav2" => new ImportPlan("xav2", true, "XAV2 route selected: vxa2-derived runtime container.", "Fallback: use VRM path when deterministic package load is blocked."),
             ".vsfavatar" => new ImportPlan("vsfavatar", true, $"VSFAvatar route selected: parser mode={_sessionPersistence.Sidecar.ParserMode}.", "Fallback follows parser policy (sidecar/inhouse/sidecar-strict)."),
-            _ => new ImportPlan("unsupported-extension", false, "Unknown extension. Supported: .vrm, .vxavatar, .vxa2, .xav2, .vsfavatar", "Convert avatar to one of the supported formats."),
+            _ => new ImportPlan("unsupported-extension", false, "Unknown extension. Supported: .vrm, .vsfavatar, .xav2", "Convert avatar to one of the supported formats."),
         };
     }
 

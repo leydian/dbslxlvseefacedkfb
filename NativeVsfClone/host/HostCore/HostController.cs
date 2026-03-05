@@ -787,7 +787,7 @@ public sealed partial class HostController
         }
 
         var extension = Path.GetExtension(trimmed).ToLowerInvariant();
-        if (extension is not ".vrm" and not ".vxavatar" and not ".vsfavatar" and not ".vxa2" and not ".xav2")
+        if (extension is not ".vrm" and not ".vsfavatar" and not ".xav2")
         {
             error = "Unsupported avatar file extension.";
             return false;

@@ -166,7 +166,7 @@ public partial class MainWindow : Window
         {
             CheckFileExists = true,
             CheckPathExists = true,
-            Filter = "Avatar Files (*.vrm;*.vxavatar;*.vsfavatar;*.vxa2;*.xav2)|*.vrm;*.vxavatar;*.vsfavatar;*.vxa2;*.xav2|All Files (*.*)|*.*",
+            Filter = "Avatar Files (*.vrm;*.vsfavatar;*.xav2)|*.vrm;*.vsfavatar;*.xav2|All Files (*.*)|*.*",
         };
 
         if (dialog.ShowDialog(this) == true)
@@ -220,7 +220,12 @@ public partial class MainWindow : Window
         UpdateUiState();
         if (rc != NcResultCode.Ok)
         {
-            MessageBox.Show(this, $"Load failed: {rc}", "Load Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            var guidance = _controller.GetLastErrorGuidance();
+            var technical = NativeCoreInterop.FormatLastError();
+            var detail = string.IsNullOrWhiteSpace(guidance)
+                ? technical
+                : $"{guidance}\n\n{technical}";
+            MessageBox.Show(this, $"Load failed: {rc}\n\n{detail}", "Load Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

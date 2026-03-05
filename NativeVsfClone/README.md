@@ -3,8 +3,6 @@
 Native C++ scaffold for a standalone VTuber-style runtime with:
 
 - `.vrm` input path handling (GLB/mesh payload MVP)
-- `.vxavatar` input path handling (MVP parser + payload)
-- `.vxa2` input path handling (manifest + TLV section decode MVP)
 - `.xav2` input path handling (vxa2-derived container with mesh-render/material-params sections)
 - `.vsfavatar` probing via UnityFS header parser (implemented)
 - `nativecore.dll` C ABI for host/UI integration
@@ -15,7 +13,6 @@ Native C++ scaffold for a standalone VTuber-style runtime with:
 
 - `tools/vsfavatar_quality_gate.ps1 -UseFixedSet`: PASS (`GateA/B/C/D` PASS, fixed 4/4 complete).
 - `tools/vrm_quality_gate.ps1 -Profile fixed5`: PASS.
-- `tools/vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`: PASS (`GateA`..`GateH` PASS).
 - `tools/publish_hosts.ps1 -IncludeWinUi`:
   - WPF publish: PASS (`dist/wpf/WpfHost.exe` generated)
   - WinUI publish: FAIL (preflight passed, blocked at XAML compile stage)
@@ -47,7 +44,7 @@ If `sidecar` mode fails to execute:
 
 ## What is implemented now
 
-- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.vxavatar`, `.vxa2`, `.xav2`, `.vsfavatar`) and falls back to header signature detection when extension routing does not match.
+- `AvatarLoaderFacade` dispatches by extension (`.vrm`, `.xav2`, `.vsfavatar`) and falls back to header signature detection when extension routing does not match.
 - `VsfAvatarLoader` reads UnityFS metadata and reports:
   - signature/version/player version/engine version
   - compression mode flags
@@ -671,7 +668,7 @@ This repository was upgraded from a loader-only scaffold to a first executable r
 ### Current behavior status
 
 - `.vrm`: accepted by extension route, returns scaffold diagnostics.
-- `.vxavatar`: checks ZIP signature and returns compatibility diagnostics.
+- `.xav2`: accepted by extension route with unknown-section policy (`Warn|Ignore|Fail`).
 - `.vsfavatar`: UnityFS header/token probing works; deep object extraction is pending.
 - Render and tracking paths are API-stable placeholders, not full runtime implementations yet.
 

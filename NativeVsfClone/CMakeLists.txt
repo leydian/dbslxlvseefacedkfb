@@ -15,8 +15,6 @@ endif()
 add_library(vsfclone_core STATIC
     src/avatar/avatar_loader_facade.cpp
     src/avatar/vrm_loader.cpp
-    src/avatar/vxavatar_loader.cpp
-    src/avatar/vxa2_loader.cpp
     src/avatar/xav2_loader.cpp
     src/avatar/vsfavatar_loader.cpp
     src/vsf/unityfs_reader.cpp

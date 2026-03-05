@@ -306,7 +306,7 @@ public static class HostContent
             "Quickstart",
             "1) Run Preflight and resolve failed checks.",
             "2) Initialize session.",
-            "3) Import avatar (.vrm/.vxavatar/.vxa2/.xav2/.vsfavatar).",
+            "3) Import avatar (.vrm/.xav2/.vsfavatar).",
             "4) Verify render stats and choose profile (quality/performance/stability).",
             "5) Start outputs (Spout/OSC) and confirm status strip.",
             "",
@@ -323,8 +323,6 @@ public static class HostContent
         {
             "Compatibility Matrix",
             "- .vrm: supported (runtime mesh/material slice, partial advanced features).",
-            "- .vxavatar: supported (MVP parse path).",
-            "- .vxa2: supported (manifest + TLV decode path).",
             "- .xav2: supported (vxa2-derived container path).",
             "- .vsfavatar: supported with sidecar-first policy + fallback modes.",
             "",

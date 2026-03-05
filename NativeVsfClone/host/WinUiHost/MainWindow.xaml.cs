@@ -152,9 +152,7 @@ public sealed partial class MainWindow : Window
     {
         var picker = new FileOpenPicker();
         picker.FileTypeFilter.Add(".vrm");
-        picker.FileTypeFilter.Add(".vxavatar");
         picker.FileTypeFilter.Add(".vsfavatar");
-        picker.FileTypeFilter.Add(".vxa2");
         picker.FileTypeFilter.Add(".xav2");
         picker.FileTypeFilter.Add(".*");
         InitializeWithWindow.Initialize(picker, _hwnd);
@@ -206,7 +204,12 @@ public sealed partial class MainWindow : Window
         UpdateUiState();
         if (rc != NcResultCode.Ok)
         {
-            await ShowMessageAsync("Load Failed", $"Load failed: {rc}");
+            var guidance = _controller.GetLastErrorGuidance();
+            var technical = NativeCoreInterop.FormatLastError();
+            var detail = string.IsNullOrWhiteSpace(guidance)
+                ? technical
+                : $"{guidance}\n\n{technical}";
+            await ShowMessageAsync("Load Failed", $"Load failed: {rc}\n\n{detail}");
         }
     }
 
