@@ -192,3 +192,19 @@ Interpretation:
 
 - WPF is the primary consumer UX conversion target in this update; WinUI changes are limited to tracking panel alignment.
 - Generated local artifacts and large sample payloads outside `NativeVsfClone/` were intentionally excluded from documentation scope and commit intent.
+
+## Addendum: iFacialMocap Direct Path (2026-03-06)
+
+Follow-up implementation completed in this same date window:
+
+- switched host tracking path to direct iFacialMocap OSC ingestion defaults (`port=49983`, `stale=500ms`)
+- added parser dual-mode auto-detection (`format-a` single-value, `format-b` bundle/array-like)
+- connected per-tick tracking submission to native (`nc_set_tracking_frame`) before render
+- expanded persisted session schema (`TrackingInputSettings`, `Version=3`)
+- aligned WPF/WinUI tracking controls to manual operator flow (`start/stop/recenter`)
+
+Updated verification snapshot for this addendum:
+
+- `dotnet build host\\HostCore\\HostCore.csproj -c Release`: PASS
+- `dotnet build host\\WpfHost\\WpfHost.csproj -c Release`: PASS
+- `dotnet build host\\WinUiHost\\WinUiHost.csproj -c Release`: blocked by environment/toolchain-level WinUI XAML compiler failure (`XamlCompiler.exe` exit code 1)
