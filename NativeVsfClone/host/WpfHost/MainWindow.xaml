@@ -3,6 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WpfHost"
         Title="VsfClone Host (WPF)" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
+    <Window.Resources>
+        <Style x:Key="NavRailButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource Color.NavItemBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Color.Border}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Color.NavItemText}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="MinWidth" Value="124"/>
+        </Style>
+    </Window.Resources>
     <Grid Margin="14">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="ControlsColumn" Width="560" />
@@ -19,33 +30,26 @@
 
             <Border x:Name="LeftRailPanel"
                     Grid.Column="0"
-                    Background="#E9F0F8"
-                    BorderBrush="#C7D5E6"
+                    Background="{DynamicResource Color.NavRailBg}"
+                    BorderBrush="{DynamicResource Color.Border}"
                     BorderThickness="1"
                     CornerRadius="8"
                     Padding="10">
                 <StackPanel>
-                    <TextBlock Text="WORKSPACE" Foreground="#5D6F83" FontWeight="Bold" FontSize="11"/>
+                    <TextBlock Text="WORKSPACE" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
                     <TextBlock Text="Host Control" Margin="0,4,0,12" FontSize="18" FontWeight="SemiBold"/>
-                    <Border Background="#FFFFFF" BorderBrush="#C7D5E6" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
-                        <TextBlock Text="Getting Started" FontWeight="SemiBold"/>
-                    </Border>
-                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
-                        <TextBlock Text="Session / Avatar" Foreground="#31485F"/>
-                    </Border>
-                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
-                        <TextBlock Text="Render / Outputs" Foreground="#31485F"/>
-                    </Border>
-                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8">
-                        <TextBlock Text="Tracking / Ops" Foreground="#31485F"/>
-                    </Border>
-                    <Border Background="#F4F8FD" BorderBrush="#D3DFEE" BorderThickness="1" CornerRadius="6" Padding="8,6">
-                        <TextBlock Text="Diagnostics" Foreground="#31485F"/>
-                    </Border>
+                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="Getting Started" Click="NavGettingStarted_Click"/>
+                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="Session / Avatar" Click="NavSessionAvatar_Click"/>
+                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="Render" Click="NavRender_Click"/>
+                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="Outputs" Click="NavOutputs_Click"/>
+                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="Tracking" Click="NavTracking_Click"/>
+                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="Platform Ops" Click="NavPlatformOps_Click"/>
+                    <Separator Margin="0,4,0,8"/>
+                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="Diagnostics Panel" Click="ToggleDiagnosticsPanel_Click"/>
                 </StackPanel>
             </Border>
 
-            <Border Grid.Column="1" Background="#D8E2EE" CornerRadius="3"/>
+            <Border Grid.Column="1" Background="{DynamicResource Color.BorderStrong}" CornerRadius="3"/>
 
             <ScrollViewer x:Name="ControlPanelScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,0,2">
@@ -56,6 +60,7 @@
                             <Button x:Name="BeginnerModeButton" Content="초급 모드 (Beginner)" Click="BeginnerMode_Click" Margin="0,0,8,0" MinWidth="170"/>
                             <Button x:Name="AdvancedModeButton" Content="고급 모드 (Advanced)" Click="AdvancedMode_Click" MinWidth="170"/>
                             <Button x:Name="RenderOnlyToggleButton" Content="렌더 전용 모드 (F11)" Click="RenderOnlyToggle_Click" Margin="8,0,0,0" MinWidth="170"/>
+                            <Button x:Name="ThemeToggleButton" Content="Dark Theme" Click="ThemeToggle_Click" Margin="8,0,0,0" MinWidth="120"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
@@ -569,7 +574,7 @@
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0">
-                <Border Background="#182639" BorderBrush="#5A708B" BorderThickness="1" CornerRadius="8">
+                <Border Background="{DynamicResource Color.RenderShellBg}" BorderBrush="{DynamicResource Color.RenderShellBorder}" BorderThickness="1" CornerRadius="8">
                     <local:RenderHwndHost x:Name="RenderHost"/>
                 </Border>
                 <Border x:Name="RenderOnlyHintOverlay"
@@ -610,24 +615,24 @@
                 </TabItem>
             </TabControl>
 
-            <Border x:Name="StatusBarBorder" Grid.Row="2" Padding="8" Background="#24384E" BorderBrush="#546E88" BorderThickness="1" CornerRadius="8">
+            <Border x:Name="StatusBarBorder" Grid.Row="2" Padding="8" Background="{DynamicResource Color.StatusBarBg}" BorderBrush="{DynamicResource Color.StatusBarBorder}" BorderThickness="1" CornerRadius="8">
                 <WrapPanel>
-                    <TextBlock Text="Session: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="SessionStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
-                    <TextBlock Text="Avatar: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="AvatarStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
-                    <TextBlock Text="Render: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="RenderStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
-                    <TextBlock Text="Frame: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
-                    <TextBlock Text="Outputs: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
-                    <TextBlock Text="Busy: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="#F4FAFF"/>
-                    <TextBlock Text="LastError: " Foreground="#D7E5F3"/>
-                    <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360" Foreground="#F4FAFF"/>
-                    <TextBlock Text="Track: " Foreground="#D7E5F3" Margin="12,0,0,0"/>
-                    <TextBlock x:Name="TrackStatusText" FontWeight="SemiBold" Width="300" TextTrimming="CharacterEllipsis" Foreground="#F4FAFF"/>
+                    <TextBlock Text="Session: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="SessionStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="Avatar: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="AvatarStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="Render: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="RenderStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="Frame: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="Outputs: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="Busy: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="LastError: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360" Foreground="{DynamicResource Color.StatusBarValue}"/>
+                    <TextBlock Text="Track: " Foreground="{DynamicResource Color.StatusBarLabel}" Margin="12,0,0,0"/>
+                    <TextBlock x:Name="TrackStatusText" FontWeight="SemiBold" Width="300" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Color.StatusBarValue}"/>
                 </WrapPanel>
             </Border>
         </Grid>

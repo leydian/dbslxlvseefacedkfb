@@ -2,6 +2,41 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF UI v2 refinement (navigation + dual theme + diagnostics collapse policy)
+
+### Summary
+
+Delivered a second-stage WPF UI refinement to increase visual quality and operational focus: the left rail is now functional with single-section navigation, diagnostics default to collapsed unless forced or pinned, and light/dark theme switching is available at runtime. Also added lightweight section transition animation and reduced hidden-section synchronization overhead.
+
+### Changed
+
+- WPF token expansion:
+  - `host/WpfHost/App.xaml`
+  - added brushes for navigation rail/items, render shell, and status bar to support theme-aware v2 UI behavior.
+- WPF navigation and layout behavior:
+  - `host/WpfHost/MainWindow.xaml`
+  - replaced static left-rail cards with actionable nav buttons.
+  - added diagnostics panel toggle button and theme toggle button.
+  - switched render/status shell color usage to dynamic resource tokens.
+- WPF interaction/state policy updates:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `UiSection`-based single-active section model.
+  - added nav click handlers and active-state styling (`ApplyNavRailState`).
+  - diagnostics visibility now follows `forced OR pinned` policy.
+  - added runtime light/dark token switching (`ApplyThemeResources`).
+  - added low-intensity section transition animation.
+  - reduced unnecessary control sync calls for hidden sections.
+- Documentation:
+  - `docs/reports/wpf_ui_v2_navigation_theme_diagnostics_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
 ## 2026-03-06 - ARKit52 quality refinement (hybrid fallback + per-group calibration)
 
 ### Summary

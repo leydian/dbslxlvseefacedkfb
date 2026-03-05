@@ -124,6 +124,7 @@ Domain-level report navigation hub.
 - [2026-03-06_wpf_arm_pose_slider_wiring.md](./weekly/2026-W10/2026-03-06_wpf_arm_pose_slider_wiring.md)
 - [2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md](./weekly/2026-W10/2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md)
 - [2026-03-06_wpf_light_glass_editorial_ui_refresh.md](./weekly/2026-W10/2026-03-06_wpf_light_glass_editorial_ui_refresh.md)
+- [2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md](./weekly/2026-W10/2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md)
 - [2026-03-05_wpf_operational_reliability_loop_and_output_sync.md](./weekly/2026-W10/2026-03-05_wpf_operational_reliability_loop_and_output_sync.md)
 - [2026-03-05_wpf_ui_smoke_and_perf.md](./weekly/2026-W10/2026-03-05_wpf_ui_smoke_and_perf.md)
 - [2026-03-05_wpf_verification_roundup.md](./weekly/2026-W10/2026-03-05_wpf_verification_roundup.md)

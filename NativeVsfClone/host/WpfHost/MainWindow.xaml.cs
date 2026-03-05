@@ -10,6 +10,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using HostCore;
@@ -20,6 +21,16 @@ namespace WpfHost;
 public partial class MainWindow : Window
 {
     private sealed record WebcamDeviceItem(string Key, string Label);
+    private enum UiSection
+    {
+        GettingStarted,
+        SessionAvatar,
+        Render,
+        Outputs,
+        Tracking,
+        PlatformOps,
+    }
+
     private const string UiModeBeginner = "beginner";
     private const string UiModeAdvanced = "advanced";
     private readonly HostController _controller = new();
@@ -61,6 +72,9 @@ public partial class MainWindow : Window
     private const int WebcamProbeLimit = 10;
     private readonly AvatarThumbnailPipeline _thumbnailPipeline;
     private bool _syncingRecentAvatarList;
+    private UiSection _activeSection = UiSection.GettingStarted;
+    private bool _diagnosticsPinnedVisible;
+    private bool _isDarkTheme;
 
     public MainWindow()
     {
@@ -108,6 +122,7 @@ public partial class MainWindow : Window
         RenderHost.RenderMouseWheel += RenderHost_RenderMouseWheel;
 
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
+        ApplyThemeResources();
         ApplySessionDefaultsToUi();
         RefreshRecentAvatarList();
         RefreshValidationState();
@@ -410,6 +425,30 @@ public partial class MainWindow : Window
     private void AdvancedMode_Click(object sender, RoutedEventArgs e)
     {
         SetUiMode(UiModeAdvanced, persist: true);
+    }
+
+    private void ThemeToggle_Click(object sender, RoutedEventArgs e)
+    {
+        _isDarkTheme = !_isDarkTheme;
+        ApplyThemeResources();
+        ApplyNavRailState();
+    }
+
+    private void NavGettingStarted_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.GettingStarted);
+    private void NavSessionAvatar_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.SessionAvatar);
+    private void NavRender_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.Render);
+    private void NavOutputs_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.Outputs);
+    private void NavTracking_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.Tracking);
+    private void NavPlatformOps_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.PlatformOps);
+
+    private void ToggleDiagnosticsPanel_Click(object sender, RoutedEventArgs e)
+    {
+        _diagnosticsPinnedVisible = !_diagnosticsPinnedVisible;
+        if (_diagnosticsPinnedVisible)
+        {
+            _diagnosticsForcedVisible = false;
+        }
+        ApplyModeVisibility();
     }
 
     private void RenderOnlyToggle_Click(object sender, RoutedEventArgs e)
@@ -1743,13 +1782,21 @@ public partial class MainWindow : Window
             : "렌더 전용 모드 (F11)";
         RenderOnlyToggleButton.IsEnabled = !operation.IsBusy;
 
-        SyncRenderControlsFromState();
-        SyncPoseControlsFromState();
-        SyncTrackingPoseFilterControlsFromState();
-        SyncPosePresetControlsFromState();
-        SyncArmSuggestionControlsFromState();
-        SyncArmTuningControlsFromState();
-        SyncPresetControlsFromState();
+        if (RenderGroup.Visibility == Visibility.Visible)
+        {
+            SyncRenderControlsFromState();
+            SyncPoseControlsFromState();
+            SyncPosePresetControlsFromState();
+            SyncArmSuggestionControlsFromState();
+            SyncArmTuningControlsFromState();
+            SyncPresetControlsFromState();
+        }
+
+        if (TrackingGroup.Visibility == Visibility.Visible)
+        {
+            SyncTrackingPoseFilterControlsFromState();
+        }
+
         ApplyModeVisibility();
     }
 
@@ -2363,9 +2410,9 @@ public partial class MainWindow : Window
             ? UiModeAdvanced
             : UiModeBeginner;
         _uiMode = normalized;
-        if (string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal))
+        if (string.Equals(_uiMode, UiModeBeginner, StringComparison.Ordinal))
         {
-            _diagnosticsForcedVisible = true;
+            _diagnosticsPinnedVisible = false;
         }
 
         if (persist)
@@ -2411,6 +2458,169 @@ public partial class MainWindow : Window
         }), DispatcherPriority.Background);
     }
 
+    private void ActivateSection(UiSection section)
+    {
+        if (_activeSection == section)
+        {
+            return;
+        }
+
+        _activeSection = section;
+        ApplySectionVisibility();
+        ApplyNavRailState();
+        AnimateSectionTransition();
+    }
+
+    private void ApplyThemeResources()
+    {
+        if (Application.Current.Resources["Color.Surface"] is not SolidColorBrush surface ||
+            Application.Current.Resources["Color.Text"] is not SolidColorBrush text)
+        {
+            return;
+        }
+
+        static void SetBrush(string key, string colorHex)
+        {
+            if (Application.Current.Resources[key] is SolidColorBrush brush)
+            {
+                brush.Color = (Color)ColorConverter.ConvertFromString(colorHex)!;
+            }
+        }
+
+        if (_isDarkTheme)
+        {
+            SetBrush("Color.Surface", "#0F1722");
+            SetBrush("Color.SurfaceAlt", "#132131");
+            SetBrush("Color.Card", "#17273A");
+            SetBrush("Color.CardStrong", "#1B2E44");
+            SetBrush("Color.Border", "#2D445E");
+            SetBrush("Color.BorderStrong", "#3A5675");
+            SetBrush("Color.Text", "#EAF2FC");
+            SetBrush("Color.TextMuted", "#B2C2D6");
+            SetBrush("Color.TextSubtle", "#8EA3BC");
+            SetBrush("Color.Primary", "#4A93D4");
+            SetBrush("Color.PrimaryHover", "#5AA1E0");
+            SetBrush("Color.PrimaryPressed", "#3E83C2");
+            SetBrush("Color.TabBg", "#142235");
+            SetBrush("Color.TabActive", "#1E324A");
+            SetBrush("Color.NavRailBg", "#122031");
+            SetBrush("Color.NavItemBg", "#16283C");
+            SetBrush("Color.NavItemActiveBg", "#20374F");
+            SetBrush("Color.NavItemText", "#B8CAE0");
+            SetBrush("Color.NavItemActiveText", "#F1F7FF");
+            SetBrush("Color.RenderShellBg", "#0A121D");
+            SetBrush("Color.RenderShellBorder", "#3E5B7A");
+            SetBrush("Color.StatusBarBg", "#0E1A28");
+            SetBrush("Color.StatusBarBorder", "#35506C");
+            SetBrush("Color.StatusBarLabel", "#AFC2D8");
+            SetBrush("Color.StatusBarValue", "#F2F8FF");
+            ThemeToggleButton.Content = "Light Theme";
+        }
+        else
+        {
+            SetBrush("Color.Surface", "#F2F6FB");
+            SetBrush("Color.SurfaceAlt", "#EAF0F8");
+            SetBrush("Color.Card", "#F8FBFF");
+            SetBrush("Color.CardStrong", "#FFFFFF");
+            SetBrush("Color.Border", "#C7D5E6");
+            SetBrush("Color.BorderStrong", "#A8BCD3");
+            SetBrush("Color.Text", "#1A2A3B");
+            SetBrush("Color.TextMuted", "#58697B");
+            SetBrush("Color.TextSubtle", "#6D7E92");
+            SetBrush("Color.Primary", "#1571B8");
+            SetBrush("Color.PrimaryHover", "#0F629F");
+            SetBrush("Color.PrimaryPressed", "#0D4F81");
+            SetBrush("Color.TabBg", "#EEF3FA");
+            SetBrush("Color.TabActive", "#FFFFFF");
+            SetBrush("Color.NavRailBg", "#E9F0F8");
+            SetBrush("Color.NavItemBg", "#F4F8FD");
+            SetBrush("Color.NavItemActiveBg", "#FFFFFF");
+            SetBrush("Color.NavItemText", "#31485F");
+            SetBrush("Color.NavItemActiveText", "#1A2A3B");
+            SetBrush("Color.RenderShellBg", "#182639");
+            SetBrush("Color.RenderShellBorder", "#5A708B");
+            SetBrush("Color.StatusBarBg", "#24384E");
+            SetBrush("Color.StatusBarBorder", "#546E88");
+            SetBrush("Color.StatusBarLabel", "#D7E5F3");
+            SetBrush("Color.StatusBarValue", "#F4FAFF");
+            ThemeToggleButton.Content = "Dark Theme";
+        }
+    }
+
+    private void ApplySectionVisibility()
+    {
+        var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        var canUseAdvancedSections = advanced;
+
+        var showGettingStarted = _activeSection == UiSection.GettingStarted;
+        var showSessionAvatar = canUseAdvancedSections && _activeSection == UiSection.SessionAvatar;
+        var showRender = canUseAdvancedSections && _activeSection == UiSection.Render;
+        var showOutputs = canUseAdvancedSections && _activeSection == UiSection.Outputs;
+        var showTracking = canUseAdvancedSections && _activeSection == UiSection.Tracking;
+        var showOps = canUseAdvancedSections && _activeSection == UiSection.PlatformOps;
+
+        ModeGroup.Visibility = showGettingStarted ? Visibility.Visible : Visibility.Collapsed;
+        QuickActionsGroup.Visibility = showGettingStarted ? Visibility.Visible : Visibility.Collapsed;
+        SessionGroup.Visibility = showSessionAvatar ? Visibility.Visible : Visibility.Collapsed;
+        AvatarGroup.Visibility = showSessionAvatar ? Visibility.Visible : Visibility.Collapsed;
+        RenderGroup.Visibility = showRender ? Visibility.Visible : Visibility.Collapsed;
+        OutputsGroup.Visibility = showOutputs ? Visibility.Visible : Visibility.Collapsed;
+        TrackingGroup.Visibility = showTracking ? Visibility.Visible : Visibility.Collapsed;
+        PlatformOpsGroup.Visibility = showOps ? Visibility.Visible : Visibility.Collapsed;
+        RenderAdvancedExpander.Visibility = showRender && canUseAdvancedSections ? Visibility.Visible : Visibility.Collapsed;
+        RenderAdvancedExpander.IsExpanded = showRender && canUseAdvancedSections;
+    }
+
+    private void ApplyNavRailState()
+    {
+        var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        var navMap = new[]
+        {
+            (NavGettingStartedButton, UiSection.GettingStarted, true),
+            (NavSessionAvatarButton, UiSection.SessionAvatar, advanced),
+            (NavRenderButton, UiSection.Render, advanced),
+            (NavOutputsButton, UiSection.Outputs, advanced),
+            (NavTrackingButton, UiSection.Tracking, advanced),
+            (NavOpsButton, UiSection.PlatformOps, advanced),
+        };
+
+        var activeBg = (Brush)FindResource("Color.NavItemActiveBg");
+        var activeFg = (Brush)FindResource("Color.NavItemActiveText");
+        var inactiveBg = (Brush)FindResource("Color.NavItemBg");
+        var inactiveFg = (Brush)FindResource("Color.NavItemText");
+        var border = (Brush)FindResource("Color.Border");
+
+        foreach (var (button, section, enabled) in navMap)
+        {
+            button.IsEnabled = enabled;
+            var active = section == _activeSection;
+            button.Background = active ? activeBg : inactiveBg;
+            button.Foreground = active ? activeFg : inactiveFg;
+            button.BorderBrush = border;
+            button.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+            button.Opacity = enabled ? 1.0 : 0.55;
+        }
+
+        ToggleDiagnosticsButton.Content = _diagnosticsPinnedVisible ? "Diagnostics: Open" : "Diagnostics: Closed";
+    }
+
+    private void AnimateSectionTransition()
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        var animation = new DoubleAnimation
+        {
+            From = 0.82,
+            To = 1.0,
+            Duration = TimeSpan.FromMilliseconds(140),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+        ControlPanelScrollViewer.BeginAnimation(OpacityProperty, animation, HandoffBehavior.SnapshotAndReplace);
+    }
+
     private void ApplyModeVisibility()
     {
         if (_isRenderOnlyMode)
@@ -2444,15 +2654,15 @@ public partial class MainWindow : Window
         BeginnerModeButton.FontWeight = advanced ? FontWeights.Normal : FontWeights.SemiBold;
         AdvancedModeButton.FontWeight = advanced ? FontWeights.SemiBold : FontWeights.Normal;
 
-        SessionGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        RenderGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        OutputsGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        TrackingGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        PlatformOpsGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        RenderAdvancedExpander.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        RenderAdvancedExpander.IsExpanded = advanced;
+        if (!advanced && _activeSection != UiSection.GettingStarted)
+        {
+            _activeSection = UiSection.GettingStarted;
+        }
 
-        var showDiagnostics = advanced || _diagnosticsForcedVisible;
+        ApplySectionVisibility();
+        ApplyNavRailState();
+
+        var showDiagnostics = _diagnosticsForcedVisible || _diagnosticsPinnedVisible;
         DiagnosticsRow.Height = showDiagnostics ? new GridLength(260.0) : new GridLength(0.0);
         DiagnosticsTabControl.Visibility = showDiagnostics ? Visibility.Visible : Visibility.Collapsed;
         BeginnerFailureHintPanel.Visibility = beginner && !string.IsNullOrWhiteSpace(_beginnerFailureHint)

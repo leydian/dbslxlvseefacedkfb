@@ -23,6 +23,17 @@
         <SolidColorBrush x:Key="Color.Error" Color="#9A3131"/>
         <SolidColorBrush x:Key="Color.TabBg" Color="#EEF3FA"/>
         <SolidColorBrush x:Key="Color.TabActive" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="Color.NavRailBg" Color="#E9F0F8"/>
+        <SolidColorBrush x:Key="Color.NavItemBg" Color="#F4F8FD"/>
+        <SolidColorBrush x:Key="Color.NavItemActiveBg" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="Color.NavItemText" Color="#31485F"/>
+        <SolidColorBrush x:Key="Color.NavItemActiveText" Color="#1A2A3B"/>
+        <SolidColorBrush x:Key="Color.RenderShellBg" Color="#182639"/>
+        <SolidColorBrush x:Key="Color.RenderShellBorder" Color="#5A708B"/>
+        <SolidColorBrush x:Key="Color.StatusBarBg" Color="#24384E"/>
+        <SolidColorBrush x:Key="Color.StatusBarBorder" Color="#546E88"/>
+        <SolidColorBrush x:Key="Color.StatusBarLabel" Color="#D7E5F3"/>
+        <SolidColorBrush x:Key="Color.StatusBarValue" Color="#F4FAFF"/>
 
         <Thickness x:Key="Spacing.ControlPadding">10,6</Thickness>
         <Thickness x:Key="Spacing.InputPadding">8,5</Thickness>
