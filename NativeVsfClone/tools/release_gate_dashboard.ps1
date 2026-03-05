@@ -118,6 +118,20 @@ $rows += [PSCustomObject]@{
     source_file = $unityValidationSummary
 }
 
+$compressionGate = Join-Path $ReportDir "xav2_compression_quality_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "XAV2 Compression Quality"
+    status_line = Get-StatusFromFile -Path $compressionGate -Pattern "- Overall:"
+    source_file = $compressionGate
+}
+
+$parityGate = Join-Path $ReportDir "xav2_parity_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "XAV2 Unity/Native Parity"
+    status_line = Get-StatusFromFile -Path $parityGate -Pattern "- Overall:"
+    source_file = $parityGate
+}
+
 $avatarRows = @($rows | Where-Object { $_.track -in @("VSFAvatar", "VRM", "VXAvatar") })
 $avatarAllPass = $true
 foreach ($r in $avatarRows) {
@@ -127,13 +141,20 @@ foreach ($r in $avatarRows) {
     }
 }
 
-$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS")
+$unityPass = [string]::Equals($unityStatus, "PASS", [System.StringComparison]::OrdinalIgnoreCase)
+$compressionPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Compression Quality" }) | Select-Object -First 1).status_line)) -eq "PASS"
+$parityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Unity/Native Parity" }) | Select-Object -First 1).status_line)) -eq "PASS"
+
+$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $unityPass -and $compressionPass -and $parityPass
 $fullReleaseCandidate = $wpfReleaseCandidate -and ($hostTrack.winui_state -eq "PASS")
 
 $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("s")
     gate_summary = [ordered]@{
         avatar_gates_all_pass = $avatarAllPass
+        unity_xav2_validate_pass = $unityPass
+        xav2_compression_quality_pass = $compressionPass
+        xav2_unity_native_parity_pass = $parityPass
         host_mode = $hostTrack.mode
         host_wpf_pass = ($hostTrack.wpf_state -eq "PASS")
         host_winui_pass = ($hostTrack.winui_state -eq "PASS")

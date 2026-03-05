@@ -11,6 +11,9 @@ param(
     [switch]$EnableSampleProfileResolve,
     [switch]$EnableHostE2E,
     [switch]$EnableNuGetMirrorBootstrap,
+    [switch]$EnableMediapipeSanity,
+    [switch]$EnableXav2CompressionQuality,
+    [switch]$EnableXav2Parity,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
 )
 
@@ -122,6 +125,24 @@ if ($EnableHostE2E) {
         -Command "powershell -ExecutionPolicy Bypass -File .\tools\host_e2e_gate.ps1 -SkipNativeBuild -NoRestore"))
 }
 
+if ($EnableMediapipeSanity) {
+    $results.Add((Invoke-Gate `
+        -Name "MediaPipe sidecar sanity" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\mediapipe_sidecar_sanity.ps1"))
+}
+
+if ($EnableXav2CompressionQuality) {
+    $results.Add((Invoke-Gate `
+        -Name "XAV2 compression quality gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\xav2_compression_quality_gate.ps1"))
+}
+
+if ($EnableXav2Parity) {
+    $results.Add((Invoke-Gate `
+        -Name "XAV2 unity/native parity gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\xav2_parity_gate.ps1"))
+}
+
 $overallStatus = if ($results | Where-Object { $_.ExitCode -ne 0 }) { "FAIL" } else { "PASS" }
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("Quality Baseline Summary")
@@ -147,6 +168,9 @@ $lines.Add("- TrackingFuzz: build/reports/tracking_parser_fuzz_gate_summary.txt"
 $lines.Add("- SampleProfileResolve: build/reports/sample_profile_resolve_latest.txt")
 $lines.Add("- NuGetMirrorBootstrap: build/reports/nuget_mirror_bootstrap_summary.txt")
 $lines.Add("- HostE2E: build/reports/host_e2e_gate_summary.txt")
+$lines.Add("- MediaPipeSidecarSanity: build/reports/mediapipe_sidecar_sanity_summary.txt")
+$lines.Add("- Xav2CompressionQuality: build/reports/xav2_compression_quality_gate_summary.txt")
+$lines.Add("- Xav2Parity: build/reports/xav2_parity_gate_summary.txt")
 
 $lines | Set-Content -Path $resolvedSummaryPath -Encoding UTF8
 Write-Host "[quality-baseline] Summary: $resolvedSummaryPath"

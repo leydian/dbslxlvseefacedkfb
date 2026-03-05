@@ -329,6 +329,45 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_CompressedMeshSectionEnvelopeTruncated_FailsDecode()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    formatVersion: 5,
+                    compressMeshSection: true,
+                    truncateCompressedEnvelope: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.CompressionDecodeFailed));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_CompressedMeshSectionV4_FailsSchemaInvalid()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    formatVersion: 4,
+                    compressMeshSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.SectionSchemaInvalid));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_SectionTruncated_Fails()
         {
             var bytes = BuildValidXav2Bytes();
@@ -480,7 +519,8 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool rigDuplicateBoneName = false,
             bool rigCycle = false,
             bool compressMeshSection = false,
-            bool corruptCompressedSection = false)
+            bool corruptCompressedSection = false,
+            bool truncateCompressedEnvelope = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -515,12 +555,16 @@ namespace VsfClone.Xav2.Runtime.Tests
                     throw new InvalidOperationException("failed to build compressed test payload");
                 }
                 var expectedLength = meshPayload.Length + (corruptCompressedSection ? 13 : 0);
-                var envelope = new byte[compressed.Length + 4];
+                var envelopeSize = truncateCompressedEnvelope ? 2 : (compressed.Length + 4);
+                var envelope = new byte[envelopeSize];
                 envelope[0] = (byte)(expectedLength & 0xFF);
                 envelope[1] = (byte)((expectedLength >> 8) & 0xFF);
-                envelope[2] = (byte)((expectedLength >> 16) & 0xFF);
-                envelope[3] = (byte)((expectedLength >> 24) & 0xFF);
-                Buffer.BlockCopy(compressed, 0, envelope, 4, compressed.Length);
+                if (!truncateCompressedEnvelope)
+                {
+                    envelope[2] = (byte)((expectedLength >> 16) & 0xFF);
+                    envelope[3] = (byte)((expectedLength >> 24) & 0xFF);
+                    Buffer.BlockCopy(compressed, 0, envelope, 4, compressed.Length);
+                }
                 WriteSection(bw, 0x0011, envelope, 0x0001);
             }
             else

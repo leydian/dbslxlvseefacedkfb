@@ -5,9 +5,13 @@ on:
     paths:
       - "unity/Packages/com.vsfclone.xav2/**"
       - "tools/unity_xav2_validate.ps1"
+      - "tools/xav2_compression_quality_gate.ps1"
+      - "tools/xav2_parity_gate.ps1"
       - ".github/workflows/unity-xav2-compat.yml"
       - "NativeVsfClone/unity/Packages/com.vsfclone.xav2/**"
       - "NativeVsfClone/tools/unity_xav2_validate.ps1"
+      - "NativeVsfClone/tools/xav2_compression_quality_gate.ps1"
+      - "NativeVsfClone/tools/xav2_parity_gate.ps1"
       - "NativeVsfClone/.github/workflows/unity-xav2-compat.yml"
   workflow_dispatch:
 
@@ -33,6 +37,26 @@ jobs:
             -UnityProjectPath "$env:UNITY_XAV2_PROJECT_PATH" `
             -ExpectedUnityVersion "2021.3.18f1"
 
+      - name: Run XAV2 compression quality gate
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\xav2_compression_quality_gate.ps1 `
+            -UnityEditorPath "$env:UNITY_2021_3_18F1_EDITOR_PATH" `
+            -UnityProjectPath "$env:UNITY_XAV2_PROJECT_PATH" `
+            -ExpectedUnityVersion "2021.3.18f1"
+
+      - name: Build native avatar_tool for parity gate
+        run: |
+          cmake -S . -B .\build
+          cmake --build .\build --config Release --target avatar_tool
+
+      - name: Run XAV2 unity/native parity gate
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\xav2_parity_gate.ps1 `
+            -AvatarToolPath ".\build\Release\avatar_tool.exe" `
+            -UnityEditorPath "$env:UNITY_2021_3_18F1_EDITOR_PATH" `
+            -UnityProjectPath "$env:UNITY_XAV2_PROJECT_PATH" `
+            -ExpectedUnityVersion "2021.3.18f1"
+
       - name: Upload Unity compatibility reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -46,9 +70,25 @@ jobs:
             build/reports/unity_xav2_smoke_report.json
             build/reports/unity_xav2_validation_summary.json
             build/reports/unity_xav2_validation_summary.txt
+            build/reports/unity_xav2_compression_gate.log
+            build/reports/unity_xav2_compression_probe.json
+            build/reports/xav2_compression_quality_gate_summary.json
+            build/reports/xav2_compression_quality_gate_summary.txt
+            build/reports/unity_xav2_parity_gate.log
+            build/reports/unity_xav2_parity_probe.json
+            build/reports/xav2_parity_gate_summary.json
+            build/reports/xav2_parity_gate_summary.txt
             NativeVsfClone/build/reports/unity_xav2_editmode.log
             NativeVsfClone/build/reports/unity_xav2_editmode_results.xml
             NativeVsfClone/build/reports/unity_xav2_smoke.log
             NativeVsfClone/build/reports/unity_xav2_smoke_report.json
             NativeVsfClone/build/reports/unity_xav2_validation_summary.json
             NativeVsfClone/build/reports/unity_xav2_validation_summary.txt
+            NativeVsfClone/build/reports/unity_xav2_compression_gate.log
+            NativeVsfClone/build/reports/unity_xav2_compression_probe.json
+            NativeVsfClone/build/reports/xav2_compression_quality_gate_summary.json
+            NativeVsfClone/build/reports/xav2_compression_quality_gate_summary.txt
+            NativeVsfClone/build/reports/unity_xav2_parity_gate.log
+            NativeVsfClone/build/reports/unity_xav2_parity_probe.json
+            NativeVsfClone/build/reports/xav2_parity_gate_summary.json
+            NativeVsfClone/build/reports/xav2_parity_gate_summary.txt

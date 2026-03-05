@@ -13,6 +13,7 @@ Follow-up implementation pass for the 20-item release board focused on previousl
 - NuGet mirror bootstrap and sidecar lock guard
 - host end-to-end gate and WinUI minimal repro wrapper
 - sample profile split (`fixed_set` / `real_large_set`)
+- MediaPipe sidecar sanity gate wiring
 
 ## Execution Plan (This Pass)
 
@@ -91,6 +92,7 @@ Follow-up implementation pass for the 20-item release board focused on previousl
 - added `tools/sidecar_lock_guard.ps1`
 - added `tools/host_e2e_gate.ps1`
 - added `tools/winui_xaml_min_repro.ps1`
+- added `tools/mediapipe_sidecar_sanity.ps1`
 - added sample profiles:
   - `tools/sample_profiles/fixed_set.txt`
   - `tools/sample_profiles/real_large_set.txt`
@@ -218,3 +220,79 @@ This addendum summarizes the integrated implementation set now reflected in `5c3
 - Effect:
   - ensures sidecar/publish/dashboard subprocess paths always execute from repository root
   - avoids path-context drift when gate is launched from external working directories.
+
+## Quality Elevation Addendum (implementation pass)
+
+This addendum captures the execution of the “중상 -> 상” SDK quality elevation plan, focused on enforceable CI gates and measurable compression/parity contracts.
+
+### A) New gate assets added
+
+- Added Unity CI quality entrypoint:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2CiQuality.cs`
+  - methods:
+    - `RunCompressionGate`
+    - `RunParityProbe`
+- Added compression KPI gate script:
+  - `tools/xav2_compression_quality_gate.ps1`
+  - outputs:
+    - `build/reports/xav2_compression_quality_gate_summary.txt`
+    - `build/reports/xav2_compression_quality_gate_summary.json`
+    - `build/reports/unity_xav2_compression_probe.json`
+- Added Unity/Native parity gate script:
+  - `tools/xav2_parity_gate.ps1`
+  - outputs:
+    - `build/reports/xav2_parity_gate_summary.txt`
+    - `build/reports/xav2_parity_gate_summary.json`
+    - `build/reports/unity_xav2_parity_probe.json`
+
+### B) Gate orchestration wiring
+
+- Updated baseline gate runner:
+  - `tools/run_quality_baseline.ps1`
+  - new flags:
+    - `-EnableXav2CompressionQuality`
+    - `-EnableXav2Parity`
+- Updated release readiness entry:
+  - `tools/release_readiness_gate.ps1`
+  - passes through the same XAV2 quality/parity toggles into baseline execution
+  - summary artifact list expanded with new XAV2 gate reports
+- Updated dashboard:
+  - `tools/release_gate_dashboard.ps1`
+  - new rows:
+    - `XAV2 Compression Quality`
+    - `XAV2 Unity/Native Parity`
+  - release candidate criteria now additionally requires:
+    - `Unity XAV2 Validate = PASS`
+    - `XAV2 Compression Quality = PASS`
+    - `XAV2 Unity/Native Parity = PASS`
+
+### C) CI workflow enforcement path
+
+- Updated `NativeVsfClone/.github/workflows/unity-xav2-compat.yml`:
+  - executes:
+    1. `unity_xav2_validate.ps1`
+    2. `xav2_compression_quality_gate.ps1`
+    3. native `avatar_tool` build
+    4. `xav2_parity_gate.ps1`
+  - uploads added artifacts for compression/parity logs and summaries
+
+### D) Runtime compression regression hardening
+
+- Expanded runtime tests in:
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+- new cases:
+  - compressed envelope truncated -> `CompressionDecodeFailed`
+  - compressed section in v4 container -> `SectionSchemaInvalid`
+- purpose:
+  - prevent silent regressions in v5 compression decode and version-gating logic
+
+### E) Documentation sync
+
+- Updated SDK package readme:
+  - `unity/Packages/com.vsfclone.xav2/README.md`
+  - CI validation section now lists compression quality and parity gates.
+
+### F) Execution caveat
+
+- In this shell session, Unity-dependent gates were wired and syntax-checked but not fully executed end-to-end because local Unity editor/project runtime context is environment-dependent.
+- Dashboard refresh confirms row-level visibility for new gates (`MISSING` until CI/local Unity execution produces reports).

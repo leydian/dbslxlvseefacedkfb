@@ -7,6 +7,9 @@ param(
     [switch]$EnableHostE2E,
     [switch]$EnableWinUiMinRepro,
     [switch]$EnableNuGetMirrorBootstrap,
+    [switch]$EnableMediapipeSanity,
+    [switch]$EnableXav2CompressionQuality,
+    [switch]$EnableXav2Parity,
     [switch]$SkipVersionContractCheck,
     [switch]$SkipQualityBaseline,
     [string]$SummaryPath = ".\build\reports\release_readiness_gate_summary.txt"
@@ -61,7 +64,13 @@ try {
 
     if (-not $SkipQualityBaseline) {
         $results.Add((Invoke-Step -Name "Quality baseline gates" -Action {
-            & powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\run_quality_baseline.ps1"
+            )
+            if ($EnableXav2CompressionQuality) { $args += "-EnableXav2CompressionQuality" }
+            if ($EnableXav2Parity) { $args += "-EnableXav2Parity" }
+            & powershell @args
         }))
     } else {
         Write-Host "[release-readiness] SKIP: Quality baseline gates"
@@ -87,6 +96,12 @@ try {
     if ($EnableNuGetMirrorBootstrap) {
         $results.Add((Invoke-Step -Name "NuGet mirror bootstrap" -Action {
             & powershell -ExecutionPolicy Bypass -File .\tools\nuget_mirror_bootstrap.ps1
+        }))
+    }
+
+    if ($EnableMediapipeSanity) {
+        $results.Add((Invoke-Step -Name "MediaPipe sidecar sanity" -Action {
+            & powershell -ExecutionPolicy Bypass -File .\tools\mediapipe_sidecar_sanity.ps1
         }))
     }
 
@@ -133,6 +148,9 @@ $lines.Add("SkipNativeBuild: $SkipNativeBuild")
 $lines.Add("EnableHostE2E: $EnableHostE2E")
 $lines.Add("EnableWinUiMinRepro: $EnableWinUiMinRepro")
 $lines.Add("EnableNuGetMirrorBootstrap: $EnableNuGetMirrorBootstrap")
+$lines.Add("EnableMediapipeSanity: $EnableMediapipeSanity")
+$lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
+$lines.Add("EnableXav2Parity: $EnableXav2Parity")
 $lines.Add("DurationSec: $durationSec")
 $lines.Add("")
 $lines.Add("Steps:")
@@ -148,6 +166,9 @@ $lines.Add("- build/reports/release_gate_dashboard.json")
 $lines.Add("- build/reports/host_e2e_gate_summary.txt")
 $lines.Add("- build/reports/winui_xaml_min_repro_summary.txt")
 $lines.Add("- build/reports/nuget_mirror_bootstrap_summary.txt")
+$lines.Add("- build/reports/mediapipe_sidecar_sanity_summary.txt")
+$lines.Add("- build/reports/xav2_compression_quality_gate_summary.txt")
+$lines.Add("- build/reports/xav2_parity_gate_summary.txt")
 
 $lines | Set-Content -Path $resolvedSummaryPath -Encoding UTF8
 Write-Host "[release-readiness] Summary: $resolvedSummaryPath"

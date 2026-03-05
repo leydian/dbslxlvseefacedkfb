@@ -70,5 +70,7 @@ Unknown section policy:
   - EditMode tests (`-runTests -testPlatform EditMode`)
   - export smoke (`Xav2CiSmoke` export path)
   - load smoke (`Xav2RuntimeLoader.TryLoad`, `runtime-ready`)
+  - compression quality gate (`xav2_compression_quality_gate.ps1`)
+  - unity/native parity gate (`xav2_parity_gate.ps1`)
 - Local reproduction:
   - `powershell -ExecutionPolicy Bypass -File .\tools\unity_xav2_validate.ps1 -UnityEditorPath "<Unity.exe>" -UnityProjectPath "<UnityProjectPath>" -ExpectedUnityVersion "2021.3.18f1"`
