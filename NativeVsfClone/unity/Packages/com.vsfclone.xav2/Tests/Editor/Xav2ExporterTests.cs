@@ -79,6 +79,61 @@ namespace VsfClone.Xav2.Editor.Tests
             }
         }
 
+        [Test]
+        public void Export_WithPhysicsSections_RoundTrips()
+        {
+            var payload = CreateCompressiblePayload();
+            payload.PhysicsColliders.Add(new Xav2PhysicsColliderPayload
+            {
+                Name = "col_0",
+                BonePath = "Root/Bone",
+                Shape = Xav2PhysicsColliderShape.Sphere,
+                Radius = 0.05f,
+                LocalDirection = new[] { 0.0f, 0.0f, 1.0f }
+            });
+            payload.SpringBones.Add(new Xav2SpringBonePayload
+            {
+                Name = "sp_0",
+                RootBonePath = "Root/Bone",
+                BonePaths = { "Root/Bone" },
+                ColliderRefs = { "col_0" },
+                Stiffness = 0.6f,
+                Drag = 0.2f
+            });
+            payload.PhysBones.Add(new Xav2PhysBonePayload
+            {
+                Name = "pb_0",
+                RootBonePath = "Root/Bone",
+                BonePaths = { "Root/Bone" },
+                ColliderRefs = { "col_0" },
+                Pull = 0.5f,
+                Spring = 0.7f
+            });
+
+            var path = Path.Combine(Path.GetTempPath(), $"xav2_export_physics_{Guid.NewGuid():N}.xav2");
+            try
+            {
+                Xav2Exporter.Export(path, payload, new Xav2ExportOptions
+                {
+                    EnableCompression = false
+                });
+
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var loaded, out var diagnostics);
+                Assert.That(ok, Is.True, diagnostics.ErrorMessage);
+                Assert.That(loaded.PhysicsColliders.Count, Is.EqualTo(1));
+                Assert.That(loaded.SpringBones.Count, Is.EqualTo(1));
+                Assert.That(loaded.PhysBones.Count, Is.EqualTo(1));
+                Assert.That(loaded.Manifest.physicsSource, Is.EqualTo("mixed"));
+            }
+            finally
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+
         private static Xav2AvatarPayload CreateCompressiblePayload()
         {
             var payload = new Xav2AvatarPayload();

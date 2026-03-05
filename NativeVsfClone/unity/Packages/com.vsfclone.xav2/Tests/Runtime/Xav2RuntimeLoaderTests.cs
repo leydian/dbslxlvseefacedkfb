@@ -549,6 +549,41 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_PhysicsSections_ParseAndWarnRuntimeUnavailable()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addPhysicsSections: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(payload.PhysicsColliders.Count, Is.EqualTo(1));
+                Assert.That(payload.SpringBones.Count, Is.EqualTo(1));
+                Assert.That(payload.PhysBones.Count, Is.EqualTo(1));
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_PHYSICS_COMPONENT_UNAVAILABLE"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_PhysicsColliderRefMissing_Warns()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addPhysicsSections: true, missingPhysicsColliderRef: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_PHYSICS_REF_MISSING"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_MissingRef_Strict_Fails()
         {
             var path = WriteTempFile(BuildValidXav2Bytes(missingTextureRef: true));
@@ -588,7 +623,9 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool compressMeshSection = false,
             bool corruptCompressedSection = false,
             bool truncateCompressedEnvelope = false,
-            ushort typedSchemaVersion = 3)
+            ushort typedSchemaVersion = 3,
+            bool addPhysicsSections = false,
+            bool missingPhysicsColliderRef = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -606,7 +643,11 @@ namespace VsfClone.Xav2.Runtime.Tests
                     : $"\"textureRefs\":[\"{textureRefName}\"],") +
                 "\"strictShaderSet\":[]," +
                 "\"hasSkinning\":false," +
-                "\"hasBlendShapes\":false" +
+                "\"hasBlendShapes\":false," +
+                "\"hasSpringBones\":" + (addPhysicsSections ? "true" : "false") + "," +
+                "\"hasPhysBones\":" + (addPhysicsSections ? "true" : "false") + "," +
+                "\"physicsSchemaVersion\":1," +
+                "\"physicsSource\":\"" + (addPhysicsSections ? "mixed" : "none") + "\"" +
                 "}";
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
 
@@ -678,6 +719,13 @@ namespace VsfClone.Xav2.Runtime.Tests
             if (addUnknownSection)
             {
                 WriteSection(bw, 0x77EE, new byte[] { 0xAA, 0xBB, 0xCC });
+            }
+
+            if (addPhysicsSections)
+            {
+                WriteSection(bw, 0x001A, BuildPhysicsColliderSection("col_0", "Root/Bone"));
+                WriteSection(bw, 0x0018, BuildSpringBoneSection("sp_0", "Root/Bone", missingPhysicsColliderRef ? "missing_col" : "col_0"));
+                WriteSection(bw, 0x0019, BuildPhysBoneSection("pb_0", "Root/Bone", missingPhysicsColliderRef ? "missing_col" : "col_0"));
             }
 
             return ms.ToArray();
@@ -859,6 +907,57 @@ namespace VsfClone.Xav2.Runtime.Tests
             {
                 bw.Write((i % 5) == 0 ? 1.0f : 0.0f);
             }
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildPhysicsColliderSection(string name, string bonePath)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, name);
+            WriteSizedString(bw, bonePath);
+            bw.Write((byte)0);
+            bw.Write(0.05f);
+            bw.Write(0.0f);
+            bw.Write(0.0f); bw.Write(0.0f); bw.Write(0.0f);
+            bw.Write(0.0f); bw.Write(0.0f); bw.Write(1.0f);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildSpringBoneSection(string name, string rootPath, string colliderRef)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, name);
+            WriteSizedString(bw, rootPath);
+            bw.Write((ushort)1);
+            WriteSizedString(bw, rootPath);
+            bw.Write(0.6f);
+            bw.Write(0.3f);
+            bw.Write(0.02f);
+            bw.Write(0.0f); bw.Write(-1.0f); bw.Write(0.0f);
+            bw.Write((ushort)1);
+            WriteSizedString(bw, colliderRef);
+            bw.Write((byte)1);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildPhysBoneSection(string name, string rootPath, string colliderRef)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, name);
+            WriteSizedString(bw, rootPath);
+            bw.Write((ushort)1);
+            WriteSizedString(bw, rootPath);
+            bw.Write(0.4f);
+            bw.Write(0.8f);
+            bw.Write(0.1f);
+            bw.Write(0.03f);
+            bw.Write(0.0f); bw.Write(-1.0f); bw.Write(0.0f);
+            bw.Write((ushort)1);
+            WriteSizedString(bw, colliderRef);
+            bw.Write((byte)1);
             return ms.ToArray();
         }
 

@@ -30,6 +30,9 @@ constexpr std::uint16_t kSectionBlendShapePayload = 0x0014U;
 constexpr std::uint16_t kSectionMaterialTypedParams = 0x0015U;
 constexpr std::uint16_t kSectionSkeletonPosePayload = 0x0016U;
 constexpr std::uint16_t kSectionSkeletonRigPayload = 0x0017U;
+constexpr std::uint16_t kSectionSpringBonePayload = 0x0018U;
+constexpr std::uint16_t kSectionPhysBonePayload = 0x0019U;
+constexpr std::uint16_t kSectionPhysicsColliderPayload = 0x001AU;
 constexpr std::uint16_t kSectionFlagPayloadCompressedLz4 = 0x0001U;
 constexpr std::uint16_t kSectionFlagKnownMask = kSectionFlagPayloadCompressedLz4;
 
@@ -695,6 +698,163 @@ bool ParseSkeletonRigPayloadSection(
     return cursor == end;
 }
 
+bool ReadStringList(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t* inout_offset,
+    std::size_t end,
+    std::vector<std::string>* out_values) {
+    if (inout_offset == nullptr || out_values == nullptr) {
+        return false;
+    }
+
+    const auto count = ReadU16Le(bytes, *inout_offset);
+    if (!count) {
+        return false;
+    }
+    *inout_offset += 2U;
+    out_values->clear();
+    out_values->reserve(*count);
+    for (std::size_t i = 0; i < *count; ++i) {
+        std::string value;
+        if (!ReadSizedString(bytes, inout_offset, end, &value)) {
+            return false;
+        }
+        out_values->push_back(std::move(value));
+    }
+    return true;
+}
+
+bool ReadVec3(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t* inout_offset,
+    std::size_t end,
+    float out_values[3]) {
+    if (inout_offset == nullptr || out_values == nullptr || *inout_offset + 12U > end) {
+        return false;
+    }
+    for (std::size_t i = 0; i < 3U; ++i) {
+        const auto bits = ReadU32Le(bytes, *inout_offset + i * 4U);
+        if (!bits) {
+            return false;
+        }
+        std::memcpy(&out_values[i], &(*bits), sizeof(float));
+    }
+    *inout_offset += 12U;
+    return true;
+}
+
+bool ParsePhysicsColliderPayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    PhysicsColliderPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->name) ||
+        !ReadSizedString(bytes, &cursor, end, &out_payload->bone_path) ||
+        cursor + 1U > end) {
+        return false;
+    }
+
+    const std::uint8_t shape_raw = bytes[cursor++];
+    out_payload->shape = static_cast<PhysicsColliderShape>(shape_raw);
+    const auto radius_bits = ReadU32Le(bytes, cursor);
+    const auto height_bits = ReadU32Le(bytes, cursor + 4U);
+    if (!radius_bits || !height_bits) {
+        return false;
+    }
+    std::memcpy(&out_payload->radius, &(*radius_bits), sizeof(float));
+    std::memcpy(&out_payload->height, &(*height_bits), sizeof(float));
+    cursor += 8U;
+
+    if (!ReadVec3(bytes, &cursor, end, out_payload->local_position) ||
+        !ReadVec3(bytes, &cursor, end, out_payload->local_direction)) {
+        return false;
+    }
+
+    return cursor == end;
+}
+
+bool ParseSpringBonePayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    SpringBonePayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->name) ||
+        !ReadSizedString(bytes, &cursor, end, &out_payload->root_bone_path) ||
+        !ReadStringList(bytes, &cursor, end, &out_payload->bone_paths)) {
+        return false;
+    }
+
+    const auto stiffness_bits = ReadU32Le(bytes, cursor);
+    const auto drag_bits = ReadU32Le(bytes, cursor + 4U);
+    const auto radius_bits = ReadU32Le(bytes, cursor + 8U);
+    if (!stiffness_bits || !drag_bits || !radius_bits) {
+        return false;
+    }
+    std::memcpy(&out_payload->stiffness, &(*stiffness_bits), sizeof(float));
+    std::memcpy(&out_payload->drag, &(*drag_bits), sizeof(float));
+    std::memcpy(&out_payload->radius, &(*radius_bits), sizeof(float));
+    cursor += 12U;
+
+    if (!ReadVec3(bytes, &cursor, end, out_payload->gravity) ||
+        !ReadStringList(bytes, &cursor, end, &out_payload->collider_refs) ||
+        cursor + 1U > end) {
+        return false;
+    }
+    out_payload->enabled = bytes[cursor++] != 0U;
+    return cursor == end;
+}
+
+bool ParsePhysBonePayloadSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    PhysBonePayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->name) ||
+        !ReadSizedString(bytes, &cursor, end, &out_payload->root_bone_path) ||
+        !ReadStringList(bytes, &cursor, end, &out_payload->bone_paths)) {
+        return false;
+    }
+
+    const auto pull_bits = ReadU32Le(bytes, cursor);
+    const auto spring_bits = ReadU32Le(bytes, cursor + 4U);
+    const auto immobile_bits = ReadU32Le(bytes, cursor + 8U);
+    const auto radius_bits = ReadU32Le(bytes, cursor + 12U);
+    if (!pull_bits || !spring_bits || !immobile_bits || !radius_bits) {
+        return false;
+    }
+    std::memcpy(&out_payload->pull, &(*pull_bits), sizeof(float));
+    std::memcpy(&out_payload->spring, &(*spring_bits), sizeof(float));
+    std::memcpy(&out_payload->immobile, &(*immobile_bits), sizeof(float));
+    std::memcpy(&out_payload->radius, &(*radius_bits), sizeof(float));
+    cursor += 16U;
+
+    if (!ReadVec3(bytes, &cursor, end, out_payload->gravity) ||
+        !ReadStringList(bytes, &cursor, end, &out_payload->collider_refs) ||
+        cursor + 1U > end) {
+        return false;
+    }
+    out_payload->enabled = bytes[cursor++] != 0U;
+    return cursor == end;
+}
+
 bool ParseMaterialTypedParamsSection(
     const std::vector<std::uint8_t>& bytes,
     std::size_t payload_offset,
@@ -1063,6 +1223,8 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         manifest_material_param_encoding = ToLower(*encoding);
     }
     const bool expects_blendshapes = ExtractBoolField(manifest, "hasBlendShapes").value_or(false);
+    const bool expects_springbones = ExtractBoolField(manifest, "hasSpringBones").value_or(false);
+    const bool expects_physbones = ExtractBoolField(manifest, "hasPhysBones").value_or(false);
 
     for (const std::string& mesh_ref : mesh_refs) {
         pkg.meshes.push_back({mesh_ref, 0U, 0U});
@@ -1081,6 +1243,9 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     std::unordered_map<std::string, SkeletonRenderPayload> skeleton_pose_sections;
     std::unordered_map<std::string, SkeletonRigPayload> skeleton_rig_sections;
     std::unordered_map<std::string, BlendShapeRenderPayload> blendshape_sections;
+    std::unordered_map<std::string, PhysicsColliderPayload> physics_collider_sections;
+    std::unordered_map<std::string, SpringBonePayload> springbone_sections;
+    std::unordered_map<std::string, PhysBonePayload> physbone_sections;
 
     std::size_t cursor = manifest_end;
     while (cursor < bytes.size()) {
@@ -1230,6 +1395,33 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             }
             blendshape_sections[NormalizeRefKey(blendshape_payload.mesh_name)] = std::move(blendshape_payload);
             ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionPhysicsColliderPayload) {
+            PhysicsColliderPayload collider_payload;
+            if (!ParsePhysicsColliderPayloadSection(section_payload, 0U, section_payload.size(), &collider_payload)) {
+                pkg.primary_error_code = "XAV2_PHYSICS_SCHEMA_INVALID";
+                PushWarning(&pkg, "E_PARSE: XAV2_PHYSICS_SCHEMA_INVALID: invalid physics collider payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            physics_collider_sections[NormalizeRefKey(collider_payload.name)] = std::move(collider_payload);
+            ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionSpringBonePayload) {
+            SpringBonePayload springbone_payload;
+            if (!ParseSpringBonePayloadSection(section_payload, 0U, section_payload.size(), &springbone_payload)) {
+                pkg.primary_error_code = "XAV2_PHYSICS_SCHEMA_INVALID";
+                PushWarning(&pkg, "E_PARSE: XAV2_PHYSICS_SCHEMA_INVALID: invalid springbone payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            springbone_sections[NormalizeRefKey(springbone_payload.name)] = std::move(springbone_payload);
+            ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionPhysBonePayload) {
+            PhysBonePayload physbone_payload;
+            if (!ParsePhysBonePayloadSection(section_payload, 0U, section_payload.size(), &physbone_payload)) {
+                pkg.primary_error_code = "XAV2_PHYSICS_SCHEMA_INVALID";
+                PushWarning(&pkg, "E_PARSE: XAV2_PHYSICS_SCHEMA_INVALID: invalid physbone payload section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            physbone_sections[NormalizeRefKey(physbone_payload.name)] = std::move(physbone_payload);
+            ++pkg.format_decoded_section_count;
         } else {
             ++pkg.format_unknown_section_count;
             if (unknown_section_policy == Xav2UnknownSectionPolicy::Warn) {
@@ -1337,6 +1529,16 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         pkg.texture_payloads.push_back(std::move(payload));
     }
 
+    for (const auto& [_, collider] : physics_collider_sections) {
+        pkg.physics_colliders.push_back(collider);
+    }
+    for (const auto& [_, springbone] : springbone_sections) {
+        pkg.springbone_payloads.push_back(springbone);
+    }
+    for (const auto& [_, physbone] : physbone_sections) {
+        pkg.physbone_payloads.push_back(physbone);
+    }
+
     std::unordered_set<std::string> texture_ref_keys;
     texture_ref_keys.reserve(texture_refs.size());
     for (const auto& tex_ref : texture_refs) {
@@ -1406,6 +1608,40 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             &pkg,
             "W_PAYLOAD: XAV2_BLENDSHAPE_PARTIAL: blendshape sections=" + std::to_string(blendshape_sections.size()) +
             ", mesh refs=" + std::to_string(mesh_refs.size()));
+    }
+    if (expects_springbones && springbone_sections.empty()) {
+        PushWarning(&pkg, "W_PAYLOAD: XAV2_PHYSICS_REF_MISSING: expected springbone payloads but none parsed.");
+    }
+    if (expects_physbones && physbone_sections.empty()) {
+        PushWarning(&pkg, "W_PAYLOAD: XAV2_PHYSICS_REF_MISSING: expected physbone payloads but none parsed.");
+    }
+    if (!springbone_sections.empty() || !physbone_sections.empty()) {
+        std::unordered_set<std::string> collider_keys;
+        collider_keys.reserve(physics_collider_sections.size());
+        for (const auto& [name_key, _] : physics_collider_sections) {
+            collider_keys.insert(name_key);
+        }
+
+        for (const auto& springbone : pkg.springbone_payloads) {
+            for (const auto& collider_ref : springbone.collider_refs) {
+                if (collider_keys.find(NormalizeRefKey(collider_ref)) == collider_keys.end()) {
+                    PushWarning(
+                        &pkg,
+                        "W_PAYLOAD: XAV2_PHYSICS_REF_MISSING: springBone=" + springbone.name + ", collider=" + collider_ref);
+                }
+            }
+        }
+        for (const auto& physbone : pkg.physbone_payloads) {
+            for (const auto& collider_ref : physbone.collider_refs) {
+                if (collider_keys.find(NormalizeRefKey(collider_ref)) == collider_keys.end()) {
+                    PushWarning(
+                        &pkg,
+                        "W_PAYLOAD: XAV2_PHYSICS_REF_MISSING: physBone=" + physbone.name + ", collider=" + collider_ref);
+                }
+            }
+        }
+        PushWarning(&pkg, "W_PAYLOAD: XAV2_PHYSICS_COMPONENT_UNAVAILABLE: runtime_simulation_not_implemented");
+        pkg.missing_features.push_back("XAV2 physics runtime simulation");
     }
     PushWarning(&pkg, "W_STAGE: payload");
 

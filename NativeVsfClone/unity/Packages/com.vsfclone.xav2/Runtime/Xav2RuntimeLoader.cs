@@ -17,6 +17,9 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionMaterialTypedParams = 0x0015;
         private const ushort SectionSkeletonPosePayload = 0x0016;
         private const ushort SectionSkeletonRigPayload = 0x0017;
+        private const ushort SectionSpringBonePayload = 0x0018;
+        private const ushort SectionPhysBonePayload = 0x0019;
+        private const ushort SectionPhysicsColliderPayload = 0x001A;
         private const ushort SectionFlagPayloadCompressedLz4 = 0x0001;
         private const ushort SectionFlagKnownMask = SectionFlagPayloadCompressedLz4;
 
@@ -290,6 +293,12 @@ namespace VsfClone.Xav2.Runtime
                     return TryParseSkeletonPose(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionSkeletonRigPayload:
                     return TryParseSkeletonRig(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
+                case SectionSpringBonePayload:
+                    return TryParseSpringBone(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
+                case SectionPhysBonePayload:
+                    return TryParsePhysBone(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
+                case SectionPhysicsColliderPayload:
+                    return TryParsePhysicsCollider(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 default:
                     return HandleUnknownSection(diagnostics, options, sectionType);
             }
@@ -945,12 +954,151 @@ namespace VsfClone.Xav2.Runtime
             return true;
         }
 
+        private static bool TryParsePhysicsCollider(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+            if (!TryReadSizedString(br, out var name) ||
+                !TryReadSizedString(br, out var bonePath) ||
+                !TryReadByte(br, out var shapeRaw) ||
+                !TryReadSingle(br, out var radius) ||
+                !TryReadSingle(br, out var height) ||
+                !TryReadVector3(br, out var localPosition) ||
+                !TryReadVector3(br, out var localDirection))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 physics collider section.");
+            }
+
+            if (ms.Position != ms.Length)
+            {
+                return AddWarningOrFail(
+                    diagnostics,
+                    options,
+                    $"XAV2_PHYSICS_SCHEMA_INVALID: collider={name}, issue=trailing-bytes");
+            }
+
+            payload.PhysicsColliders.Add(new Xav2PhysicsColliderPayload
+            {
+                Name = name,
+                BonePath = bonePath,
+                Shape = Enum.IsDefined(typeof(Xav2PhysicsColliderShape), (int)shapeRaw)
+                    ? (Xav2PhysicsColliderShape)shapeRaw
+                    : Xav2PhysicsColliderShape.Unknown,
+                Radius = radius,
+                Height = height,
+                LocalPosition = localPosition,
+                LocalDirection = localDirection
+            });
+            return true;
+        }
+
+        private static bool TryParseSpringBone(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+            if (!TryReadSizedString(br, out var name) ||
+                !TryReadSizedString(br, out var rootBonePath) ||
+                !TryReadStringList(br, out var bonePaths) ||
+                !TryReadSingle(br, out var stiffness) ||
+                !TryReadSingle(br, out var drag) ||
+                !TryReadSingle(br, out var radius) ||
+                !TryReadVector3(br, out var gravity) ||
+                !TryReadStringList(br, out var colliderRefs) ||
+                !TryReadByte(br, out var enabledByte))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 springbone section.");
+            }
+
+            if (ms.Position != ms.Length)
+            {
+                return AddWarningOrFail(
+                    diagnostics,
+                    options,
+                    $"XAV2_PHYSICS_SCHEMA_INVALID: springBone={name}, issue=trailing-bytes");
+            }
+
+            payload.SpringBones.Add(new Xav2SpringBonePayload
+            {
+                Name = name,
+                RootBonePath = rootBonePath,
+                BonePaths = bonePaths,
+                Stiffness = stiffness,
+                Drag = drag,
+                Radius = radius,
+                Gravity = gravity,
+                ColliderRefs = colliderRefs,
+                Enabled = enabledByte != 0
+            });
+            return true;
+        }
+
+        private static bool TryParsePhysBone(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+            if (!TryReadSizedString(br, out var name) ||
+                !TryReadSizedString(br, out var rootBonePath) ||
+                !TryReadStringList(br, out var bonePaths) ||
+                !TryReadSingle(br, out var pull) ||
+                !TryReadSingle(br, out var spring) ||
+                !TryReadSingle(br, out var immobile) ||
+                !TryReadSingle(br, out var radius) ||
+                !TryReadVector3(br, out var gravity) ||
+                !TryReadStringList(br, out var colliderRefs) ||
+                !TryReadByte(br, out var enabledByte))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 physbone section.");
+            }
+
+            if (ms.Position != ms.Length)
+            {
+                return AddWarningOrFail(
+                    diagnostics,
+                    options,
+                    $"XAV2_PHYSICS_SCHEMA_INVALID: physBone={name}, issue=trailing-bytes");
+            }
+
+            payload.PhysBones.Add(new Xav2PhysBonePayload
+            {
+                Name = name,
+                RootBonePath = rootBonePath,
+                BonePaths = bonePaths,
+                Pull = pull,
+                Spring = spring,
+                Immobile = immobile,
+                Radius = radius,
+                Gravity = gravity,
+                ColliderRefs = colliderRefs,
+                Enabled = enabledByte != 0
+            });
+            return true;
+        }
+
         private static void NormalizeManifest(Xav2Manifest manifest)
         {
             manifest.avatarId ??= string.Empty;
             manifest.displayName ??= string.Empty;
             manifest.sourceExt ??= ".vrm";
             manifest.exporterVersion ??= "0.3.0";
+            manifest.physicsSource ??= "none";
             manifest.meshRefs ??= new List<string>();
             manifest.materialRefs ??= new List<string>();
             manifest.textureRefs ??= new List<string>();
@@ -959,6 +1107,10 @@ namespace VsfClone.Xav2.Runtime
             if (manifest.schemaVersion == 0U)
             {
                 manifest.schemaVersion = 1U;
+            }
+            if (manifest.physicsSchemaVersion == 0U)
+            {
+                manifest.physicsSchemaVersion = 1U;
             }
         }
 
@@ -1077,6 +1229,66 @@ namespace VsfClone.Xav2.Runtime
                 }
                 diagnostics.IsPartial = true;
                 return true;
+            }
+
+            if (payload.SpringBones.Count > 0 || payload.PhysBones.Count > 0)
+            {
+                var colliderRefSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var collider in payload.PhysicsColliders)
+                {
+                    if (!string.IsNullOrWhiteSpace(collider.Name))
+                    {
+                        colliderRefSet.Add(NormalizeRefKey(collider.Name));
+                    }
+                }
+
+                foreach (var springBone in payload.SpringBones)
+                {
+                    foreach (var colliderRef in springBone.ColliderRefs)
+                    {
+                        if (string.IsNullOrWhiteSpace(colliderRef))
+                        {
+                            continue;
+                        }
+                        if (colliderRefSet.Contains(NormalizeRefKey(colliderRef)))
+                        {
+                            continue;
+                        }
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV2_PHYSICS_REF_MISSING: springBone={springBone.Name}, collider={colliderRef}"))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                foreach (var physBone in payload.PhysBones)
+                {
+                    foreach (var colliderRef in physBone.ColliderRefs)
+                    {
+                        if (string.IsNullOrWhiteSpace(colliderRef))
+                        {
+                            continue;
+                        }
+                        if (colliderRefSet.Contains(NormalizeRefKey(colliderRef)))
+                        {
+                            continue;
+                        }
+                        if (!AddWarningOrFail(
+                                diagnostics,
+                                options,
+                                $"XAV2_PHYSICS_REF_MISSING: physBone={physBone.Name}, collider={colliderRef}"))
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                AddSoftWarning(
+                    diagnostics,
+                    "XAV2_PHYSICS_COMPONENT_UNAVAILABLE: runtime_simulation_not_implemented");
             }
 
             if (formatVersion >= 3 && payload.Skins.Count > 0)
@@ -1234,6 +1446,17 @@ namespace VsfClone.Xav2.Runtime
             }
             diagnostics.Warnings.Add(warning);
             return true;
+        }
+
+        private static void AddSoftWarning(Xav2LoadDiagnostics diagnostics, string warning)
+        {
+            if (diagnostics == null || string.IsNullOrWhiteSpace(warning))
+            {
+                return;
+            }
+
+            AddWarningCode(diagnostics, warning);
+            diagnostics.Warnings.Add(warning);
         }
 
         private static void AddWarningCode(Xav2LoadDiagnostics diagnostics, string warning)
@@ -1411,6 +1634,39 @@ namespace VsfClone.Xav2.Runtime
                 return false;
             }
             value = br.ReadByte();
+            return true;
+        }
+
+        private static bool TryReadStringList(BinaryReader br, out List<string> values)
+        {
+            values = new List<string>();
+            if (!TryReadUInt16(br, out var count))
+            {
+                return false;
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                if (!TryReadSizedString(br, out var value))
+                {
+                    return false;
+                }
+                values.Add(value);
+            }
+            return true;
+        }
+
+        private static bool TryReadVector3(BinaryReader br, out float[] values)
+        {
+            values = new float[3];
+            if (!TryReadSingle(br, out values[0]) ||
+                !TryReadSingle(br, out values[1]) ||
+                !TryReadSingle(br, out values[2]))
+            {
+                values = Array.Empty<float>();
+                return false;
+            }
+
             return true;
         }
     }

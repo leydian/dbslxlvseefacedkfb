@@ -48,9 +48,11 @@ namespace VsfClone.Xav2.Runtime
     {
         public uint schemaVersion = 1U;
         public string exporterVersion = "0.3.0";
+        public uint physicsSchemaVersion = 1U;
         public string avatarId = string.Empty;
         public string displayName = string.Empty;
         public string sourceExt = ".vrm";
+        public string physicsSource = "none";
         public List<string> meshRefs = new List<string>();
         public List<string> materialRefs = new List<string>();
         public List<string> textureRefs = new List<string>();
@@ -58,6 +60,8 @@ namespace VsfClone.Xav2.Runtime
         public string materialParamEncoding = "legacy-json";
         public bool hasSkinning;
         public bool hasBlendShapes;
+        public bool hasSpringBones;
+        public bool hasPhysBones;
     }
 
     [Serializable]
@@ -160,6 +164,52 @@ namespace VsfClone.Xav2.Runtime
         public byte[] Bytes = Array.Empty<byte>();
     }
 
+    public enum Xav2PhysicsColliderShape : byte
+    {
+        Sphere = 0,
+        Capsule = 1,
+        Plane = 2,
+        Unknown = 255
+    }
+
+    public sealed class Xav2PhysicsColliderPayload
+    {
+        public string Name = string.Empty;
+        public string BonePath = string.Empty;
+        public Xav2PhysicsColliderShape Shape = Xav2PhysicsColliderShape.Unknown;
+        public float Radius;
+        public float Height;
+        public float[] LocalPosition = new float[3];
+        public float[] LocalDirection = new float[3];
+    }
+
+    public sealed class Xav2SpringBonePayload
+    {
+        public string Name = string.Empty;
+        public string RootBonePath = string.Empty;
+        public List<string> BonePaths = new List<string>();
+        public List<string> ColliderRefs = new List<string>();
+        public float Stiffness;
+        public float Drag;
+        public float Radius;
+        public float[] Gravity = new float[3];
+        public bool Enabled = true;
+    }
+
+    public sealed class Xav2PhysBonePayload
+    {
+        public string Name = string.Empty;
+        public string RootBonePath = string.Empty;
+        public List<string> BonePaths = new List<string>();
+        public List<string> ColliderRefs = new List<string>();
+        public float Pull;
+        public float Spring;
+        public float Immobile;
+        public float Radius;
+        public float[] Gravity = new float[3];
+        public bool Enabled = true;
+    }
+
     public sealed class Xav2AvatarPayload
     {
         public Xav2Manifest Manifest = new Xav2Manifest();
@@ -170,5 +220,8 @@ namespace VsfClone.Xav2.Runtime
         public List<Xav2SkeletonPayload> Skeletons = new List<Xav2SkeletonPayload>();
         public List<Xav2SkeletonRigPayload> SkeletonRigs = new List<Xav2SkeletonRigPayload>();
         public List<Xav2BlendShapePayload> BlendShapes = new List<Xav2BlendShapePayload>();
+        public List<Xav2PhysicsColliderPayload> PhysicsColliders = new List<Xav2PhysicsColliderPayload>();
+        public List<Xav2SpringBonePayload> SpringBones = new List<Xav2SpringBonePayload>();
+        public List<Xav2PhysBonePayload> PhysBones = new List<Xav2PhysBonePayload>();
     }
 }

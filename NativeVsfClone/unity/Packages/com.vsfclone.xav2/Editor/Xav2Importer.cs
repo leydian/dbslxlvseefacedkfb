@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using VsfClone.Xav2.Runtime;
@@ -381,6 +383,8 @@ namespace VsfClone.Xav2.Editor
                 report.RigQuality = (fullRigCount == skinnedMeshCount) ? "Full" : "Partial";
             }
 
+            ApplyPhysicsComponents(root, payload, report);
+
             return root;
         }
 
@@ -616,6 +620,417 @@ namespace VsfClone.Xav2.Editor
             }
 
             return null;
+        }
+
+        private static void ApplyPhysicsComponents(GameObject root, Xav2AvatarPayload payload, Xav2ImportReport report)
+        {
+            if (root == null || payload == null)
+            {
+                return;
+            }
+
+            var pathMap = BuildPathMap(root.transform);
+            var colliderComponentByName = new Dictionary<string, Component>(StringComparer.OrdinalIgnoreCase);
+            var unavailableTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (var i = 0; i < payload.PhysicsColliders.Count; i++)
+            {
+                var src = payload.PhysicsColliders[i];
+                var target = ResolvePath(pathMap, src.BonePath) ?? root.transform;
+                var colliderType = ResolveFirstType("VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBoneCollider", "VRMSpringBoneColliderGroup", "VRMSpringBoneCollider");
+                if (colliderType == null)
+                {
+                    if (unavailableTypes.Add("Collider"))
+                    {
+                        report.Warnings.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE: collider-type-not-found");
+                        report.WarningCodes.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE");
+                    }
+                    continue;
+                }
+
+                try
+                {
+                    var component = target.gameObject.AddComponent(colliderType);
+                    SetMemberValue(component, src.Radius, "radius", "Radius");
+                    SetMemberValue(component, src.Height, "height", "Height");
+                    colliderComponentByName[src.Name] = component;
+                }
+                catch (Exception ex)
+                {
+                    report.Warnings.Add($"XAV2_PHYSICS_COMPONENT_UNAVAILABLE: collider={src.Name}, error={ex.Message}");
+                    report.WarningCodes.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE");
+                }
+            }
+
+            for (var i = 0; i < payload.SpringBones.Count; i++)
+            {
+                ApplySpringBoneComponent(root.transform, payload.SpringBones[i], colliderComponentByName, pathMap, report, unavailableTypes);
+            }
+
+            for (var i = 0; i < payload.PhysBones.Count; i++)
+            {
+                ApplyPhysBoneComponent(root.transform, payload.PhysBones[i], colliderComponentByName, pathMap, report, unavailableTypes);
+            }
+        }
+
+        private static void ApplySpringBoneComponent(
+            Transform root,
+            Xav2SpringBonePayload src,
+            IReadOnlyDictionary<string, Component> colliderByName,
+            IReadOnlyDictionary<string, Transform> pathMap,
+            Xav2ImportReport report,
+            ISet<string> unavailableTypes)
+        {
+            var springType = ResolveFirstType("VRMSpringBone", "UniGLTF.SpringBone");
+            if (springType == null)
+            {
+                if (unavailableTypes.Add("SpringBone"))
+                {
+                    report.Warnings.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE: springbone-type-not-found");
+                    report.WarningCodes.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE");
+                }
+                return;
+            }
+
+            try
+            {
+                var target = ResolvePath(pathMap, src.RootBonePath) ?? root;
+                var component = target.gameObject.AddComponent(springType);
+                SetMemberValue(component, src.Stiffness, "stiffness", "stiffnessForce", "Stiffness");
+                SetMemberValue(component, src.Drag, "drag", "dragForce", "Drag");
+                SetMemberValue(component, src.Radius, "radius", "hitRadius", "Radius");
+                SetMemberValue(component, ToVector3(src.Gravity), "gravity", "gravityDir", "GravityDir");
+                SetMemberValue(component, target, "rootBone", "Root", "RootBone");
+                SetMemberValue(component, src.Enabled, "enabled", "Enabled");
+                SetMemberList(component, ResolveColliderList(src.ColliderRefs, colliderByName), "colliders", "Colliders", "colliderGroups");
+            }
+            catch (Exception ex)
+            {
+                report.Warnings.Add($"XAV2_PHYSICS_COMPONENT_UNAVAILABLE: springBone={src.Name}, error={ex.Message}");
+                report.WarningCodes.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE");
+            }
+        }
+
+        private static void ApplyPhysBoneComponent(
+            Transform root,
+            Xav2PhysBonePayload src,
+            IReadOnlyDictionary<string, Component> colliderByName,
+            IReadOnlyDictionary<string, Transform> pathMap,
+            Xav2ImportReport report,
+            ISet<string> unavailableTypes)
+        {
+            var physType = ResolveFirstType("VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBone", "VRCPhysBone");
+            if (physType == null)
+            {
+                if (unavailableTypes.Add("PhysBone"))
+                {
+                    report.Warnings.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE: physbone-type-not-found");
+                    report.WarningCodes.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE");
+                }
+                return;
+            }
+
+            try
+            {
+                var target = ResolvePath(pathMap, src.RootBonePath) ?? root;
+                var component = target.gameObject.AddComponent(physType);
+                SetMemberValue(component, target, "rootTransform", "RootTransform", "root");
+                SetMemberValue(component, src.Pull, "pull", "Pull");
+                SetMemberValue(component, src.Spring, "spring", "Spring");
+                SetMemberValue(component, src.Immobile, "immobile", "Immobile");
+                SetMemberValue(component, src.Radius, "radius", "Radius");
+                SetMemberValue(component, ToVector3(src.Gravity), "gravity", "Gravity");
+                SetMemberValue(component, src.Enabled, "enabled", "Enabled");
+                SetMemberList(component, ResolveColliderList(src.ColliderRefs, colliderByName), "colliders", "Colliders");
+            }
+            catch (Exception ex)
+            {
+                report.Warnings.Add($"XAV2_PHYSICS_COMPONENT_UNAVAILABLE: physBone={src.Name}, error={ex.Message}");
+                report.WarningCodes.Add("XAV2_PHYSICS_COMPONENT_UNAVAILABLE");
+            }
+        }
+
+        private static List<object> ResolveColliderList(
+            IReadOnlyList<string> colliderRefs,
+            IReadOnlyDictionary<string, Component> colliderByName)
+        {
+            var list = new List<object>();
+            if (colliderRefs == null || colliderByName == null)
+            {
+                return list;
+            }
+
+            for (var i = 0; i < colliderRefs.Count; i++)
+            {
+                var key = colliderRefs[i] ?? string.Empty;
+                if (colliderByName.TryGetValue(key, out var comp) && comp != null)
+                {
+                    list.Add(comp);
+                }
+            }
+            return list;
+        }
+
+        private static Dictionary<string, Transform> BuildPathMap(Transform root)
+        {
+            var map = new Dictionary<string, Transform>(StringComparer.OrdinalIgnoreCase);
+            if (root == null)
+            {
+                return map;
+            }
+
+            map["."] = root;
+            var all = root.GetComponentsInChildren<Transform>(true);
+            for (var i = 0; i < all.Length; i++)
+            {
+                var t = all[i];
+                if (t == null)
+                {
+                    continue;
+                }
+
+                map[GetRelativePath(root, t)] = t;
+            }
+            return map;
+        }
+
+        private static Transform ResolvePath(IReadOnlyDictionary<string, Transform> pathMap, string path)
+        {
+            if (pathMap == null)
+            {
+                return null;
+            }
+
+            if (pathMap.TryGetValue(path ?? string.Empty, out var t))
+            {
+                return t;
+            }
+            return null;
+        }
+
+        private static string GetRelativePath(Transform root, Transform target)
+        {
+            if (root == null || target == null)
+            {
+                return string.Empty;
+            }
+            if (root == target)
+            {
+                return ".";
+            }
+
+            var stack = new Stack<string>();
+            var cursor = target;
+            while (cursor != null && cursor != root)
+            {
+                stack.Push(cursor.name);
+                cursor = cursor.parent;
+            }
+            if (cursor != root)
+            {
+                return target.name;
+            }
+            return string.Join("/", stack.ToArray());
+        }
+
+        private static Type ResolveFirstType(params string[] fullNames)
+        {
+            if (fullNames == null || fullNames.Length == 0)
+            {
+                return null;
+            }
+
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (var i = 0; i < fullNames.Length; i++)
+            {
+                var fullName = fullNames[i];
+                if (string.IsNullOrWhiteSpace(fullName))
+                {
+                    continue;
+                }
+
+                var type = Type.GetType(fullName, false);
+                if (type != null)
+                {
+                    return type;
+                }
+
+                for (var j = 0; j < assemblies.Length; j++)
+                {
+                    type = assemblies[j].GetType(fullName, false);
+                    if (type != null)
+                    {
+                        return type;
+                    }
+                    try
+                    {
+                        var shortMatch = Array.Find(
+                            assemblies[j].GetTypes(),
+                            t => string.Equals(t.Name, fullName, StringComparison.Ordinal));
+                        if (shortMatch != null)
+                        {
+                            return shortMatch;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static void SetMemberList(object target, List<object> values, params string[] names)
+        {
+            if (target == null || names == null || names.Length == 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < names.Length; i++)
+            {
+                var name = names[i];
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                var type = target.GetType();
+                var field = type.GetField(name, flags);
+                if (field != null)
+                {
+                    TryAssignCollection(field.FieldType, target, field, null, values);
+                    return;
+                }
+
+                var prop = type.GetProperty(name, flags);
+                if (prop != null && prop.CanWrite)
+                {
+                    TryAssignCollection(prop.PropertyType, target, null, prop, values);
+                    return;
+                }
+            }
+        }
+
+        private static void TryAssignCollection(Type collectionType, object target, FieldInfo field, PropertyInfo prop, List<object> values)
+        {
+            try
+            {
+                if (!typeof(IEnumerable).IsAssignableFrom(collectionType))
+                {
+                    return;
+                }
+
+                var itemType = typeof(object);
+                if (collectionType.IsArray)
+                {
+                    itemType = collectionType.GetElementType() ?? typeof(object);
+                    var arr = Array.CreateInstance(itemType, values.Count);
+                    for (var i = 0; i < values.Count; i++)
+                    {
+                        if (values[i] != null && itemType.IsInstanceOfType(values[i]))
+                        {
+                            arr.SetValue(values[i], i);
+                        }
+                    }
+                    if (field != null) field.SetValue(target, arr);
+                    if (prop != null) prop.SetValue(target, arr, null);
+                    return;
+                }
+
+                if (collectionType.IsGenericType)
+                {
+                    itemType = collectionType.GetGenericArguments()[0];
+                }
+
+                var listType = typeof(List<>).MakeGenericType(itemType);
+                var list = (IList)Activator.CreateInstance(listType);
+                for (var i = 0; i < values.Count; i++)
+                {
+                    if (values[i] != null && itemType.IsInstanceOfType(values[i]))
+                    {
+                        list.Add(values[i]);
+                    }
+                }
+
+                if (field != null) field.SetValue(target, list);
+                if (prop != null) prop.SetValue(target, list, null);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void SetMemberValue(object target, object value, params string[] names)
+        {
+            if (target == null || names == null || names.Length == 0)
+            {
+                return;
+            }
+
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var type = target.GetType();
+            for (var i = 0; i < names.Length; i++)
+            {
+                var name = names[i];
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                var field = type.GetField(name, flags);
+                if (field != null)
+                {
+                    TrySetValue(target, field.FieldType, field, null, value);
+                    return;
+                }
+
+                var prop = type.GetProperty(name, flags);
+                if (prop != null && prop.CanWrite)
+                {
+                    TrySetValue(target, prop.PropertyType, null, prop, value);
+                    return;
+                }
+            }
+        }
+
+        private static void TrySetValue(object target, Type memberType, FieldInfo field, PropertyInfo prop, object value)
+        {
+            try
+            {
+                if (value == null)
+                {
+                    return;
+                }
+
+                object converted = value;
+                if (!memberType.IsInstanceOfType(value))
+                {
+                    converted = Convert.ChangeType(value, memberType);
+                }
+
+                if (field != null)
+                {
+                    field.SetValue(target, converted);
+                }
+                else if (prop != null)
+                {
+                    prop.SetValue(target, converted, null);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static Vector3 ToVector3(float[] values)
+        {
+            return new Vector3(
+                values != null && values.Length > 0 ? values[0] : 0.0f,
+                values != null && values.Length > 1 ? values[1] : 0.0f,
+                values != null && values.Length > 2 ? values[2] : 0.0f);
         }
 
         private static Mesh BuildMesh(Xav2MeshPayload src, string meshName, Xav2ImportReport report)

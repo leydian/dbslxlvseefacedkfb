@@ -30,6 +30,10 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 - `exporterVersion`: string
 - `hasSkinning`: bool
 - `hasBlendShapes`: bool
+- `physicsSchemaVersion`: uint (`1`)
+- `physicsSource`: string (`none|vrm|vrc|mixed`)
+- `hasSpringBones`: bool
+- `hasPhysBones`: bool
 
 ## TLV Section Header
 
@@ -60,6 +64,9 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `0x0015` Material typed params (v2)
 - `0x0016` Skeleton pose payload (v3)
 - `0x0017` Skeleton rig payload (v4)
+- `0x0018` SpringBone typed payload
+- `0x0019` PhysBone typed payload
+- `0x001A` Physics collider typed payload
 
 ### `0x0011` Mesh render payload
 
@@ -183,6 +190,35 @@ Notes:
 
 - For v4 skinning payloads (`0x0013` present), matching `0x0017` rig payload is expected.
 - Missing rig for skinned mesh is reported as `XAV4_RIG_MISSING` (or strict-fail under strict validation).
+
+### `0x0018` SpringBone typed payload
+
+- `name_len[2]`, `name[name_len]`
+- `root_bone_path_len[2]`, `root_bone_path[root_bone_path_len]`
+- `bone_path_count[2]` + repeated sized string
+- `stiffness[4]`, `drag[4]`, `radius[4]` (`float32`)
+- `gravity_xyz[12]` (`float32 x,y,z`)
+- `collider_ref_count[2]` + repeated sized string
+- `enabled[1]` (`0|1`)
+
+### `0x0019` PhysBone typed payload
+
+- `name_len[2]`, `name[name_len]`
+- `root_bone_path_len[2]`, `root_bone_path[root_bone_path_len]`
+- `bone_path_count[2]` + repeated sized string
+- `pull[4]`, `spring[4]`, `immobile[4]`, `radius[4]` (`float32`)
+- `gravity_xyz[12]` (`float32 x,y,z`)
+- `collider_ref_count[2]` + repeated sized string
+- `enabled[1]` (`0|1`)
+
+### `0x001A` Physics collider typed payload
+
+- `name_len[2]`, `name[name_len]`
+- `bone_path_len[2]`, `bone_path[bone_path_len]`
+- `shape[1]` (`0=sphere,1=capsule,2=plane,255=unknown`)
+- `radius[4]`, `height[4]` (`float32`)
+- `local_position_xyz[12]` (`float32 x,y,z`)
+- `local_direction_xyz[12]` (`float32 x,y,z`)
 
 ## Loader behavior in this repository
 

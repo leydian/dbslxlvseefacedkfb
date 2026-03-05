@@ -148,6 +148,48 @@ struct SpringBoneSummary {
     std::uint32_t collider_group_count = 0;
 };
 
+enum class PhysicsColliderShape : std::uint8_t {
+    Sphere = 0,
+    Capsule = 1,
+    Plane = 2,
+    Unknown = 255,
+};
+
+struct PhysicsColliderPayload {
+    std::string name;
+    std::string bone_path;
+    PhysicsColliderShape shape = PhysicsColliderShape::Unknown;
+    float radius = 0.0f;
+    float height = 0.0f;
+    float local_position[3] = {0.0f, 0.0f, 0.0f};
+    float local_direction[3] = {0.0f, 0.0f, 1.0f};
+};
+
+struct SpringBonePayload {
+    std::string name;
+    std::string root_bone_path;
+    std::vector<std::string> bone_paths;
+    float stiffness = 0.0f;
+    float drag = 0.0f;
+    float radius = 0.0f;
+    float gravity[3] = {0.0f, 0.0f, 0.0f};
+    std::vector<std::string> collider_refs;
+    bool enabled = true;
+};
+
+struct PhysBonePayload {
+    std::string name;
+    std::string root_bone_path;
+    std::vector<std::string> bone_paths;
+    float pull = 0.0f;
+    float spring = 0.0f;
+    float immobile = 0.0f;
+    float radius = 0.0f;
+    float gravity[3] = {0.0f, 0.0f, 0.0f};
+    std::vector<std::string> collider_refs;
+    bool enabled = true;
+};
+
 enum class HumanoidBoneId : std::uint32_t {
     Unknown = 0,
     Hips = 1,
@@ -190,6 +232,9 @@ struct AvatarPackage {
     std::vector<TextureRenderPayload> texture_payloads;
     std::vector<ExpressionState> expressions;
     SpringBoneSummary springbone_summary;
+    std::vector<PhysicsColliderPayload> physics_colliders;
+    std::vector<SpringBonePayload> springbone_payloads;
+    std::vector<PhysBonePayload> physbone_payloads;
     std::string last_expression_summary;
     std::uint32_t last_render_draw_calls = 0;
     std::uint32_t format_section_count = 0;

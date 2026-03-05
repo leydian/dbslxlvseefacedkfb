@@ -20,6 +20,9 @@ namespace VsfClone.Xav2.Editor
         private const ushort SectionMaterialTypedParams = 0x0015;
         private const ushort SectionSkeletonPosePayload = 0x0016;
         private const ushort SectionSkeletonRigPayload = 0x0017;
+        private const ushort SectionSpringBonePayload = 0x0018;
+        private const ushort SectionPhysBonePayload = 0x0019;
+        private const ushort SectionPhysicsColliderPayload = 0x001A;
         private const ushort SectionFlagPayloadCompressedLz4 = 0x0001;
 
         public static void Export(string outputPath, GameObject avatarRoot, Xav2ExportOptions options)
@@ -92,6 +95,18 @@ namespace VsfClone.Xav2.Editor
             {
                 WriteSection(bw, SectionBlendShapePayload, BuildBlendShapePayload(blendShape), options);
             }
+            foreach (var collider in payload.PhysicsColliders)
+            {
+                WriteSection(bw, SectionPhysicsColliderPayload, BuildPhysicsColliderPayload(collider), options);
+            }
+            foreach (var springBone in payload.SpringBones)
+            {
+                WriteSection(bw, SectionSpringBonePayload, BuildSpringBonePayload(springBone), options);
+            }
+            foreach (var physBone in payload.PhysBones)
+            {
+                WriteSection(bw, SectionPhysBonePayload, BuildPhysBonePayload(physBone), options);
+            }
         }
 
         private static void EnsureManifestDefaults(Xav2AvatarPayload payload, Xav2ExportOptions options)
@@ -148,6 +163,10 @@ namespace VsfClone.Xav2.Editor
 
             payload.Manifest.hasSkinning = payload.Skins.Count > 0;
             payload.Manifest.hasBlendShapes = payload.BlendShapes.Count > 0;
+            payload.Manifest.hasSpringBones = payload.SpringBones.Count > 0;
+            payload.Manifest.hasPhysBones = payload.PhysBones.Count > 0;
+            payload.Manifest.physicsSchemaVersion = payload.Manifest.physicsSchemaVersion == 0U ? 1U : payload.Manifest.physicsSchemaVersion;
+            payload.Manifest.physicsSource = ResolvePhysicsSource(payload);
             payload.Manifest.strictShaderSet = new List<string>(options.StrictShaderSet ?? new List<string>());
             payload.Manifest.materialParamEncoding =
                 payload.Materials.Exists(m => m.MaterialParamEncoding == "typed-v3" ||
@@ -157,6 +176,25 @@ namespace VsfClone.Xav2.Editor
                                               m.TypedTextureParams.Count > 0)
                     ? "typed-v3"
                     : "legacy-json";
+        }
+
+        private static string ResolvePhysicsSource(Xav2AvatarPayload payload)
+        {
+            var hasSpring = payload.SpringBones != null && payload.SpringBones.Count > 0;
+            var hasPhys = payload.PhysBones != null && payload.PhysBones.Count > 0;
+            if (hasSpring && hasPhys)
+            {
+                return "mixed";
+            }
+            if (hasPhys)
+            {
+                return "vrc";
+            }
+            if (hasSpring)
+            {
+                return "vrm";
+            }
+            return "none";
         }
 
         private static void ValidateShaderPolicy(Xav2AvatarPayload payload, Xav2ExportOptions options)
@@ -480,6 +518,53 @@ namespace VsfClone.Xav2.Editor
             return ms.ToArray();
         }
 
+        private static byte[] BuildPhysicsColliderPayload(Xav2PhysicsColliderPayload collider)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, collider?.Name ?? string.Empty);
+            WriteSizedString(bw, collider?.BonePath ?? string.Empty);
+            bw.Write((byte)(collider?.Shape ?? Xav2PhysicsColliderShape.Unknown));
+            bw.Write(collider?.Radius ?? 0.0f);
+            bw.Write(collider?.Height ?? 0.0f);
+            WriteVector3(bw, collider?.LocalPosition);
+            WriteVector3(bw, collider?.LocalDirection);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildSpringBonePayload(Xav2SpringBonePayload springBone)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, springBone?.Name ?? string.Empty);
+            WriteSizedString(bw, springBone?.RootBonePath ?? string.Empty);
+            WriteStringList(bw, springBone?.BonePaths);
+            bw.Write(springBone?.Stiffness ?? 0.0f);
+            bw.Write(springBone?.Drag ?? 0.0f);
+            bw.Write(springBone?.Radius ?? 0.0f);
+            WriteVector3(bw, springBone?.Gravity);
+            WriteStringList(bw, springBone?.ColliderRefs);
+            bw.Write((byte)((springBone == null || springBone.Enabled) ? 1 : 0));
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildPhysBonePayload(Xav2PhysBonePayload physBone)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, physBone?.Name ?? string.Empty);
+            WriteSizedString(bw, physBone?.RootBonePath ?? string.Empty);
+            WriteStringList(bw, physBone?.BonePaths);
+            bw.Write(physBone?.Pull ?? 0.0f);
+            bw.Write(physBone?.Spring ?? 0.0f);
+            bw.Write(physBone?.Immobile ?? 0.0f);
+            bw.Write(physBone?.Radius ?? 0.0f);
+            WriteVector3(bw, physBone?.Gravity);
+            WriteStringList(bw, physBone?.ColliderRefs);
+            bw.Write((byte)((physBone == null || physBone.Enabled) ? 1 : 0));
+            return ms.ToArray();
+        }
+
         private static void WriteSection(BinaryWriter bw, ushort type, byte[] payload, Xav2ExportOptions options)
         {
             var flags = (ushort)0;
@@ -543,6 +628,28 @@ namespace VsfClone.Xav2.Editor
             }
             bw.Write((ushort)bytes.Length);
             bw.Write(bytes);
+        }
+
+        private static void WriteStringList(BinaryWriter bw, IList<string> values)
+        {
+            var list = values ?? Array.Empty<string>();
+            if (list.Count > ushort.MaxValue)
+            {
+                throw new InvalidOperationException("String list too long for XAV2 physics payload.");
+            }
+
+            bw.Write((ushort)list.Count);
+            for (var i = 0; i < list.Count; i++)
+            {
+                WriteSizedString(bw, list[i] ?? string.Empty);
+            }
+        }
+
+        private static void WriteVector3(BinaryWriter bw, float[] values)
+        {
+            bw.Write((values != null && values.Length > 0) ? values[0] : 0.0f);
+            bw.Write((values != null && values.Length > 1) ? values[1] : 0.0f);
+            bw.Write((values != null && values.Length > 2) ? values[2] : 0.0f);
         }
     }
 }

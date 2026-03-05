@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -95,10 +97,34 @@ namespace VsfClone.Xav2.Editor
                 }
             }
 
+            ExtractPhysicsMetadata(avatarRoot.transform, payload);
             payload.Manifest.hasSkinning = payload.Skins.Count > 0;
             payload.Manifest.hasBlendShapes = payload.BlendShapes.Count > 0;
+            payload.Manifest.hasSpringBones = payload.SpringBones.Count > 0;
+            payload.Manifest.hasPhysBones = payload.PhysBones.Count > 0;
+            payload.Manifest.physicsSchemaVersion = 1U;
+            payload.Manifest.physicsSource = ResolvePhysicsSource(payload);
             payload.Manifest.strictShaderSet = new List<string>(options?.StrictShaderSet ?? new List<string>());
             return payload;
+        }
+
+        private static string ResolvePhysicsSource(Xav2AvatarPayload payload)
+        {
+            var hasSpring = payload.SpringBones.Count > 0;
+            var hasPhys = payload.PhysBones.Count > 0;
+            if (hasSpring && hasPhys)
+            {
+                return "mixed";
+            }
+            if (hasPhys)
+            {
+                return "vrc";
+            }
+            if (hasSpring)
+            {
+                return "vrm";
+            }
+            return "none";
         }
 
         private static Xav2SkinPayload BuildSkinPayload(string meshName, Mesh mesh, SkinnedMeshRenderer smr)
@@ -251,6 +277,395 @@ namespace VsfClone.Xav2.Editor
                 }
             }
             return payload;
+        }
+
+        private static void ExtractPhysicsMetadata(Transform root, Xav2AvatarPayload payload)
+        {
+            if (root == null || payload == null)
+            {
+                return;
+            }
+
+            var colliderNameByInstance = new Dictionary<int, string>();
+            var components = root.GetComponentsInChildren<Component>(true);
+            foreach (var component in components)
+            {
+                if (component == null)
+                {
+                    continue;
+                }
+
+                var typeName = component.GetType().Name;
+                if (!IsPhysicsColliderType(typeName))
+                {
+                    continue;
+                }
+
+                var collider = ExtractColliderPayload(component, root);
+                if (collider == null)
+                {
+                    continue;
+                }
+
+                payload.PhysicsColliders.Add(collider);
+                colliderNameByInstance[component.GetInstanceID()] = collider.Name;
+            }
+
+            foreach (var component in components)
+            {
+                if (component == null)
+                {
+                    continue;
+                }
+
+                var typeName = component.GetType().Name;
+                if (IsPhysBoneType(typeName))
+                {
+                    var phys = ExtractPhysBonePayload(component, root, colliderNameByInstance);
+                    if (phys != null)
+                    {
+                        payload.PhysBones.Add(phys);
+                    }
+                }
+                else if (IsSpringBoneType(typeName))
+                {
+                    var spring = ExtractSpringBonePayload(component, root, colliderNameByInstance);
+                    if (spring != null)
+                    {
+                        payload.SpringBones.Add(spring);
+                    }
+                }
+            }
+        }
+
+        private static bool IsPhysBoneType(string typeName)
+        {
+            return !string.IsNullOrWhiteSpace(typeName) &&
+                   typeName.IndexOf("PhysBone", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   typeName.IndexOf("Collider", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        private static bool IsSpringBoneType(string typeName)
+        {
+            return !string.IsNullOrWhiteSpace(typeName) &&
+                   typeName.IndexOf("SpringBone", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   typeName.IndexOf("Collider", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        private static bool IsPhysicsColliderType(string typeName)
+        {
+            return !string.IsNullOrWhiteSpace(typeName) &&
+                   typeName.IndexOf("Collider", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   (typeName.IndexOf("PhysBone", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    typeName.IndexOf("SpringBone", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static Xav2PhysicsColliderPayload ExtractColliderPayload(Component component, Transform root)
+        {
+            if (component == null || root == null)
+            {
+                return null;
+            }
+
+            var transform = component.transform;
+            var payload = new Xav2PhysicsColliderPayload
+            {
+                Name = string.IsNullOrWhiteSpace(transform.name)
+                    ? $"{component.GetType().Name}_{component.GetInstanceID()}"
+                    : transform.name,
+                BonePath = GetRelativePath(root, transform),
+                Radius = GetFloatMember(component, "radius", "Radius", "_radius"),
+                Height = GetFloatMember(component, "height", "Height", "_height"),
+                LocalPosition = new[] { transform.localPosition.x, transform.localPosition.y, transform.localPosition.z },
+                LocalDirection = GetDirectionMember(component)
+            };
+
+            var typeName = component.GetType().Name;
+            if (typeName.IndexOf("Sphere", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                payload.Shape = Xav2PhysicsColliderShape.Sphere;
+            }
+            else if (typeName.IndexOf("Capsule", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                payload.Shape = Xav2PhysicsColliderShape.Capsule;
+            }
+            else if (typeName.IndexOf("Plane", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                payload.Shape = Xav2PhysicsColliderShape.Plane;
+            }
+            else
+            {
+                payload.Shape = Xav2PhysicsColliderShape.Unknown;
+            }
+
+            return payload;
+        }
+
+        private static Xav2SpringBonePayload ExtractSpringBonePayload(
+            Component component,
+            Transform root,
+            IReadOnlyDictionary<int, string> colliderNameByInstance)
+        {
+            var rootBone = GetTransformMember(component, "rootBone", "Root", "RootBone");
+            var bones = GetTransformListMember(component, "joints", "Bones", "bones");
+            if (rootBone != null && bones.Count == 0)
+            {
+                bones.Add(rootBone);
+            }
+
+            return new Xav2SpringBonePayload
+            {
+                Name = component.GetType().Name + "_" + component.GetInstanceID(),
+                RootBonePath = GetRelativePath(root, rootBone ?? component.transform),
+                BonePaths = ResolveBonePaths(root, bones),
+                Stiffness = GetFloatMember(component, "stiffnessForce", "stiffness", "Stiffness"),
+                Drag = GetFloatMember(component, "dragForce", "drag", "Drag"),
+                Radius = GetFloatMember(component, "hitRadius", "radius", "Radius"),
+                Gravity = GetVector3Member(component, "gravityDir", "gravity", "GravityDir"),
+                ColliderRefs = GetColliderRefs(component, colliderNameByInstance),
+                Enabled = component.enabled
+            };
+        }
+
+        private static Xav2PhysBonePayload ExtractPhysBonePayload(
+            Component component,
+            Transform root,
+            IReadOnlyDictionary<int, string> colliderNameByInstance)
+        {
+            var rootBone = GetTransformMember(component, "rootTransform", "RootTransform", "root");
+            var bones = GetTransformListMember(component, "bones", "Bones");
+            if (rootBone != null && bones.Count == 0)
+            {
+                bones.Add(rootBone);
+            }
+
+            return new Xav2PhysBonePayload
+            {
+                Name = component.GetType().Name + "_" + component.GetInstanceID(),
+                RootBonePath = GetRelativePath(root, rootBone ?? component.transform),
+                BonePaths = ResolveBonePaths(root, bones),
+                Pull = GetFloatMember(component, "pull", "Pull"),
+                Spring = GetFloatMember(component, "spring", "Spring"),
+                Immobile = GetFloatMember(component, "immobile", "Immobile"),
+                Radius = GetFloatMember(component, "radius", "Radius"),
+                Gravity = GetVector3Member(component, "gravity", "Gravity"),
+                ColliderRefs = GetColliderRefs(component, colliderNameByInstance),
+                Enabled = component.enabled
+            };
+        }
+
+        private static List<string> ResolveBonePaths(Transform root, IReadOnlyList<Transform> bones)
+        {
+            var result = new List<string>();
+            if (root == null || bones == null)
+            {
+                return result;
+            }
+
+            for (var i = 0; i < bones.Count; i++)
+            {
+                var bone = bones[i];
+                if (bone == null)
+                {
+                    continue;
+                }
+
+                var path = GetRelativePath(root, bone);
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    result.Add(path);
+                }
+            }
+
+            return result;
+        }
+
+        private static List<string> GetColliderRefs(Component component, IReadOnlyDictionary<int, string> colliderNameByInstance)
+        {
+            var refs = new List<string>();
+            var colliderObjects = GetObjectListMember(component, "colliders", "Colliders", "colliderGroups");
+            for (var i = 0; i < colliderObjects.Count; i++)
+            {
+                if (colliderObjects[i] is Component colliderComp &&
+                    colliderNameByInstance.TryGetValue(colliderComp.GetInstanceID(), out var colliderName))
+                {
+                    refs.Add(colliderName);
+                }
+            }
+            return refs;
+        }
+
+        private static float[] GetDirectionMember(Component component)
+        {
+            var direction = GetVector3Member(component, "direction", "Direction", "tail", "Tail");
+            if (direction[0] == 0.0f && direction[1] == 0.0f && direction[2] == 0.0f)
+            {
+                direction[2] = 1.0f;
+            }
+            return direction;
+        }
+
+        private static float[] GetVector3Member(Component component, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (TryGetMemberValue(component, name, out var raw) && raw is Vector3 v)
+                {
+                    return new[] { v.x, v.y, v.z };
+                }
+            }
+            return new float[3];
+        }
+
+        private static float GetFloatMember(Component component, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!TryGetMemberValue(component, name, out var raw) || raw == null)
+                {
+                    continue;
+                }
+
+                switch (raw)
+                {
+                    case float f:
+                        return f;
+                    case int i:
+                        return i;
+                    case double d:
+                        return (float)d;
+                }
+            }
+            return 0.0f;
+        }
+
+        private static Transform GetTransformMember(Component component, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!TryGetMemberValue(component, name, out var raw) || raw == null)
+                {
+                    continue;
+                }
+
+                if (raw is Transform t)
+                {
+                    return t;
+                }
+                if (raw is GameObject go)
+                {
+                    return go.transform;
+                }
+            }
+            return null;
+        }
+
+        private static List<Transform> GetTransformListMember(Component component, params string[] names)
+        {
+            var transforms = new List<Transform>();
+            foreach (var obj in GetObjectListMember(component, names))
+            {
+                if (obj is Transform t)
+                {
+                    transforms.Add(t);
+                }
+                else if (obj is GameObject go)
+                {
+                    transforms.Add(go.transform);
+                }
+            }
+            return transforms;
+        }
+
+        private static List<object> GetObjectListMember(Component component, params string[] names)
+        {
+            var values = new List<object>();
+            foreach (var name in names)
+            {
+                if (!TryGetMemberValue(component, name, out var raw) || raw == null)
+                {
+                    continue;
+                }
+
+                if (raw is IEnumerable enumerable)
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (item != null)
+                        {
+                            values.Add(item);
+                        }
+                    }
+                }
+            }
+            return values;
+        }
+
+        private static bool TryGetMemberValue(Component component, string name, out object value)
+        {
+            value = null;
+            if (component == null || string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var type = component.GetType();
+            var prop = type.GetProperty(name, flags);
+            if (prop != null && prop.CanRead)
+            {
+                try
+                {
+                    value = prop.GetValue(component, null);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            var field = type.GetField(name, flags);
+            if (field != null)
+            {
+                try
+                {
+                    value = field.GetValue(component);
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        private static string GetRelativePath(Transform root, Transform target)
+        {
+            if (root == null || target == null)
+            {
+                return string.Empty;
+            }
+            if (target == root)
+            {
+                return ".";
+            }
+
+            var stack = new Stack<string>();
+            var cursor = target;
+            while (cursor != null && cursor != root)
+            {
+                stack.Push(cursor.name);
+                cursor = cursor.parent;
+            }
+
+            if (cursor != root)
+            {
+                return target.name;
+            }
+            return string.Join("/", stack.ToArray());
         }
 
         private static uint[] ToUIntIndices(int[] indices)

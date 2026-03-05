@@ -2,6 +2,58 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 physics typed section rollout (SpringBone/PhysBone/Collider metadata)
+
+### Summary
+
+Implemented the first end-to-end XAV2 physics transport slice by introducing typed physics sections (`0x0018/0x0019/0x001A`), wiring Unity export/import/runtime parsing, and aligning native loader contracts so physics metadata survives conversion while unsupported runtime simulation degrades with explicit warnings.
+
+### Changed
+
+- XAV2 schema and docs expansion:
+  - `docs/formats/xav2.md`
+  - added manifest keys:
+    - `physicsSchemaVersion`
+    - `physicsSource` (`none|vrm|vrc|mixed`)
+    - `hasSpringBones`
+    - `hasPhysBones`
+  - added section layout definitions:
+    - `0x0018` SpringBone typed payload
+    - `0x0019` PhysBone typed payload
+    - `0x001A` Physics collider typed payload
+- Unity runtime data model + loader:
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - added physics payload types and manifest fields.
+  - loader now parses sections `0x0018/0x0019/0x001A`.
+  - added compatibility diagnostics:
+    - `XAV2_PHYSICS_REF_MISSING`
+    - `XAV2_PHYSICS_COMPONENT_UNAVAILABLE`
+    - `XAV2_PHYSICS_SCHEMA_INVALID`
+- Unity exporter + extractor + importer:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Importer.cs`
+  - exporter writes physics typed sections and manifest flags/source.
+  - extractor added reflection-based metadata extraction for PhysBone/SpringBone/Collider families (SDK-optional).
+  - importer attempts reflection-based component rehydration when target component types are available; otherwise records non-fatal warnings and keeps import flow alive.
+- Native loader contract + parser alignment:
+  - `include/vsfclone/avatar/avatar_package.h`
+  - `src/avatar/xav2_loader.cpp`
+  - added native physics payload structs and parse path for `0x0018/0x0019/0x001A`.
+  - added collider reference validation and warning path parity.
+  - added explicit runtime limitation signal:
+    - `XAV2_PHYSICS_COMPONENT_UNAVAILABLE: runtime_simulation_not_implemented`
+- Test coverage expansion:
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - `unity/Packages/com.vsfclone.xav2/Tests/Editor/Xav2ExporterTests.cs`
+  - added runtime parse/diagnostic tests for physics sections.
+  - added exporter round-trip test covering physics payload persistence.
+- Detailed implementation report:
+  - `docs/reports/xav2_physics_typed_sections_and_pipeline_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_xav2_physics_typed_sections_and_pipeline.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+
 ## 2026-03-06 - XAV2 lilToon parity material extension (unity/native)
 
 ### Summary
