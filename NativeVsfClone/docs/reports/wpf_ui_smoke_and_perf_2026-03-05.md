@@ -102,3 +102,7 @@ This evidence document is considered complete when:
   - quantitative `LastFrameMs` before/after measurement table
 - Additional open item from latest run:
   - investigate `DllNotFoundException` root dependency chain behind launch exit code `-532462766` in current CLI/headless environment
+
+## Status Board Link
+
+- consolidated tracker: `docs/reports/host_blocker_status_board_2026-03-05.md`

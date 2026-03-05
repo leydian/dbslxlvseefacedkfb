@@ -7,6 +7,7 @@ on:
     paths:
       - "host/**"
       - "tools/publish_hosts.ps1"
+      - "tools/wpf_launch_smoke.ps1"
       - "tools/run_quality_baseline.ps1"
       - "tools/vsfavatar_quality_gate.ps1"
       - "tools/vsfavatar_sample_report.ps1"
@@ -20,6 +21,7 @@ on:
     paths:
       - "host/**"
       - "tools/publish_hosts.ps1"
+      - "tools/wpf_launch_smoke.ps1"
       - "tools/run_quality_baseline.ps1"
       - "tools/vsfavatar_quality_gate.ps1"
       - "tools/vsfavatar_sample_report.ps1"
@@ -114,11 +116,16 @@ jobs:
           path: |
             NativeVsfClone/dist/wpf
             NativeVsfClone/build/reports/host_publish_latest.txt
+            NativeVsfClone/build/reports/wpf_launch_smoke_latest.txt
 
   publish-hosts-winui-diagnostics:
     needs: quality-baseline
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
     defaults:
       run:
         shell: powershell
@@ -137,13 +144,26 @@ jobs:
       - name: Publish Hosts (WPF + WinUI optional diagnostics)
         run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi
 
+      - name: Validate WinUI Diagnostic Manifest
+        run: |
+          $manifest = Join-Path $PWD "build\reports\winui\winui_diagnostic_manifest.json"
+          if (-not (Test-Path $manifest)) {
+            Write-Host "Missing WinUI diagnostic manifest: $manifest"
+            exit 1
+          }
+
       - name: Upload WinUI Diagnostic Outputs
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: host-publish-winui-diagnostics
+          name: host-publish-winui-diagnostics-${{ matrix.os }}
           if-no-files-found: warn
           path: |
             NativeVsfClone/dist/winui
             NativeVsfClone/build/reports/host_publish_latest.txt
-            NativeVsfClone/build/reports/winui
+            NativeVsfClone/build/reports/wpf_launch_smoke_latest.txt
+            NativeVsfClone/build/reports/winui/winui_diagnostic_manifest.json
+            NativeVsfClone/build/reports/winui/winui_build.binlog
+            NativeVsfClone/build/reports/winui/winui_build_diag.log
+            NativeVsfClone/build/reports/winui/winui_build_managed_diag.log
+            NativeVsfClone/build/reports/winui/obj-dump

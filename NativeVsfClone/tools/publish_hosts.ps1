@@ -6,7 +6,12 @@ param(
     [switch]$NoRestore,
     [bool]$CollectWinUiDiagnostics = $true,
     [bool]$CollectManagedXamlDiagnostics = $true,
-    [string]$WinUiDiagDir = ".\build\reports\winui"
+    [string]$WinUiDiagDir = ".\build\reports\winui",
+    [ValidateSet("full", "diag-only")][string]$WinUiDiagnosticsProfile = "full",
+    [bool]$RunWpfLaunchSmoke = $true,
+    [bool]$WpfLaunchSmokeFailOnError = $false,
+    [int]$WpfLaunchSmokeDurationSeconds = 6,
+    [string]$WpfLaunchSmokeReportPath = ".\build\reports\wpf_launch_smoke_latest.txt"
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +58,11 @@ $resolvedWinUiDiagDir = if ([System.IO.Path]::IsPathRooted($WinUiDiagDir)) {
 } else {
     [System.IO.Path]::GetFullPath((Join-Path $repoRoot $WinUiDiagDir))
 }
+$resolvedWpfLaunchSmokeReportPath = if ([System.IO.Path]::IsPathRooted($WpfLaunchSmokeReportPath)) {
+    [System.IO.Path]::GetFullPath($WpfLaunchSmokeReportPath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $WpfLaunchSmokeReportPath))
+}
 $distRoot = Join-Path $repoRoot "dist"
 $wpfDist = Join-Path $distRoot "wpf"
 $winUiDist = Join-Path $distRoot "winui"
@@ -73,7 +83,12 @@ $log.Add("IncludeWinUi: $IncludeWinUi")
 $log.Add("NoRestore: $NoRestore")
 $log.Add("CollectWinUiDiagnostics: $CollectWinUiDiagnostics")
 $log.Add("CollectManagedXamlDiagnostics: $CollectManagedXamlDiagnostics")
+$log.Add("WinUiDiagnosticsProfile: $WinUiDiagnosticsProfile")
 $log.Add("WinUiDiagDir: $resolvedWinUiDiagDir")
+$log.Add("RunWpfLaunchSmoke: $RunWpfLaunchSmoke")
+$log.Add("WpfLaunchSmokeFailOnError: $WpfLaunchSmokeFailOnError")
+$log.Add("WpfLaunchSmokeDurationSeconds: $WpfLaunchSmokeDurationSeconds")
+$log.Add("WpfLaunchSmokeReportPath: $resolvedWpfLaunchSmokeReportPath")
 
 Assert-Command "cmake"
 Assert-Command "dotnet"
@@ -112,6 +127,7 @@ if (-not (Test-Path $nativeCoreDll)) {
 
 $wpfProject = Join-Path $repoRoot "host\WpfHost\WpfHost.csproj"
 $winUiProject = Join-Path $repoRoot "host\WinUiHost\WinUiHost.csproj"
+$wpfLaunchSmokeScript = Join-Path $repoRoot "tools\wpf_launch_smoke.ps1"
 
 function Write-WinUiDiagnosticManifest {
     param(
@@ -133,7 +149,8 @@ function Write-WinUiDiagnosticManifest {
         [string]$ManagedDiagLogPath,
         [string]$ManagedDiagStderrPath,
         [string[]]$RootCauseHints,
-        [hashtable]$PreflightProbe
+        [hashtable]$PreflightProbe,
+        [object[]]$Profiles
     )
 
     $legacyPreflight = $Preflight
@@ -165,11 +182,50 @@ function Write-WinUiDiagnosticManifest {
         managed_diagnostics_command = $ManagedDiagCommand
         managed_diagnostics_exit_code = $ManagedDiagExitCode
         root_cause_hints = $RootCauseHints
+        profiles = $Profiles
         preflight = $legacyPreflight
         preflight_probe = $PreflightProbe
         environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
+}
+
+function Get-WinUiProfileHints {
+    param(
+        [string]$ProfileName,
+        [string]$DiagLogPath,
+        [string]$ManagedDiagLogPath
+    )
+
+    $hints = [System.Collections.Generic.List[string]]::new()
+
+    if ($ProfileName -eq "diag-default") {
+        if (Test-Path $DiagLogPath) {
+            if (Select-String -Path $DiagLogPath -Pattern "XamlCompiler.exe" -SimpleMatch -Quiet) {
+                $hints.Add("XamlCompiler.exe exit path observed (MSB3073).")
+            }
+            if (Select-String -Path $DiagLogPath -Pattern "NU1101" -SimpleMatch -Quiet) {
+                $hints.Add("NuGet package resolution failed (NU1101). Verify package source connectivity.")
+            }
+            if (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet) {
+                $hints.Add("NuGet source access failed (NU1301). Verify network/proxy and source config.")
+            }
+        }
+    }
+
+    if ($ProfileName -eq "managed-xaml") {
+        if ((Test-Path $ManagedDiagLogPath) -and (Select-String -Path $ManagedDiagLogPath -Pattern "System.Security.Permissions" -SimpleMatch -Quiet)) {
+            $hints.Add("Managed XAML compiler task load failed: missing System.Security.Permissions assembly.")
+        }
+        if ((Test-Path $ManagedDiagLogPath) -and (Select-String -Path $ManagedDiagLogPath -Pattern "WMC9999" -SimpleMatch -Quiet)) {
+            $hints.Add("Managed XAML compiler reported WMC9999 (platform unsupported/internal operation not supported).")
+        }
+    }
+
+    if ($hints.Count -eq 0) {
+        $hints.Add("No explicit profile-local root-cause hint extracted.")
+    }
+    return $hints.ToArray()
 }
 
 function Get-WinUiEnvironmentSummary {
@@ -336,6 +392,37 @@ function Test-WinUiToolchainPreconditions {
         $recommendedActions.Add("Install Windows 10 SDK 10.0.19041.0 metadata/facade components for WinUI net8 targeting.")
     }
 
+    $msbuildCommand = Get-Command msbuild -ErrorAction SilentlyContinue
+    $hasMsbuild = $null -ne $msbuildCommand
+    if (-not $hasMsbuild) {
+        $failedChecks.Add("MISSING_MSBUILD_DISCOVERY")
+        $recommendedActions.Add("Install Visual Studio Build Tools 2022 with MSBuild and desktop/windows workload components.")
+    }
+
+    $windowsSdkBinProbePath = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\rc.exe"
+    $hasWindowsSdkBinTool = Test-Path $windowsSdkBinProbePath
+    if (-not $hasWindowsSdkBinTool) {
+        $failedChecks.Add("MISSING_WINDOWS_SDK_19041_BINTOOLS")
+        $recommendedActions.Add("Install Windows 10 SDK 10.0.19041.0 C++/bin tools (rc.exe) required by WinUI toolchain.")
+    }
+
+    $windowsAppSdkVersion = ""
+    if (Test-Path $winUiProject) {
+        $packageLine = Select-String -Path $winUiProject -Pattern 'PackageReference Include="Microsoft.WindowsAppSDK"' -SimpleMatch | Select-Object -First 1
+        if ($null -ne $packageLine -and $packageLine.Line -match 'Version="([^"]+)"') {
+            $windowsAppSdkVersion = $Matches[1]
+        }
+    }
+    $windowsAppSdkPackagePath = ""
+    if (-not [string]::IsNullOrWhiteSpace($windowsAppSdkVersion)) {
+        $windowsAppSdkPackagePath = Join-Path $env:USERPROFILE ".nuget\packages\microsoft.windowsappsdk\$windowsAppSdkVersion"
+    }
+    $hasWindowsAppSdkPackage = (-not [string]::IsNullOrWhiteSpace($windowsAppSdkPackagePath)) -and (Test-Path $windowsAppSdkPackagePath)
+    if (-not $hasWindowsAppSdkPackage) {
+        $failedChecks.Add("MISSING_WINDOWSAPPSDK_PACKAGE_CACHE")
+        $recommendedActions.Add("Run dotnet restore for WinUiHost and verify Microsoft.WindowsAppSDK package cache is available.")
+    }
+
     return [ordered]@{
         passed = ($failedChecks.Count -eq 0)
         failed_checks = $failedChecks.ToArray()
@@ -358,6 +445,23 @@ function Test-WinUiToolchainPreconditions {
                     detected = -not [string]::IsNullOrWhiteSpace($foundWindowsSdkMetadataPath)
                     checked_paths = $windowsSdkProbePaths
                     detected_path = $foundWindowsSdkMetadataPath
+                },
+                [ordered]@{
+                    check = "MSBUILD_DISCOVERY"
+                    detected = $hasMsbuild
+                    detected_path = if ($hasMsbuild) { $msbuildCommand.Source } else { "" }
+                },
+                [ordered]@{
+                    check = "WINDOWS_SDK_19041_BINTOOLS"
+                    detected = $hasWindowsSdkBinTool
+                    checked_paths = @($windowsSdkBinProbePath)
+                    detected_path = if ($hasWindowsSdkBinTool) { $windowsSdkBinProbePath } else { "" }
+                },
+                [ordered]@{
+                    check = "WINDOWSAPPSDK_PACKAGE_CACHE"
+                    detected = $hasWindowsAppSdkPackage
+                    checked_paths = if (-not [string]::IsNullOrWhiteSpace($windowsAppSdkPackagePath)) { @($windowsAppSdkPackagePath) } else { @() }
+                    expected_version = $windowsAppSdkVersion
                 }
             )
         }
@@ -375,6 +479,15 @@ function Get-WinUiFailureClass {
         $checks = @($Preflight.failed_checks)
         if ($checks -contains "MISSING_DOTNET_8_SDK") {
             return [ordered]@{ Class = "TOOLCHAIN_MISSING_DOTNET8"; Confidence = "high" }
+        }
+        if ($checks -contains "MISSING_WINDOWS_SDK_19041_METADATA" -or $checks -contains "MISSING_WINDOWS_SDK_19041_BINTOOLS") {
+            return [ordered]@{ Class = "TOOLCHAIN_WINDOWS_SDK_INCOMPLETE"; Confidence = "high" }
+        }
+        if ($checks -contains "MISSING_WINDOWSAPPSDK_PACKAGE_CACHE") {
+            return [ordered]@{ Class = "WINDOWSAPPSDK_RESTORE_INCOMPLETE"; Confidence = "high" }
+        }
+        if ($checks -contains "MISSING_VISUAL_STUDIO_DISCOVERY" -or $checks -contains "MISSING_MSBUILD_DISCOVERY") {
+            return [ordered]@{ Class = "TOOLCHAIN_VISUAL_STUDIO_INCOMPLETE"; Confidence = "high" }
         }
         return [ordered]@{ Class = "TOOLCHAIN_PRECONDITION_FAILED"; Confidence = "high" }
     }
@@ -427,6 +540,9 @@ function Collect-WinUiDiagnostics {
 
     New-Item -ItemType Directory -Force -Path $objDumpPath | Out-Null
 
+    $envSummary = Get-WinUiEnvironmentSummary
+    $profiles = [System.Collections.Generic.List[object]]::new()
+
     $diagArgs = @(
         "build",
         $winUiProject,
@@ -439,14 +555,26 @@ function Collect-WinUiDiagnostics {
         $diagArgs += "--no-restore"
     }
     $diagCommandText = "dotnet " + ($diagArgs -join " ")
-    $envSummary = Get-WinUiEnvironmentSummary
-
     & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
     $diagExitCode = $LASTEXITCODE
+    $diagProfileHints = Get-WinUiProfileHints -ProfileName "diag-default" -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath
+    $profiles.Add([ordered]@{
+        name = "diag-default"
+        enabled = $true
+        command = $diagCommandText
+        exit_code = $diagExitCode
+        artifacts = [ordered]@{
+            binlog = $binlogPath
+            diag_log = $diagLogPath
+            stderr_log = $diagStderrPath
+        }
+        root_cause_hints = $diagProfileHints
+    })
 
     $managedDiagCommandText = ""
     $managedDiagExitCode = -1
-    if ($CollectManagedXamlDiagnostics) {
+    $shouldRunManagedDiagnostics = $CollectManagedXamlDiagnostics -and $WinUiDiagnosticsProfile -eq "full"
+    if ($shouldRunManagedDiagnostics) {
         $managedDiagArgs = @(
             "build",
             $winUiProject,
@@ -461,6 +589,25 @@ function Collect-WinUiDiagnostics {
         $managedDiagCommandText = "dotnet " + ($managedDiagArgs -join " ")
         & dotnet @managedDiagArgs 1> $managedDiagLogPath 2> $managedDiagStderrPath
         $managedDiagExitCode = $LASTEXITCODE
+
+        $managedProfileHints = Get-WinUiProfileHints -ProfileName "managed-xaml" -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath
+        $profiles.Add([ordered]@{
+            name = "managed-xaml"
+            enabled = $true
+            command = $managedDiagCommandText
+            exit_code = $managedDiagExitCode
+            artifacts = [ordered]@{
+                diag_log = $managedDiagLogPath
+                stderr_log = $managedDiagStderrPath
+            }
+            root_cause_hints = $managedProfileHints
+        })
+    } else {
+        $profiles.Add([ordered]@{
+            name = "managed-xaml"
+            enabled = $false
+            skipped_reason = if (-not $CollectManagedXamlDiagnostics) { "CollectManagedXamlDiagnostics=false" } else { "WinUiDiagnosticsProfile=diag-only" }
+        })
     }
 
     Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
@@ -485,17 +632,31 @@ function Collect-WinUiDiagnostics {
         -ManagedDiagLogPath $managedDiagLogPath `
         -ManagedDiagStderrPath $managedDiagStderrPath `
         -RootCauseHints $rootCauseHints `
-        -PreflightProbe $Preflight.probe
+        -PreflightProbe $Preflight.probe `
+        -Profiles $profiles.ToArray()
 
     $log.Add("WinUI diagnostics command: $diagCommandText")
     $log.Add("WinUI diagnostics exit code: $diagExitCode")
-    if ($CollectManagedXamlDiagnostics) {
+    if ($shouldRunManagedDiagnostics) {
         $log.Add("WinUI managed diagnostics command: $managedDiagCommandText")
         $log.Add("WinUI managed diagnostics exit code: $managedDiagExitCode")
         $log.Add("WinUI managed diagnostics log: $managedDiagLogPath")
         $log.Add("WinUI managed diagnostics stderr log: $managedDiagStderrPath")
     } else {
-        $log.Add("WinUI managed diagnostics: skipped (CollectManagedXamlDiagnostics=false)")
+        $log.Add("WinUI managed diagnostics: skipped (profile=$WinUiDiagnosticsProfile, collect_flag=$CollectManagedXamlDiagnostics)")
+    }
+    foreach ($profile in $profiles) {
+        $profileName = "$($profile.name)"
+        $profileEnabled = "$($profile.enabled)"
+        $log.Add("WinUI diagnostics profile: $profileName enabled=$profileEnabled")
+        if ($profile.Contains("exit_code")) {
+            $log.Add("WinUI diagnostics profile exit code [$profileName]: $($profile.exit_code)")
+        }
+        if ($profile.Contains("root_cause_hints")) {
+            foreach ($hint in @($profile.root_cause_hints)) {
+                $log.Add("WinUI diagnostics profile hint [$profileName]: $hint")
+            }
+        }
     }
     foreach ($hint in $rootCauseHints) {
         $log.Add("WinUI root-cause hint: $hint")
@@ -535,6 +696,28 @@ try {
     Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
     $log.Add("WPF dist: $wpfDist")
     $log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
+    if ($RunWpfLaunchSmoke) {
+        if (-not (Test-Path $wpfLaunchSmokeScript)) {
+            $log.Add("WPF launch smoke: skipped (script not found: $wpfLaunchSmokeScript)")
+        } else {
+            Write-Step "Running WPF launch smoke probe..."
+            $smokeResult = & $wpfLaunchSmokeScript `
+                -ExePath (Join-Path $wpfDist "WpfHost.exe") `
+                -WorkingDirectory $wpfDist `
+                -AliveSeconds $WpfLaunchSmokeDurationSeconds `
+                -ReportPath $resolvedWpfLaunchSmokeReportPath `
+                -TreatFailureAsError:$WpfLaunchSmokeFailOnError
+            if ($null -ne $smokeResult -and "$($smokeResult.status)" -eq "PASS") {
+                $log.Add("WPF launch smoke: PASS")
+            } else {
+                $reportedExit = if ($null -ne $smokeResult -and $smokeResult.Contains("exit_code")) { "$($smokeResult.exit_code)" } else { "unknown" }
+                $log.Add("WPF launch smoke: FAIL (exit=$reportedExit)")
+            }
+            $log.Add("WPF launch smoke report: $resolvedWpfLaunchSmokeReportPath")
+        }
+    } else {
+        $log.Add("WPF launch smoke: skipped (RunWpfLaunchSmoke=false)")
+    }
 } catch {
     $wpfPublishFailed = $true
     $wpfPublishErrorText = ($_ | Out-String).Trim()

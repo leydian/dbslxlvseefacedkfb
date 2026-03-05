@@ -2,6 +2,61 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI diagnostics profile expansion + CI matrix + WPF launch smoke automation
+
+### Summary
+
+Implemented the next host-track closure slice to make WinUI blocker triage and WPF launch smoke evidence deterministic:
+
+- expanded WinUI diagnostics collection into explicit profiles in manifest output
+- expanded WinUI preflight probe checks for tooling/package/bin prerequisites
+- added non-interactive WPF launch smoke automation with report artifact output
+- split WinUI diagnostics CI job into OS matrix runs for comparative evidence
+- published a single blocker status board document for open/closed/next actions
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - added options:
+    - `WinUiDiagnosticsProfile` (`full|diag-only`)
+    - `RunWpfLaunchSmoke`
+    - `WpfLaunchSmokeFailOnError`
+    - `WpfLaunchSmokeDurationSeconds`
+    - `WpfLaunchSmokeReportPath`
+  - WinUI diagnostics manifest now includes `profiles[]` with per-profile command/exit/artifacts/hints
+  - preflight checks extended with:
+    - `MSBUILD_DISCOVERY`
+    - `WINDOWS_SDK_19041_BINTOOLS`
+    - `WINDOWSAPPSDK_PACKAGE_CACHE`
+  - failure-class mapping extended for new preflight failure categories
+  - WPF publish path now optionally runs launch smoke and records report path in host publish log
+
+- `tools/wpf_launch_smoke.ps1` (new)
+  - launches published WPF exe in non-interactive mode
+  - verifies process-alive window
+  - captures `.NET Runtime` event `1026` evidence snapshot
+  - writes `build/reports/wpf_launch_smoke_latest.txt`
+
+- `.github/workflows/host-publish.yml`
+  - added trigger path for `tools/wpf_launch_smoke.ps1`
+  - WPF artifact upload now includes `wpf_launch_smoke_latest.txt`
+  - `publish-hosts-winui-diagnostics` now runs on matrix:
+    - `windows-latest`
+    - `windows-2022`
+  - matrix artifacts now include explicit WinUI diagnostic contract files
+
+- `docs/reports/host_blocker_status_board_2026-03-05.md` (new)
+  - consolidated open blockers / closed items / next actions
+  - fixed artifact contract list for closure tracking
+- `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md` (new)
+  - detailed implementation breakdown for script/workflow/docs updates in this round
+
+- docs links refreshed:
+  - `docs/INDEX.md`
+  - `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - `docs/reports/wpf_verification_roundup_2026-03-05.md`
+  - `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
+
 ## 2026-03-05 - WinUI blocker mitigation attempt (csproj simplification) + final rerun
 
 ### Summary

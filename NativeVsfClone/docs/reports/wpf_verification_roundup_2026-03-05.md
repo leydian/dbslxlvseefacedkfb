@@ -163,3 +163,7 @@ Outcome:
 
 - WPF-first release path remains stable in this round.
 - WinUI blocker remains open and is not resolved by csproj publish-property simplification.
+
+## Status Board Link
+
+- consolidated tracker: `docs/reports/host_blocker_status_board_2026-03-05.md`

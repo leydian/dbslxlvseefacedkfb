@@ -127,6 +127,10 @@ Validation closure status:
 2. Run manual WinUI runtime smoke in an environment where WinUI app launch succeeds.
 3. Capture runtime perf deltas (before/after) to complete parity evidence vs WPF.
 
+## Status Board Link
+
+- consolidated tracker: `docs/reports/host_blocker_status_board_2026-03-05.md`
+
 ## Follow-up Verification Update (2026-03-05, later same day)
 
 Additional rerun after parity implementation:
