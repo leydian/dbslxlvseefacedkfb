@@ -68,14 +68,33 @@ struct BlendShapeRenderPayload {
 };
 
 struct MaterialRenderPayload {
+    struct TypedFloatParam {
+        std::string id;
+        float value = 0.0f;
+    };
+    struct TypedColorParam {
+        std::string id;
+        float rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    };
+    struct TypedTextureParam {
+        std::string slot;
+        std::string texture_ref;
+    };
+
     std::string name;
     std::string shader_name;
     std::string shader_variant = "default";
+    std::string shader_family = "legacy";
+    std::string material_param_encoding = "legacy-json";
+    std::uint32_t feature_flags = 0;
     std::string base_color_texture_name;
     std::string shader_params_json = "{}";
     std::string alpha_mode = "OPAQUE";
     float alpha_cutoff = 0.5f;
     bool double_sided = false;
+    std::vector<TypedFloatParam> typed_float_params;
+    std::vector<TypedColorParam> typed_color_params;
+    std::vector<TypedTextureParam> typed_texture_params;
 };
 
 struct TextureRenderPayload {

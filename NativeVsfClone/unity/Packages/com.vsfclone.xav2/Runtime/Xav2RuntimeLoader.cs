@@ -14,6 +14,7 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionMaterialShaderParams = 0x0012;
         private const ushort SectionSkinPayload = 0x0013;
         private const ushort SectionBlendShapePayload = 0x0014;
+        private const ushort SectionMaterialTypedParams = 0x0015;
 
         public static Xav2AvatarPayload Load(string path)
         {
@@ -202,6 +203,8 @@ namespace VsfClone.Xav2.Runtime
                     return TryParseSkin(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionBlendShapePayload:
                     return TryParseBlendShape(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
+                case SectionMaterialTypedParams:
+                    return TryParseMaterialTypedParams(bytes, sectionOffset, sectionLength, materialsByName, diagnostics, options);
                 default:
                     return HandleUnknownSection(diagnostics, options, sectionType);
             }
@@ -414,6 +417,110 @@ namespace VsfClone.Xav2.Runtime
             return true;
         }
 
+        private static bool TryParseMaterialTypedParams(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            Dictionary<string, Xav2MaterialPayload> materialsByName,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
+        {
+            using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+
+            if (!TryReadSizedString(br, out var name) ||
+                !TryReadSizedString(br, out var shaderFamily) ||
+                !TryReadUInt32(br, out var featureFlags) ||
+                !TryReadUInt16(br, out var floatCount))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed params section.");
+            }
+
+            if (!materialsByName.TryGetValue(name, out var material))
+            {
+                material = new Xav2MaterialPayload { Name = name };
+                materialsByName[name] = material;
+            }
+
+            material.ShaderFamily = string.IsNullOrWhiteSpace(shaderFamily) ? "legacy" : shaderFamily;
+            material.MaterialParamEncoding = "typed-v2";
+            material.FeatureFlags = featureFlags;
+            material.TypedFloatParams.Clear();
+            material.TypedColorParams.Clear();
+            material.TypedTextureParams.Clear();
+
+            for (var i = 0; i < floatCount; i++)
+            {
+                if (!TryReadSizedString(br, out var id) || !TryReadSingle(br, out var value))
+                {
+                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed float param.");
+                }
+                material.TypedFloatParams.Add(new Xav2TypedFloatParam { Id = id, Value = value });
+            }
+
+            if (!TryReadUInt16(br, out var colorCount))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed color count.");
+            }
+            for (var i = 0; i < colorCount; i++)
+            {
+                if (!TryReadSizedString(br, out var id) ||
+                    !TryReadSingle(br, out var r) ||
+                    !TryReadSingle(br, out var g) ||
+                    !TryReadSingle(br, out var b) ||
+                    !TryReadSingle(br, out var a))
+                {
+                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed color param.");
+                }
+                material.TypedColorParams.Add(new Xav2TypedColorParam { Id = id, R = r, G = g, B = b, A = a });
+            }
+
+            if (!TryReadUInt16(br, out var textureCount))
+            {
+                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed texture count.");
+            }
+            for (var i = 0; i < textureCount; i++)
+            {
+                if (!TryReadSizedString(br, out var slot) || !TryReadSizedString(br, out var textureRef))
+                {
+                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed texture param.");
+                }
+                material.TypedTextureParams.Add(new Xav2TypedTextureParam
+                {
+                    Slot = slot,
+                    TextureRef = textureRef
+                });
+            }
+
+            if (ms.Position != ms.Length)
+            {
+                return AddWarningOrFail(diagnostics, options, $"XAV2_MATERIAL_TYPED_SCHEMA_INVALID: material={name}");
+            }
+
+            if (string.Equals(material.ShaderFamily, "liltoon", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)))
+                {
+                    if (!AddWarningOrFail(diagnostics, options, $"XAV2_MATERIAL_TYPED_MISSING_REQUIRED_PARAM: material={name}, id=_BaseColor"))
+                    {
+                        return false;
+                    }
+                }
+            }
+            else if (!string.Equals(material.ShaderFamily, "legacy", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!AddWarningOrFail(
+                        diagnostics,
+                        options,
+                        $"XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY: material={name}, family={material.ShaderFamily}"))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private static bool TryParseSkin(
             byte[] bytes,
             int sectionOffset,
@@ -529,6 +636,7 @@ namespace VsfClone.Xav2.Runtime
             manifest.materialRefs ??= new List<string>();
             manifest.textureRefs ??= new List<string>();
             manifest.strictShaderSet ??= new List<string>();
+            manifest.materialParamEncoding ??= "legacy-json";
             if (manifest.schemaVersion == 0U)
             {
                 manifest.schemaVersion = 1U;

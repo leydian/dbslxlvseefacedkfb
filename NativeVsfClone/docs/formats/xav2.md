@@ -1,4 +1,4 @@
-# XAV2 Format (Draft v1)
+# XAV2 Format (Draft v1/v2)
 
 XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transport.
 
@@ -6,10 +6,10 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 - `.xav2`
 
-## Binary Layout (v1)
+## Binary Layout (v1/v2)
 
 1. `magic[4]`: ASCII `XAV2`
-2. `version[2]`: little-endian unsigned integer (`1`)
+2. `version[2]`: little-endian unsigned integer (`1|2`)
 3. `manifest_size[4]`: little-endian unsigned integer
 4. `manifest_json[manifest_size]`: UTF-8 JSON
 5. `asset_sections[...]`: zero or more TLV entries
@@ -40,7 +40,7 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED`.
 
-## Section Types (v1)
+## Section Types (v1/v2)
 
 - `0x0001` Legacy mesh blob
 - `0x0002` Texture blob
@@ -49,6 +49,7 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `0x0012` Material shader params
 - `0x0013` Skin payload
 - `0x0014` BlendShape payload
+- `0x0015` Material typed params (v2)
 
 ### `0x0011` Mesh render payload
 
@@ -84,6 +85,32 @@ If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED
 - `params_json[params_json_len]`
 
 `params_json` is a shader-specific payload (for example lilToon/Poiyomi parameter blocks).
+
+### `0x0015` Material typed params (v2)
+
+- `name_len[2]`
+- `name[name_len]`
+- `shader_family_len[2]`
+- `shader_family[shader_family_len]` (`liltoon|legacy`)
+- `feature_flags[4]` (`uint32` bitmask)
+- `float_count[2]`
+- repeated float entry:
+  - `id_len[2]`
+  - `id[id_len]`
+  - `value[4]` (`float32`)
+- `color_count[2]`
+- repeated color entry:
+  - `id_len[2]`
+  - `id[id_len]`
+  - `r[4]`, `g[4]`, `b[4]`, `a[4]` (`float32`)
+- `texture_count[2]`
+- repeated texture entry:
+  - `slot_len[2]`
+  - `slot[slot_len]`
+  - `texture_ref_len[2]`
+  - `texture_ref[texture_ref_len]`
+
+For current implementation, `liltoon` typed fields are preferred over legacy `params_json` when both are present.
 
 ### `0x0013` Skin payload
 

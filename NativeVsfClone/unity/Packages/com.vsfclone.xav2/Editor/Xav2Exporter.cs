@@ -17,6 +17,7 @@ namespace VsfClone.Xav2.Editor
         private const ushort SectionMaterialShaderParams = 0x0012;
         private const ushort SectionSkinPayload = 0x0013;
         private const ushort SectionBlendShapePayload = 0x0014;
+        private const ushort SectionMaterialTypedParams = 0x0015;
 
         public static void Export(string outputPath, GameObject avatarRoot, Xav2ExportOptions options)
         {
@@ -65,6 +66,10 @@ namespace VsfClone.Xav2.Editor
             {
                 WriteSection(bw, SectionMaterialOverride, BuildMaterialPayload(material));
                 WriteSection(bw, SectionMaterialShaderParams, BuildMaterialParamsPayload(material));
+                if (material.TypedFloatParams.Count > 0 || material.TypedColorParams.Count > 0 || material.TypedTextureParams.Count > 0)
+                {
+                    WriteSection(bw, SectionMaterialTypedParams, BuildMaterialTypedParamsPayload(material));
+                }
             }
             foreach (var skin in payload.Skins)
             {
@@ -131,6 +136,13 @@ namespace VsfClone.Xav2.Editor
             payload.Manifest.hasSkinning = payload.Skins.Count > 0;
             payload.Manifest.hasBlendShapes = payload.BlendShapes.Count > 0;
             payload.Manifest.strictShaderSet = new List<string>(options.StrictShaderSet ?? new List<string>());
+            payload.Manifest.materialParamEncoding =
+                payload.Materials.Exists(m => m.MaterialParamEncoding == "typed-v2" ||
+                                              m.TypedFloatParams.Count > 0 ||
+                                              m.TypedColorParams.Count > 0 ||
+                                              m.TypedTextureParams.Count > 0)
+                    ? "typed-v2"
+                    : "legacy-json";
         }
 
         private static void ValidateShaderPolicy(Xav2AvatarPayload payload, Xav2ExportOptions options)
@@ -211,6 +223,40 @@ namespace VsfClone.Xav2.Editor
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, material.Name);
             WriteSizedString(bw, string.IsNullOrEmpty(material.ShaderParamsJson) ? "{}" : material.ShaderParamsJson);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildMaterialTypedParamsPayload(Xav2MaterialPayload material)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, material.Name);
+            WriteSizedString(bw, string.IsNullOrWhiteSpace(material.ShaderFamily) ? "legacy" : material.ShaderFamily);
+            bw.Write(material.FeatureFlags);
+
+            bw.Write((ushort)material.TypedFloatParams.Count);
+            foreach (var p in material.TypedFloatParams)
+            {
+                WriteSizedString(bw, p.Id ?? string.Empty);
+                bw.Write(p.Value);
+            }
+
+            bw.Write((ushort)material.TypedColorParams.Count);
+            foreach (var p in material.TypedColorParams)
+            {
+                WriteSizedString(bw, p.Id ?? string.Empty);
+                bw.Write(p.R);
+                bw.Write(p.G);
+                bw.Write(p.B);
+                bw.Write(p.A);
+            }
+
+            bw.Write((ushort)material.TypedTextureParams.Count);
+            foreach (var p in material.TypedTextureParams)
+            {
+                WriteSizedString(bw, p.Slot ?? string.Empty);
+                WriteSizedString(bw, p.TextureRef ?? string.Empty);
+            }
             return ms.ToArray();
         }
 

@@ -54,8 +54,33 @@ namespace VsfClone.Xav2.Runtime
         public List<string> materialRefs = new List<string>();
         public List<string> textureRefs = new List<string>();
         public List<string> strictShaderSet = new List<string>();
+        public string materialParamEncoding = "legacy-json";
         public bool hasSkinning;
         public bool hasBlendShapes;
+    }
+
+    [Serializable]
+    public sealed class Xav2TypedFloatParam
+    {
+        public string Id = string.Empty;
+        public float Value;
+    }
+
+    [Serializable]
+    public sealed class Xav2TypedColorParam
+    {
+        public string Id = string.Empty;
+        public float R;
+        public float G;
+        public float B;
+        public float A = 1.0f;
+    }
+
+    [Serializable]
+    public sealed class Xav2TypedTextureParam
+    {
+        public string Slot = string.Empty;
+        public string TextureRef = string.Empty;
     }
 
     public sealed class Xav2BlendShapeFramePayload
@@ -95,11 +120,17 @@ namespace VsfClone.Xav2.Runtime
         public string Name = string.Empty;
         public string ShaderName = "MToon (minimal)";
         public string ShaderVariant = "default";
+        public string ShaderFamily = "legacy";
+        public string MaterialParamEncoding = "legacy-json";
+        public uint FeatureFlags;
         public string BaseColorTextureName = string.Empty;
         public string AlphaMode = "OPAQUE";
         public float AlphaCutoff = 0.5f;
         public bool DoubleSided;
         public string ShaderParamsJson = "{}";
+        public List<Xav2TypedFloatParam> TypedFloatParams = new List<Xav2TypedFloatParam>();
+        public List<Xav2TypedColorParam> TypedColorParams = new List<Xav2TypedColorParam>();
+        public List<Xav2TypedTextureParam> TypedTextureParams = new List<Xav2TypedTextureParam>();
     }
 
     public sealed class Xav2TexturePayload

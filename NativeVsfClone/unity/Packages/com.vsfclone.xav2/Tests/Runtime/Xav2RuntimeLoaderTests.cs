@@ -49,7 +49,7 @@ namespace VsfClone.Xav2.Runtime.Tests
         public void TryLoad_UnsupportedVersion_Fails()
         {
             var bytes = BuildValidXav2Bytes();
-            bytes[4] = 0x02;
+            bytes[4] = 0x03;
             bytes[5] = 0x00;
             var path = WriteTempFile(bytes);
             try
@@ -57,6 +57,29 @@ namespace VsfClone.Xav2.Runtime.Tests
                 var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
                 Assert.That(ok, Is.False);
                 Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.UnsupportedVersion));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialParams_Parses()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(payload.Materials.Count, Is.EqualTo(1));
+                var material = payload.Materials[0];
+                Assert.That(material.MaterialParamEncoding, Is.EqualTo("typed-v2"));
+                Assert.That(material.ShaderFamily, Is.EqualTo("liltoon"));
+                Assert.That(material.TypedFloatParams.Exists(p => p.Id == "_Cutoff"), Is.True);
+                Assert.That(material.TypedColorParams.Exists(p => p.Id == "_BaseColor"), Is.True);
+                Assert.That(material.TypedTextureParams.Exists(p => p.Slot == "base"), Is.True);
             }
             finally
             {
@@ -224,7 +247,8 @@ namespace VsfClone.Xav2.Runtime.Tests
         private static byte[] BuildValidXav2Bytes(
             bool addUnknownSection = false,
             bool legacyMaterialFormat = false,
-            bool missingTextureRef = false)
+            bool missingTextureRef = false,
+            bool addTypedMaterialSection = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -260,6 +284,10 @@ namespace VsfClone.Xav2.Runtime.Tests
                     ? BuildMaterialSectionLegacy("material_0", "lilToon", "texture_0")
                     : BuildMaterialSectionV1("material_0", "lilToon", "default", "texture_0"));
             WriteSection(bw, 0x0012, BuildMaterialParamsSection("material_0", "{}"));
+            if (addTypedMaterialSection)
+            {
+                WriteSection(bw, 0x0015, BuildMaterialTypedParamsSection("material_0"));
+            }
 
             if (addUnknownSection)
             {
@@ -329,6 +357,32 @@ namespace VsfClone.Xav2.Runtime.Tests
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, name);
             WriteSizedString(bw, json);
+            return ms.ToArray();
+        }
+
+        private static byte[] BuildMaterialTypedParamsSection(string name)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
+            WriteSizedString(bw, name);
+            WriteSizedString(bw, "liltoon");
+            bw.Write((uint)0x00000021); // cutout + shade
+
+            bw.Write((ushort)1);
+            WriteSizedString(bw, "_Cutoff");
+            bw.Write(0.5f);
+
+            bw.Write((ushort)1);
+            WriteSizedString(bw, "_BaseColor");
+            bw.Write(1.0f);
+            bw.Write(1.0f);
+            bw.Write(1.0f);
+            bw.Write(1.0f);
+
+            bw.Write((ushort)1);
+            WriteSizedString(bw, "base");
+            WriteSizedString(bw, "texture_0");
+
             return ms.ToArray();
         }
 

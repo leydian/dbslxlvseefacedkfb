@@ -2,6 +2,51 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 typed-v2 material params (lilToon phase1) end-to-end wiring
+
+### Summary
+
+Implemented XAV2 `typed-v2` material parameter flow across Unity exporter/runtime loader and native loader/renderer, so lilToon-focused material controls can be consumed without relying only on free-form `shader_params_json`.
+
+### Changed
+
+- typed material data model expansion:
+  - `include/vsfclone/avatar/avatar_package.h`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - added shader family/encoding/feature flags and typed float/color/texture parameter lists.
+- new XAV2 section support:
+  - `src/avatar/xav2_loader.cpp`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - added `0x0015 (MaterialTypedParams)` parser path.
+  - parse diagnostics/warnings added:
+    - `XAV2_MATERIAL_TYPED_SCHEMA_INVALID`
+    - `XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY`
+    - `XAV2_MATERIAL_TYPED_MISSING_REQUIRED_PARAM`
+- Unity exporter + extractor update:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - exporter writes `0x0015` when typed params exist and sets manifest `materialParamEncoding=typed-v2`.
+  - extractor now emits lilToon phase1 typed set:
+    - float: `_Cutoff`, `_BumpScale`, `_RimFresnelPower`, `_RimLightingMix`
+    - color: `_BaseColor`, `_ShadeColor`, `_EmissionColor`, `_RimColor`
+    - texture slots: `base`, `shade`, `normal`, `emission`, `mask`, `rim`
+    - feature flags for cutout/transparent/normal/emission/rim/shade.
+- native renderer typed-priority consumption:
+  - `src/nativecore/native_core.cpp`
+  - typed params now preferred for alpha/cutoff/base-color/shade/emission/base texture lookup.
+  - legacy `shader_params_json` remains fallback.
+- tests/docs:
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - added typed section parse test and corrected unsupported-version test to use version `3`.
+  - `docs/formats/xav2.md` updated with v1/v2 wording and `0x0015` payload layout.
+
+### Verified
+
+- `cmake --build NativeVsfClone\build --config Release --target nativecore avatar_tool` PASS
+  - first run had linker lock (`LNK1104` on `avatar_tool.exe`) due running process; resolved by stopping process and rebuilding.
+- `NativeVsfClone\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"` PASS
+  - `Load succeeded`, `Format=XAV2`, `Compat=full`, `ParserStage=runtime-ready`, `PrimaryError=NONE`
+
 ## 2026-03-06 - XAV2 skinning stabilization + v2 path activation (native/runtime/exporter)
 
 ### Summary

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <limits>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -1267,8 +1268,65 @@ bool TryExtractShaderParamColor(const std::string& params_json, const std::strin
     return true;
 }
 
+bool TryGetTypedFloatParam(const avatar::MaterialRenderPayload& payload, const std::string& id, float* out_value) {
+    if (out_value == nullptr) {
+        return false;
+    }
+    const auto it = std::find_if(
+        payload.typed_float_params.begin(),
+        payload.typed_float_params.end(),
+        [&](const avatar::MaterialRenderPayload::TypedFloatParam& p) { return p.id == id; });
+    if (it == payload.typed_float_params.end()) {
+        return false;
+    }
+    *out_value = it->value;
+    return true;
+}
+
+bool TryGetTypedColorParam(
+    const avatar::MaterialRenderPayload& payload,
+    const std::string& id,
+    std::array<float, 4U>* out_color) {
+    if (out_color == nullptr) {
+        return false;
+    }
+    const auto it = std::find_if(
+        payload.typed_color_params.begin(),
+        payload.typed_color_params.end(),
+        [&](const avatar::MaterialRenderPayload::TypedColorParam& p) { return p.id == id; });
+    if (it == payload.typed_color_params.end()) {
+        return false;
+    }
+    *out_color = {it->rgba[0], it->rgba[1], it->rgba[2], it->rgba[3]};
+    return true;
+}
+
+bool TryGetTypedTextureRef(
+    const avatar::MaterialRenderPayload& payload,
+    const std::string& slot,
+    std::string* out_texture_ref) {
+    if (out_texture_ref == nullptr) {
+        return false;
+    }
+    const auto it = std::find_if(
+        payload.typed_texture_params.begin(),
+        payload.typed_texture_params.end(),
+        [&](const avatar::MaterialRenderPayload::TypedTextureParam& p) { return p.slot == slot; });
+    if (it == payload.typed_texture_params.end()) {
+        return false;
+    }
+    *out_texture_ref = it->texture_ref;
+    return !out_texture_ref->empty();
+}
+
 std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
     std::string alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : ToUpperAscii(payload.alpha_mode);
+    if (payload.feature_flags & (1U << 1)) {
+        return "BLEND";
+    }
+    if (payload.feature_flags & (1U << 0)) {
+        return "MASK";
+    }
     const std::string upper_json = ToUpperAscii(payload.shader_params_json);
     if (upper_json.find("_ALPHATEST_ON") != std::string::npos) {
         return "MASK";
@@ -1310,8 +1368,13 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         material.alpha_mode = ResolveAlphaMode(payload);
         material.alpha_cutoff = payload.alpha_cutoff;
         material.double_sided = payload.double_sided;
+        float typed_cutoff = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_Cutoff", &typed_cutoff)) {
+            material.alpha_cutoff = std::max(0.0f, std::min(1.0f, typed_cutoff));
+        }
         std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
-        if (!TryExtractShaderParamColor(payload.shader_params_json, "_BaseColor", &base_color)) {
+        if (!TryGetTypedColorParam(payload, "_BaseColor", &base_color) &&
+            !TryExtractShaderParamColor(payload.shader_params_json, "_BaseColor", &base_color)) {
             (void)TryExtractShaderParamColor(payload.shader_params_json, "_Color", &base_color);
         }
         for (float& c : base_color) {
@@ -1319,7 +1382,8 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         }
         material.base_color = base_color;
         std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
-        if (TryExtractShaderParamColor(payload.shader_params_json, "_ShadeColor", &shade_color)) {
+        if (TryGetTypedColorParam(payload, "_ShadeColor", &shade_color) ||
+            TryExtractShaderParamColor(payload.shader_params_json, "_ShadeColor", &shade_color)) {
             for (float& c : shade_color) {
                 c = std::max(0.0f, std::min(1.0f, c));
             }
@@ -1327,7 +1391,8 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         }
         material.shade_color = shade_color;
         std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
-        if (TryExtractShaderParamColor(payload.shader_params_json, "_EmissionColor", &emission_color)) {
+        if (TryGetTypedColorParam(payload, "_EmissionColor", &emission_color) ||
+            TryExtractShaderParamColor(payload.shader_params_json, "_EmissionColor", &emission_color)) {
             for (float& c : emission_color) {
                 c = std::max(0.0f, std::min(1.0f, c));
             }
@@ -1336,11 +1401,13 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                 : 0.0f;
         }
         material.emission_color = emission_color;
-        if (!payload.base_color_texture_name.empty()) {
+        std::string base_texture_ref = payload.base_color_texture_name;
+        (void)TryGetTypedTextureRef(payload, "base", &base_texture_ref);
+        if (!base_texture_ref.empty()) {
             const auto tex_it = std::find_if(
                 avatar_pkg.texture_payloads.begin(),
                 avatar_pkg.texture_payloads.end(),
-                [&](const avatar::TextureRenderPayload& t) { return t.name == payload.base_color_texture_name; });
+                [&](const avatar::TextureRenderPayload& t) { return t.name == base_texture_ref; });
             if (tex_it != avatar_pkg.texture_payloads.end()) {
                 material.base_color_srv = CreateTextureSrvFromPayload(device, &(*tex_it));
             }
@@ -2080,10 +2147,38 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
     if (it->second.mesh_payloads.empty()) {
+        const char* format_name = "unknown";
+        switch (it->second.source_type) {
+            case vsfclone::avatar::AvatarSourceType::Vrm:
+                format_name = "vrm";
+                break;
+            case vsfclone::avatar::AvatarSourceType::VxAvatar:
+                format_name = "vxavatar";
+                break;
+            case vsfclone::avatar::AvatarSourceType::Vxa2:
+                format_name = "vxa2";
+                break;
+            case vsfclone::avatar::AvatarSourceType::Xav2:
+                format_name = "xav2";
+                break;
+            case vsfclone::avatar::AvatarSourceType::VsfAvatar:
+                format_name = "vsfavatar";
+                break;
+            default:
+                break;
+        }
+        std::ostringstream detail;
+        detail << "avatar has no renderable mesh payloads"
+               << " (format=" << format_name
+               << ", parser_stage=" << (it->second.parser_stage.empty() ? "unknown" : it->second.parser_stage)
+               << ", primary_error=" << (it->second.primary_error_code.empty() ? "NONE" : it->second.primary_error_code)
+               << ", mesh_count=" << it->second.meshes.size()
+               << ", material_count=" << it->second.materials.size()
+               << ")";
         vsfclone::nativecore::SetError(
             NC_ERROR_UNSUPPORTED,
             "render",
-            "avatar has no renderable mesh payloads",
+            detail.str(),
             true);
         return NC_ERROR_UNSUPPORTED;
     }

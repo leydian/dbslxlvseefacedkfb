@@ -25,6 +25,7 @@ constexpr std::uint16_t kSectionMeshRenderPayload = 0x0011U;
 constexpr std::uint16_t kSectionMaterialShaderParams = 0x0012U;
 constexpr std::uint16_t kSectionSkinPayload = 0x0013U;
 constexpr std::uint16_t kSectionBlendShapePayload = 0x0014U;
+constexpr std::uint16_t kSectionMaterialTypedParams = 0x0015U;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -524,6 +525,95 @@ bool ParseMaterialShaderParamsSection(
     return cursor == end;
 }
 
+bool ParseMaterialTypedParamsSection(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    MaterialRenderPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    const std::size_t end = payload_offset + payload_size;
+    std::size_t cursor = payload_offset;
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->name) || out_payload->name.empty()) {
+        return false;
+    }
+    if (!ReadSizedString(bytes, &cursor, end, &out_payload->shader_family) || out_payload->shader_family.empty()) {
+        return false;
+    }
+    const auto feature_flags = ReadU32Le(bytes, cursor);
+    if (!feature_flags) {
+        return false;
+    }
+    cursor += 4U;
+    out_payload->feature_flags = *feature_flags;
+    out_payload->material_param_encoding = "typed-v2";
+    out_payload->typed_float_params.clear();
+    out_payload->typed_color_params.clear();
+    out_payload->typed_texture_params.clear();
+
+    const auto float_count = ReadU16Le(bytes, cursor);
+    if (!float_count) {
+        return false;
+    }
+    cursor += 2U;
+    out_payload->typed_float_params.reserve(*float_count);
+    for (std::size_t i = 0U; i < *float_count; ++i) {
+        MaterialRenderPayload::TypedFloatParam p;
+        if (!ReadSizedString(bytes, &cursor, end, &p.id) || p.id.empty()) {
+            return false;
+        }
+        const auto value_bits = ReadU32Le(bytes, cursor);
+        if (!value_bits) {
+            return false;
+        }
+        cursor += 4U;
+        std::memcpy(&p.value, &(*value_bits), sizeof(float));
+        out_payload->typed_float_params.push_back(std::move(p));
+    }
+
+    const auto color_count = ReadU16Le(bytes, cursor);
+    if (!color_count) {
+        return false;
+    }
+    cursor += 2U;
+    out_payload->typed_color_params.reserve(*color_count);
+    for (std::size_t i = 0U; i < *color_count; ++i) {
+        MaterialRenderPayload::TypedColorParam p;
+        if (!ReadSizedString(bytes, &cursor, end, &p.id) || p.id.empty()) {
+            return false;
+        }
+        for (std::size_t c = 0U; c < 4U; ++c) {
+            const auto f32_bits = ReadU32Le(bytes, cursor);
+            if (!f32_bits) {
+                return false;
+            }
+            cursor += 4U;
+            std::memcpy(&p.rgba[c], &(*f32_bits), sizeof(float));
+        }
+        out_payload->typed_color_params.push_back(std::move(p));
+    }
+
+    const auto texture_count = ReadU16Le(bytes, cursor);
+    if (!texture_count) {
+        return false;
+    }
+    cursor += 2U;
+    out_payload->typed_texture_params.reserve(*texture_count);
+    for (std::size_t i = 0U; i < *texture_count; ++i) {
+        MaterialRenderPayload::TypedTextureParam p;
+        if (!ReadSizedString(bytes, &cursor, end, &p.slot) || p.slot.empty()) {
+            return false;
+        }
+        if (!ReadSizedString(bytes, &cursor, end, &p.texture_ref) || p.texture_ref.empty()) {
+            return false;
+        }
+        out_payload->typed_texture_params.push_back(std::move(p));
+    }
+
+    return cursor == end;
+}
+
 void AppendWarningCode(AvatarPackage* pkg, const std::string& warning) {
     if (pkg == nullptr) {
         return;
@@ -640,6 +730,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     std::unordered_map<std::string, std::vector<std::uint8_t>> texture_sections;
     std::unordered_map<std::string, MaterialRenderPayload> material_sections;
     std::unordered_map<std::string, std::string> material_params_sections;
+    std::unordered_map<std::string, MaterialRenderPayload> material_typed_sections;
     std::unordered_map<std::string, SkinRenderPayload> skin_sections;
     std::unordered_map<std::string, BlendShapeRenderPayload> blendshape_sections;
 
@@ -709,6 +800,21 @@ core::Result<AvatarPackage> Xav2Loader::Load(
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
             material_params_sections[NormalizeRefKey(material_name)] = std::move(params_json);
+            ++pkg.format_decoded_section_count;
+        } else if (*type == kSectionMaterialTypedParams) {
+            MaterialRenderPayload typed_payload;
+            if (!ParseMaterialTypedParamsSection(bytes, payload_offset, payload_size, &typed_payload)) {
+                pkg.primary_error_code = "XAV2_MATERIAL_TYPED_SCHEMA_INVALID";
+                PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            if (typed_payload.shader_family != "liltoon" && typed_payload.shader_family != "legacy") {
+                PushWarning(
+                    &pkg,
+                    "W_PARSE: XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY: material=" + typed_payload.name +
+                        ", family=" + typed_payload.shader_family);
+            }
+            material_typed_sections[NormalizeRefKey(typed_payload.name)] = std::move(typed_payload);
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionSkinPayload) {
             SkinRenderPayload skin_payload;
@@ -787,6 +893,27 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         const auto params_it = material_params_sections.find(key);
         if (params_it != material_params_sections.end()) {
             payload.shader_params_json = params_it->second;
+        }
+        const auto typed_it = material_typed_sections.find(key);
+        if (typed_it != material_typed_sections.end()) {
+            payload.shader_family = typed_it->second.shader_family;
+            payload.material_param_encoding = "typed-v2";
+            payload.feature_flags = typed_it->second.feature_flags;
+            payload.typed_float_params = typed_it->second.typed_float_params;
+            payload.typed_color_params = typed_it->second.typed_color_params;
+            payload.typed_texture_params = typed_it->second.typed_texture_params;
+            if (payload.shader_family == "liltoon") {
+                const auto has_base_color = std::any_of(
+                    payload.typed_color_params.begin(),
+                    payload.typed_color_params.end(),
+                    [](const MaterialRenderPayload::TypedColorParam& p) { return p.id == "_BaseColor"; });
+                if (!has_base_color) {
+                    PushWarning(
+                        &pkg,
+                        "W_PAYLOAD: XAV2_MATERIAL_TYPED_MISSING_REQUIRED_PARAM: material=" + payload.name +
+                            ", id=_BaseColor");
+                }
+            }
         }
         pkg.material_payloads.push_back(std::move(payload));
     }

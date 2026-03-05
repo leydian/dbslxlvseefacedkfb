@@ -17,6 +17,12 @@ namespace VsfClone.Xav2.Editor
     public sealed class UniVrmAvatarExtractor : IXav2AvatarExtractor
     {
         private const int TargetVertexStride = 48; // pos3 + nrm3 + uv2 + tan4
+        private const uint FeatureCutout = 1U << 0;
+        private const uint FeatureTransparent = 1U << 1;
+        private const uint FeatureNormalMap = 1U << 2;
+        private const uint FeatureEmission = 1U << 3;
+        private const uint FeatureRim = 1U << 4;
+        private const uint FeatureShade = 1U << 5;
 
         public Xav2AvatarPayload Extract(GameObject avatarRoot, Xav2ExportOptions options)
         {
@@ -192,6 +198,8 @@ namespace VsfClone.Xav2.Editor
                     Name = fallbackName,
                     ShaderName = "MToon (minimal)",
                     ShaderVariant = "default",
+                    ShaderFamily = "legacy",
+                    MaterialParamEncoding = "legacy-json",
                     AlphaMode = "OPAQUE",
                     ShaderParamsJson = "{\"schema\":1,\"shader\":\"MToon (minimal)\",\"keywords\":[],\"properties\":[]}"
                 });
@@ -205,42 +213,79 @@ namespace VsfClone.Xav2.Editor
                 return existing;
             }
 
-            var textureName = string.Empty;
-            var mainTexture = ResolveBaseColorTexture(material);
-            if (mainTexture != null)
-            {
-                var encoded = EncodeTextureSafe(mainTexture);
-                if (encoded.Length > 0)
-                {
-                    textureName = BuildUniqueTextureName(mainTexture);
-                    if (textureNameSet.Add(textureName))
-                    {
-                        payload.Textures.Add(new Xav2TexturePayload
-                        {
-                            Name = textureName,
-                            Bytes = encoded
-                        });
-                        payload.Manifest.textureRefs.Add(textureName);
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning($"[XAV2] Texture encode failed for material '{material.name}', texture '{mainTexture.name}'.");
-                }
-            }
-
             var shaderName = material.shader != null ? material.shader.name : "UnknownShader";
+            var shaderVariant = ResolveShaderVariant(shaderName);
+            var shaderFamily = ResolveShaderFamily(shaderVariant);
+            var baseTextureName = EnsureTextureRefForProperty(
+                material,
+                payload,
+                textureNameSet,
+                "_MainTex",
+                "_BaseMap",
+                "_BaseColorMap");
             var item = new Xav2MaterialPayload
             {
                 Name = BuildUniqueMaterialName(material, id),
                 ShaderName = shaderName,
-                ShaderVariant = ResolveShaderVariant(shaderName),
-                BaseColorTextureName = textureName,
+                ShaderVariant = shaderVariant,
+                ShaderFamily = shaderFamily,
+                MaterialParamEncoding = shaderFamily == "liltoon" ? "typed-v2" : "legacy-json",
+                BaseColorTextureName = baseTextureName,
                 AlphaMode = ResolveAlphaMode(material),
                 AlphaCutoff = ResolveAlphaCutoff(material),
                 DoubleSided = material.HasProperty("_Cull") && Mathf.Approximately(material.GetFloat("_Cull"), 0.0f),
                 ShaderParamsJson = BuildShaderParamsJson(material)
             };
+            if (item.AlphaMode == "MASK")
+            {
+                item.FeatureFlags |= FeatureCutout;
+            }
+            if (item.AlphaMode == "BLEND")
+            {
+                item.FeatureFlags |= FeatureTransparent;
+            }
+
+            if (shaderFamily == "liltoon")
+            {
+                AddTypedColor(item, material, "_BaseColor", "_BaseColor", "_Color");
+                AddTypedColor(item, material, "_ShadeColor", "_ShadeColor");
+                AddTypedColor(item, material, "_EmissionColor", "_EmissionColor");
+                AddTypedColor(item, material, "_RimColor", "_RimColor");
+
+                AddTypedFloat(item, material, "_Cutoff", "_Cutoff");
+                AddTypedFloat(item, material, "_BumpScale", "_BumpScale");
+                AddTypedFloat(item, material, "_RimFresnelPower", "_RimFresnelPower");
+                AddTypedFloat(item, material, "_RimLightingMix", "_RimLightingMix");
+
+                AddTypedTexture(item, "base", baseTextureName);
+                var shadeTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_ShadeTexture", "_ShadowColorTex");
+                AddTypedTexture(item, "shade", shadeTextureName);
+                var normalTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_BumpMap", "_NormalMap");
+                AddTypedTexture(item, "normal", normalTextureName);
+                var emissionTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_EmissionMap");
+                AddTypedTexture(item, "emission", emissionTextureName);
+                var maskTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_Main2ndTex", "_Main2ndBlendMask");
+                AddTypedTexture(item, "mask", maskTextureName);
+                var rimTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_RimColorTex", "_RimTex");
+                AddTypedTexture(item, "rim", rimTextureName);
+
+                if (!string.IsNullOrEmpty(shadeTextureName) || HasTypedColor(item, "_ShadeColor"))
+                {
+                    item.FeatureFlags |= FeatureShade;
+                }
+                if (!string.IsNullOrEmpty(normalTextureName))
+                {
+                    item.FeatureFlags |= FeatureNormalMap;
+                }
+                if (!string.IsNullOrEmpty(emissionTextureName) || HasTypedColor(item, "_EmissionColor"))
+                {
+                    item.FeatureFlags |= FeatureEmission;
+                }
+                if (!string.IsNullOrEmpty(rimTextureName) || HasTypedColor(item, "_RimColor"))
+                {
+                    item.FeatureFlags |= FeatureRim;
+                }
+            }
             payload.Materials.Add(item);
             payload.Manifest.materialRefs.Add(item.Name);
             var index = payload.Materials.Count - 1;
@@ -267,6 +312,114 @@ namespace VsfClone.Xav2.Editor
                 return "realtoon";
             }
             return "other";
+        }
+
+        private static string ResolveShaderFamily(string shaderVariant)
+        {
+            return string.Equals(shaderVariant, "lilToon", StringComparison.OrdinalIgnoreCase)
+                ? "liltoon"
+                : "legacy";
+        }
+
+        private static bool HasTypedColor(Xav2MaterialPayload payload, string id)
+        {
+            return payload.TypedColorParams.Exists(p => string.Equals(p.Id, id, StringComparison.Ordinal));
+        }
+
+        private static void AddTypedFloat(Xav2MaterialPayload payload, Material material, string id, params string[] sourceProps)
+        {
+            foreach (var prop in sourceProps)
+            {
+                if (!material.HasProperty(prop))
+                {
+                    continue;
+                }
+                payload.TypedFloatParams.Add(new Xav2TypedFloatParam
+                {
+                    Id = id,
+                    Value = material.GetFloat(prop)
+                });
+                return;
+            }
+        }
+
+        private static void AddTypedColor(Xav2MaterialPayload payload, Material material, string id, params string[] sourceProps)
+        {
+            foreach (var prop in sourceProps)
+            {
+                if (!material.HasProperty(prop))
+                {
+                    continue;
+                }
+                var c = material.GetColor(prop);
+                payload.TypedColorParams.Add(new Xav2TypedColorParam
+                {
+                    Id = id,
+                    R = c.r,
+                    G = c.g,
+                    B = c.b,
+                    A = c.a
+                });
+                return;
+            }
+        }
+
+        private static void AddTypedTexture(Xav2MaterialPayload payload, string slot, string textureRef)
+        {
+            if (string.IsNullOrWhiteSpace(textureRef))
+            {
+                return;
+            }
+            payload.TypedTextureParams.Add(new Xav2TypedTextureParam
+            {
+                Slot = slot,
+                TextureRef = textureRef
+            });
+        }
+
+        private static string EnsureTextureRefForProperty(
+            Material material,
+            Xav2AvatarPayload payload,
+            HashSet<string> textureNameSet,
+            params string[] propertyCandidates)
+        {
+            if (material == null || payload == null || textureNameSet == null || propertyCandidates == null)
+            {
+                return string.Empty;
+            }
+
+            foreach (var prop in propertyCandidates)
+            {
+                if (string.IsNullOrWhiteSpace(prop) || !material.HasProperty(prop))
+                {
+                    continue;
+                }
+                if (!(material.GetTexture(prop) is Texture2D tex2d) || tex2d == null)
+                {
+                    continue;
+                }
+
+                var encoded = EncodeTextureSafe(tex2d);
+                if (encoded.Length == 0)
+                {
+                    Debug.LogWarning($"[XAV2] Texture encode failed for material '{material.name}', texture '{tex2d.name}'.");
+                    continue;
+                }
+
+                var textureName = BuildUniqueTextureName(tex2d);
+                if (textureNameSet.Add(textureName))
+                {
+                    payload.Textures.Add(new Xav2TexturePayload
+                    {
+                        Name = textureName,
+                        Bytes = encoded
+                    });
+                    payload.Manifest.textureRefs.Add(textureName);
+                }
+                return textureName;
+            }
+
+            return string.Empty;
         }
 
         [Serializable]
@@ -373,28 +526,6 @@ namespace VsfClone.Xav2.Editor
             {
                 return EncodeTextureViaRenderTexture(texture);
             }
-        }
-
-        private static Texture2D ResolveBaseColorTexture(Material material)
-        {
-            if (material == null)
-            {
-                return null;
-            }
-
-            var candidateProps = new[] { "_MainTex", "_BaseMap", "_BaseColorMap" };
-            foreach (var prop in candidateProps)
-            {
-                if (!material.HasProperty(prop))
-                {
-                    continue;
-                }
-                if (material.GetTexture(prop) is Texture2D tex2d)
-                {
-                    return tex2d;
-                }
-            }
-            return null;
         }
 
         private static string BuildUniqueTextureName(Texture2D texture)
