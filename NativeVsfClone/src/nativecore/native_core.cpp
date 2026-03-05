@@ -39,6 +39,7 @@ namespace {
 using vsfclone::avatar::AvatarCompatLevel;
 using vsfclone::avatar::AvatarPackage;
 using vsfclone::avatar::AvatarSourceType;
+using vsfclone::avatar::ExpressionState;
 
 #if defined(_WIN32)
 struct WindowRenderState {
@@ -154,11 +155,18 @@ struct AvatarSecondaryMotionState {
     float peak_offset_magnitude = 0.0f;
 };
 
+struct AvatarArmPoseState {
+    bool initialized = false;
+    NcPoseBoneOffset left {};
+    NcPoseBoneOffset right {};
+};
+
 struct CoreState {
     bool initialized = false;
     std::uint64_t next_avatar_handle = 1;
     std::unordered_map<std::uint64_t, AvatarPackage> avatars;
     std::unordered_map<std::uint64_t, AvatarSecondaryMotionState> secondary_motion_states;
+    std::unordered_map<std::uint64_t, AvatarArmPoseState> arm_pose_states;
     std::unordered_set<std::uint64_t> render_ready_avatars;
     avatar::AvatarLoaderFacade loader;
     stream::SpoutSender spout;
@@ -207,7 +215,7 @@ NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions
     }
     out.framing_target = std::max(0.35f, std::min(0.95f, out.framing_target));
     out.headroom = std::max(0.0f, std::min(0.40f, out.headroom));
-    out.yaw_deg = std::max(-45.0f, std::min(45.0f, out.yaw_deg));
+    out.yaw_deg = std::max(-180.0f, std::min(180.0f, out.yaw_deg));
     out.fov_deg = std::max(20.0f, std::min(80.0f, out.fov_deg));
     for (int i = 0; i < 4; ++i) {
         out.background_rgba[i] = std::max(0.0f, std::min(1.0f, out.background_rgba[i]));
@@ -448,6 +456,36 @@ NcAvatarFormatHint ToFormatHint(AvatarSourceType source_type) {
     }
 }
 
+const char* AvatarSourceTypeName(AvatarSourceType source_type) {
+    switch (source_type) {
+        case AvatarSourceType::Vrm:
+            return "vrm";
+        case AvatarSourceType::VxAvatar:
+            return "vxavatar";
+        case AvatarSourceType::Vxa2:
+            return "vxa2";
+        case AvatarSourceType::Xav2:
+            return "xav2";
+        case AvatarSourceType::VsfAvatar:
+            return "vsfavatar";
+        default:
+            return "unknown";
+    }
+}
+
+int PreviewYawDegreesForAvatarSource(AvatarSourceType source_type) {
+    // Runtime preview yaw is the single source-of-truth for front-view alignment.
+    if (source_type == AvatarSourceType::Xav2 || source_type == AvatarSourceType::Vrm) {
+        return 0;
+    }
+    return 180;
+}
+
+float PreviewYawRadiansForAvatarSource(AvatarSourceType source_type) {
+    constexpr float kPi = 3.14159265358979323846f;
+    return static_cast<float>(PreviewYawDegreesForAvatarSource(source_type)) * (kPi / 180.0f);
+}
+
 NcCompatLevel ToCompatLevel(AvatarCompatLevel compat_level) {
     switch (compat_level) {
         case AvatarCompatLevel::Full:
@@ -548,7 +586,9 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     }
     {
         std::ostringstream pass_summary;
-        pass_summary << "opaque=" << mode_counts.opaque
+        pass_summary << "format=" << AvatarSourceTypeName(pkg.source_type)
+                     << ", applied_preview_yaw_deg=" << PreviewYawDegreesForAvatarSource(pkg.source_type)
+                     << ", opaque=" << mode_counts.opaque
                      << ", mask=" << mode_counts.mask
                      << ", blend=" << mode_counts.blend;
         CopyString(
@@ -1150,6 +1190,142 @@ void PushAvatarWarningUnique(AvatarPackage* pkg, const std::string& message, con
     }
 }
 
+std::string ToLowerAscii(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+ExpressionState* FindExpressionByNameCaseInsensitive(std::vector<ExpressionState>* expressions, const std::string& name) {
+    if (expressions == nullptr) {
+        return nullptr;
+    }
+    const std::string lowered = ToLowerAscii(name);
+    for (auto& expr : *expressions) {
+        if (ToLowerAscii(expr.name) == lowered) {
+            return &expr;
+        }
+    }
+    return nullptr;
+}
+
+const std::array<const char*, 52U> kArkit52Canonical = {
+    "browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
+    "cheekPuff", "cheekSquintLeft", "cheekSquintRight", "eyeBlinkLeft", "eyeBlinkRight",
+    "eyeLookDownLeft", "eyeLookDownRight", "eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft",
+    "eyeLookOutRight", "eyeLookUpLeft", "eyeLookUpRight", "eyeSquintLeft", "eyeSquintRight",
+    "eyeWideLeft", "eyeWideRight", "jawForward", "jawLeft", "jawOpen",
+    "jawRight", "mouthClose", "mouthDimpleLeft", "mouthDimpleRight", "mouthFrownLeft",
+    "mouthFrownRight", "mouthFunnel", "mouthLeft", "mouthLowerDownLeft", "mouthLowerDownRight",
+    "mouthPressLeft", "mouthPressRight", "mouthPucker", "mouthRight", "mouthRollLower",
+    "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper", "mouthSmileLeft", "mouthSmileRight",
+    "mouthStretchLeft", "mouthStretchRight", "mouthUpperUpLeft", "mouthUpperUpRight", "noseSneerLeft",
+    "noseSneerRight", "tongueOut",
+};
+
+bool HasArkit52ExpressionBindings(const AvatarPackage& pkg) {
+    std::size_t bound_channels = 0U;
+    for (const auto* channel : kArkit52Canonical) {
+        const auto* expr = static_cast<const ExpressionState*>(nullptr);
+        const std::string lowered = ToLowerAscii(channel);
+        for (const auto& item : pkg.expressions) {
+            if (ToLowerAscii(item.name) == lowered) {
+                expr = &item;
+                break;
+            }
+        }
+        if (expr != nullptr && !expr->binds.empty()) {
+            ++bound_channels;
+        }
+    }
+    return bound_channels > 0U;
+}
+
+void BuildArkit52ExpressionBindings(AvatarPackage* pkg) {
+    if (pkg == nullptr || pkg->blendshape_payloads.empty()) {
+        return;
+    }
+
+    std::unordered_map<std::string, std::string> canonical_by_lower;
+    canonical_by_lower.reserve(kArkit52Canonical.size());
+    for (const auto* channel : kArkit52Canonical) {
+        canonical_by_lower[ToLowerAscii(channel)] = channel;
+    }
+
+    std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> channel_binds;
+    channel_binds.reserve(kArkit52Canonical.size());
+    for (const auto& blendshape : pkg->blendshape_payloads) {
+        for (const auto& frame : blendshape.frames) {
+            const auto it = canonical_by_lower.find(ToLowerAscii(frame.name));
+            if (it == canonical_by_lower.end()) {
+                continue;
+            }
+            channel_binds[it->second].push_back({blendshape.mesh_name, frame.name});
+        }
+    }
+
+    std::vector<std::string> missing_channels;
+    missing_channels.reserve(kArkit52Canonical.size());
+    for (const auto* channel : kArkit52Canonical) {
+        auto* expr = FindExpressionByNameCaseInsensitive(&pkg->expressions, channel);
+        if (expr == nullptr) {
+            ExpressionState created {};
+            created.name = channel;
+            created.mapping_kind = channel;
+            created.default_weight = 0.0f;
+            created.runtime_weight = 0.0f;
+            pkg->expressions.push_back(std::move(created));
+            expr = &pkg->expressions.back();
+        } else {
+            expr->mapping_kind = channel;
+            expr->default_weight = 0.0f;
+            expr->runtime_weight = 0.0f;
+        }
+
+        expr->binds.clear();
+        std::unordered_set<std::string> bind_keys;
+        const auto bind_it = channel_binds.find(channel);
+        if (bind_it != channel_binds.end()) {
+            bind_keys.reserve(bind_it->second.size());
+            for (const auto& [mesh_name, frame_name] : bind_it->second) {
+                const std::string key = NormalizeMeshKey(mesh_name) + "|" + ToLowerAscii(frame_name);
+                if (!bind_keys.insert(key).second) {
+                    continue;
+                }
+                ExpressionState::Bind bind {};
+                bind.mesh_name = mesh_name;
+                bind.frame_name = frame_name;
+                bind.weight_scale = 1.0f;
+                expr->binds.push_back(std::move(bind));
+            }
+        }
+        if (expr->binds.empty()) {
+            missing_channels.push_back(channel);
+        }
+    }
+
+    if (!missing_channels.empty()) {
+        std::ostringstream summary;
+        summary << "W_EXPRESSION: ARKIT52 strict channel missing binds=" << missing_channels.size() << "/52";
+        if (!missing_channels.empty()) {
+            summary << " [";
+            const std::size_t to_show = std::min<std::size_t>(8U, missing_channels.size());
+            for (std::size_t i = 0U; i < to_show; ++i) {
+                if (i > 0U) {
+                    summary << ",";
+                }
+                summary << missing_channels[i];
+            }
+            if (missing_channels.size() > to_show) {
+                summary << ",...";
+            }
+            summary << "]";
+        }
+        PushAvatarWarningUnique(pkg, summary.str(), "W_ARKIT52_MISSING_BIND");
+    }
+}
+
 float ClampFinite(float value, float min_v, float max_v, float fallback) {
     if (!std::isfinite(value)) {
         return fallback;
@@ -1608,7 +1784,7 @@ NcPoseBoneOffset SanitizePoseOffset(const NcPoseBoneOffset& src) {
         return std::max(min_v, std::min(max_v, value));
     };
     out.pitch_deg = clamp_finite(out.pitch_deg, -45.0f, 45.0f);
-    out.yaw_deg = clamp_finite(out.yaw_deg, -45.0f, 45.0f);
+    out.yaw_deg = clamp_finite(out.yaw_deg, -180.0f, 180.0f);
     out.roll_deg = clamp_finite(out.roll_deg, -45.0f, 45.0f);
     return out;
 }
@@ -2150,6 +2326,18 @@ bool ApplyArmPoseToAvatar(
 
     const auto left_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
     const auto right_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
+    auto& pose_state = g_state.arm_pose_states[handle];
+    auto abs_max_delta = [](const NcPoseBoneOffset& a, const NcPoseBoneOffset& b) {
+        return std::max(
+            std::abs(a.pitch_deg - b.pitch_deg),
+            std::max(std::abs(a.yaw_deg - b.yaw_deg), std::abs(a.roll_deg - b.roll_deg)));
+    };
+    if (pose_state.initialized &&
+        abs_max_delta(pose_state.left, left_arm_pose) < 0.2f &&
+        abs_max_delta(pose_state.right, right_arm_pose) < 0.2f) {
+        return true;
+    }
+    bool any_mesh_updated = false;
     auto& meshes = mesh_it->second;
     for (auto& mesh : meshes) {
         if (mesh.bind_pose_vertex_blob.empty()) {
@@ -2218,6 +2406,12 @@ bool ApplyArmPoseToAvatar(
         mesh.deformed_vertex_blob = mesh.base_vertex_blob;
         RecomputeMeshBoundsFromVertexBlob(&mesh);
         (void)UploadMeshVertexBlob(&mesh, device_ctx);
+        any_mesh_updated = true;
+    }
+    if (any_mesh_updated) {
+        pose_state.initialized = true;
+        pose_state.left = left_arm_pose;
+        pose_state.right = right_arm_pose;
     }
     return true;
 }
@@ -3436,9 +3630,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         // Host UI currently operates in single-avatar mode, and slot offsets
         // can push the visible avatar out of frame after reload/recovery paths.
         const float x_offset = 0.0f;
-        const float preview_yaw = (it->second.source_type == AvatarSourceType::Xav2)
-            ? 0.0f
-            : DirectX::XM_PI;
+        const float preview_yaw = PreviewYawRadiansForAvatarSource(it->second.source_type);
         const auto raw_head_rot = DirectX::XMVectorSet(
             g_state.latest_tracking.head_rot_quat[0],
             g_state.latest_tracking.head_rot_quat[1],
@@ -3805,6 +3997,7 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.next_avatar_handle = 1;
     vsfclone::nativecore::g_state.avatars.clear();
     vsfclone::nativecore::g_state.secondary_motion_states.clear();
+    vsfclone::nativecore::g_state.arm_pose_states.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
@@ -3834,6 +4027,7 @@ NcResultCode nc_shutdown(void) {
     vsfclone::nativecore::ResetRendererResources(&vsfclone::nativecore::g_state.renderer);
 #endif
     vsfclone::nativecore::g_state.avatars.clear();
+    vsfclone::nativecore::g_state.arm_pose_states.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
@@ -3857,6 +4051,7 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
         vsfclone::nativecore::SetError(NC_ERROR_IO, "avatar", loaded.error, true);
         return NC_ERROR_IO;
     }
+    vsfclone::nativecore::BuildArkit52ExpressionBindings(&loaded.value);
     if (loaded.value.source_type == vsfclone::avatar::AvatarSourceType::Vrm && loaded.value.expressions.empty()) {
         loaded.value.expressions.push_back({"blink", "blink", 0.0f, 0.0f});
         loaded.value.expressions.push_back({"aa", "viseme_aa", 0.0f, 0.0f});
@@ -3867,6 +4062,7 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
     const std::uint64_t handle = vsfclone::nativecore::g_state.next_avatar_handle++;
     vsfclone::nativecore::g_state.avatars[handle] = loaded.value;
     vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
+    vsfclone::nativecore::g_state.arm_pose_states.erase(handle);
     *out_handle = handle;
     vsfclone::nativecore::FillAvatarInfo(loaded.value, handle, out_info);
     vsfclone::nativecore::ClearError();
@@ -3886,6 +4082,7 @@ NcResultCode nc_unload_avatar(NcAvatarHandle handle) {
     }
     vsfclone::nativecore::g_state.render_ready_avatars.erase(handle);
     vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
+    vsfclone::nativecore::g_state.arm_pose_states.erase(handle);
 #if defined(_WIN32)
     auto mesh_it = vsfclone::nativecore::g_state.renderer.avatar_meshes.find(handle);
     if (mesh_it != vsfclone::nativecore::g_state.renderer.avatar_meshes.end()) {
@@ -4121,6 +4318,7 @@ NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32
         if (pkg.expressions.empty()) {
             continue;
         }
+        const bool arkit52_mode = vsfclone::nativecore::HasArkit52ExpressionBindings(pkg);
 
         std::string summary;
         std::size_t shown = 0U;
@@ -4142,7 +4340,7 @@ NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32
                     matched = true;
                 }
             }
-            if (!matched && mapping == "blink") {
+            if (!matched && !arkit52_mode && mapping == "blink") {
                 const auto left_it = incoming.find("eyeblinkleft");
                 const auto right_it = incoming.find("eyeblinkright");
                 if (left_it != incoming.end() || right_it != incoming.end()) {
@@ -4152,14 +4350,14 @@ NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32
                     matched = true;
                 }
             }
-            if (!matched && mapping == "visemeaa") {
+            if (!matched && !arkit52_mode && mapping == "visemeaa") {
                 const auto jaw_it = incoming.find("jawopen");
                 if (jaw_it != incoming.end()) {
                     weight = jaw_it->second;
                     matched = true;
                 }
             }
-            if (!matched && mapping == "joy") {
+            if (!matched && !arkit52_mode && mapping == "joy") {
                 const auto smile_it = incoming.find("mouthsmileleft");
                 if (smile_it != incoming.end()) {
                     weight = smile_it->second;
@@ -4249,6 +4447,7 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
     }
 #endif
     vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
+    vsfclone::nativecore::g_state.arm_pose_states.erase(handle);
     it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
@@ -4284,6 +4483,7 @@ NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
     }
 #endif
     vsfclone::nativecore::g_state.secondary_motion_states.erase(handle);
+    vsfclone::nativecore::g_state.arm_pose_states.erase(handle);
     it->second.last_render_draw_calls = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;

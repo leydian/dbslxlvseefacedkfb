@@ -191,7 +191,10 @@ public sealed class PosePresetStore : IPosePresetStore
 
             output.Add(new PoseBoneUiOffset(
                 bone,
-                Clamp(src.PitchDeg, -45.0f, 45.0f),
+                Clamp(
+                    src.PitchDeg,
+                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm ? -90.0f : -45.0f,
+                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm ? 90.0f : 45.0f),
                 Clamp(src.YawDeg, -45.0f, 45.0f),
                 Clamp(src.RollDeg, -45.0f, 45.0f)));
         }

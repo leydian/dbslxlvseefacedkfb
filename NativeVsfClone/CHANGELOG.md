@@ -2,6 +2,82 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF arm pose refinement + suggested preset automation + native update optimization
+
+### Summary
+
+Upgraded T-pose arm raise/lower control quality with host-side filtering/tuning, added suggested arm preset automation for repetitive operator flows, and optimized native arm pose updates to skip redundant re-skinning work on negligible input deltas.
+
+### Changed
+
+- HostCore arm pose refinement:
+  - `host/HostCore/HostUiState.cs`
+    - added `ArmPoseTuningSettings`, `SuggestedArmPreset`.
+  - `host/HostCore/HostController.cs`
+    - added upper-arm pitch filtering pipeline (hard/soft clamp, deadband, smoothing, rate limit).
+    - added `ConfigureArmPoseTuning(...)`.
+    - added suggested arm preset generation/apply flow from recent arm pose history.
+  - `host/HostCore/PosePresetStore.cs`
+    - updated arm pitch normalization range to preserve `[-90, +90]`.
+- WPF UI integration:
+  - `host/WpfHost/MainWindow.xaml`
+    - added arm quality controls (smoothing + deadband).
+    - added suggested arm preset controls (apply/save).
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - wired tuning change handlers and suggested preset apply/save actions.
+    - integrated state sync and UI enable policy with existing render/pose flows.
+- Native optimization:
+  - `src/nativecore/native_core.cpp`
+    - added per-avatar arm pose cache state.
+    - `ApplyArmPoseToAvatar(...)` now short-circuits when arm pose delta is below threshold.
+    - clears arm pose cache on init/shutdown/unload/resource lifecycle paths.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md`
+  - `docs/reports/wpf_arm_pose_refinement_and_suggestion_optimization_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+
+## 2026-03-06 - WPF arm pose slider wiring (both + per-arm pitch)
+
+### Summary
+
+Completed the WPF host-side interaction wiring for T-pose arm adjustment so operators can control arm pitch with both synchronized and per-arm slider flows while preserving existing pose preset/controller contracts.
+
+### Changed
+
+- WPF pose interaction wiring:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `ArmPoseSlider_ValueChanged(...)` to support:
+    - `Both` pitch apply to left/right upper arm
+    - independent left/right pitch apply
+    - combined slider value recompute from per-arm values
+  - added null-safe guards and existing busy/sync gating integration (`_isSyncingPoseUi`, `OperationState.IsBusy`).
+- Pose apply helper and state synchronization:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `ApplyArmPitchOffset(...)` helper that updates pitch while preserving current Yaw/Roll.
+  - extended `SyncPoseControlsFromState()` to keep arm sliders aligned with `PoseOffsets`.
+  - extended `ApplySelectedPoseOffset()` so legacy arm-bone edits synchronize arm slider UI.
+- Render control availability alignment:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - arm sliders now follow existing render-control enable policy.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_arm_pose_slider_wiring.md`
+  - `docs/reports/wpf_arm_pose_slider_wiring_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: PASS (0 warnings, 0 errors)
+
 ## 2026-03-06 - VRM SpringBone runtime refinement + MToon advanced runtime application
 
 ### Summary

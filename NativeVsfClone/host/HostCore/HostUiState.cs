@@ -56,6 +56,22 @@ public sealed record PoseBoneUiOffset(
     float YawDeg,
     float RollDeg);
 
+public sealed record ArmPoseTuningSettings(
+    bool EnableSmoothing,
+    float SmoothingTauMs,
+    float DeadbandDeg,
+    float SoftClampDeg,
+    float HardClampMinDeg,
+    float HardClampMaxDeg,
+    float MaxDegreesPerSecond);
+
+public sealed record SuggestedArmPreset(
+    string Name,
+    float LeftPitchDeg,
+    float RightPitchDeg,
+    float Score,
+    DateTimeOffset LastUsedUtc);
+
 public sealed record RenderUiState(
     bool BroadcastMode,
     RenderCameraMode CameraMode,

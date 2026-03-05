@@ -42,6 +42,26 @@ public sealed partial class HostController
     private DiagnosticsModel _runtimeDiagnostics = DiagnosticsModel.Empty;
     private DateTimeOffset _lastDiagnosticsPublishUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastRuntimeCaptureUtc = DateTimeOffset.MinValue;
+    private ArmPoseTuningSettings _armPoseTuning = new(
+        EnableSmoothing: true,
+        SmoothingTauMs: 80.0f,
+        DeadbandDeg: 0.8f,
+        SoftClampDeg: 55.0f,
+        HardClampMinDeg: -80.0f,
+        HardClampMaxDeg: 85.0f,
+        MaxDegreesPerSecond: 420.0f);
+    private readonly Dictionary<PoseBoneKind, ArmPoseFilterState> _armPoseFilterState = new();
+    private readonly List<ArmPoseSample> _armPoseHistory = new();
+    private List<SuggestedArmPreset> _suggestedArmPresets = new();
+    private long _armPoseInputVersion;
+    private long _armPoseCapturedVersion;
+    private DateTimeOffset _lastArmPoseInputUtc = DateTimeOffset.MinValue;
+
+    private const int ArmPoseHistoryCapacity = 20;
+    private const int ArmPoseSuggestionTopK = 3;
+    private static readonly TimeSpan ArmPoseCaptureDelay = TimeSpan.FromMilliseconds(500);
+    private const float ArmPoseSuggestionMinDeltaDeg = 1.0f;
+    private const float ArmPoseSuggestionQuantizeDeg = 5.0f;
 
     public HostController()
         : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new PosePresetStore(), new TrackingInputService())
@@ -108,6 +128,8 @@ public sealed partial class HostController
     public string? SelectedPosePresetName => _posePresetStoreModel.LastSelectedPresetName;
     public TrackingDiagnostics TrackingDiagnostics => _trackingDiagnostics;
     public IReadOnlyList<PoseBoneUiOffset> PoseOffsets => _poseOffsets;
+    public ArmPoseTuningSettings ArmPoseTuning => _armPoseTuning;
+    public IReadOnlyList<SuggestedArmPreset> SuggestedArmPresets => _suggestedArmPresets;
 
     public NcResultCode Initialize()
     {
@@ -407,7 +429,7 @@ public sealed partial class HostController
             _renderOptions.CameraMode = ToNativeCameraMode(current.CameraMode);
             _renderOptions.FramingTarget = Clamp(current.FramingTarget, 0.35f, 0.95f);
             _renderOptions.Headroom = Clamp(current.Headroom, 0.0f, 0.5f);
-            _renderOptions.YawDeg = Clamp(current.YawDeg, -45.0f, 45.0f);
+            _renderOptions.YawDeg = Clamp(current.YawDeg, -180.0f, 180.0f);
             _renderOptions.FovDeg = Clamp(current.FovDeg, 20.0f, 70.0f);
             _renderOptions.ShowDebugOverlay = current.ShowDebugOverlay ? 1U : 0U;
             ApplyBackgroundPreset(ref _renderOptions, current.BackgroundPreset);
@@ -530,11 +552,21 @@ public sealed partial class HostController
             return NcResultCode.InvalidArgument;
         }
 
+        var clampedYaw = Clamp(yawDeg, -45.0f, 45.0f);
+        var clampedRoll = Clamp(rollDeg, -45.0f, 45.0f);
+        var clampedPitch = Clamp(pitchDeg, -45.0f, 45.0f);
+        if (bone == PoseBoneKind.LeftUpperArm || bone == PoseBoneKind.RightUpperArm)
+        {
+            clampedPitch = ProcessArmPitchInput(bone, pitchDeg);
+            _armPoseInputVersion++;
+            _lastArmPoseInputUtc = DateTimeOffset.UtcNow;
+        }
+
         _poseOffsets[idx] = new PoseBoneUiOffset(
             bone,
-            Clamp(pitchDeg, -45.0f, 45.0f),
-            Clamp(yawDeg, -45.0f, 45.0f),
-            Clamp(rollDeg, -45.0f, 45.0f));
+            clampedPitch,
+            clampedYaw,
+            clampedRoll);
         var rc = ApplyPoseOffsetsInternal("SetPoseOffset");
         RefreshState();
         return rc;
@@ -548,9 +580,45 @@ public sealed partial class HostController
     public NcResultCode ResetAllPoseOffsets()
     {
         _poseOffsets = BuildDefaultPoseOffsets();
+        _armPoseFilterState.Clear();
         var rc = ApplyPoseOffsetsInternal("ResetAllPoseOffsets");
         RefreshState();
         return rc;
+    }
+
+    public void ConfigureArmPoseTuning(ArmPoseTuningSettings tuning)
+    {
+        _armPoseTuning = tuning with
+        {
+            SmoothingTauMs = Clamp(tuning.SmoothingTauMs, 10.0f, 240.0f),
+            DeadbandDeg = Clamp(tuning.DeadbandDeg, 0.0f, 3.0f),
+            SoftClampDeg = Clamp(tuning.SoftClampDeg, 20.0f, 75.0f),
+            HardClampMinDeg = Clamp(tuning.HardClampMinDeg, -90.0f, -40.0f),
+            HardClampMaxDeg = Clamp(tuning.HardClampMaxDeg, 40.0f, 90.0f),
+            MaxDegreesPerSecond = Clamp(tuning.MaxDegreesPerSecond, 60.0f, 720.0f),
+        };
+        if (_armPoseTuning.HardClampMinDeg >= _armPoseTuning.HardClampMaxDeg - 1.0f)
+        {
+            _armPoseTuning = _armPoseTuning with { HardClampMinDeg = -80.0f, HardClampMaxDeg = 85.0f };
+        }
+        _armPoseFilterState.Clear();
+        RefreshState();
+    }
+
+    public NcResultCode ApplySuggestedArmPreset(string presetName)
+    {
+        var preset = _suggestedArmPresets.FirstOrDefault(
+            p => string.Equals(p.Name, presetName, StringComparison.OrdinalIgnoreCase));
+        if (preset is null)
+        {
+            return NcResultCode.InvalidArgument;
+        }
+
+        var left = _poseOffsets.FirstOrDefault(static p => p.Bone == PoseBoneKind.LeftUpperArm);
+        var right = _poseOffsets.FirstOrDefault(static p => p.Bone == PoseBoneKind.RightUpperArm);
+        var leftRc = SetPoseOffset(PoseBoneKind.LeftUpperArm, preset.LeftPitchDeg, left?.YawDeg ?? 0.0f, left?.RollDeg ?? 0.0f);
+        var rightRc = SetPoseOffset(PoseBoneKind.RightUpperArm, preset.RightPitchDeg, right?.YawDeg ?? 0.0f, right?.RollDeg ?? 0.0f);
+        return leftRc != NcResultCode.Ok ? leftRc : rightRc;
     }
 
     public PosePresetModel CreatePosePreset(string name)
@@ -602,6 +670,7 @@ public sealed partial class HostController
 
         _posePresetStoreModel.LastSelectedPresetName = preset.Name;
         _poseOffsets = PosePresetStoreModel.CloneOffsets(preset.Offsets);
+        _armPoseFilterState.Clear();
         PersistPosePresetStore();
         var rc = ApplyPoseOffsetsInternal("ApplyPosePreset");
 
@@ -654,6 +723,7 @@ public sealed partial class HostController
 
     public NcResultCode Tick(float deltaTimeSeconds)
     {
+        MaybeCaptureArmPoseSample();
         if (!Monitor.TryEnter(_runtimeSync))
         {
             if (OperationState.IsBusy &&
@@ -710,9 +780,26 @@ public sealed partial class HostController
                 TrackResult("SetTrackingFrameNeutral", trackingRc);
             }
         }
+        int? arkit52SubmittedCount = null;
+        int? arkit52MissingCount = null;
+        string? arkit52MissingKeys = null;
         if (_trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
             expressionWeights.Count > 0)
         {
+            var submittedCount = 0;
+            var arkit52Missing = new List<string>();
+            foreach (var channel in Arkit52Channels.NormalizedOrder)
+            {
+                if (expressionWeights.ContainsKey(channel))
+                {
+                    submittedCount++;
+                }
+                else
+                {
+                    arkit52Missing.Add(channel);
+                }
+            }
+
             var payload = expressionWeights
                 .Where(static pair => !IsPoseChannel(pair.Key))
                 .Select(static pair => new NcExpressionWeight
@@ -735,8 +822,20 @@ public sealed partial class HostController
                     _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
                 }
             }
+            arkit52SubmittedCount = submittedCount;
+            arkit52MissingCount = arkit52Missing.Count;
+            arkit52MissingKeys = string.Join(",", arkit52Missing);
         }
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+        if (arkit52SubmittedCount.HasValue && arkit52MissingCount.HasValue)
+        {
+            _trackingDiagnostics = _trackingDiagnostics with
+            {
+                Arkit52SubmittedCount = arkit52SubmittedCount.Value,
+                Arkit52MissingCount = arkit52MissingCount.Value,
+                Arkit52MissingKeys = arkit52MissingKeys ?? string.Empty,
+            };
+        }
         ReconcileTrackingDiagnostics();
 
         var rc = NcResultCode.Ok;
@@ -976,7 +1075,7 @@ public sealed partial class HostController
             CameraMode = ToNativeCameraMode(state.CameraMode),
             FramingTarget = Clamp(state.FramingTarget, 0.35f, 0.95f),
             Headroom = Clamp(state.Headroom, 0.0f, 0.5f),
-            YawDeg = Clamp(state.YawDeg, -45.0f, 45.0f),
+            YawDeg = Clamp(state.YawDeg, -180.0f, 180.0f),
             FovDeg = Clamp(state.FovDeg, 20.0f, 70.0f),
             ShowDebugOverlay = state.ShowDebugOverlay ? 1U : 0U,
         };
@@ -1097,7 +1196,7 @@ public sealed partial class HostController
         {
             FramingTarget = Clamp(state.FramingTarget, 0.35f, 0.95f),
             Headroom = Clamp(state.Headroom, 0.0f, 0.5f),
-            YawDeg = Clamp(state.YawDeg, -45.0f, 45.0f),
+            YawDeg = Clamp(state.YawDeg, -180.0f, 180.0f),
             FovDeg = Clamp(state.FovDeg, 20.0f, 70.0f),
         };
     }
@@ -1169,6 +1268,189 @@ public sealed partial class HostController
     {
         return Math.Min(max, Math.Max(min, value));
     }
+
+    private float ProcessArmPitchInput(PoseBoneKind bone, float rawPitchDeg)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var hardClamped = Clamp(rawPitchDeg, _armPoseTuning.HardClampMinDeg, _armPoseTuning.HardClampMaxDeg);
+        var target = ApplyArmSoftClamp(hardClamped);
+        if (!_armPoseFilterState.TryGetValue(bone, out var state))
+        {
+            state = new ArmPoseFilterState(target, now);
+        }
+
+        var dtSeconds = Math.Max((float)(now - state.LastUpdateUtc).TotalSeconds, 1.0f / 120.0f);
+        var maxDelta = _armPoseTuning.MaxDegreesPerSecond * dtSeconds;
+        var delta = target - state.FilteredPitchDeg;
+        if (Math.Abs(delta) > maxDelta)
+        {
+            target = state.FilteredPitchDeg + MathF.Sign(delta) * maxDelta;
+        }
+
+        float filtered;
+        if (_armPoseTuning.EnableSmoothing)
+        {
+            if (Math.Abs(target - state.FilteredPitchDeg) < _armPoseTuning.DeadbandDeg)
+            {
+                filtered = state.FilteredPitchDeg;
+            }
+            else
+            {
+                var tauSeconds = _armPoseTuning.SmoothingTauMs / 1000.0f;
+                var alpha = dtSeconds / (tauSeconds + dtSeconds);
+                filtered = state.FilteredPitchDeg + alpha * (target - state.FilteredPitchDeg);
+            }
+        }
+        else
+        {
+            filtered = target;
+        }
+
+        filtered = Clamp(filtered, _armPoseTuning.HardClampMinDeg, _armPoseTuning.HardClampMaxDeg);
+        _armPoseFilterState[bone] = new ArmPoseFilterState(filtered, now);
+        return filtered;
+    }
+
+    private float ApplyArmSoftClamp(float pitchDeg)
+    {
+        var soft = Math.Abs(_armPoseTuning.SoftClampDeg);
+        var hardMin = _armPoseTuning.HardClampMinDeg;
+        var hardMax = _armPoseTuning.HardClampMaxDeg;
+        if (pitchDeg > soft)
+        {
+            var t = (pitchDeg - soft) / Math.Max(0.0001f, hardMax - soft);
+            pitchDeg = soft + (hardMax - soft) * (1.0f - MathF.Exp(-t * 2.2f));
+        }
+        else if (pitchDeg < -soft)
+        {
+            var t = ((-pitchDeg) - soft) / Math.Max(0.0001f, (-hardMin) - soft);
+            pitchDeg = -soft - (((-hardMin) - soft) * (1.0f - MathF.Exp(-t * 2.2f)));
+        }
+        return Clamp(pitchDeg, hardMin, hardMax);
+    }
+
+    private void MaybeCaptureArmPoseSample()
+    {
+        if (_armPoseInputVersion == _armPoseCapturedVersion)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastArmPoseInputUtc < ArmPoseCaptureDelay)
+        {
+            return;
+        }
+
+        var left = _poseOffsets.FirstOrDefault(static p => p.Bone == PoseBoneKind.LeftUpperArm);
+        var right = _poseOffsets.FirstOrDefault(static p => p.Bone == PoseBoneKind.RightUpperArm);
+        if (left is null || right is null)
+        {
+            _armPoseCapturedVersion = _armPoseInputVersion;
+            return;
+        }
+
+        if (_armPoseHistory.Count > 0)
+        {
+            var last = _armPoseHistory[^1];
+            if (Math.Abs(last.LeftPitchDeg - left.PitchDeg) < ArmPoseSuggestionMinDeltaDeg &&
+                Math.Abs(last.RightPitchDeg - right.PitchDeg) < ArmPoseSuggestionMinDeltaDeg)
+            {
+                _armPoseCapturedVersion = _armPoseInputVersion;
+                return;
+            }
+        }
+
+        _armPoseHistory.Add(new ArmPoseSample(left.PitchDeg, right.PitchDeg, now));
+        if (_armPoseHistory.Count > ArmPoseHistoryCapacity)
+        {
+            _armPoseHistory.RemoveRange(0, _armPoseHistory.Count - ArmPoseHistoryCapacity);
+        }
+        _suggestedArmPresets = BuildSuggestedArmPresets(_armPoseHistory);
+        _armPoseCapturedVersion = _armPoseInputVersion;
+        RefreshState();
+    }
+
+    private static List<SuggestedArmPreset> BuildSuggestedArmPresets(List<ArmPoseSample> history)
+    {
+        var buckets = new Dictionary<string, (int Count, DateTimeOffset LastUsed, float LeftSum, float RightSum)>(StringComparer.Ordinal);
+        foreach (var sample in history)
+        {
+            var qLeft = Quantize(sample.LeftPitchDeg, ArmPoseSuggestionQuantizeDeg);
+            var qRight = Quantize(sample.RightPitchDeg, ArmPoseSuggestionQuantizeDeg);
+            var key = $"{qLeft:F0}:{qRight:F0}";
+            if (!buckets.TryGetValue(key, out var b))
+            {
+                b = (0, DateTimeOffset.MinValue, 0.0f, 0.0f);
+            }
+            b.Count += 1;
+            b.LeftSum += sample.LeftPitchDeg;
+            b.RightSum += sample.RightPitchDeg;
+            if (sample.TimestampUtc > b.LastUsed)
+            {
+                b.LastUsed = sample.TimestampUtc;
+            }
+            buckets[key] = b;
+        }
+
+        var ordered = buckets
+            .OrderByDescending(static x => x.Value.Count)
+            .ThenByDescending(static x => x.Value.LastUsed)
+            .Take(ArmPoseSuggestionTopK)
+            .ToList();
+        var output = new List<SuggestedArmPreset>(ordered.Count);
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in ordered)
+        {
+            var left = item.Value.LeftSum / item.Value.Count;
+            var right = item.Value.RightSum / item.Value.Count;
+            var name = BuildArmPoseName((left + right) * 0.5f);
+            if (!usedNames.Add(name))
+            {
+                var suffix = 2;
+                while (!usedNames.Add($"{name} {suffix}"))
+                {
+                    suffix++;
+                }
+                name = $"{name} {suffix}";
+            }
+            output.Add(new SuggestedArmPreset(name, left, right, item.Value.Count, item.Value.LastUsed));
+        }
+        return output;
+    }
+
+    private static float Quantize(float value, float step)
+    {
+        if (step <= 0.0001f)
+        {
+            return value;
+        }
+        return MathF.Round(value / step) * step;
+    }
+
+    private static string BuildArmPoseName(float bothPitch)
+    {
+        if (bothPitch >= 60.0f)
+        {
+            return "Full Raise";
+        }
+        if (bothPitch >= 25.0f)
+        {
+            return "Half Raise";
+        }
+        if (bothPitch >= 6.0f)
+        {
+            return "Slight Raise";
+        }
+        if (bothPitch <= -15.0f)
+        {
+            return "Down Relax";
+        }
+        return "T Relax";
+    }
+
+    private sealed record ArmPoseFilterState(float FilteredPitchDeg, DateTimeOffset LastUpdateUtc);
+    private sealed record ArmPoseSample(float LeftPitchDeg, float RightPitchDeg, DateTimeOffset TimestampUtc);
 
     private static bool IsPoseChannel(string key)
     {
@@ -1372,7 +1654,7 @@ public sealed partial class HostController
         var extension = Path.GetExtension(trimmed).ToLowerInvariant();
         if (extension is not ".vrm" and not ".vsfavatar" and not ".xav2")
         {
-            error = "Unsupported avatar file extension.";
+            error = "Unsupported avatar file extension. Supported: .vrm, .vsfavatar, .xav2. If your file is .xva2, rename/re-export to .xav2.";
             return false;
         }
 
