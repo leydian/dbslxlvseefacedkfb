@@ -120,3 +120,25 @@ WPF non-interactive launch smoke result in this follow-up run:
 
 - FAIL (`exit=-532462766`)
 - this differs from the earlier same-day snapshot and is tracked as an open environment/runtime investigation item.
+
+## Follow-up Update (2026-03-05, blocker-investigation rerun)
+
+Latest rerun snapshot:
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - run time: `2026-03-05T16:01:21.4764432+09:00`
+  - WPF publish: PASS
+  - WinUI publish: FAIL (`TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:10:11`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:10:21`
+  - `Overall: PASS`
+
+Additional WPF crash evidence captured from Application event log:
+
+- provider: `.NET Runtime`, event id: `1026`
+- unhandled exception: `System.DllNotFoundException`
+- stack includes WPF hwnd subclass hook path (`SetWindowLongPtrWndProc`).

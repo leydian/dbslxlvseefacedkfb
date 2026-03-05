@@ -127,6 +127,30 @@ Validation closure status:
 2. Run manual WinUI runtime smoke in an environment where WinUI app launch succeeds.
 3. Capture runtime perf deltas (before/after) to complete parity evidence vs WPF.
 
+## Follow-up Verification Update (2026-03-05, later same day)
+
+Additional rerun after parity implementation:
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - `Host publish run: 2026-03-05T16:01:21.4764432+09:00`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL
+  - class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:10:11`
+  - `HostTrackStatus: PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:10:21`
+  - `Overall: PASS`
+
+Investigation attempt applied during this rerun:
+
+- tested WinUI target-framework uplift (`net8.0-windows10.0.26100.0`) as a blocker mitigation candidate.
+- outcome: no improvement; same XAML compiler failure signature persisted.
+- decision: reverted target-framework experiment and retained baseline project target (`net8.0-windows10.0.19041.0`).
+
 ## Detailed Change Inventory (This Round)
 
 Code changes:

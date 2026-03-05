@@ -2,6 +2,43 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Host blocker follow-up rerun (WinUI persists, WPF crash signal clarified)
+
+### Summary
+
+Executed another host/gate/baseline cycle after the WinUI parity implementation to refresh blocker status and capture additional WPF crash diagnostics.
+
+- WinUI blocker remains unchanged:
+  - `WMC9999` / `XamlCompiler.exe` (`MSB3073`)
+  - class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- WPF launch-smoke failure signal was refined with event-log evidence:
+  - `.NET Runtime` event `1026`
+  - unhandled `System.DllNotFoundException` in WPF hwnd subclass hook path
+- quality gate and baseline remained PASS
+
+### Verification (latest rerun)
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - run time: `2026-03-05T16:01:21.4764432+09:00`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:10:11`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:10:21`
+  - `Overall: PASS`
+
+### Documentation updates
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - updated latest verification timestamps
+  - added event-log evidence for WPF launch failure path
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
+  - appended follow-up rerun status and target-framework mitigation test result
+
 ## 2026-03-05 - WinUI refresh-throttle parity implementation + verification rerun
 
 ### Summary

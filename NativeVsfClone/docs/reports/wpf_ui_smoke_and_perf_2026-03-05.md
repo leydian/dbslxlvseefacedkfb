@@ -42,6 +42,12 @@ Target flow:
     - verify process remains alive for 6 seconds
   - observed:
     - process exited early with code `-532462766` (unhandled runtime exception path)
+  - event-log evidence (`Application` log):
+    - `.NET Runtime` event `1026`
+    - unhandled exception: `System.DllNotFoundException`
+    - call path includes:
+      - `MS.Internal.WindowsBase.NativeMethodsSetLastError.SetWindowLongPtrWndProc(...)`
+      - `MS.Win32.HwndSubclass.HookWindowProc(...)`
 - Full operator interactive smoke (7-step flow): NOT EXECUTED IN THIS ROUND
   - reason:
     - current validation round was executed in CLI/headless context
@@ -68,15 +74,15 @@ Quantitative runtime metrics capture status:
 Artifacts and outcomes:
 
 - `build/reports/host_publish_latest.txt`
-  - generated: `2026-03-05T15:43:46.9334499+09:00`
+  - generated: `2026-03-05T16:01:21.4764432+09:00`
   - `HostPublishMode: WPF_PLUS_WINUI`
   - WPF publish: PASS, WinUI publish: FAIL (`TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
 - `build/reports/vsfavatar_gate_summary.txt`
-  - generated: `2026-03-05T15:38:52`
+  - generated: `2026-03-05T16:10:11`
   - `Overall: PASS`
   - `HostTrackStatus: PASS_WPF_BASELINE`
 - `build/reports/quality_baseline_summary.txt`
-  - generated: `2026-03-05T15:39:47`
+  - generated: `2026-03-05T16:10:21`
   - `Overall: PASS`
 
 ## Acceptance Gate for Closure
@@ -95,4 +101,4 @@ This evidence document is considered complete when:
   - full 7-step interactive operator smoke
   - quantitative `LastFrameMs` before/after measurement table
 - Additional open item from latest run:
-  - diagnose startup exception path behind launch exit code `-532462766` in current CLI/headless environment
+  - investigate `DllNotFoundException` root dependency chain behind launch exit code `-532462766` in current CLI/headless environment
