@@ -62,6 +62,7 @@ public sealed class RenderHwndHost : HwndHost
             case WmRButtonDown:
             {
                 _rightDragActive = true;
+                _ = SetCapture(hwnd);
                 var (x, y) = GetPointFromLParam(lParam);
                 RenderRightDragStarted?.Invoke(this, new RenderMouseDragEventArgs(x, y));
                 break;
@@ -83,6 +84,7 @@ public sealed class RenderHwndHost : HwndHost
                     RenderRightDragCompleted?.Invoke(this, new RenderMouseDragEventArgs(x, y));
                 }
                 _rightDragActive = false;
+                _ = ReleaseCapture();
                 break;
             }
             case WmMouseWheel:
@@ -139,6 +141,13 @@ public sealed class RenderHwndHost : HwndHost
         int nWidth,
         int nHeight,
         [MarshalAs(UnmanagedType.Bool)] bool repaint);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetCapture(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
 
     private static (int x, int y) GetPointFromLParam(IntPtr lParam)
     {
