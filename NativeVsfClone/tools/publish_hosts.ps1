@@ -102,34 +102,69 @@ function Get-NuGetSourceProbe {
         }
     }
 
-    $sourceLines = @()
+    $sources = [System.Collections.Generic.List[object]]::new()
+    $shortSourceLines = @()
     try {
-        $sourceLines = @(& dotnet nuget list source 2>$null)
+        $shortSourceLines = @(& dotnet nuget list source --format short 2>$null)
     } catch {
-        return $probe
+        $shortSourceLines = @()
     }
 
-    $sources = [System.Collections.Generic.List[object]]::new()
-    foreach ($line in $sourceLines) {
+    foreach ($line in $shortSourceLines) {
         $text = "$line".Trim()
         if ([string]::IsNullOrWhiteSpace($text)) {
             continue
         }
-        if ($text -match '^\s*\d+\.\s+(.+?)\s+\[(Enabled|Disabled)\]\s*$') {
+        # Locale-agnostic short format examples:
+        # E https://api.nuget.org/v3/index.json
+        # EM C:\Program Files (x86)\Microsoft SDKs\NuGetPackages\
+        if ($text -match '^([A-Za-z]+)\s+(.+)$') {
+            $flags = $Matches[1].ToUpperInvariant()
+            $urlOrPath = $Matches[2].Trim()
+            $isEnabled = $flags.Contains("E")
             $sources.Add([ordered]@{
-                name = $Matches[1].Trim()
-                enabled = ($Matches[2] -eq "Enabled")
-                url = ""
+                name = if ($urlOrPath.StartsWith("http", [System.StringComparison]::OrdinalIgnoreCase)) { $urlOrPath } else { "local-feed" }
+                enabled = $isEnabled
+                url = $urlOrPath
                 reachable = $null
                 status = "unknown"
                 error = ""
             })
-            continue
         }
-        if ($text -match '^\s*(https?://\S+)\s*$') {
-            if ($sources.Count -gt 0) {
-                $entry = $sources[$sources.Count - 1]
-                $entry.url = $Matches[1]
+    }
+
+    if ($sources.Count -eq 0) {
+        # Fallback for environments where short-format parsing fails.
+        $sourceLines = @()
+        try {
+            $sourceLines = @(& dotnet nuget list source 2>$null)
+        } catch {
+            $sourceLines = @()
+        }
+
+        foreach ($line in $sourceLines) {
+            $text = "$line".Trim()
+            if ([string]::IsNullOrWhiteSpace($text)) {
+                continue
+            }
+            if ($text -match '^\s*\d+\.\s+(.+?)\s+\[(.+?)\]\s*$') {
+                $stateText = $Matches[2].ToLowerInvariant()
+                $isEnabled = $stateText.Contains("enabled") -or $stateText.Contains("사용")
+                $sources.Add([ordered]@{
+                    name = $Matches[1].Trim()
+                    enabled = $isEnabled
+                    url = ""
+                    reachable = $null
+                    status = "unknown"
+                    error = ""
+                })
+                continue
+            }
+            if ($text -match '^\s*(https?://\S+)\s*$') {
+                if ($sources.Count -gt 0) {
+                    $entry = $sources[$sources.Count - 1]
+                    $entry.url = $Matches[1]
+                }
             }
         }
     }
@@ -141,6 +176,10 @@ function Get-NuGetSourceProbe {
         }
         if ([string]::IsNullOrWhiteSpace("$($source.url)")) {
             $source.status = "enabled_no_url"
+            continue
+        }
+        if (-not ("$($source.url)" -match '^https?://')) {
+            $source.status = "enabled_local_source"
             continue
         }
         try {
