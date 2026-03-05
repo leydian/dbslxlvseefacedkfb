@@ -411,9 +411,12 @@ public sealed partial class HostController
         string? cameraDeviceKey = null,
         int? inferenceFpsCap = null,
         int? parseErrorWarnThreshold = null,
-        int? droppedPacketWarnThreshold = null)
+        int? droppedPacketWarnThreshold = null,
+        TrackingSourceLockMode? sourceLockMode = null,
+        TrackingLatencyProfile? latencyProfile = null)
     {
         var current = _sessionPersistence.Tracking;
+        var resolvedProfile = latencyProfile ?? current.LatencyProfile;
         var normalized = new TrackingInputSettings(
             listenPort == 0 ? (ushort)49983 : listenPort,
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
@@ -422,7 +425,9 @@ public sealed partial class HostController
             cameraDeviceKey ?? current.CameraDeviceKey,
             Math.Clamp(inferenceFpsCap ?? current.InferenceFpsCap, 5, 120),
             Math.Clamp(parseErrorWarnThreshold ?? current.ParseErrorWarnThreshold, 1, 10000),
-            Math.Clamp(droppedPacketWarnThreshold ?? current.DroppedPacketWarnThreshold, 1, 10000));
+            Math.Clamp(droppedPacketWarnThreshold ?? current.DroppedPacketWarnThreshold, 1, 10000),
+            sourceLockMode ?? current.SourceLockMode,
+            resolvedProfile);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -433,7 +438,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
                 NcResultCode.Ok),
             false);
     }
@@ -464,7 +469,9 @@ public sealed partial class HostController
             current.CameraDeviceKey,
             current.InferenceFpsCap,
             current.ParseErrorWarnThreshold,
-            current.DroppedPacketWarnThreshold);
+            current.DroppedPacketWarnThreshold,
+            current.SourceLockMode,
+            current.LatencyProfile);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,

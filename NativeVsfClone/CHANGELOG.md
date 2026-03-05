@@ -2,6 +2,86 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking latency/lock hardening follow-up
+
+### Summary
+
+Hardened the hybrid tracking runtime with operator-selectable source lock modes, latency profile tuning, and stage-level latency diagnostics for low-latency operation insight.
+
+### Changed
+
+- tracking contract extensions:
+  - `host/HostCore/HostInterfaces.cs`
+  - added:
+    - `TrackingSourceLockMode` (`Auto`, `IfacialLocked`, `WebcamLocked`)
+    - `TrackingLatencyProfile` (`LowLatency`, `Balanced`, `Stable`)
+  - extended `TrackingStartOptions` with lock/profile options.
+  - extended `TrackingDiagnostics` with:
+    - `LatencyAvgMs`, `LatencyP95Ms`
+    - `CaptureStageMs`, `ParseStageMs`, `SmoothStageMs`, `SubmitStageMs`
+    - `SourceLockMode`, `SwitchBlockedReason`
+- tracking persistence and migration:
+  - `host/HostCore/PlatformFeatures.cs`
+  - `TrackingInputSettings` now persists source lock/profile.
+  - session persistence model version raised to `6` with backward normalization defaults.
+- host configuration wiring:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - tracking configuration path now accepts and persists lock/profile values in host session settings.
+- runtime arbitration and latency instrumentation:
+  - `host/HostCore/TrackingInputService.cs`
+  - added source-lock-aware arbitration behavior and blocked-switch reason diagnostics.
+  - added profile-driven smoothing/fallback tuning:
+    - `LowLatency` / `Balanced` / `Stable`
+  - added rolling latency sample collection and p95 computation.
+  - added stage-timing updates across parse/smooth/submit path and exposed through diagnostics snapshot.
+- MediaPipe sidecar packet contract:
+  - `tools/mediapipe_webcam_sidecar.py`
+  - output now includes:
+    - `schema_version`
+    - `source_ts_unix_ms`
+  - HostCore parser now validates schema presence and uses sidecar timestamp in capture-stage estimation.
+- documentation:
+  - `docs/reports/tracking_latency_lock_followup_2026-03-06.md`
+
+### Verification
+
+Executed in this environment:
+
+```powershell
+dotnet build host\HostCore\HostCore.csproj -c Release --no-restore
+dotnet build host\WpfHost\WpfHost.csproj -c Release --no-restore
+```
+
+Result:
+
+- build verification is currently blocked by environment network restrictions:
+  - `NU1301` while resolving repository-signature metadata from `api.nuget.org:443`
+
+## 2026-03-06 - Documentation onboarding optimization and quality gate
+
+### Summary
+
+Optimized documentation for faster onboarding by reducing README scope, rebuilding the documentation index, and adding an automated docs quality gate.
+
+### Changed
+
+- onboarding-first documentation refresh:
+  - `README.md`
+  - reduced long-form operational history and kept a focused quick-start path.
+- docs navigation restructure:
+  - `docs/INDEX.md`
+  - switched to repo-relative links, added recent-reports view, and regenerated full report catalog.
+- docs policy and retention clarity:
+  - `docs/CONTRIBUTING_DOCS.md`
+  - `build/reports/README.md`
+  - restored UTF-8 readable policy docs and aligned report conventions.
+- docs automation:
+  - `tools/docs_quality_gate.ps1`
+  - added checks for report-index coverage, broken local links, absolute-path links, and UTF-8 validity.
+- report authoring baseline:
+  - `docs/reports/TEMPLATE.md`
+  - added a concise default report template.
+
 ## 2026-03-06 - Hybrid tracking precision + render/VRM follow-up
 
 ### Summary

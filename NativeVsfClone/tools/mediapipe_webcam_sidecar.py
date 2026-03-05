@@ -109,7 +109,9 @@ def main():
 
             if not result.multi_face_landmarks:
                 payload = {
+                    "schema_version": 1,
                     "frame_id": frame_id + 1,
+                    "source_ts_unix_ms": int(time.time() * 1000.0),
                     "yaw_deg": 0.0,
                     "pitch_deg": 0.0,
                     "roll_deg": 0.0,
@@ -166,7 +168,9 @@ def main():
                 confidence = _clamp01(0.55 + (0.35 * (1.0 - abs(yaw) / 60.0)) + (0.10 * (1.0 - infer_ms / 50.0)))
 
                 payload = {
+                    "schema_version": 1,
                     "frame_id": frame_id + 1,
+                    "source_ts_unix_ms": int(time.time() * 1000.0),
                     "yaw_deg": yaw,
                     "pitch_deg": pitch,
                     "roll_deg": roll,

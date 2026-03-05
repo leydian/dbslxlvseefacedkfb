@@ -55,7 +55,9 @@ public sealed record TrackingInputSettings(
     string CameraDeviceKey,
     int InferenceFpsCap,
     int ParseErrorWarnThreshold = 10,
-    int DroppedPacketWarnThreshold = 10);
+    int DroppedPacketWarnThreshold = 10,
+    TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
+    TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced);
 
 public sealed record SessionPersistenceModel(
     int Version,
@@ -70,13 +72,13 @@ public sealed record SessionPersistenceModel(
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 5,
+        Version: 6,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
         OscPublishAddress: "127.0.0.1:39540",
         Sidecar: new SidecarSettings("sidecar", string.Empty, 15000, false),
-        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10),
+        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
         LastProfileName: "quality",
         UiMode: "beginner",
         LastUpdatedUtc: DateTimeOffset.UtcNow);
@@ -159,13 +161,13 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 5,
+                    Version: 6,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
                     LastUpdatedUtc: legacy.LastUpdatedUtc));
@@ -197,7 +199,7 @@ public sealed class SessionStateStore
         var lastUpdated = model.LastUpdatedUtc == default ? DateTimeOffset.UtcNow : model.LastUpdatedUtc;
         return model with
         {
-            Version = Math.Max(5, model.Version),
+            Version = Math.Max(6, model.Version),
             Tracking = NormalizeTracking(model.Tracking),
             UiMode = mode,
             LastUpdatedUtc = lastUpdated,
@@ -208,7 +210,7 @@ public sealed class SessionStateStore
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
@@ -216,6 +218,12 @@ public sealed class SessionStateStore
         var sourceType = Enum.IsDefined(typeof(TrackingSourceType), value.SourceType)
             ? value.SourceType
             : TrackingSourceType.OscIfacial;
+        var sourceLockMode = Enum.IsDefined(typeof(TrackingSourceLockMode), value.SourceLockMode)
+            ? value.SourceLockMode
+            : TrackingSourceLockMode.Auto;
+        var latencyProfile = Enum.IsDefined(typeof(TrackingLatencyProfile), value.LatencyProfile)
+            ? value.LatencyProfile
+            : TrackingLatencyProfile.Balanced;
         var fpsCap = Math.Clamp(value.InferenceFpsCap <= 0 ? 30 : value.InferenceFpsCap, 5, 120);
         var parseThreshold = Math.Clamp(value.ParseErrorWarnThreshold <= 0 ? 10 : value.ParseErrorWarnThreshold, 1, 10000);
         var droppedThreshold = Math.Clamp(value.DroppedPacketWarnThreshold <= 0 ? 10 : value.DroppedPacketWarnThreshold, 1, 10000);
@@ -227,7 +235,9 @@ public sealed class SessionStateStore
             value.CameraDeviceKey ?? string.Empty,
             fpsCap,
             parseThreshold,
-            droppedThreshold);
+            droppedThreshold,
+            sourceLockMode,
+            latencyProfile);
     }
 
     private static string NormalizeUiMode(string value)

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -11,10 +12,8 @@ public sealed class TrackingInputService : ITrackingInputService
 {
     private const ushort DefaultListenPort = 49983;
     private const int DefaultStaleTimeoutMs = 500;
-    private const int IfacialFallbackAgeMs = 650;
-    private const int IfacialRecoveryAgeMs = 180;
-    private const int IfacialRecoveryStreakRequired = 10;
     private const int CalibrationWarmupFrames = 90;
+    private const int LatencySampleWindow = 240;
 
     private readonly object _sync = new();
     private readonly Dictionary<string, float> _expressionCache = new(StringComparer.OrdinalIgnoreCase);
@@ -23,7 +22,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
-    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10);
+    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced);
     private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
 
     private DateTimeOffset _lastPacketUtc = DateTimeOffset.MinValue;
@@ -34,6 +33,15 @@ public sealed class TrackingInputService : ITrackingInputService
     private double _smoothedInputFps;
     private double _smoothedCaptureFps;
     private double _smoothedInferenceMs;
+    private double _smoothedCaptureStageMs;
+    private double _smoothedParseStageMs;
+    private double _smoothedSmoothStageMs;
+    private double _smoothedSubmitStageMs;
+    private readonly Queue<double> _latencySamples = new();
+    private double _latencySampleSum;
+    private double _latencyAvgMs;
+    private double _latencyP95Ms;
+    private string _switchBlockedReason = string.Empty;
 
     private NcTrackingFrame _rawFrame = BuildNeutralFrame();
     private NcTrackingFrame _smoothedFrame = BuildNeutralFrame();
@@ -68,9 +76,14 @@ public sealed class TrackingInputService : ITrackingInputService
     private int _fallbackCount;
     private int _ifacialRecoveryStreak;
     private int _ifacialConsecutiveFailures;
+    private int _ifacialFallbackAgeMs = 650;
+    private int _ifacialRecoveryAgeMs = 180;
+    private int _ifacialRecoveryStreakRequired = 10;
     private int _calibrationFrames;
     private readonly Dictionary<string, float> _calibrationBaseline = new(StringComparer.OrdinalIgnoreCase);
     private string _calibrationState = "idle";
+    private float _poseAlpha = 0.35f;
+    private float _expressionAlpha = 0.60f;
 
     private static readonly string[] ArkitBlendshapeOrder =
     {
@@ -105,7 +118,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 InferenceFpsCap = Math.Clamp(options.InferenceFpsCap <= 0 ? 30 : options.InferenceFpsCap, 5, 120),
                 ParseErrorWarnThreshold = Math.Clamp(options.ParseErrorWarnThreshold <= 0 ? 10 : options.ParseErrorWarnThreshold, 1, 10000),
                 DroppedPacketWarnThreshold = Math.Clamp(options.DroppedPacketWarnThreshold <= 0 ? 10 : options.DroppedPacketWarnThreshold, 1, 10000),
+                SourceLockMode = Enum.IsDefined(typeof(TrackingSourceLockMode), options.SourceLockMode)
+                    ? options.SourceLockMode
+                    : TrackingSourceLockMode.Auto,
+                LatencyProfile = Enum.IsDefined(typeof(TrackingLatencyProfile), options.LatencyProfile)
+                    ? options.LatencyProfile
+                    : TrackingLatencyProfile.Balanced,
             };
+            ApplyLatencyProfileTuning(_options.LatencyProfile);
             ResetRuntimeState();
 
             if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
@@ -248,6 +268,7 @@ public sealed class TrackingInputService : ITrackingInputService
     {
         lock (_sync)
         {
+            var submitWatch = Stopwatch.StartNew();
             if (!_hasFrame)
             {
                 frame = BuildNeutralFrame();
@@ -259,6 +280,12 @@ public sealed class TrackingInputService : ITrackingInputService
                 : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - _lastPacketUtc).TotalMilliseconds);
             var stale = ageMs > _options.StaleTimeoutMs;
             EvaluateSourceArbitration(ageMs);
+            submitWatch.Stop();
+            UpdateSubmitStageMs(submitWatch.Elapsed.TotalMilliseconds);
+            if (!stale)
+            {
+                RecordLatencySample(_smoothedCaptureStageMs + _smoothedParseStageMs + _smoothedSmoothStageMs + _smoothedSubmitStageMs + ageMs);
+            }
             _diagnostics = _diagnostics with
             {
                 LastPacketAgeMs = ageMs,
@@ -272,6 +299,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 FallbackCount = _fallbackCount,
                 CalibrationState = _calibrationState,
                 ConfidenceSummary = BuildConfidenceSummary(),
+                LatencyAvgMs = _latencyAvgMs,
+                LatencyP95Ms = _latencyP95Ms,
+                CaptureStageMs = _smoothedCaptureStageMs,
+                ParseStageMs = _smoothedParseStageMs,
+                SmoothStageMs = _smoothedSmoothStageMs,
+                SubmitStageMs = _smoothedSubmitStageMs,
+                SourceLockMode = _options.SourceLockMode,
+                SwitchBlockedReason = _switchBlockedReason,
             };
 
             frame = stale ? BuildNeutralFrame() : _lastOutputFrame;
@@ -315,6 +350,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 FallbackCount = _fallbackCount,
                 CalibrationState = _calibrationState,
                 ConfidenceSummary = BuildConfidenceSummary(),
+                LatencyAvgMs = _latencyAvgMs,
+                LatencyP95Ms = _latencyP95Ms,
+                CaptureStageMs = _smoothedCaptureStageMs,
+                ParseStageMs = _smoothedParseStageMs,
+                SmoothStageMs = _smoothedSmoothStageMs,
+                SubmitStageMs = _smoothedSubmitStageMs,
+                SourceLockMode = _options.SourceLockMode,
+                SwitchBlockedReason = _switchBlockedReason,
             };
             return _diagnostics;
         }
@@ -351,6 +394,15 @@ public sealed class TrackingInputService : ITrackingInputService
         _smoothedInputFps = 0.0;
         _smoothedCaptureFps = 0.0;
         _smoothedInferenceMs = 0.0;
+        _smoothedCaptureStageMs = 0.0;
+        _smoothedParseStageMs = 0.0;
+        _smoothedSmoothStageMs = 0.0;
+        _smoothedSubmitStageMs = 0.0;
+        _latencySamples.Clear();
+        _latencySampleSum = 0.0;
+        _latencyAvgMs = 0.0;
+        _latencyP95Ms = 0.0;
+        _switchBlockedReason = string.Empty;
         _lastIfacialPacketUtc = DateTimeOffset.MinValue;
         _lastWebcamPacketUtc = DateTimeOffset.MinValue;
         _activeRuntimeSource = TrackingRuntimeSource.None;
@@ -383,7 +435,15 @@ public sealed class TrackingInputService : ITrackingInputService
             "none",
             0,
             _calibrationState,
-            "ifacial=0.00,webcam=0.00");
+            "ifacial=0.00,webcam=0.00",
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            _options.SourceLockMode,
+            string.Empty);
     }
 
     private async Task ReceiveLoopAsync(CancellationToken token)
@@ -422,8 +482,11 @@ public sealed class TrackingInputService : ITrackingInputService
                 var receivedPackets = _diagnostics.ReceivedPackets + 1;
                 _diagnostics = _diagnostics with { ReceivedPackets = receivedPackets };
 
+                var parseWatch = Stopwatch.StartNew();
                 if (!TryParsePacket(result.Buffer, out var updates, out var formatName))
                 {
+                parseWatch.Stop();
+                UpdateParseStageMs(parseWatch.Elapsed.TotalMilliseconds);
                 _diagnostics = _diagnostics with
                 {
                     ParseErrors = _diagnostics.ParseErrors + 1,
@@ -439,6 +502,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 _ifacialConsecutiveFailures++;
                 continue;
             }
+                parseWatch.Stop();
+                UpdateParseStageMs(parseWatch.Elapsed.TotalMilliseconds);
 
                 if (!ApplyUpdates(updates))
                 {
@@ -465,7 +530,11 @@ public sealed class TrackingInputService : ITrackingInputService
                     _lastPacketUtc = _lastIfacialPacketUtc;
                     _hasFrame = true;
                     UpdateInputFps();
+                    UpdateCaptureStageMs(0.0);
+                    var smoothWatch = Stopwatch.StartNew();
                     ApplySmoothing();
+                    smoothWatch.Stop();
+                    UpdateSmoothStageMs(smoothWatch.Elapsed.TotalMilliseconds);
                     AdvanceCalibration();
                 }
                 _diagnostics = _diagnostics with
@@ -717,7 +786,24 @@ public sealed class TrackingInputService : ITrackingInputService
             UpdateInputFps();
             UpdateCaptureFps(packet.CaptureFps);
             UpdateInferenceMs(packet.InferenceMs);
+            var captureStageMs = packet.InferenceMs;
+            if (packet.SourceTimestampUnixMs > 0)
+            {
+                try
+                {
+                    var sourceUtc = DateTimeOffset.FromUnixTimeMilliseconds(packet.SourceTimestampUnixMs);
+                    captureStageMs = Math.Max(captureStageMs, Math.Max(0.0, (_lastPacketUtc - sourceUtc).TotalMilliseconds));
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    // keep fallback metric from inference time
+                }
+            }
+            UpdateCaptureStageMs(captureStageMs);
+            var smoothWatch = Stopwatch.StartNew();
             ApplySmoothing();
+            smoothWatch.Stop();
+            UpdateSmoothStageMs(smoothWatch.Elapsed.TotalMilliseconds);
             AdvanceCalibration();
             _diagnostics = _diagnostics with
             {
@@ -737,6 +823,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 FallbackCount = _fallbackCount,
                 CalibrationState = _calibrationState,
                 ConfidenceSummary = BuildConfidenceSummary(),
+                LatencyAvgMs = _latencyAvgMs,
+                LatencyP95Ms = _latencyP95Ms,
+                CaptureStageMs = _smoothedCaptureStageMs,
+                ParseStageMs = _smoothedParseStageMs,
+                SmoothStageMs = _smoothedSmoothStageMs,
+                SubmitStageMs = _smoothedSubmitStageMs,
+                SourceLockMode = _options.SourceLockMode,
+                SwitchBlockedReason = _switchBlockedReason,
             };
         }
     }
@@ -870,6 +964,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
                 lock (_sync)
                 {
+                    UpdateParseStageMs(packet.ParseMs);
                     _latestMediapipePacket = packet;
                     _hasMediapipePacket = true;
                     _diagnostics = _diagnostics with
@@ -929,10 +1024,22 @@ public sealed class TrackingInputService : ITrackingInputService
     private bool TryParseMediapipePacket(string jsonLine, [NotNullWhen(true)] out MediapipeFramePacket? packet)
     {
         packet = null;
+        var parseWatch = Stopwatch.StartNew();
         try
         {
             using var doc = JsonDocument.Parse(jsonLine);
             var root = doc.RootElement;
+
+            var schemaVersion = 0;
+            if (!TryReadNumber(root, "schema_version", out var schemaVersionRaw))
+            {
+                return false;
+            }
+            schemaVersion = (int)schemaVersionRaw;
+            if (schemaVersion <= 0)
+            {
+                return false;
+            }
 
             if (!TryReadNumber(root, "frame_id", out var frameIdRaw))
             {
@@ -961,9 +1068,14 @@ public sealed class TrackingInputService : ITrackingInputService
             var captureFps = 0.0;
             var inferenceMs = 0.0;
             var sourceConfidence = 0.75;
+            var sourceTimestampUnixMs = 0L;
             _ = TryReadNumber(root, "capture_fps", out captureFps);
             _ = TryReadNumber(root, "inference_ms", out inferenceMs);
             _ = TryReadNumber(root, "confidence", out sourceConfidence);
+            if (TryReadNumber(root, "source_ts_unix_ms", out var sourceTsRaw))
+            {
+                sourceTimestampUnixMs = (long)sourceTsRaw;
+            }
 
             var blendshapes = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
             if (root.TryGetProperty("blendshapes", out var blendRoot) &&
@@ -979,7 +1091,9 @@ public sealed class TrackingInputService : ITrackingInputService
             }
 
             _lastMediapipeFrameId = frameId;
+            parseWatch.Stop();
             packet = new MediapipeFramePacket(
+                schemaVersion,
                 frameId,
                 (float)yawDeg,
                 (float)pitchDeg,
@@ -994,6 +1108,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 captureFps <= 0.0 ? 0.0 : captureFps,
                 inferenceMs <= 0.0 ? 0.0 : inferenceMs,
                 Clamp01((float)sourceConfidence),
+                sourceTimestampUnixMs,
+                parseWatch.Elapsed.TotalMilliseconds,
                 blendshapes);
             return true;
         }
@@ -1447,9 +1563,30 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private void EvaluateSourceArbitration(int currentAgeMs)
     {
+        _switchBlockedReason = string.Empty;
         if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
         {
             _activeRuntimeSource = TrackingRuntimeSource.Webcam;
+            return;
+        }
+
+        if (_options.SourceLockMode == TrackingSourceLockMode.IfacialLocked)
+        {
+            _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
+            if (_lastWebcamPacketUtc != DateTimeOffset.MinValue)
+            {
+                _switchBlockedReason = "source-lock:ifacial";
+            }
+            return;
+        }
+
+        if (_options.SourceLockMode == TrackingSourceLockMode.WebcamLocked)
+        {
+            _activeRuntimeSource = TrackingRuntimeSource.Webcam;
+            if (_lastIfacialPacketUtc != DateTimeOffset.MinValue)
+            {
+                _switchBlockedReason = "source-lock:webcam";
+            }
             return;
         }
 
@@ -1462,7 +1599,7 @@ public sealed class TrackingInputService : ITrackingInputService
             : (int)Math.Max(0.0, (now - _lastWebcamPacketUtc).TotalMilliseconds);
         var ageMs = currentAgeMs > 0 ? currentAgeMs : ifacialAge;
 
-        var shouldFallback = (ageMs >= IfacialFallbackAgeMs || _ifacialConsecutiveFailures >= 4) &&
+        var shouldFallback = (ageMs >= _ifacialFallbackAgeMs || _ifacialConsecutiveFailures >= 4) &&
                              webcamAge < (_options.StaleTimeoutMs * 2);
         if (shouldFallback && _activeRuntimeSource != TrackingRuntimeSource.Webcam)
         {
@@ -1473,11 +1610,11 @@ public sealed class TrackingInputService : ITrackingInputService
 
         if (_activeRuntimeSource == TrackingRuntimeSource.Webcam)
         {
-            var ifacialRecovered = ifacialAge <= IfacialRecoveryAgeMs && _ifacialConsecutiveFailures == 0;
+            var ifacialRecovered = ifacialAge <= _ifacialRecoveryAgeMs && _ifacialConsecutiveFailures == 0;
             if (ifacialRecovered)
             {
                 _ifacialRecoveryStreak++;
-                if (_ifacialRecoveryStreak >= IfacialRecoveryStreakRequired)
+                if (_ifacialRecoveryStreak >= _ifacialRecoveryStreakRequired)
                 {
                     _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
                     _ifacialRecoveryStreak = 0;
@@ -1501,6 +1638,14 @@ public sealed class TrackingInputService : ITrackingInputService
             return false;
         }
 
+        if (_options.SourceLockMode == TrackingSourceLockMode.IfacialLocked)
+        {
+            return true;
+        }
+        if (_options.SourceLockMode == TrackingSourceLockMode.WebcamLocked)
+        {
+            return false;
+        }
         return _activeRuntimeSource != TrackingRuntimeSource.Webcam;
     }
 
@@ -1511,6 +1656,14 @@ public sealed class TrackingInputService : ITrackingInputService
             return true;
         }
 
+        if (_options.SourceLockMode == TrackingSourceLockMode.IfacialLocked)
+        {
+            return false;
+        }
+        if (_options.SourceLockMode == TrackingSourceLockMode.WebcamLocked)
+        {
+            return true;
+        }
         return _activeRuntimeSource == TrackingRuntimeSource.Webcam;
     }
 
@@ -1553,9 +1706,6 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private void ApplySmoothing()
     {
-        const float poseAlpha = 0.35f;
-        const float expressionAlpha = 0.60f;
-
         if (!_hasSmoothedFrame)
         {
             _smoothedFrame = _rawFrame;
@@ -1566,18 +1716,18 @@ public sealed class TrackingInputService : ITrackingInputService
         }
         else
         {
-            _smoothedFrame.HeadPosX = Ema(_smoothedFrame.HeadPosX, _rawFrame.HeadPosX, poseAlpha);
-            _smoothedFrame.HeadPosY = Ema(_smoothedFrame.HeadPosY, _rawFrame.HeadPosY, poseAlpha);
-            _smoothedFrame.HeadPosZ = Ema(_smoothedFrame.HeadPosZ, _rawFrame.HeadPosZ, poseAlpha);
-            _smoothedFrame.BlinkL = Ema(_smoothedFrame.BlinkL, Clamp01(_rawFrame.BlinkL), expressionAlpha);
-            _smoothedFrame.BlinkR = Ema(_smoothedFrame.BlinkR, Clamp01(_rawFrame.BlinkR), expressionAlpha);
-            _smoothedFrame.MouthOpen = Ema(_smoothedFrame.MouthOpen, Clamp01(_rawFrame.MouthOpen), expressionAlpha);
+            _smoothedFrame.HeadPosX = Ema(_smoothedFrame.HeadPosX, _rawFrame.HeadPosX, _poseAlpha);
+            _smoothedFrame.HeadPosY = Ema(_smoothedFrame.HeadPosY, _rawFrame.HeadPosY, _poseAlpha);
+            _smoothedFrame.HeadPosZ = Ema(_smoothedFrame.HeadPosZ, _rawFrame.HeadPosZ, _poseAlpha);
+            _smoothedFrame.BlinkL = Ema(_smoothedFrame.BlinkL, Clamp01(_rawFrame.BlinkL), _expressionAlpha);
+            _smoothedFrame.BlinkR = Ema(_smoothedFrame.BlinkR, Clamp01(_rawFrame.BlinkR), _expressionAlpha);
+            _smoothedFrame.MouthOpen = Ema(_smoothedFrame.MouthOpen, Clamp01(_rawFrame.MouthOpen), _expressionAlpha);
 
             if (_hasHeadYpr)
             {
-                _smoothedHeadYaw = Ema(_smoothedHeadYaw, _rawHeadYaw, poseAlpha);
-                _smoothedHeadPitch = Ema(_smoothedHeadPitch, _rawHeadPitch, poseAlpha);
-                _smoothedHeadRoll = Ema(_smoothedHeadRoll, _rawHeadRoll, poseAlpha);
+                _smoothedHeadYaw = Ema(_smoothedHeadYaw, _rawHeadYaw, _poseAlpha);
+                _smoothedHeadPitch = Ema(_smoothedHeadPitch, _rawHeadPitch, _poseAlpha);
+                _smoothedHeadRoll = Ema(_smoothedHeadRoll, _rawHeadRoll, _poseAlpha);
             }
         }
 
@@ -1674,6 +1824,110 @@ public sealed class TrackingInputService : ITrackingInputService
                 ? elapsedMs
                 : (_smoothedInferenceMs * 0.7) + (elapsedMs * 0.3);
         }
+    }
+
+    private void ApplyLatencyProfileTuning(TrackingLatencyProfile profile)
+    {
+        switch (profile)
+        {
+            case TrackingLatencyProfile.LowLatency:
+                _poseAlpha = 0.55f;
+                _expressionAlpha = 0.78f;
+                _ifacialFallbackAgeMs = 420;
+                _ifacialRecoveryAgeMs = 130;
+                _ifacialRecoveryStreakRequired = 4;
+                break;
+            case TrackingLatencyProfile.Stable:
+                _poseAlpha = 0.25f;
+                _expressionAlpha = 0.46f;
+                _ifacialFallbackAgeMs = 850;
+                _ifacialRecoveryAgeMs = 220;
+                _ifacialRecoveryStreakRequired = 14;
+                break;
+            default:
+                _poseAlpha = 0.35f;
+                _expressionAlpha = 0.60f;
+                _ifacialFallbackAgeMs = 650;
+                _ifacialRecoveryAgeMs = 180;
+                _ifacialRecoveryStreakRequired = 10;
+                break;
+        }
+    }
+
+    private void UpdateCaptureStageMs(double captureStageMs)
+    {
+        if (double.IsNaN(captureStageMs) || double.IsInfinity(captureStageMs) || captureStageMs < 0.0)
+        {
+            return;
+        }
+
+        _smoothedCaptureStageMs = _smoothedCaptureStageMs <= 0.001
+            ? captureStageMs
+            : (_smoothedCaptureStageMs * 0.7) + (captureStageMs * 0.3);
+    }
+
+    private void UpdateParseStageMs(double parseStageMs)
+    {
+        if (double.IsNaN(parseStageMs) || double.IsInfinity(parseStageMs) || parseStageMs < 0.0)
+        {
+            return;
+        }
+
+        _smoothedParseStageMs = _smoothedParseStageMs <= 0.001
+            ? parseStageMs
+            : (_smoothedParseStageMs * 0.7) + (parseStageMs * 0.3);
+    }
+
+    private void UpdateSmoothStageMs(double smoothStageMs)
+    {
+        if (double.IsNaN(smoothStageMs) || double.IsInfinity(smoothStageMs) || smoothStageMs < 0.0)
+        {
+            return;
+        }
+
+        _smoothedSmoothStageMs = _smoothedSmoothStageMs <= 0.001
+            ? smoothStageMs
+            : (_smoothedSmoothStageMs * 0.7) + (smoothStageMs * 0.3);
+    }
+
+    private void UpdateSubmitStageMs(double submitStageMs)
+    {
+        if (double.IsNaN(submitStageMs) || double.IsInfinity(submitStageMs) || submitStageMs < 0.0)
+        {
+            return;
+        }
+
+        _smoothedSubmitStageMs = _smoothedSubmitStageMs <= 0.001
+            ? submitStageMs
+            : (_smoothedSubmitStageMs * 0.7) + (submitStageMs * 0.3);
+    }
+
+    private void RecordLatencySample(double latencyMs)
+    {
+        if (double.IsNaN(latencyMs) || double.IsInfinity(latencyMs))
+        {
+            return;
+        }
+
+        var bounded = Math.Clamp(latencyMs, 0.0, 5000.0);
+        _latencySamples.Enqueue(bounded);
+        _latencySampleSum += bounded;
+        while (_latencySamples.Count > LatencySampleWindow)
+        {
+            _latencySampleSum -= _latencySamples.Dequeue();
+        }
+
+        if (_latencySamples.Count == 0)
+        {
+            _latencyAvgMs = 0.0;
+            _latencyP95Ms = 0.0;
+            return;
+        }
+
+        _latencyAvgMs = _latencySampleSum / _latencySamples.Count;
+        var ordered = _latencySamples.OrderBy(x => x).ToArray();
+        var p95Index = Math.Clamp((int)Math.Ceiling((ordered.Length * 0.95) - 1.0), 0, ordered.Length - 1);
+        _latencyP95Ms = ordered[p95Index];
     }
 
     private static (float x, float y, float z, float w) ToQuaternion(float pitchDeg, float yawDeg, float rollDeg)
@@ -1790,6 +2044,7 @@ public sealed class TrackingInputService : ITrackingInputService
         string ErrorMessage);
 
     private sealed record MediapipeFramePacket(
+        int SchemaVersion,
         long FrameId,
         float HeadYawDeg,
         float HeadPitchDeg,
@@ -1804,6 +2059,8 @@ public sealed class TrackingInputService : ITrackingInputService
         double CaptureFps,
         double InferenceMs,
         float SourceConfidence,
+        long SourceTimestampUnixMs,
+        double ParseMs,
         IReadOnlyDictionary<string, float> BlendshapeWeights);
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);

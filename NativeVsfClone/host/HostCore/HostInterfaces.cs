@@ -43,6 +43,20 @@ public enum TrackingSourceType
     WebcamMediapipe = 1,
 }
 
+public enum TrackingSourceLockMode
+{
+    Auto = 0,
+    IfacialLocked = 1,
+    WebcamLocked = 2,
+}
+
+public enum TrackingLatencyProfile
+{
+    LowLatency = 0,
+    Balanced = 1,
+    Stable = 2,
+}
+
 public sealed record TrackingStartOptions(
     ushort ListenPort,
     int StaleTimeoutMs,
@@ -50,7 +64,9 @@ public sealed record TrackingStartOptions(
     string CameraDeviceKey,
     int InferenceFpsCap,
     int ParseErrorWarnThreshold = 10,
-    int DroppedPacketWarnThreshold = 10);
+    int DroppedPacketWarnThreshold = 10,
+    TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
+    TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced);
 
 public sealed record WebcamDeviceOption(
     string DeviceKey,
@@ -76,7 +92,15 @@ public sealed record TrackingDiagnostics(
     string ActiveSource = "none",
     int FallbackCount = 0,
     string CalibrationState = "idle",
-    string ConfidenceSummary = "");
+    string ConfidenceSummary = "",
+    double LatencyAvgMs = 0.0,
+    double LatencyP95Ms = 0.0,
+    double CaptureStageMs = 0.0,
+    double ParseStageMs = 0.0,
+    double SmoothStageMs = 0.0,
+    double SubmitStageMs = 0.0,
+    TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
+    string SwitchBlockedReason = "");
 
 public interface ITrackingInputService
 {
