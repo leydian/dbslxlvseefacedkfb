@@ -30,6 +30,27 @@ function Assert-Command {
     }
 }
 
+function Get-DotNetVersionInfo {
+    param([string]$WorkingDirectory)
+
+    $resolved = if ([string]::IsNullOrWhiteSpace($WorkingDirectory)) { $PWD.Path } else { $WorkingDirectory }
+    Push-Location $resolved
+    try {
+        $versionText = (& dotnet --version 2>$null | Select-Object -First 1).Trim()
+    } finally {
+        Pop-Location
+    }
+    $major = 0
+    if ($versionText -match '^(\d+)\.') {
+        $major = [int]$Matches[1]
+    }
+    return [ordered]@{
+        version = $versionText
+        major = $major
+        working_directory = $resolved
+    }
+}
+
 function Stop-IfRunning {
     param([string]$ProcessName)
     try {
@@ -45,9 +66,14 @@ function Invoke-DotNetCommand {
         [Parameter(Mandatory = $true)][string]$Description
     )
 
-    & dotnet @Args | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Description failed with exit code $LASTEXITCODE (dotnet $($Args -join ' '))"
+    Push-Location $repoRoot
+    try {
+        & dotnet @Args | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "$Description failed with exit code $LASTEXITCODE (dotnet $($Args -join ' '))"
+        }
+    } finally {
+        Pop-Location
     }
 }
 
@@ -62,9 +88,14 @@ function Invoke-DotNetCommandWithRetry {
     $attempt = 0
     while ($true) {
         $attempt++
-        $output = & dotnet @Args 2>&1
-        $output | Out-Host
-        $exitCode = $LASTEXITCODE
+        Push-Location $repoRoot
+        try {
+            $output = & dotnet @Args 2>&1
+            $output | Out-Host
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
         if ($exitCode -eq 0) {
             return
         }
@@ -238,6 +269,13 @@ $log.Add("NoRestore: $NoRestore")
 $log.Add("CollectWinUiDiagnostics: $CollectWinUiDiagnostics")
 $log.Add("CollectManagedXamlDiagnostics: $CollectManagedXamlDiagnostics")
 $log.Add("WinUiDiagnosticsProfile: $WinUiDiagnosticsProfile")
+$dotnetContract = Get-DotNetVersionInfo -WorkingDirectory $repoRoot
+$log.Add("dotnet version (repo root): $($dotnetContract.version)")
+if ($IncludeWinUi -and $dotnetContract.major -ne 8) {
+    $log.Add("WinUI SDK contract: FAIL (expected .NET SDK major 8)")
+    $log | Set-Content -Path $logPath -Encoding UTF8
+    throw "WinUI SDK contract failed. Expected .NET SDK major 8 at repo root ($repoRoot), actual=$($dotnetContract.version)"
+}
 $log.Add("WinUiDiagDir: $resolvedWinUiDiagDir")
 $log.Add("RunWpfLaunchSmoke: $RunWpfLaunchSmoke")
 $log.Add("WpfLaunchSmokeFailOnError: $WpfLaunchSmokeFailOnError")
@@ -307,7 +345,9 @@ function Write-WinUiDiagnosticManifest {
         [string[]]$RootCauseHints,
         [hashtable]$PreflightProbe,
         [object[]]$Profiles,
-        [hashtable]$NuGetProbe
+        [hashtable]$NuGetProbe,
+        [string]$DotNetVersion,
+        [hashtable]$SdkResolutionContext
     )
 
     $legacyPreflight = $Preflight
@@ -343,6 +383,8 @@ function Write-WinUiDiagnosticManifest {
         preflight = $legacyPreflight
         preflight_probe = $PreflightProbe
         nuget_probe = $NuGetProbe
+        dotnet_version = $DotNetVersion
+        sdk_resolution_context = $SdkResolutionContext
         environment = $EnvironmentSummary
     }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $ManifestPath -Encoding UTF8
@@ -666,7 +708,8 @@ function Get-WinUiFailureClass {
     param(
         [string]$DiagLogPath,
         [string]$ManagedDiagLogPath,
-        [hashtable]$Preflight
+        [hashtable]$Preflight,
+        [string]$ObjRoot
     )
 
     if ($null -ne $Preflight -and $null -ne $Preflight.passed -and -not [bool]$Preflight.passed) {
@@ -711,6 +754,11 @@ function Get-WinUiFailureClass {
         }
         if ((Select-String -Path $DiagLogPath -Pattern "MSB3073" -SimpleMatch -Quiet) -and
             (Select-String -Path $DiagLogPath -Pattern "XamlCompiler.exe" -SimpleMatch -Quiet)) {
+            $inputPath = Join-Path $ObjRoot "x64\Release\net8.0-windows10.0.19041.0\input.json"
+            $outputPath = Join-Path $ObjRoot "x64\Release\net8.0-windows10.0.19041.0\output.json"
+            if ((Test-Path $inputPath) -and -not (Test-Path $outputPath)) {
+                return [ordered]@{ Class = "TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED"; Confidence = "high" }
+            }
             return [ordered]@{ Class = "XAML_COMPILER_EXEC_FAIL"; Confidence = "high" }
         }
     }
@@ -740,6 +788,7 @@ function Collect-WinUiDiagnostics {
     New-Item -ItemType Directory -Force -Path $objDumpPath | Out-Null
 
     $envSummary = Get-WinUiEnvironmentSummary
+    $dotnetInfo = Get-DotNetVersionInfo -WorkingDirectory $repoRoot
     $profiles = [System.Collections.Generic.List[object]]::new()
 
     $diagArgs = @(
@@ -754,7 +803,12 @@ function Collect-WinUiDiagnostics {
         $diagArgs += "--no-restore"
     }
     $diagCommandText = "dotnet " + ($diagArgs -join " ")
-    & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
+    Push-Location $repoRoot
+    try {
+        & dotnet @diagArgs 1> $diagLogPath 2> $diagStderrPath
+    } finally {
+        Pop-Location
+    }
     $diagExitCode = $LASTEXITCODE
     $diagProfileHints = Get-WinUiProfileHints -ProfileName "diag-default" -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath
     $profiles.Add([ordered]@{
@@ -786,7 +840,12 @@ function Collect-WinUiDiagnostics {
             $managedDiagArgs += "--no-restore"
         }
         $managedDiagCommandText = "dotnet " + ($managedDiagArgs -join " ")
-        & dotnet @managedDiagArgs 1> $managedDiagLogPath 2> $managedDiagStderrPath
+        Push-Location $repoRoot
+        try {
+            & dotnet @managedDiagArgs 1> $managedDiagLogPath 2> $managedDiagStderrPath
+        } finally {
+            Pop-Location
+        }
         $managedDiagExitCode = $LASTEXITCODE
 
         $managedProfileHints = Get-WinUiProfileHints -ProfileName "managed-xaml" -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath
@@ -811,7 +870,7 @@ function Collect-WinUiDiagnostics {
 
     Copy-WinUiObjDiagnostics -ObjRoot $objRoot -ObjDumpRoot $objDumpPath
     $rootCauseHints = Get-WinUiRootCauseHints -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -EnvironmentSummary $envSummary -NuGetProbe $NuGetProbe
-    $failure = Get-WinUiFailureClass -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -Preflight $Preflight
+    $failure = Get-WinUiFailureClass -DiagLogPath $diagLogPath -ManagedDiagLogPath $managedDiagLogPath -Preflight $Preflight -ObjRoot $objRoot
     Write-WinUiDiagnosticManifest `
         -ManifestPath $manifestPath `
         -Reason $Reason `
@@ -833,7 +892,9 @@ function Collect-WinUiDiagnostics {
         -RootCauseHints $rootCauseHints `
         -PreflightProbe $Preflight.probe `
         -Profiles $profiles.ToArray() `
-        -NuGetProbe $NuGetProbe
+        -NuGetProbe $NuGetProbe `
+        -DotNetVersion $dotnetInfo.version `
+        -SdkResolutionContext ([ordered]@{ global_json_root = $repoRoot; diagnostics_workdir = $dotnetInfo.working_directory })
 
     $log.Add("WinUI diagnostics command: $diagCommandText")
     $log.Add("WinUI diagnostics exit code: $diagExitCode")

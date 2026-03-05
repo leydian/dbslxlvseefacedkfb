@@ -256,6 +256,8 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Threshold"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="AutoQualityThresholdTextBox" Text="28.0"/>
@@ -263,6 +265,10 @@
                             <TextBox Grid.Row="1" Grid.Column="1" x:Name="AutoQualityConsecutiveTextBox" Text="120" Margin="0,8,0,0"/>
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Cooldown" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="2" Grid.Column="1" x:Name="AutoQualityCooldownTextBox" Text="30" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Recovery ms" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="3" Grid.Column="1" x:Name="AutoQualityRecoveryThresholdTextBox" Text="22.0" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Recovery n" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="4" Grid.Column="1" x:Name="AutoQualityRecoveryConsecutiveTextBox" Text="240" Margin="0,8,0,0"/>
                         </Grid>
                         <Button Content="Apply Auto Quality Policy" Click="ApplyAutoQualityPolicy_Click" MinWidth="170"/>
                     </StackPanel>

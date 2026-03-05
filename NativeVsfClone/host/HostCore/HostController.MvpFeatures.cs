@@ -19,8 +19,12 @@ public sealed partial class HostController
     private readonly List<FrameMetric> _rollingMetrics = new();
     private DateTimeOffset _lastAutoQualityAdjustUtc = DateTimeOffset.MinValue;
     private int _highFrameCount;
+    private int _recoveryFrameCount;
+    private bool _autoQualityDowngraded;
     private CancellationTokenSource? _loadCancellation;
     private Task<NcResultCode>? _activeLoadTask;
+    private string _activeLoadOperationId = string.Empty;
+    private long _loadOperationSequence;
     private SessionPersistenceModel _sessionPersistence = SessionPersistenceModel.CreateDefault();
     private AutoQualityPolicy _autoQualityPolicy = AutoQualityPolicy.CreateDefault();
 
@@ -48,28 +52,34 @@ public sealed partial class HostController
         }
     }
 
-    public string BuildImportGuidance(string path)
+    public ImportPlan BuildImportPlan(string path)
     {
         var trimmed = path?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmed))
         {
-            return "Select an avatar file path first.";
+            return new ImportPlan("none", false, "Select an avatar file path first.", "No fallback available until a path is provided.");
         }
         if (!File.Exists(trimmed))
         {
-            return "Selected avatar path does not exist. Verify path and try again.";
+            return new ImportPlan("missing-file", false, "Selected avatar path does not exist. Verify path and try again.", "Check path accessibility and retry.");
         }
 
         var ext = Path.GetExtension(trimmed).ToLowerInvariant();
         return ext switch
         {
-            ".vrm" => "VRM route selected: runtime-ready mesh/material path. Fallback: convert to XAV2 if runtime compatibility warnings appear.",
-            ".vxavatar" => "VXAvatar route selected: MVP container parser. Fallback: export to VXA2/XAV2 path when available.",
-            ".vxa2" => "VXA2 route selected: manifest + TLV decode path. Fallback: validate package and retry with XAV2.",
-            ".xav2" => "XAV2 route selected: vxa2-derived runtime container. Recommended for deterministic runtime loading.",
-            ".vsfavatar" => $"VSFAvatar route selected: parser mode={_sessionPersistence.Sidecar.ParserMode}. Fallback behavior follows current parser policy.",
-            _ => "Unknown extension. Supported: .vrm, .vxavatar, .vxa2, .xav2, .vsfavatar",
+            ".vrm" => new ImportPlan("vrm", true, "VRM route selected: runtime-ready mesh/material path.", "Fallback: convert to XAV2 if runtime compatibility warnings appear."),
+            ".vxavatar" => new ImportPlan("vxavatar", true, "VXAvatar route selected: MVP container parser.", "Fallback: export to VXA2/XAV2 path when available."),
+            ".vxa2" => new ImportPlan("vxa2", true, "VXA2 route selected: manifest + TLV decode path.", "Fallback: validate package and retry with XAV2."),
+            ".xav2" => new ImportPlan("xav2", true, "XAV2 route selected: vxa2-derived runtime container.", "Fallback: use VRM path when deterministic package load is blocked."),
+            ".vsfavatar" => new ImportPlan("vsfavatar", true, $"VSFAvatar route selected: parser mode={_sessionPersistence.Sidecar.ParserMode}.", "Fallback follows parser policy (sidecar/inhouse/sidecar-strict)."),
+            _ => new ImportPlan("unsupported-extension", false, "Unknown extension. Supported: .vrm, .vxavatar, .vxa2, .xav2, .vsfavatar", "Convert avatar to one of the supported formats."),
         };
+    }
+
+    public string BuildImportGuidance(string path)
+    {
+        var plan = BuildImportPlan(path);
+        return $"{plan.Guidance} Fallback: {plan.Fallback}";
     }
 
     public PreflightSummary RunPreflight()
@@ -78,13 +88,38 @@ public sealed partial class HostController
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         checks.Add(new PreflightCheckResult(
+            "LOCAL_APPDATA_PRESENT",
             "LOCAL_APPDATA",
             !string.IsNullOrWhiteSpace(localAppData),
             string.IsNullOrWhiteSpace(localAppData) ? "LocalAppData path unavailable." : localAppData,
             "Ensure user profile has a writable LocalAppData folder."));
 
+        var localAppDataWritable = false;
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            try
+            {
+                Directory.CreateDirectory(localAppData);
+                var probeFile = Path.Combine(localAppData, $"vsfclone_preflight_{Guid.NewGuid():N}.tmp");
+                File.WriteAllText(probeFile, "ok", Encoding.UTF8);
+                File.Delete(probeFile);
+                localAppDataWritable = true;
+            }
+            catch
+            {
+                localAppDataWritable = false;
+            }
+        }
+        checks.Add(new PreflightCheckResult(
+            "LOCAL_APPDATA_WRITABLE",
+            "LOCAL_APPDATA_WRITABLE",
+            localAppDataWritable,
+            localAppDataWritable ? "Verified write access to LocalAppData." : "Failed to create temporary file in LocalAppData.",
+            "Grant write permission to LocalAppData and re-run preflight."));
+
         var sdk8Detected = DetectDotnet8Sdk();
         checks.Add(new PreflightCheckResult(
+            "DOTNET_8_SDK",
             "DOTNET_8_SDK",
             sdk8Detected,
             sdk8Detected ? "Detected .NET 8 SDK." : "Could not detect .NET 8 SDK via dotnet --list-sdks.",
@@ -93,6 +128,7 @@ public sealed partial class HostController
         var nativeDllCandidate = Path.Combine(AppContext.BaseDirectory, "nativecore.dll");
         checks.Add(new PreflightCheckResult(
             "NATIVECORE_DLL",
+            "NATIVECORE_DLL",
             File.Exists(nativeDllCandidate),
             File.Exists(nativeDllCandidate) ? nativeDllCandidate : "nativecore.dll not found near host executable.",
             "Build nativecore and place/copy nativecore.dll next to host executable."));
@@ -100,9 +136,41 @@ public sealed partial class HostController
         var sidecarMode = _sessionPersistence.Sidecar.ParserMode;
         checks.Add(new PreflightCheckResult(
             "VSF_PARSER_MODE",
+            "VSF_PARSER_MODE",
             sidecarMode is "sidecar" or "inhouse" or "sidecar-strict",
             $"Current mode: {sidecarMode}",
             "Set parser mode to sidecar, inhouse, or sidecar-strict."));
+
+        var diagnosticsPath = Path.Combine(localAppData, "VsfCloneHost", "diagnostics");
+        var diagnosticsWritable = false;
+        try
+        {
+            Directory.CreateDirectory(diagnosticsPath);
+            var probeFile = Path.Combine(diagnosticsPath, $"preflight_write_{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(probeFile, "ok", Encoding.UTF8);
+            File.Delete(probeFile);
+            diagnosticsWritable = true;
+        }
+        catch
+        {
+            diagnosticsWritable = false;
+        }
+        checks.Add(new PreflightCheckResult(
+            "DIAGNOSTICS_OUTPUT_WRITABLE",
+            "DIAGNOSTICS_OUTPUT_WRITABLE",
+            diagnosticsWritable,
+            diagnosticsWritable ? diagnosticsPath : $"Unable to write diagnostics under: {diagnosticsPath}",
+            "Verify local disk permissions and available space for diagnostics output."));
+
+        var sidecarPath = _sessionPersistence.Sidecar.SidecarPath?.Trim() ?? string.Empty;
+        var sidecarModeNeedsPath = sidecarMode is "sidecar" or "sidecar-strict";
+        var sidecarPathValid = !sidecarModeNeedsPath || string.IsNullOrWhiteSpace(sidecarPath) || File.Exists(sidecarPath);
+        checks.Add(new PreflightCheckResult(
+            "SIDECAR_PATH_VALID",
+            "SIDECAR_PATH_VALID",
+            sidecarPathValid,
+            string.IsNullOrWhiteSpace(sidecarPath) ? "No explicit sidecar path configured." : sidecarPath,
+            "Set an existing sidecar executable path or clear the field to use default discovery."));
 
         LastPreflight = new PreflightSummary(DateTimeOffset.UtcNow, checks);
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "Preflight", LastPreflight.Passed ? "PASS" : "FAIL", LastPreflight.Passed ? NcResultCode.Ok : NcResultCode.Unsupported), false);
@@ -262,13 +330,15 @@ public sealed partial class HostController
         _autoQualityPolicy = new AutoQualityPolicy(
             Math.Clamp(policy.HighFrameMsThreshold, 10.0f, 80.0f),
             Math.Clamp(policy.ConsecutiveFrameLimit, 10, 1200),
-            Math.Clamp(policy.CooldownSeconds, 5, 300));
+            Math.Clamp(policy.CooldownSeconds, 5, 300),
+            Math.Clamp(policy.RecoveryFrameMsThreshold, 8.0f, Math.Clamp(policy.HighFrameMsThreshold, 10.0f, 80.0f)),
+            Math.Clamp(policy.RecoveryConsecutiveFrameLimit, 10, 2400));
         _autoQualityStore.Save(_autoQualityPolicy);
         AddLog(
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "AutoQualityPolicy",
-                $"threshold_ms={_autoQualityPolicy.HighFrameMsThreshold:F1}, consecutive={_autoQualityPolicy.ConsecutiveFrameLimit}, cooldown_sec={_autoQualityPolicy.CooldownSeconds}",
+                $"threshold_ms={_autoQualityPolicy.HighFrameMsThreshold:F1}, consecutive={_autoQualityPolicy.ConsecutiveFrameLimit}, cooldown_sec={_autoQualityPolicy.CooldownSeconds}, recovery_threshold_ms={_autoQualityPolicy.RecoveryFrameMsThreshold:F1}, recovery_consecutive={_autoQualityPolicy.RecoveryConsecutiveFrameLimit}",
                 NcResultCode.Ok),
             false);
     }
@@ -280,7 +350,7 @@ public sealed partial class HostController
             return string.Empty;
         }
 
-        return $"{LastUserFacingError.Title} | {LastUserFacingError.ActionHint}";
+        return $"[{LastUserFacingError.ErrorCode}] {LastUserFacingError.Title} | {LastUserFacingError.ActionHint}";
     }
 
     public Task<NcResultCode> LoadAvatarAsync(string path, int timeoutMs)
@@ -293,35 +363,52 @@ public sealed partial class HostController
         _loadCancellation?.Dispose();
         _loadCancellation = new CancellationTokenSource();
         var token = _loadCancellation.Token;
+        var operationId = $"load-{Interlocked.Increment(ref _loadOperationSequence)}";
+        _activeLoadOperationId = operationId;
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", $"started timeout_ms={timeoutMs}", NcResultCode.Ok), false);
-        PublishLoadProgress("queued", 5, "Load queued.", false);
+        PublishLoadProgress(operationId, "queued", 5, "Load queued.", false);
 
         _activeLoadTask = Task.Run(async () =>
         {
             try
             {
-                PublishLoadProgress("validating", 15, "Validating avatar path and operation state.", false);
+                PublishLoadProgress(operationId, "validating", 15, "Validating avatar path and operation state.", false);
                 var worker = Task.Run(() => LoadAvatar(path), token);
-                PublishLoadProgress("loading", 70, "Loading avatar package and runtime payload.", false);
-                var rc = await worker.WaitAsync(TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs)));
-                PublishLoadProgress("finalizing", 95, "Finalizing avatar runtime state.", false);
-                PublishLoadProgress("completed", rc == NcResultCode.Ok ? 100 : 0, rc == NcResultCode.Ok ? "Load completed." : $"Load failed: {rc}", true);
+                PublishLoadProgress(operationId, "loading", 70, "Loading avatar package and runtime payload.", false);
+                var rc = await worker.WaitAsync(TimeSpan.FromMilliseconds(Math.Max(1000, timeoutMs)), token);
+                if (!string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
+                {
+                    return rc;
+                }
+                PublishLoadProgress(operationId, "finalizing", 95, "Finalizing avatar runtime state.", false);
+                PublishLoadProgress(operationId, "completed", rc == NcResultCode.Ok ? 100 : 0, rc == NcResultCode.Ok ? "Load completed." : $"Load failed: {rc}", true);
                 return rc;
             }
             catch (OperationCanceledException)
             {
                 AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested", NcResultCode.Internal), false);
-                PublishLoadProgress("canceled", 0, "Load canceled.", true);
+                if (string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
+                {
+                    PublishLoadProgress(operationId, "canceled", 0, "Load canceled.", true);
+                }
                 return NcResultCode.Internal;
             }
             catch (TimeoutException)
             {
                 AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "timeout exceeded", NcResultCode.Internal), true);
-                PublishLoadProgress("timeout", 0, "Load timed out.", true);
+                if (string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
+                {
+                    PublishLoadProgress(operationId, "timeout", 0, "Load timed out.", true);
+                }
                 return NcResultCode.Internal;
             }
             finally
             {
+                if (string.Equals(_activeLoadOperationId, operationId, StringComparison.Ordinal))
+                {
+                    _activeLoadOperationId = string.Empty;
+                    _activeLoadTask = null;
+                }
                 RefreshState();
             }
         });
@@ -338,7 +425,8 @@ public sealed partial class HostController
 
         _loadCancellation.Cancel();
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "LoadAvatarAsync", "cancel requested by operator", NcResultCode.Ok), false);
-        PublishLoadProgress("canceling", 0, "Cancel requested.", false);
+        var operationId = string.IsNullOrWhiteSpace(_activeLoadOperationId) ? "load-cancel" : _activeLoadOperationId;
+        PublishLoadProgress(operationId, "canceling", 0, "Cancel requested.", false);
     }
 
     private void RecordFrameMetricAndGuardrails()
@@ -363,10 +451,30 @@ public sealed partial class HostController
         if (stats.LastFrameMs > _autoQualityPolicy.HighFrameMsThreshold)
         {
             _highFrameCount++;
+            _recoveryFrameCount = 0;
         }
         else
         {
             _highFrameCount = Math.Max(0, _highFrameCount - 1);
+            if (stats.LastFrameMs <= _autoQualityPolicy.RecoveryFrameMsThreshold)
+            {
+                _recoveryFrameCount++;
+            }
+            else
+            {
+                _recoveryFrameCount = Math.Max(0, _recoveryFrameCount - 1);
+            }
+        }
+
+        if (_autoQualityDowngraded &&
+            _recoveryFrameCount >= _autoQualityPolicy.RecoveryConsecutiveFrameLimit &&
+            (DateTimeOffset.UtcNow - _lastAutoQualityAdjustUtc) >= TimeSpan.FromSeconds(_autoQualityPolicy.CooldownSeconds))
+        {
+            _lastAutoQualityAdjustUtc = DateTimeOffset.UtcNow;
+            _recoveryFrameCount = 0;
+            _autoQualityDowngraded = false;
+            _ = ApplyRenderProfile("quality");
+            AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "AutoQualityGuard", "recovered to quality profile after stable frame time window", NcResultCode.Ok), false);
         }
 
         if (_highFrameCount < _autoQualityPolicy.ConsecutiveFrameLimit)
@@ -380,6 +488,8 @@ public sealed partial class HostController
 
         _lastAutoQualityAdjustUtc = DateTimeOffset.UtcNow;
         _highFrameCount = 0;
+        _recoveryFrameCount = 0;
+        _autoQualityDowngraded = true;
         _ = ApplyRenderProfile("performance");
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "AutoQualityGuard", "applied performance profile due to sustained frame time pressure", NcResultCode.Ok), false);
     }
@@ -410,11 +520,21 @@ public sealed partial class HostController
         return true;
     }
 
+    private static string BuildErrorCode(string source, NcResultCode rc)
+    {
+        var normalizedSource = string.IsNullOrWhiteSpace(source)
+            ? "unknown"
+            : source.Replace('.', '_').Replace(' ', '_').ToUpperInvariant();
+        return $"ERR_{normalizedSource}_{rc.ToString().ToUpperInvariant()}";
+    }
+
     private UserFacingError BuildUserFacingError(string source, NcResultCode rc, string detail)
     {
+        var errorCode = BuildErrorCode(source, rc);
         if (source.EndsWith(".Blocked", StringComparison.OrdinalIgnoreCase))
         {
             LastUserFacingError = new UserFacingError(
+                errorCode,
                 HostErrorCategory.Initialization,
                 "Operation blocked by lifecycle policy",
                 "Follow the operation order: Initialize -> Load Avatar -> Start Outputs.",
@@ -470,7 +590,7 @@ public sealed partial class HostController
             action = "Apply the failed-check remediation from preflight report.";
         }
 
-        LastUserFacingError = new UserFacingError(category, title, action, detail);
+        LastUserFacingError = new UserFacingError(errorCode, category, title, action, detail);
         return LastUserFacingError;
     }
 
@@ -550,9 +670,10 @@ public sealed partial class HostController
         }
     }
 
-    private void PublishLoadProgress(string stage, int percent, string message, bool terminal)
+    private void PublishLoadProgress(string operationId, string stage, int percent, string message, bool terminal)
     {
         var normalized = new LoadProgressState(
+            operationId,
             stage,
             Math.Clamp(percent, 0, 100),
             message,

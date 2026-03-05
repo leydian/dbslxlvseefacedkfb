@@ -15,16 +15,24 @@ public enum HostErrorCategory
 }
 
 public sealed record UserFacingError(
+    string ErrorCode,
     HostErrorCategory Category,
     string Title,
     string ActionHint,
     string TechnicalDetail);
 
 public sealed record PreflightCheckResult(
+    string CheckCode,
     string Name,
     bool Passed,
     string Detail,
     string Remediation);
+
+public sealed record ImportPlan(
+    string Route,
+    bool IsSupported,
+    string Guidance,
+    string Fallback);
 
 public sealed record PreflightSummary(
     DateTimeOffset TimestampUtc,
@@ -72,6 +80,7 @@ public sealed record TelemetrySettings(
     bool RedactSensitiveFields);
 
 public sealed record LoadProgressState(
+    string OperationId,
     string Stage,
     int Percent,
     string Message,
@@ -80,12 +89,16 @@ public sealed record LoadProgressState(
 public sealed record AutoQualityPolicy(
     float HighFrameMsThreshold,
     int ConsecutiveFrameLimit,
-    int CooldownSeconds)
+    int CooldownSeconds,
+    float RecoveryFrameMsThreshold,
+    int RecoveryConsecutiveFrameLimit)
 {
     public static AutoQualityPolicy CreateDefault() => new(
         HighFrameMsThreshold: 28.0f,
         ConsecutiveFrameLimit: 120,
-        CooldownSeconds: 30);
+        CooldownSeconds: 30,
+        RecoveryFrameMsThreshold: 22.0f,
+        RecoveryConsecutiveFrameLimit: 240);
 }
 
 public sealed class SessionStateStore
@@ -194,7 +207,9 @@ public sealed class AutoQualityPolicyStore
         var frame = Math.Clamp(value.HighFrameMsThreshold, 10.0f, 80.0f);
         var count = Math.Clamp(value.ConsecutiveFrameLimit, 10, 1200);
         var cooldown = Math.Clamp(value.CooldownSeconds, 5, 300);
-        return new AutoQualityPolicy(frame, count, cooldown);
+        var recoveryFrame = Math.Clamp(value.RecoveryFrameMsThreshold, 8.0f, frame);
+        var recoveryCount = Math.Clamp(value.RecoveryConsecutiveFrameLimit, 10, 2400);
+        return new AutoQualityPolicy(frame, count, cooldown, recoveryFrame, recoveryCount);
     }
 }
 

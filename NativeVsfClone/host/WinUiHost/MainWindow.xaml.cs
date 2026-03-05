@@ -199,8 +199,8 @@ public sealed partial class MainWindow : Window
 
         _isLoadRunning = true;
         UpdateUiState();
-        var guidance = _controller.BuildImportGuidance(AvatarPathTextBox.Text.Trim());
-        SessionStatusText.Text = $"Session: {guidance}";
+        var importPlan = _controller.BuildImportPlan(AvatarPathTextBox.Text.Trim());
+        SessionStatusText.Text = $"Session: {importPlan.Guidance} Fallback: {importPlan.Fallback}";
         var rc = await _controller.LoadAvatarAsync(AvatarPathTextBox.Text.Trim(), timeoutMs);
         _isLoadRunning = false;
         UpdateUiState();
@@ -341,7 +341,7 @@ public sealed partial class MainWindow : Window
         sb.AppendLine($"Preflight: {(preflight.Passed ? "PASS" : "FAIL")}");
         foreach (var c in preflight.Checks)
         {
-            sb.AppendLine($"- {(c.Passed ? "PASS" : "FAIL")} {c.Name}: {c.Detail}");
+            sb.AppendLine($"- {(c.Passed ? "PASS" : "FAIL")} [{c.CheckCode}] {c.Name}: {c.Detail}");
             if (!c.Passed)
             {
                 sb.AppendLine($"  remediation: {c.Remediation}");
@@ -351,7 +351,7 @@ public sealed partial class MainWindow : Window
         var failed = preflight.Checks.Where(x => !x.Passed).ToList();
         PreflightHintText.Text = failed.Count == 0
             ? "Preflight passed. Proceed with Initialize -> Load -> Start outputs."
-            : "Preflight failed checks: " + string.Join(" | ", failed.Select(x => $"{x.Name}: {x.Remediation}"));
+            : "Preflight failed checks: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
 
         await ShowMessageAsync("Preflight Result", sb.ToString());
     }
@@ -433,7 +433,18 @@ public sealed partial class MainWindow : Window
             AutoQualityCooldownTextBox.Text = "30";
         }
 
-        _controller.ConfigureAutoQualityPolicy(new AutoQualityPolicy(threshold, consecutive, cooldown));
+        if (!float.TryParse(AutoQualityRecoveryThresholdTextBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var recoveryThreshold))
+        {
+            recoveryThreshold = 22.0f;
+            AutoQualityRecoveryThresholdTextBox.Text = "22.0";
+        }
+        if (!int.TryParse(AutoQualityRecoveryConsecutiveTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var recoveryConsecutive))
+        {
+            recoveryConsecutive = 240;
+            AutoQualityRecoveryConsecutiveTextBox.Text = "240";
+        }
+
+        _controller.ConfigureAutoQualityPolicy(new AutoQualityPolicy(threshold, consecutive, cooldown, recoveryThreshold, recoveryConsecutive));
     }
 
     private void BroadcastMode_Changed(object sender, RoutedEventArgs e)
@@ -707,7 +718,7 @@ public sealed partial class MainWindow : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             LoadProgressBar.Value = e.Percent;
-            LoadProgressText.Text = $"Load progress: {e.Stage} ({e.Percent}%) - {e.Message}";
+            LoadProgressText.Text = $"Load progress [{e.OperationId}]: {e.Stage} ({e.Percent}%) - {e.Message}";
             if (e.IsTerminal)
             {
                 _isLoadRunning = false;
@@ -1140,6 +1151,8 @@ public sealed partial class MainWindow : Window
         AutoQualityThresholdTextBox.Text = aq.HighFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
         AutoQualityConsecutiveTextBox.Text = aq.ConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
         AutoQualityCooldownTextBox.Text = aq.CooldownSeconds.ToString(CultureInfo.InvariantCulture);
+        AutoQualityRecoveryThresholdTextBox.Text = aq.RecoveryFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
+        AutoQualityRecoveryConsecutiveTextBox.Text = aq.RecoveryConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
     }
 
     private void RefreshGuides()
