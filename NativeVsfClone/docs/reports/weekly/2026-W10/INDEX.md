@@ -67,6 +67,7 @@ Report list for this week.
 - [2026-03-05_xav2_relaxed_export_menu.md](./2026-03-05_xav2_relaxed_export_menu.md)
 - [2026-03-05_xav2_unity_2021_3_18f1_support_and_gate.md](./2026-03-05_xav2_unity_2021_3_18f1_support_and_gate.md)
 - [2026-03-06_avatar_render_recovery_bundle.md](./2026-03-06_avatar_render_recovery_bundle.md)
+- [2026-03-06_arkit52_strict_full_support_pipeline.md](./2026-03-06_arkit52_strict_full_support_pipeline.md)
 - [2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md](./2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md)
 - [2026-03-06_host_pose_tracking_refinement_execution.md](./2026-03-06_host_pose_tracking_refinement_execution.md)
 - [2026-03-06_ifacialmocap_direct_tracking.md](./2026-03-06_ifacialmocap_direct_tracking.md)

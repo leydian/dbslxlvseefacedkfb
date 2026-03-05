@@ -117,7 +117,10 @@ public sealed record TrackingDiagnostics(
     TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
     string SwitchBlockedReason = "",
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
-    float PoseDeadbandDeg = 0.9f);
+    float PoseDeadbandDeg = 0.9f,
+    int Arkit52SubmittedCount = 0,
+    int Arkit52MissingCount = 52,
+    string Arkit52MissingKeys = "");
 
 public interface ITrackingInputService
 {

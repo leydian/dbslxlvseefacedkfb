@@ -23,6 +23,7 @@
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
 - `nativecore`: 2 reports
+- `arkit52`: 1 reports
 - `runtime`: 1 reports
 - `spout2`: 1 reports
 - `vxa2`: 1 reports
@@ -36,3 +37,4 @@
 - Newly added: review `2026-03-06_wpf_render_only_mode_toggle.md` for WPF render-only mode toggle, F11 UX, and layout/resize sync behavior.
 - Newly added: review `2026-03-06_wpf_arm_pose_slider_wiring.md` for both/per-arm pitch slider control flow and pose sync/busy-gating behavior in WPF host.
 - Newly added: review `2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md` for arm filtering/tuning, suggested arm preset automation, and native arm-pose update optimization.
+- Newly added: review `2026-03-06_arkit52_strict_full_support_pipeline.md` for strict ARKit52 channel binding policy, host/native coverage diagnostics, and non-fatal missing-channel warning behavior.

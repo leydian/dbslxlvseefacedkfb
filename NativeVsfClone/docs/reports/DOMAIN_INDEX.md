@@ -6,6 +6,9 @@ Domain-level report navigation hub.
 - [2026-03-06_avatar_render_recovery_bundle.md](./weekly/2026-W10/2026-03-06_avatar_render_recovery_bundle.md)
 - [2026-03-05_avatar_extension_policy_trim.md](./weekly/2026-W10/2026-03-05_avatar_extension_policy_trim.md)
 
+## arkit52
+- [2026-03-06_arkit52_strict_full_support_pipeline.md](./weekly/2026-W10/2026-03-06_arkit52_strict_full_support_pipeline.md)
+
 ## consumer
 - [2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md](./weekly/2026-W10/2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md)
 

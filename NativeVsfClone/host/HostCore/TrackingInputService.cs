@@ -90,21 +90,6 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _poseAdaptiveGain = 0.024f;
     private int _recenterStabilizeFramesRemaining;
 
-    private static readonly string[] ArkitBlendshapeOrder =
-    {
-        "browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
-        "cheekPuff", "cheekSquintLeft", "cheekSquintRight", "eyeBlinkLeft", "eyeBlinkRight",
-        "eyeLookDownLeft", "eyeLookDownRight", "eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft",
-        "eyeLookOutRight", "eyeLookUpLeft", "eyeLookUpRight", "eyeSquintLeft", "eyeSquintRight",
-        "eyeWideLeft", "eyeWideRight", "jawForward", "jawLeft", "jawOpen",
-        "jawRight", "mouthClose", "mouthDimpleLeft", "mouthDimpleRight", "mouthFrownLeft",
-        "mouthFrownRight", "mouthFunnel", "mouthLeft", "mouthLowerDownLeft", "mouthLowerDownRight",
-        "mouthPressLeft", "mouthPressRight", "mouthPucker", "mouthRight", "mouthRollLower",
-        "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper", "mouthSmileLeft", "mouthSmileRight",
-        "mouthStretchLeft", "mouthStretchRight", "mouthUpperUpLeft", "mouthUpperUpRight", "noseSneerLeft",
-        "noseSneerRight", "tongueOut",
-    };
-
     public NcResultCode Start(TrackingStartOptions options)
     {
         lock (_sync)
@@ -851,9 +836,9 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private void ApplyMediapipeBlendshapeResult(MediapipeFramePacket packet)
     {
-        for (var i = 0; i < ArkitBlendshapeOrder.Length; i++)
+        for (var i = 0; i < Arkit52Channels.CanonicalOrder.Count; i++)
         {
-            var key = NormalizeKey(ArkitBlendshapeOrder[i]);
+            var key = NormalizeKey(Arkit52Channels.CanonicalOrder[i]);
             _expressionCache[key] = 0.0f;
         }
 
@@ -2040,20 +2025,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private static string NormalizeKey(string raw)
     {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return string.Empty;
-        }
-
-        var sb = new StringBuilder(raw.Length);
-        foreach (var ch in raw)
-        {
-            if (char.IsLetterOrDigit(ch))
-            {
-                sb.Append(char.ToLowerInvariant(ch));
-            }
-        }
-        return sb.ToString();
+        return Arkit52Channels.NormalizeKey(raw);
     }
 
     private static void NormalizeQuaternion(ref float x, ref float y, ref float z, ref float w)

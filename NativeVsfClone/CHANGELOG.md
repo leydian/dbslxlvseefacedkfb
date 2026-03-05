@@ -2,6 +2,38 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - ARKit52 strict full-support pipeline (VRM + XAV2)
+
+### Summary
+
+Implemented strict ARKit52 end-to-end support wiring with host/native coverage diagnostics and non-fatal missing-channel handling. Runtime now builds ARKit52 expression bindings per avatar from blendshape payloads and applies direct ARKit channels without legacy fallback interference when ARKit binding mode is active.
+
+### Changed
+
+- HostCore ARKit52 canonical source + diagnostics:
+  - `host/HostCore/Arkit52Channels.cs` (new shared channel source and normalizer)
+  - `host/HostCore/TrackingInputService.cs` (uses shared ARKit52 channel source)
+  - `host/HostCore/HostInterfaces.cs` (`TrackingDiagnostics` expanded with ARKit52 coverage fields)
+  - `host/HostCore/HostController.cs` (per-tick ARKit52 submitted/missing coverage computation)
+- Host UI status visibility:
+  - `host/WpfHost/MainWindow.xaml.cs` (tracking status/runtime text includes ARKit52 coverage)
+  - `host/WinUiHost/MainWindow.xaml.cs` (tracking status/runtime text includes ARKit52 coverage)
+- NativeCore ARKit52 strict bind generation + precedence update:
+  - `src/nativecore/native_core.cpp`
+  - builds ARKit52 expression/bind map at avatar load from blendshape payloads
+  - warns with `W_ARKIT52_MISSING_BIND` when channels are missing
+  - disables legacy blink/jaw/smile alias fallback when ARKit52 bindings are present
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_arkit52_strict_full_support_pipeline.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release`: blocked by NU1301 (NuGet network access restricted in current environment)
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: blocked by same environment restriction
+
 ## 2026-03-06 - WPF arm pose refinement + suggested preset automation + native update optimization
 
 ### Summary
