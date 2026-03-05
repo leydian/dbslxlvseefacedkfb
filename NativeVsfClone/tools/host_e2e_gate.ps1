@@ -49,21 +49,27 @@ function Run-Step {
 }
 
 try {
-    Run-Step "Sidecar lock guard" {
-        & powershell -ExecutionPolicy Bypass -File .\tools\sidecar_lock_guard.ps1
-    }
+    Push-Location $repoRoot
+    try {
+        Run-Step "Sidecar lock guard" {
+            & powershell -ExecutionPolicy Bypass -File .\tools\sidecar_lock_guard.ps1
+        }
 
-    Run-Step "Host publish and smoke" {
-        $scriptPath = Join-Path $repoRoot "tools\publish_hosts.ps1"
-        if ($IncludeWinUi) {
-            & $scriptPath -Configuration $Configuration -RuntimeIdentifier $RuntimeIdentifier -RunWpfLaunchSmoke $true -WpfLaunchSmokeFailOnError $true -IncludeWinUi -SkipNativeBuild:$SkipNativeBuild -NoRestore:$NoRestore
-        } else {
-            & $scriptPath -Configuration $Configuration -RuntimeIdentifier $RuntimeIdentifier -RunWpfLaunchSmoke $true -WpfLaunchSmokeFailOnError $true -SkipNativeBuild:$SkipNativeBuild -NoRestore:$NoRestore
+        Run-Step "Host publish and smoke" {
+            $scriptPath = Join-Path $repoRoot "tools\publish_hosts.ps1"
+            if ($IncludeWinUi) {
+                & $scriptPath -Configuration $Configuration -RuntimeIdentifier $RuntimeIdentifier -RunWpfLaunchSmoke $true -WpfLaunchSmokeFailOnError $true -IncludeWinUi -SkipNativeBuild:$SkipNativeBuild -NoRestore:$NoRestore
+            } else {
+                & $scriptPath -Configuration $Configuration -RuntimeIdentifier $RuntimeIdentifier -RunWpfLaunchSmoke $true -WpfLaunchSmokeFailOnError $true -SkipNativeBuild:$SkipNativeBuild -NoRestore:$NoRestore
+            }
+        }
+
+        Run-Step "Release dashboard refresh" {
+            & powershell -ExecutionPolicy Bypass -File .\tools\release_gate_dashboard.ps1
         }
     }
-
-    Run-Step "Release dashboard refresh" {
-        & powershell -ExecutionPolicy Bypass -File .\tools\release_gate_dashboard.ps1
+    finally {
+        Pop-Location
     }
 }
 catch {

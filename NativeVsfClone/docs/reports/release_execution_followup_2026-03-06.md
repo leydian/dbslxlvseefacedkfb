@@ -114,3 +114,54 @@ Observed:
 - new gates are opt-in by default to avoid breaking existing baseline pipelines that do not always have prerequisite artifacts (for example, metrics CSV for render perf gate).
 - release board status was updated accordingly in:
   - `docs/reports/release_execution_board_20_2026-03-06.md`
+
+## Detailed Rollup Addendum (same-day integration update)
+
+This addendum summarizes the integrated implementation set now reflected in `5c335e6` and the post-commit gate-script fix.
+
+### A) XAV2 SDK quality and compression track
+
+- Export options/API expansion:
+  - `Xav2ExportOptions` now includes compression controls:
+    - `EnableCompression`
+    - `CompressionCodec` (`Lz4`)
+    - `CompressionLevel` (`Fast`/`Balanced`)
+- Export format behavior:
+  - default export remains uncompressed v4 for compatibility
+  - compression-enabled export writes v5 and uses section flag bit (`0x0001`) for compressed payloads
+  - compression is opportunistic and currently focused on large sections (`mesh`, `texture`, `skin`, `blendshape`)
+- Runtime loader hardening:
+  - added compression decode error mapping (`CompressionDecodeFailed`)
+  - v5 compressed sections are decoded via LZ4 envelope (`uncompressed_size + compressed bytes`)
+  - unknown section flags still surface diagnostics via existing warning channel
+- Native loader parity:
+  - native XAV2 loader now accepts v5 and decodes compressed sections with equivalent LZ4 path
+  - compressed payload decode failure is surfaced as explicit parse error code/warning
+- Test expansion:
+  - added exporter compression tests (v4/v5 contract + smaller file expectation + runtime load pass)
+  - added runtime compressed section tests (success path + corrupt compressed payload failure path)
+  - fixed importer test fixture shader/policy mismatch by aligning sample shader to strict-set default
+
+### B) Format and documentation sync
+
+- `docs/formats/xav2.md` updated to include:
+  - version matrix v1/v2/v3/v4/v5
+  - section flag definition (`0x0001` compressed payload)
+  - compressed payload envelope schema
+- package readme updated with compression usage notes and v5 behavior summary.
+
+### C) Release/dashboard visibility
+
+- `tools/release_gate_dashboard.ps1` now reports Unity SDK validation state from:
+  - `build/reports/unity_xav2_validation_summary.txt`
+  - status contract: `PASS|FAIL|UNKNOWN|NOT_RUN`
+- dashboard text/json output now includes `Unity XAV2 Validate` row.
+
+### D) Host E2E gate follow-up fix (post-commit)
+
+- `tools/host_e2e_gate.ps1` now wraps steps in:
+  - `Push-Location $repoRoot`
+  - `try/finally { Pop-Location }`
+- Effect:
+  - ensures sidecar/publish/dashboard subprocess paths always execute from repository root
+  - avoids path-context drift when gate is launched from external working directories.
