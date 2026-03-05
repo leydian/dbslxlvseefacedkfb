@@ -1,14 +1,17 @@
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -38,6 +41,8 @@ struct CliOptions {
     bool strict = false;
     bool enable_compression = true;
     std::string diag_json_path;
+    std::string strict_allowlist_path;
+    std::string perf_metrics_json_path;
     std::string input_path;
     std::string output_path;
 };
@@ -51,6 +56,27 @@ struct ValidationIssue {
 struct WriteStats {
     std::uint32_t section_count = 0U;
     std::uint32_t compressed_section_count = 0U;
+    std::uint64_t raw_total_bytes = 0U;
+    std::uint64_t written_total_bytes = 0U;
+    std::uint64_t max_payload_buffer_bytes = 0U;
+    std::unordered_map<std::uint16_t, std::uint64_t> section_raw_bytes;
+    std::unordered_map<std::uint16_t, std::uint64_t> section_written_bytes;
+    std::unordered_map<std::uint16_t, std::uint32_t> section_counts;
+};
+
+struct StrictDecision {
+    bool compat_ok = true;
+    std::vector<std::string> accepted_source_warning_codes;
+    std::vector<std::string> rejected_source_warning_codes;
+    std::vector<std::string> accepted_validation_issue_codes;
+    std::vector<std::string> rejected_validation_issue_codes;
+};
+
+struct PerfMetrics {
+    std::uint64_t load_ms = 0U;
+    std::uint64_t validate_ms = 0U;
+    std::uint64_t write_ms = 0U;
+    std::uint64_t total_ms = 0U;
 };
 
 void WriteU16Le(std::ofstream* out, std::uint16_t value) {
@@ -146,6 +172,36 @@ std::string EscapeJson(std::string_view input) {
 
 std::string BoolJson(bool value) {
     return value ? "true" : "false";
+}
+
+std::string TrimAscii(std::string value) {
+    auto is_space = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.front()))) {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && is_space(static_cast<unsigned char>(value.back()))) {
+        value.pop_back();
+    }
+    return value;
+}
+
+std::string ToUpperAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        if (c >= 'a' && c <= 'z') {
+            return static_cast<char>(c - 'a' + 'A');
+        }
+        return static_cast<char>(c);
+    });
+    return value;
+}
+
+std::string NormalizeCode(std::string value) {
+    return ToUpperAscii(TrimAscii(std::move(value)));
+}
+
+std::uint64_t MillisecondsSince(const std::chrono::steady_clock::time_point& start) {
+    const auto dur = std::chrono::steady_clock::now() - start;
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(dur).count());
 }
 
 std::string ResolvePhysicsSource(const vsfclone::avatar::AvatarPackage& pkg) {
@@ -496,6 +552,52 @@ bool ShouldCompressSection(std::uint16_t section_type, std::size_t payload_size,
            section_type == kSectionBlendShapePayload;
 }
 
+bool IsAlreadyCompressedTexture(const std::vector<std::uint8_t>& payload) {
+    if (payload.size() < 16U) {
+        return false;
+    }
+    // texture payload: [name_len(2)][name][blob_size(4)][blob]
+    const std::size_t name_len = static_cast<std::size_t>(payload[0]) | (static_cast<std::size_t>(payload[1]) << 8U);
+    if (2U + name_len + 4U >= payload.size()) {
+        return false;
+    }
+    const std::size_t blob_offset = 2U + name_len + 4U;
+    if (blob_offset + 4U > payload.size()) {
+        return false;
+    }
+    const auto* p = payload.data() + static_cast<std::ptrdiff_t>(blob_offset);
+    // png
+    if (p[0] == 0x89U && p[1] == 0x50U && p[2] == 0x4EU && p[3] == 0x47U) {
+        return true;
+    }
+    // jpg
+    if (p[0] == 0xFFU && p[1] == 0xD8U) {
+        return true;
+    }
+    // dds
+    if (p[0] == 0x44U && p[1] == 0x44U && p[2] == 0x53U && p[3] == 0x20U) {
+        return true;
+    }
+    // ktx
+    if (p[0] == 0xABU && p[1] == 0x4BU && p[2] == 0x54U && p[3] == 0x58U) {
+        return true;
+    }
+    return false;
+}
+
+bool ShouldAttemptCompression(std::uint16_t section_type, const std::vector<std::uint8_t>& payload, bool enabled) {
+    if (!ShouldCompressSection(section_type, payload.size(), enabled)) {
+        return false;
+    }
+    if (section_type == kSectionTextureBlob && IsAlreadyCompressedTexture(payload)) {
+        return false;
+    }
+    if (payload.size() < 1024U) {
+        return false;
+    }
+    return true;
+}
+
 inline std::uint32_t ReadU32Le(const std::vector<std::uint8_t>& data, std::size_t pos) {
     return static_cast<std::uint32_t>(data[pos]) |
            (static_cast<std::uint32_t>(data[pos + 1U]) << 8U) |
@@ -619,7 +721,7 @@ bool WriteSection(
 
     std::uint16_t flags = 0U;
     std::vector<std::uint8_t> serialized_payload = payload;
-    if (ShouldCompressSection(type, payload.size(), allow_compression)) {
+    if (ShouldAttemptCompression(type, payload, allow_compression)) {
         std::vector<std::uint8_t> compressed;
         if (TryLz4CompressRaw(payload, &compressed) && (compressed.size() + 4U) < payload.size()) {
             flags |= kSectionFlagPayloadCompressedLz4;
@@ -639,6 +741,11 @@ bool WriteSection(
 
     if (stats != nullptr) {
         ++stats->section_count;
+        stats->raw_total_bytes += static_cast<std::uint64_t>(payload.size());
+        stats->written_total_bytes += static_cast<std::uint64_t>(serialized_payload.size());
+        stats->section_raw_bytes[type] += static_cast<std::uint64_t>(payload.size());
+        stats->section_written_bytes[type] += static_cast<std::uint64_t>(serialized_payload.size());
+        stats->section_counts[type] += 1U;
         if ((flags & kSectionFlagPayloadCompressedLz4) != 0U) {
             ++stats->compressed_section_count;
         }
@@ -706,12 +813,75 @@ std::vector<ValidationIssue> ValidatePackageForExport(const vsfclone::avatar::Av
     return issues;
 }
 
+std::unordered_set<std::string> LoadAllowlist(const std::string& path, std::string* out_error) {
+    std::unordered_set<std::string> allowlist;
+    if (path.empty()) {
+        return allowlist;
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        *out_error = "could not open strict allowlist file: " + path;
+        return {};
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        std::size_t at = 0U;
+        while (at < line.size()) {
+            std::size_t comma = line.find(',', at);
+            std::string token = (comma == std::string::npos) ? line.substr(at) : line.substr(at, comma - at);
+            token = NormalizeCode(std::move(token));
+            if (!token.empty() && token[0] != '#') {
+                allowlist.insert(token);
+            }
+            if (comma == std::string::npos) {
+                break;
+            }
+            at = comma + 1U;
+        }
+    }
+    return allowlist;
+}
+
+StrictDecision EvaluateStrictDecision(
+    const CliOptions& options,
+    const vsfclone::avatar::AvatarPackage& pkg,
+    const std::vector<ValidationIssue>& issues,
+    const std::unordered_set<std::string>& allowlist) {
+    StrictDecision decision;
+    decision.compat_ok = (pkg.compat_level == vsfclone::avatar::AvatarCompatLevel::Full);
+    if (!options.strict) {
+        return decision;
+    }
+
+    auto classify = [&](const std::string& raw_code, std::vector<std::string>* accepted, std::vector<std::string>* rejected) {
+        const std::string code = NormalizeCode(raw_code);
+        if (code.empty()) {
+            return;
+        }
+        if (!allowlist.empty() && allowlist.find(code) != allowlist.end()) {
+            accepted->push_back(code);
+        } else {
+            rejected->push_back(code);
+        }
+    };
+
+    for (const auto& code : pkg.warning_codes) {
+        classify(code, &decision.accepted_source_warning_codes, &decision.rejected_source_warning_codes);
+    }
+    for (const auto& issue : issues) {
+        classify(issue.code, &decision.accepted_validation_issue_codes, &decision.rejected_validation_issue_codes);
+    }
+    return decision;
+}
+
 bool WriteDiagJson(
     const std::string& path,
     const CliOptions& options,
     const vsfclone::avatar::AvatarPackage& pkg,
     const WriteStats& stats,
     const std::vector<ValidationIssue>& issues,
+    const StrictDecision& strict_decision,
+    const PerfMetrics& perf,
     const std::string& output_path) {
     std::ofstream out(path, std::ios::binary);
     if (!out) {
@@ -721,10 +891,14 @@ bool WriteDiagJson(
     out << "\"input\":\"" << EscapeJson(options.input_path) << "\",";
     out << "\"output\":\"" << EscapeJson(output_path) << "\",";
     out << "\"strict\":" << BoolJson(options.strict) << ",";
+    out << "\"strictAllowlistPath\":\"" << EscapeJson(options.strict_allowlist_path) << "\",";
     out << "\"compressionEnabled\":" << BoolJson(options.enable_compression) << ",";
     out << "\"xav2Version\":" << kXav2Version << ",";
     out << "\"sectionCount\":" << stats.section_count << ",";
     out << "\"compressedSectionCount\":" << stats.compressed_section_count << ",";
+    out << "\"rawTotalBytes\":" << stats.raw_total_bytes << ",";
+    out << "\"writtenTotalBytes\":" << stats.written_total_bytes << ",";
+    out << "\"maxPayloadBufferBytes\":" << stats.max_payload_buffer_bytes << ",";
     out << "\"payloadCounts\":{";
     out << "\"mesh\":" << pkg.mesh_payloads.size() << ",";
     out << "\"material\":" << pkg.material_payloads.size() << ",";
@@ -745,6 +919,66 @@ bool WriteDiagJson(
         out << "\"" << EscapeJson(pkg.warning_codes[i]) << "\"";
     }
     out << "],";
+    out << "\"strictPolicy\":{";
+    out << "\"compatOk\":" << BoolJson(strict_decision.compat_ok) << ",";
+    out << "\"acceptedSourceWarningCodes\":[";
+    for (std::size_t i = 0; i < strict_decision.accepted_source_warning_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(strict_decision.accepted_source_warning_codes[i]) << "\"";
+    }
+    out << "],";
+    out << "\"rejectedSourceWarningCodes\":[";
+    for (std::size_t i = 0; i < strict_decision.rejected_source_warning_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(strict_decision.rejected_source_warning_codes[i]) << "\"";
+    }
+    out << "],";
+    out << "\"acceptedValidationIssueCodes\":[";
+    for (std::size_t i = 0; i < strict_decision.accepted_validation_issue_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(strict_decision.accepted_validation_issue_codes[i]) << "\"";
+    }
+    out << "],";
+    out << "\"rejectedValidationIssueCodes\":[";
+    for (std::size_t i = 0; i < strict_decision.rejected_validation_issue_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(strict_decision.rejected_validation_issue_codes[i]) << "\"";
+    }
+    out << "]";
+    out << "},";
+    out << "\"perf\":{";
+    out << "\"loadMs\":" << perf.load_ms << ",";
+    out << "\"validateMs\":" << perf.validate_ms << ",";
+    out << "\"writeMs\":" << perf.write_ms << ",";
+    out << "\"totalMs\":" << perf.total_ms;
+    out << "},";
+    out << "\"sectionMetrics\":[";
+    bool first_metric = true;
+    for (const auto& [section_type, count] : stats.section_counts) {
+        if (!first_metric) {
+            out << ",";
+        }
+        first_metric = false;
+        const auto raw_it = stats.section_raw_bytes.find(section_type);
+        const auto written_it = stats.section_written_bytes.find(section_type);
+        const std::uint64_t raw_bytes = (raw_it != stats.section_raw_bytes.end()) ? raw_it->second : 0U;
+        const std::uint64_t written_bytes = (written_it != stats.section_written_bytes.end()) ? written_it->second : 0U;
+        out << "{";
+        out << "\"type\":" << section_type << ",";
+        out << "\"count\":" << count << ",";
+        out << "\"rawBytes\":" << raw_bytes << ",";
+        out << "\"writtenBytes\":" << written_bytes;
+        out << "}";
+    }
+    out << "],";
     out << "\"issues\":[";
     for (std::size_t i = 0; i < issues.size(); ++i) {
         if (i > 0U) {
@@ -757,6 +991,34 @@ bool WriteDiagJson(
         out << "}";
     }
     out << "]";
+    out << "}";
+    return out.good();
+}
+
+bool WritePerfMetricsJson(
+    const std::string& path,
+    const CliOptions& options,
+    const WriteStats& stats,
+    const PerfMetrics& perf) {
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        return false;
+    }
+    out << "{";
+    out << "\"input\":\"" << EscapeJson(options.input_path) << "\",";
+    out << "\"output\":\"" << EscapeJson(options.output_path) << "\",";
+    out << "\"compressionEnabled\":" << BoolJson(options.enable_compression) << ",";
+    out << "\"sections\":" << stats.section_count << ",";
+    out << "\"compressedSections\":" << stats.compressed_section_count << ",";
+    out << "\"rawTotalBytes\":" << stats.raw_total_bytes << ",";
+    out << "\"writtenTotalBytes\":" << stats.written_total_bytes << ",";
+    out << "\"maxPayloadBufferBytes\":" << stats.max_payload_buffer_bytes << ",";
+    out << "\"timingMs\":{";
+    out << "\"load\":" << perf.load_ms << ",";
+    out << "\"validate\":" << perf.validate_ms << ",";
+    out << "\"write\":" << perf.write_ms << ",";
+    out << "\"total\":" << perf.total_ms;
+    out << "}";
     out << "}";
     return out.good();
 }
@@ -782,6 +1044,22 @@ std::optional<CliOptions> ParseArgs(int argc, char** argv, std::string* out_erro
             options.diag_json_path = argv[++i];
             continue;
         }
+        if (arg == "--strict-allowlist") {
+            if (i + 1 >= argc) {
+                *out_error = "--strict-allowlist requires a path";
+                return std::nullopt;
+            }
+            options.strict_allowlist_path = argv[++i];
+            continue;
+        }
+        if (arg == "--perf-metrics-json") {
+            if (i + 1 >= argc) {
+                *out_error = "--perf-metrics-json requires a path";
+                return std::nullopt;
+            }
+            options.perf_metrics_json_path = argv[++i];
+            continue;
+        }
         if (!arg.empty() && arg[0] == '-') {
             *out_error = "unknown option: " + arg;
             return std::nullopt;
@@ -790,7 +1068,8 @@ std::optional<CliOptions> ParseArgs(int argc, char** argv, std::string* out_erro
     }
 
     if (positional.size() != 2U) {
-        *out_error = "Usage: vrm_to_xav2 [--strict] [--no-compress] [--diag-json <path>] <input.vrm> <output.xav2>";
+        *out_error =
+            "Usage: vrm_to_xav2 [--strict] [--strict-allowlist <path>] [--no-compress] [--diag-json <path>] [--perf-metrics-json <path>] <input.vrm> <output.xav2>";
         return std::nullopt;
     }
     options.input_path = positional[0];
@@ -800,22 +1079,23 @@ std::optional<CliOptions> ParseArgs(int argc, char** argv, std::string* out_erro
 
 bool IsStrictFailure(
     const CliOptions& options,
-    const vsfclone::avatar::AvatarPackage& pkg,
-    const std::vector<ValidationIssue>& issues,
+    const StrictDecision& strict_decision,
     std::string* out_reason) {
     if (!options.strict) {
         return false;
     }
-    if (pkg.compat_level != vsfclone::avatar::AvatarCompatLevel::Full) {
+    if (!strict_decision.compat_ok) {
         *out_reason = "strict mode requires compat=Full";
         return true;
     }
-    if (!pkg.warning_codes.empty()) {
-        *out_reason = "strict mode rejected source warning codes";
+    if (!strict_decision.rejected_source_warning_codes.empty()) {
+        *out_reason =
+            "strict mode rejected source warning code: " + strict_decision.rejected_source_warning_codes.front();
         return true;
     }
-    if (!issues.empty()) {
-        *out_reason = "strict mode rejected validation issues";
+    if (!strict_decision.rejected_validation_issue_codes.empty()) {
+        *out_reason =
+            "strict mode rejected validation issue code: " + strict_decision.rejected_validation_issue_codes.front();
         return true;
     }
     return false;
@@ -824,6 +1104,7 @@ bool IsStrictFailure(
 }  // namespace
 
 int main(int argc, char** argv) {
+    const auto t0 = std::chrono::steady_clock::now();
     std::string arg_error;
     const auto options_opt = ParseArgs(argc, argv, &arg_error);
     if (!options_opt) {
@@ -832,8 +1113,11 @@ int main(int argc, char** argv) {
     }
     const CliOptions options = *options_opt;
 
+    PerfMetrics perf;
     vsfclone::avatar::AvatarLoaderFacade facade;
+    const auto t_load = std::chrono::steady_clock::now();
     auto loaded = facade.Load(options.input_path);
+    perf.load_ms = MillisecondsSince(t_load);
     if (!loaded.ok) {
         std::cerr << "Load failed: " << loaded.error << "\n";
         return 1;
@@ -848,9 +1132,18 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    const auto t_validate = std::chrono::steady_clock::now();
     const std::vector<ValidationIssue> issues = ValidatePackageForExport(pkg);
+    std::string allowlist_error;
+    const auto strict_allowlist = LoadAllowlist(options.strict_allowlist_path, &allowlist_error);
+    if (!allowlist_error.empty()) {
+        std::cerr << allowlist_error << "\n";
+        return 1;
+    }
+    const StrictDecision strict_decision = EvaluateStrictDecision(options, pkg, issues, strict_allowlist);
+    perf.validate_ms = MillisecondsSince(t_validate);
     std::string strict_reason;
-    if (IsStrictFailure(options, pkg, issues, &strict_reason)) {
+    if (IsStrictFailure(options, strict_decision, &strict_reason)) {
         std::cerr << "Strict validation failed: " << strict_reason << "\n";
         return 1;
     }
@@ -869,8 +1162,11 @@ int main(int argc, char** argv) {
 
     WriteStats stats;
     std::vector<std::uint8_t> payload;
+    stats.max_payload_buffer_bytes = std::max<std::uint64_t>(stats.max_payload_buffer_bytes, payload.capacity());
+    const auto t_write = std::chrono::steady_clock::now();
 
     auto write_payload = [&](std::uint16_t type, const std::string& name) -> bool {
+        stats.max_payload_buffer_bytes = std::max<std::uint64_t>(stats.max_payload_buffer_bytes, payload.capacity());
         if (!WriteSection(&out, type, payload, options.enable_compression, &stats)) {
             std::cerr << "Failed to write " << name << " section.\n";
             return false;
@@ -941,10 +1237,18 @@ int main(int argc, char** argv) {
         std::cerr << "Write failed.\n";
         return 1;
     }
+    perf.write_ms = MillisecondsSince(t_write);
+    perf.total_ms = MillisecondsSince(t0);
 
     if (!options.diag_json_path.empty()) {
-        if (!WriteDiagJson(options.diag_json_path, options, pkg, stats, issues, options.output_path)) {
+        if (!WriteDiagJson(options.diag_json_path, options, pkg, stats, issues, strict_decision, perf, options.output_path)) {
             std::cerr << "Failed to write diagnostics json: " << options.diag_json_path << "\n";
+            return 1;
+        }
+    }
+    if (!options.perf_metrics_json_path.empty()) {
+        if (!WritePerfMetricsJson(options.perf_metrics_json_path, options, stats, perf)) {
+            std::cerr << "Failed to write perf metrics json: " << options.perf_metrics_json_path << "\n";
             return 1;
         }
     }
@@ -959,6 +1263,18 @@ int main(int argc, char** argv) {
               << ", SpringBones=" << pkg.springbone_payloads.size()
               << ", PhysBones=" << pkg.physbone_payloads.size()
               << "\n";
+    std::cout << "TimingMs: load=" << perf.load_ms
+              << ", validate=" << perf.validate_ms
+              << ", write=" << perf.write_ms
+              << ", total=" << perf.total_ms
+              << "\n";
+    if (options.strict) {
+        std::cout << "StrictPolicy: sourceAccepted=" << strict_decision.accepted_source_warning_codes.size()
+                  << ", sourceRejected=" << strict_decision.rejected_source_warning_codes.size()
+                  << ", issuesAccepted=" << strict_decision.accepted_validation_issue_codes.size()
+                  << ", issuesRejected=" << strict_decision.rejected_validation_issue_codes.size()
+                  << "\n";
+    }
     if (!issues.empty()) {
         std::cout << "Warnings=" << issues.size() << " (use --strict to fail on validation warnings)\n";
     }
