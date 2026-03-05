@@ -1155,8 +1155,16 @@ public sealed partial class MainWindow : Window
             avatarSb.AppendLine($"TexturePayloads: {info.TexturePayloadCount}");
             avatarSb.AppendLine($"Expressions: {info.ExpressionCount}");
             avatarSb.AppendLine($"DrawCalls: {info.LastRenderDrawCalls}");
+            avatarSb.AppendLine($"WarningCount: {info.WarningCount}");
+            avatarSb.AppendLine($"WarningCodeCount: {info.WarningCodeCount}");
+            avatarSb.AppendLine($"CriticalWarningCount: {info.CriticalWarningCount}");
+            avatarSb.AppendLine($"MaterialDiagCount: {info.MaterialDiagCount}");
+            avatarSb.AppendLine($"LastWarningCode: {NormalizeDiagField(info.LastWarningCode)}");
+            avatarSb.AppendLine($"LastWarningSeverity: {NormalizeDiagField(info.LastWarningSeverity)}");
+            avatarSb.AppendLine($"LastWarningCategory: {NormalizeDiagField(info.LastWarningCategory)}");
             avatarSb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
+            avatarSb.AppendLine($"LastMaterialDiag: {info.LastMaterialDiag}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
 
@@ -1172,6 +1180,11 @@ public sealed partial class MainWindow : Window
         }
 
         return logsSb.ToString();
+    }
+
+    private static string NormalizeDiagField(string text)
+    {
+        return string.IsNullOrWhiteSpace(text) ? "none" : text;
     }
 
     private async Task<bool> ConfirmAsync(string content)

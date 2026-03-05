@@ -75,6 +75,9 @@ public struct NcAvatarInfo
     public uint FormatDecodedSectionCount;
     public uint FormatUnknownSectionCount;
     public uint WarningCount;
+    public uint WarningCodeCount;
+    public uint CriticalWarningCount;
+    public uint MaterialDiagCount;
     public uint MissingFeatureCount;
     public uint ExpressionCount;
     public uint LastRenderDrawCalls;
@@ -86,10 +89,18 @@ public struct NcAvatarInfo
     public string ParserStage;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
     public string PrimaryErrorCode;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string LastWarningCode;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
+    public string LastWarningSeverity;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
+    public string LastWarningCategory;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
     public string LastExpressionSummary;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
     public string LastWarning;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+    public string LastMaterialDiag;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
     public string LastMissingFeature;
 }

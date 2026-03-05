@@ -172,6 +172,81 @@ void CopyString(char* dst, std::size_t dst_size, const std::string& src) {
     dst[count] = '\0';
 }
 
+std::string BuildMaterialDiagSummary(const avatar::MaterialDiagnosticsEntry& diag) {
+    std::ostringstream ss;
+    ss << diag.material_name
+       << ", alphaMode=" << diag.alpha_mode
+       << ", alphaCutoff=" << diag.alpha_cutoff
+       << ", doubleSided=" << (diag.double_sided ? "true" : "false")
+       << ", mtoonBinding=" << (diag.has_mtoon_binding ? "true" : "false")
+       << ", tex(base/normal/emission/rim)="
+       << (diag.has_base_texture ? "1" : "0") << "/"
+       << (diag.has_normal_texture ? "1" : "0") << "/"
+       << (diag.has_emission_texture ? "1" : "0") << "/"
+       << (diag.has_rim_texture ? "1" : "0")
+       << ", typed(c/f/t)="
+       << diag.typed_color_param_count << "/"
+       << diag.typed_float_param_count << "/"
+       << diag.typed_texture_param_count;
+    return ss.str();
+}
+
+struct WarningMeta {
+    const char* severity = "unknown";
+    const char* category = "unknown";
+    bool critical = false;
+};
+
+WarningMeta ClassifyWarningCode(std::string code) {
+    std::transform(code.begin(), code.end(), code.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    static const std::unordered_set<std::string> kCriticalCodes = {
+        "xav2_skinning_static_disabled",
+        "xav2_material_typed_texture_unresolved",
+        "xav3_skeleton_payload_missing",
+        "xav3_skeleton_mesh_bind_mismatch",
+        "xav3_skinning_matrix_invalid",
+        "xav2_unknown_section_not_allowed",
+    };
+
+    WarningMeta meta {};
+    if (code.rfind("e_", 0U) == 0U) {
+        meta.severity = "error";
+        meta.category = "schema";
+        meta.critical = true;
+        return meta;
+    }
+    if (code == "w_stage") {
+        meta.severity = "info";
+        meta.category = "stage";
+        return meta;
+    }
+    if (code == "w_layout" || code == "w_offset" || code == "w_recon_summary") {
+        meta.severity = "info";
+        meta.category = "layout";
+        return meta;
+    }
+    if (code.rfind("w_", 0U) == 0U) {
+        meta.severity = "warn";
+        meta.category = "payload";
+        return meta;
+    }
+    if (code.rfind("xav2_", 0U) == 0U || code.rfind("xav3_", 0U) == 0U || code.rfind("xav4_", 0U) == 0U) {
+        meta.severity = "warn";
+        meta.category = "render";
+        meta.critical = kCriticalCodes.find(code) != kCriticalCodes.end();
+        return meta;
+    }
+    if (code.rfind("vrm_", 0U) == 0U) {
+        meta.severity = "warn";
+        meta.category = "payload";
+        return meta;
+    }
+    return meta;
+}
+
 void SetError(NcResultCode code, const char* subsystem, const std::string& message, bool recoverable) {
     g_state.last_error_code = code;
     g_state.last_error_subsystem = subsystem != nullptr ? subsystem : "unknown";
@@ -231,6 +306,15 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     out_info->format_decoded_section_count = pkg.format_decoded_section_count;
     out_info->format_unknown_section_count = pkg.format_unknown_section_count;
     out_info->warning_count = static_cast<std::uint32_t>(pkg.warnings.size());
+    out_info->warning_code_count = static_cast<std::uint32_t>(pkg.warning_codes.size());
+    std::uint32_t critical_warning_count = 0U;
+    for (const auto& code : pkg.warning_codes) {
+        if (ClassifyWarningCode(code).critical) {
+            ++critical_warning_count;
+        }
+    }
+    out_info->critical_warning_count = critical_warning_count;
+    out_info->material_diag_count = static_cast<std::uint32_t>(pkg.material_diagnostics.size());
     out_info->missing_feature_count = static_cast<std::uint32_t>(pkg.missing_features.size());
     out_info->expression_count = static_cast<std::uint32_t>(pkg.expressions.size());
     if (out_info->detected_format == NC_AVATAR_FORMAT_VRM && out_info->expression_count == 0U) {
@@ -247,6 +331,12 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         out_info->primary_error_code,
         sizeof(out_info->primary_error_code),
         pkg.primary_error_code.empty() ? "NONE" : pkg.primary_error_code);
+    if (!pkg.warning_codes.empty()) {
+        CopyString(out_info->last_warning_code, sizeof(out_info->last_warning_code), pkg.warning_codes.back());
+        const auto last_meta = ClassifyWarningCode(pkg.warning_codes.back());
+        CopyString(out_info->last_warning_severity, sizeof(out_info->last_warning_severity), last_meta.severity);
+        CopyString(out_info->last_warning_category, sizeof(out_info->last_warning_category), last_meta.category);
+    }
     const std::string expression_summary =
         (!pkg.last_expression_summary.empty())
             ? pkg.last_expression_summary
@@ -257,6 +347,12 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         expression_summary);
     if (!pkg.warnings.empty()) {
         CopyString(out_info->last_warning, sizeof(out_info->last_warning), pkg.warnings.back());
+    }
+    if (!pkg.material_diagnostics.empty()) {
+        CopyString(
+            out_info->last_material_diag,
+            sizeof(out_info->last_material_diag),
+            BuildMaterialDiagSummary(pkg.material_diagnostics.back()));
     }
     if (!pkg.missing_features.empty()) {
         CopyString(out_info->last_missing_feature, sizeof(out_info->last_missing_feature), pkg.missing_features.back());

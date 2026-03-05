@@ -68,6 +68,9 @@ typedef struct NcAvatarInfo {
     uint32_t format_decoded_section_count;
     uint32_t format_unknown_section_count;
     uint32_t warning_count;
+    uint32_t warning_code_count;
+    uint32_t critical_warning_count;
+    uint32_t material_diag_count;
     uint32_t missing_feature_count;
     uint32_t expression_count;
     uint32_t last_render_draw_calls;
@@ -75,8 +78,12 @@ typedef struct NcAvatarInfo {
     char source_path[260];
     char parser_stage[32];
     char primary_error_code[64];
+    char last_warning_code[64];
+    char last_warning_severity[16];
+    char last_warning_category[16];
     char last_expression_summary[128];
     char last_warning[256];
+    char last_material_diag[256];
     char last_missing_feature[256];
 } NcAvatarInfo;
 

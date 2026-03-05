@@ -1423,13 +1423,33 @@ public partial class MainWindow : Window
             avatarSb.AppendLine($"Expressions: {info.ExpressionCount}");
             avatarSb.AppendLine($"DrawCalls: {info.LastRenderDrawCalls}");
             avatarSb.AppendLine($"WarningCount: {info.WarningCount}");
-            avatarSb.AppendLine($"LastWarningCode: {ExtractWarningCode(info.LastWarning)}");
+            avatarSb.AppendLine($"WarningCodeCount: {info.WarningCodeCount}");
+            avatarSb.AppendLine($"CriticalWarningCount: {info.CriticalWarningCount}");
+            avatarSb.AppendLine($"MaterialDiagCount: {info.MaterialDiagCount}");
+            avatarSb.AppendLine($"LastWarningCode: {ResolveWarningCode(info)}");
+            avatarSb.AppendLine($"LastWarningSeverity: {NormalizeDiagField(info.LastWarningSeverity)}");
+            avatarSb.AppendLine($"LastWarningCategory: {NormalizeDiagField(info.LastWarningCategory)}");
             avatarSb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
+            avatarSb.AppendLine($"LastMaterialDiag: {info.LastMaterialDiag}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
 
         return avatarSb.ToString();
+    }
+
+    private static string ResolveWarningCode(NcAvatarInfo info)
+    {
+        if (!string.IsNullOrWhiteSpace(info.LastWarningCode))
+        {
+            return info.LastWarningCode;
+        }
+        return ExtractWarningCode(info.LastWarning);
+    }
+
+    private static string NormalizeDiagField(string text)
+    {
+        return string.IsNullOrWhiteSpace(text) ? "none" : text;
     }
 
     private static string ExtractWarningCode(string warningText)

@@ -98,6 +98,7 @@ foreach ($f in $candidates) {
         MaterialPayloads = (To-Int "$($fields["MaterialPayloads"])")
         TexturePayloads = (To-Int "$($fields["TexturePayloads"])")
         ExpressionCount = (To-Int "$($fields["ExpressionCount"])")
+        MaterialDiagnostics = (To-Int "$($fields["MaterialDiagnostics"])")
     }
 }
 
@@ -118,9 +119,9 @@ foreach ($r in $rows) {
         $gateB = $false
         $failReasons += "GateB: $($r.Name) expected VRM/runtime-ready/mesh>0/non-failed but got format=$($r.Format), stage=$($r.ParserStage), mesh=$($r.MeshPayloads), compat=$($r.Compat)"
     }
-    if ($r.MaterialPayloads -le 0 -or $r.TexturePayloads -le 0) {
+    if ($r.MaterialPayloads -le 0 -or $r.TexturePayloads -le 0 -or $r.MaterialDiagnostics -le 0) {
         $gateC = $false
-        $failReasons += "GateC: $($r.Name) expected material+texture payloads > 0 but got material=$($r.MaterialPayloads), texture=$($r.TexturePayloads)"
+        $failReasons += "GateC: $($r.Name) expected material+texture payloads and material diagnostics > 0 but got material=$($r.MaterialPayloads), texture=$($r.TexturePayloads), materialDiag=$($r.MaterialDiagnostics)"
     }
     if ($r.ExpressionCount -le 0) {
         $gateD = $false
@@ -174,8 +175,8 @@ $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Per-sample"
 foreach ($r in $rows) {
-    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}" -f
-        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount)
+    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}, materialDiag={9}" -f
+        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount, $r.MaterialDiagnostics)
 }
 if ($failReasons.Count -gt 0) {
     $summary += ""

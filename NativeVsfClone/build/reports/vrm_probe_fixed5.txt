@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-06T02:12:55
+Generated: 2026-03-06T02:40:20
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -28,7 +28,9 @@ Load succeeded
   FormatUnknownSections: 0
   Warnings: 20
   WarningCodes: 0
+  MaterialDiagnostics: 15
   LastWarning: W_STAGE: runtime-ready
+  LastMaterialDiag: Shoes_Black_02, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 0
   SpringBoneJoints: 0
@@ -60,7 +62,9 @@ Load succeeded
   FormatUnknownSections: 0
   Warnings: 23
   WarningCodes: 0
+  MaterialDiagnostics: 18
   LastWarning: W_STAGE: runtime-ready
+  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 0
   SpringBoneJoints: 0
@@ -92,7 +96,9 @@ Load succeeded
   FormatUnknownSections: 0
   Warnings: 23
   WarningCodes: 0
+  MaterialDiagnostics: 18
   LastWarning: W_STAGE: runtime-ready
+  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 1
   SpringBoneJoints: 0
@@ -124,7 +130,9 @@ Load succeeded
   FormatUnknownSections: 0
   Warnings: 23
   WarningCodes: 0
+  MaterialDiagnostics: 18
   LastWarning: W_STAGE: runtime-ready
+  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 2
   SpringBoneJoints: 26
@@ -156,7 +164,9 @@ Load succeeded
   FormatUnknownSections: 0
   Warnings: 17
   WarningCodes: 0
+  MaterialDiagnostics: 12
   LastWarning: W_STAGE: runtime-ready
+  LastMaterialDiag: hat, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 1
   SpringBoneJoints: 5

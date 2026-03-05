@@ -310,6 +310,17 @@ static std::string ToLower(std::string s) {
     return s;
 }
 
+std::string NormalizeAlphaMode(const std::string& raw_alpha_mode) {
+    const auto mode = ToLower(raw_alpha_mode);
+    if (mode == "mask") {
+        return "MASK";
+    }
+    if (mode == "blend") {
+        return "BLEND";
+    }
+    return "OPAQUE";
+}
+
 const JsonValue* FindKey(const JsonValue& root, const std::string& key) {
     if (root.type != JsonValue::Type::Object) {
         return nullptr;
@@ -2161,10 +2172,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             TryGetString(material, "name", &info.name);
             TryGetBool(material, "doubleSided", &info.double_sided);
             TryGetString(material, "alphaMode", &info.alpha_mode);
+            info.alpha_mode = NormalizeAlphaMode(info.alpha_mode);
             double alpha_cutoff = static_cast<double>(info.alpha_cutoff);
             if (TryGetNumber(material, "alphaCutoff", &alpha_cutoff)) {
                 info.alpha_cutoff = static_cast<float>(alpha_cutoff);
             }
+            info.alpha_cutoff = std::max(0.0f, std::min(1.0f, info.alpha_cutoff));
 
             const auto* pbr = FindKey(material, "pbrMetallicRoughness");
             if (pbr != nullptr && pbr->type == JsonValue::Type::Object) {
@@ -2316,12 +2329,27 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         if (!m.rim_texture_name.empty()) {
             material_payload.typed_texture_params.push_back({"rim", m.rim_texture_name});
         }
+        MaterialDiagnosticsEntry material_diag_entry;
+        material_diag_entry.material_name = m.name;
+        material_diag_entry.alpha_mode = m.alpha_mode;
+        material_diag_entry.alpha_cutoff = m.alpha_cutoff;
+        material_diag_entry.double_sided = m.double_sided;
+        material_diag_entry.has_mtoon_binding = m.has_mtoon_binding;
+        material_diag_entry.has_base_texture = !m.base_color_texture_name.empty();
+        material_diag_entry.has_normal_texture = !m.normal_texture_name.empty();
+        material_diag_entry.has_emission_texture = !m.emission_texture_name.empty();
+        material_diag_entry.has_rim_texture = !m.rim_texture_name.empty();
+        material_diag_entry.typed_color_param_count = static_cast<std::uint32_t>(material_payload.typed_color_params.size());
+        material_diag_entry.typed_float_param_count = static_cast<std::uint32_t>(material_payload.typed_float_params.size());
+        material_diag_entry.typed_texture_param_count = static_cast<std::uint32_t>(material_payload.typed_texture_params.size());
+        pkg.material_diagnostics.push_back(std::move(material_diag_entry));
         pkg.material_payloads.push_back(std::move(material_payload));
         std::ostringstream material_diag;
         material_diag << "W_MATERIAL: " << m.name
                       << ", alphaMode=" << m.alpha_mode
                       << ", alphaCutoff=" << m.alpha_cutoff
-                      << ", doubleSided=" << (m.double_sided ? "true" : "false");
+                      << ", doubleSided=" << (m.double_sided ? "true" : "false")
+                      << ", mtoonBinding=" << (m.has_mtoon_binding ? "true" : "false");
         if (!m.base_color_texture_name.empty()) {
             material_diag << ", baseTexture=" << m.base_color_texture_name;
         }
@@ -2662,6 +2690,9 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         default_material.alpha_cutoff = 0.5f;
         default_material.double_sided = false;
         pkg.material_payloads.push_back(std::move(default_material));
+        MaterialDiagnosticsEntry default_material_diag;
+        default_material_diag.material_name = "Default";
+        pkg.material_diagnostics.push_back(std::move(default_material_diag));
         pkg.warnings.push_back("W_PARSE: VRM_MATERIAL_UNSUPPORTED: materials array missing or empty");
         ++unsupported_materials;
     }

@@ -102,6 +102,21 @@ struct MaterialRenderPayload {
     std::vector<TypedTextureParam> typed_texture_params;
 };
 
+struct MaterialDiagnosticsEntry {
+    std::string material_name;
+    std::string alpha_mode = "OPAQUE";
+    float alpha_cutoff = 0.5f;
+    bool double_sided = false;
+    bool has_mtoon_binding = false;
+    bool has_base_texture = false;
+    bool has_normal_texture = false;
+    bool has_emission_texture = false;
+    bool has_rim_texture = false;
+    std::uint32_t typed_color_param_count = 0;
+    std::uint32_t typed_float_param_count = 0;
+    std::uint32_t typed_texture_param_count = 0;
+};
+
 struct TextureRenderPayload {
     std::string name;
     std::uint32_t width = 0;
@@ -181,6 +196,7 @@ struct AvatarPackage {
     std::vector<std::string> warnings;
     std::vector<std::string> warning_codes;
     std::vector<std::string> missing_features;
+    std::vector<MaterialDiagnosticsEntry> material_diagnostics;
 };
 
 }  // namespace vsfclone::avatar
