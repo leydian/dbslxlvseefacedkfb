@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-06T03:14:40
+Generated: 2026-03-06T05:15:22
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -22,29 +22,33 @@ Load succeeded
   TexturePayloads: 11
   ExpressionCount: 3
   ExpressionBindTotal: 0
+  SpringPayloads: 0
+  PhysicsColliders: 0
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 20
+  Warnings: 25
   WarningCodes: 0
   MaterialDiagnostics: 15
-  OpaqueMaterials: 15
-  MaskMaterials: 0
-  BlendMaterials: 0
+  OpaqueMaterials: 7
+  MaskMaterials: 5
+  BlendMaterials: 3
+  MtoonAdvancedMaterials: 15
+  MtoonFallbackMaterials: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
   CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
-  LastMaterialDiag: Shoes_Black_02, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
+  LastMaterialDiag: Shoes_Black_02, alphaMode=MASK, alphaSource=root.extensions.VRM.materialProperties.renderQueue, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 0
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 1
-  LastMissingFeature: SpringBone runtime simulation
+  MissingFeatures: 4
+  LastMissingFeature: MToon matcap
 
 ---- Kikyo_FT Variant.vrm
 Load succeeded
@@ -63,29 +67,33 @@ Load succeeded
   TexturePayloads: 22
   ExpressionCount: 3
   ExpressionBindTotal: 0
+  SpringPayloads: 0
+  PhysicsColliders: 0
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 23
+  Warnings: 28
   WarningCodes: 0
   MaterialDiagnostics: 18
-  OpaqueMaterials: 17
-  MaskMaterials: 1
+  OpaqueMaterials: 15
+  MaskMaterials: 3
   BlendMaterials: 0
+  MtoonAdvancedMaterials: 18
+  MtoonFallbackMaterials: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
   CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
-  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
+  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaSource=gltf.alphaMode, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 0
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 1
-  LastMissingFeature: SpringBone runtime simulation
+  MissingFeatures: 4
+  LastMissingFeature: MToon matcap
 
 ---- Kikyo_FT Variant111.vrm
 Load succeeded
@@ -104,29 +112,33 @@ Load succeeded
   TexturePayloads: 22
   ExpressionCount: 17
   ExpressionBindTotal: 9
+  SpringPayloads: 1
+  PhysicsColliders: 0
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 23
+  Warnings: 29
   WarningCodes: 0
   MaterialDiagnostics: 18
   OpaqueMaterials: 18
   MaskMaterials: 0
   BlendMaterials: 0
+  MtoonAdvancedMaterials: 18
+  MtoonFallbackMaterials: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
   CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
-  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
+  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaSource=gltf.alphaMode, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 1
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 1
-  LastMissingFeature: SpringBone runtime simulation
+  MissingFeatures: 3
+  LastMissingFeature: MToon matcap
 
 ---- Kikyo_FT Variant112.vrm
 Load succeeded
@@ -145,29 +157,33 @@ Load succeeded
   TexturePayloads: 22
   ExpressionCount: 18
   ExpressionBindTotal: 63
+  SpringPayloads: 2
+  PhysicsColliders: 4
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 23
+  Warnings: 29
   WarningCodes: 0
   MaterialDiagnostics: 18
-  OpaqueMaterials: 18
-  MaskMaterials: 0
+  OpaqueMaterials: 16
+  MaskMaterials: 2
   BlendMaterials: 0
+  MtoonAdvancedMaterials: 18
+  MtoonFallbackMaterials: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
   CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
-  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
+  LastMaterialDiag: Innerwhite, alphaMode=OPAQUE, alphaSource=gltf.alphaMode, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 2
   SpringBoneJoints: 26
   SpringBoneColliders: 4
   SpringBoneColliderGroups: 2
-  MissingFeatures: 1
-  LastMissingFeature: SpringBone runtime simulation
+  MissingFeatures: 3
+  LastMissingFeature: MToon matcap
 
 ---- NewOnYou.vrm
 Load succeeded
@@ -186,27 +202,31 @@ Load succeeded
   TexturePayloads: 9
   ExpressionCount: 18
   ExpressionBindTotal: 102
+  SpringPayloads: 1
+  PhysicsColliders: 57
   LastRenderDrawCalls: 0
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 17
+  Warnings: 23
   WarningCodes: 0
   MaterialDiagnostics: 12
-  OpaqueMaterials: 12
+  OpaqueMaterials: 6
   MaskMaterials: 0
-  BlendMaterials: 0
+  BlendMaterials: 6
+  MtoonAdvancedMaterials: 12
+  MtoonFallbackMaterials: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
   CriticalWarningCount: 0
   LastWarning: W_STAGE: runtime-ready
-  LastMaterialDiag: hat, alphaMode=OPAQUE, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
+  LastMaterialDiag: hat, alphaMode=BLEND, alphaSource=fallback.texture-alpha, alphaCutoff=0.5, doubleSided=false, mtoonBinding=true
   SpringBonePresent: true
   SpringBoneSprings: 1
   SpringBoneJoints: 5
   SpringBoneColliders: 57
   SpringBoneColliderGroups: 50
-  MissingFeatures: 1
-  LastMissingFeature: SpringBone runtime simulation
+  MissingFeatures: 3
+  LastMissingFeature: MToon matcap
 

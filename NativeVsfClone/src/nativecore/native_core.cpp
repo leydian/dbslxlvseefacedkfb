@@ -80,11 +80,18 @@ struct GpuMaterialResource {
     float rim_strength = 0.0f;
     float matcap_strength = 0.0f;
     float rim_power = 2.0f;
+    float outline_width = 0.0f;
+    float outline_lighting_mix = 0.0f;
+    float uv_anim_scroll_x = 0.0f;
+    float uv_anim_scroll_y = 0.0f;
+    float uv_anim_rotation = 0.0f;
+    bool uv_anim_enabled = false;
     ID3D11ShaderResourceView* base_color_srv = nullptr;
     ID3D11ShaderResourceView* normal_srv = nullptr;
     ID3D11ShaderResourceView* rim_srv = nullptr;
     ID3D11ShaderResourceView* emission_srv = nullptr;
     ID3D11ShaderResourceView* matcap_srv = nullptr;
+    ID3D11ShaderResourceView* uv_anim_mask_srv = nullptr;
 };
 
 struct RendererResources {
@@ -94,6 +101,7 @@ struct RendererResources {
     ID3D11InputLayout* input_layout = nullptr;
     ID3D11Buffer* constant_buffer = nullptr;
     ID3D11RasterizerState* raster_cull_back = nullptr;
+    ID3D11RasterizerState* raster_cull_front = nullptr;
     ID3D11RasterizerState* raster_cull_none = nullptr;
     ID3D11DepthStencilState* depth_write = nullptr;
     ID3D11DepthStencilState* depth_read = nullptr;
@@ -118,9 +126,12 @@ struct SecondaryMotionChainRuntime {
     float gravity_y = -0.15f;
     float radius = 0.02f;
     bool enabled = true;
-    float phase = 0.0f;
-    float velocity = 0.0f;
-    float offset = 0.0f;
+    float velocity_x = 0.0f;
+    float velocity_y = 0.0f;
+    float offset_x = 0.0f;
+    float offset_y = 0.0f;
+    float rest_offset_x = 0.0f;
+    float rest_offset_y = 0.0f;
     float fixed_dt_accumulator = 0.0f;
     std::uint32_t unsupported_collider_count = 0U;
     std::uint32_t last_substeps = 0U;
@@ -155,6 +166,7 @@ struct CoreState {
     float last_cpu_frame_ms = 0.0f;
     float last_material_resolve_ms = 0.0f;
     std::uint32_t last_pass_count = 0U;
+    float runtime_time_seconds = 0.0f;
 
 #if defined(_WIN32)
     std::unordered_map<void*, WindowRenderState> window_targets;
@@ -556,6 +568,10 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
         material->matcap_srv->Release();
         material->matcap_srv = nullptr;
     }
+    if (material->uv_anim_mask_srv != nullptr) {
+        material->uv_anim_mask_srv->Release();
+        material->uv_anim_mask_srv = nullptr;
+    }
     material->alpha_mode = "OPAQUE";
     material->alpha_cutoff = 0.5f;
     material->double_sided = false;
@@ -570,6 +586,12 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
     material->rim_strength = 0.0f;
     material->matcap_strength = 0.0f;
     material->rim_power = 2.0f;
+    material->outline_width = 0.0f;
+    material->outline_lighting_mix = 0.0f;
+    material->uv_anim_scroll_x = 0.0f;
+    material->uv_anim_scroll_y = 0.0f;
+    material->uv_anim_rotation = 0.0f;
+    material->uv_anim_enabled = false;
 }
 
 void ResetRendererResources(RendererResources* renderer) {
@@ -619,6 +641,10 @@ void ResetRendererResources(RendererResources* renderer) {
     if (renderer->raster_cull_none != nullptr) {
         renderer->raster_cull_none->Release();
         renderer->raster_cull_none = nullptr;
+    }
+    if (renderer->raster_cull_front != nullptr) {
+        renderer->raster_cull_front->Release();
+        renderer->raster_cull_front = nullptr;
     }
     if (renderer->raster_cull_back != nullptr) {
         renderer->raster_cull_back->Release();
@@ -697,7 +723,8 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     }
     if (renderer->vertex_shader != nullptr && renderer->pixel_shader != nullptr &&
         renderer->input_layout != nullptr && renderer->constant_buffer != nullptr &&
-        renderer->raster_cull_back != nullptr && renderer->raster_cull_none != nullptr &&
+        renderer->raster_cull_back != nullptr && renderer->raster_cull_front != nullptr &&
+        renderer->raster_cull_none != nullptr &&
         renderer->depth_write != nullptr && renderer->depth_read != nullptr &&
         renderer->blend_opaque != nullptr && renderer->blend_alpha != nullptr &&
         renderer->linear_sampler != nullptr) {
@@ -716,12 +743,19 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 liltoon_params;\n"
         "  float4 liltoon_aux;\n"
         "  float4 alpha_misc;\n"
+        "  float4 outline_params;\n"
+        "  float4 uv_anim_params;\n"
+        "  float4 time_params;\n"
         "};\n"
         "struct VSIn { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
         "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
         "VSOut main(VSIn i) {\n"
         "  VSOut o;\n"
-        "  o.pos = mul(float4(i.pos, 1.0), world_view_proj);\n"
+        "  float3 pos = i.pos;\n"
+        "  if (outline_params.w > 0.5) {\n"
+        "    pos += normalize(i.nrm) * outline_params.x;\n"
+        "  }\n"
+        "  o.pos = mul(float4(pos, 1.0), world_view_proj);\n"
         "  o.color = base_color;\n"
         "  o.nrm = normalize(i.nrm);\n"
         "  o.uv = i.uv;\n"
@@ -739,14 +773,23 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 liltoon_params;\n"
         "  float4 liltoon_aux;\n"
         "  float4 alpha_misc;\n"
+        "  float4 outline_params;\n"
+        "  float4 uv_anim_params;\n"
+        "  float4 time_params;\n"
         "};\n"
         "Texture2D tex0 : register(t0);\n"
         "Texture2D tex1 : register(t1);\n"
         "Texture2D tex2 : register(t2);\n"
         "Texture2D tex3 : register(t3);\n"
         "Texture2D tex4 : register(t4);\n"
+        "Texture2D tex5 : register(t5);\n"
         "SamplerState samp0 : register(s0);\n"
         "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float3 nrm : NORMAL, float2 uv : TEXCOORD0) : SV_TARGET {\n"
+        "  float is_outline_pass = outline_params.w;\n"
+        "  if (is_outline_pass > 0.5) {\n"
+        "    float3 outline_tint = lerp(base_color.rgb, shade_color.rgb, saturate(outline_params.y));\n"
+        "    return float4(outline_tint, base_color.a);\n"
+        "  }\n"
         "  float alpha_cutoff = alpha_misc.x;\n"
         "  float alpha_mode_mask = alpha_misc.y;\n"
         "  float has_texture = alpha_misc.z;\n"
@@ -756,17 +799,31 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float use_emission_tex = liltoon_params.w;\n"
         "  float use_matcap_tex = liltoon_aux.x;\n"
         "  float matcap_strength = saturate(liltoon_aux.y);\n"
+        "  float has_uv_anim = uv_anim_params.w;\n"
+        "  float has_uv_mask = liltoon_aux.z;\n"
+        "  float t = time_params.x;\n"
+        "  float2 sample_uv = uv;\n"
+        "  if (has_uv_anim > 0.5) {\n"
+        "    float2 centered = uv - float2(0.5, 0.5);\n"
+        "    float rot = uv_anim_params.z * t;\n"
+        "    float s = sin(rot);\n"
+        "    float c = cos(rot);\n"
+        "    float2 rotated = float2(centered.x * c - centered.y * s, centered.x * s + centered.y * c) + float2(0.5, 0.5);\n"
+        "    float2 shifted = rotated + uv_anim_params.xy * t;\n"
+        "    float mask = has_uv_mask > 0.5 ? saturate(tex5.Sample(samp0, uv).r) : 1.0;\n"
+        "    sample_uv = lerp(uv, shifted, mask);\n"
+        "  }\n"
         "  float4 out_color = color;\n"
         "  float3 normal = normalize(nrm);\n"
         "  if (use_normal_tex > 0.5) {\n"
-        "    float3 ntex = tex1.Sample(samp0, uv).xyz * 2.0 - 1.0;\n"
+        "    float3 ntex = tex1.Sample(samp0, sample_uv).xyz * 2.0 - 1.0;\n"
         "    normal = normalize(float3(normal.xy + ntex.xy * saturate(liltoon_mix.z), max(0.15, normal.z * abs(ntex.z))));\n"
         "  }\n"
         "  float3 light_dir = normalize(float3(0.35, 0.45, 0.82));\n"
         "  float ndotl = saturate(dot(normal, light_dir));\n"
         "  float lit = lerp(0.55, 1.0, ndotl);\n"
         "  if (has_texture > 0.5) {\n"
-        "    float4 texel = tex0.Sample(samp0, uv);\n"
+        "    float4 texel = tex0.Sample(samp0, sample_uv);\n"
         "    out_color.rgb *= texel.rgb;\n"
         "    if (use_texture_alpha > 0.5) {\n"
         "      out_color.a *= texel.a;\n"
@@ -777,12 +834,12 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  out_color.rgb = lerp(out_color.rgb, out_color.rgb * shade_color.rgb, shade_t);\n"
         "  float3 emission_term = emission_color.rgb;\n"
         "  if (use_emission_tex > 0.5) {\n"
-        "    emission_term *= tex3.Sample(samp0, uv).rgb;\n"
+        "    emission_term *= tex3.Sample(samp0, sample_uv).rgb;\n"
         "  }\n"
         "  out_color.rgb += emission_term * saturate(liltoon_mix.y);\n"
         "  float rim = pow(saturate(1.0 - normal.z), max(0.1, liltoon_params.x)) * saturate(liltoon_mix.w);\n"
         "  if (use_rim_tex > 0.5) {\n"
-        "    rim *= tex2.Sample(samp0, uv).a;\n"
+        "    rim *= tex2.Sample(samp0, sample_uv).a;\n"
         "  }\n"
         "  out_color.rgb += rim_color.rgb * rim;\n"
         "  if (use_matcap_tex > 0.5 && matcap_strength > 0.001) {\n"
@@ -888,6 +945,9 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         float liltoon_params[4];
         float liltoon_aux[4];
         float alpha_misc[4];
+        float outline_params[4];
+        float uv_anim_params[4];
+        float time_params[4];
     };
     D3D11_BUFFER_DESC cb_desc {};
     cb_desc.ByteWidth = static_cast<UINT>(sizeof(SceneConstants));
@@ -905,6 +965,11 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     raster_desc.DepthClipEnable = TRUE;
     hr = device->CreateRasterizerState(&raster_desc, &renderer->raster_cull_back);
     if (FAILED(hr) || renderer->raster_cull_back == nullptr) {
+        return false;
+    }
+    raster_desc.CullMode = D3D11_CULL_FRONT;
+    hr = device->CreateRasterizerState(&raster_desc, &renderer->raster_cull_front);
+    if (FAILED(hr) || renderer->raster_cull_front == nullptr) {
         return false;
     }
     raster_desc.CullMode = D3D11_CULL_NONE;
@@ -1087,7 +1152,7 @@ std::vector<std::size_t> ResolveChainTargetMeshes(
 }
 
 bool IsUnsupportedColliderShape(avatar::PhysicsColliderShape shape) {
-    return shape == avatar::PhysicsColliderShape::Plane || shape == avatar::PhysicsColliderShape::Unknown;
+    return shape == avatar::PhysicsColliderShape::Unknown;
 }
 
 const char* PhysicsAutoCorrectedCodeFor(const AvatarPackage& pkg) {
@@ -1278,29 +1343,36 @@ bool ApplySecondaryMotionToAvatar(
         chain.fixed_dt_accumulator = ClampFinite(chain.fixed_dt_accumulator + dt, 0.0f, 0.20f, 0.0f);
         std::uint32_t chain_substeps = 0U;
         while (chain.fixed_dt_accumulator >= kFixedStep && chain_substeps < kMaxSubsteps) {
-            chain.phase += kFixedStep * (2.0f + chain.stiffness * 4.0f);
-            const float head_influence = ClampFinite(g_state.latest_tracking.head_pos[1], -1.0f, 1.0f, 0.0f) * 0.002f;
-            const float target =
-                std::sin(chain.phase) * (0.0015f + chain.radius * 0.20f) +
-                (chain.gravity_y * 0.0035f) +
-                head_influence;
-            const float accel = (target - chain.offset) * (chain.stiffness * 20.0f);
-            chain.velocity += accel * kFixedStep;
+            const float head_x = ClampFinite(g_state.latest_tracking.head_pos[0], -1.0f, 1.0f, 0.0f);
+            const float head_y = ClampFinite(g_state.latest_tracking.head_pos[1], -1.0f, 1.0f, 0.0f);
+            const float sway_gain = 0.0015f + chain.radius * 0.17f;
+            const float target_x = chain.rest_offset_x + (head_x * sway_gain);
+            const float target_y = chain.rest_offset_y + (chain.gravity_y * 0.0038f) + (head_y * 0.0012f);
+            const float accel_x = (target_x - chain.offset_x) * (chain.stiffness * 22.0f);
+            const float accel_y = (target_y - chain.offset_y) * (chain.stiffness * 24.0f);
+            chain.velocity_x += accel_x * kFixedStep;
+            chain.velocity_y += accel_y * kFixedStep;
             const float drag_decay = std::max(0.0f, 1.0f - chain.drag * (kFixedStep * 30.0f));
-            chain.velocity *= drag_decay;
-            chain.offset += chain.velocity * kFixedStep;
+            chain.velocity_x *= drag_decay;
+            chain.velocity_y *= drag_decay;
+            chain.offset_x += chain.velocity_x * kFixedStep;
+            chain.offset_y += chain.velocity_y * kFixedStep;
             const float length_limit = std::max(0.003f, chain.radius * 2.0f);
-            if (chain.offset > length_limit) {
-                chain.offset = length_limit;
-                chain.velocity *= 0.4f;
-            } else if (chain.offset < -length_limit) {
-                chain.offset = -length_limit;
-                chain.velocity *= 0.4f;
+            const float len_sq = chain.offset_x * chain.offset_x + chain.offset_y * chain.offset_y;
+            if (len_sq > (length_limit * length_limit)) {
+                const float len = std::sqrt(std::max(len_sq, 1e-8f));
+                const float scale = length_limit / len;
+                chain.offset_x *= scale;
+                chain.offset_y *= scale;
+                chain.velocity_x *= 0.45f;
+                chain.velocity_y *= 0.45f;
             }
             if (chain.unsupported_collider_count > 0U) {
-                chain.velocity *= 0.9f;
+                chain.velocity_x *= 0.9f;
+                chain.velocity_y *= 0.9f;
             }
-            chain.offset = ClampFinite(chain.offset, -0.05f, 0.05f, 0.0f);
+            chain.offset_x = ClampFinite(chain.offset_x, -0.05f, 0.05f, 0.0f);
+            chain.offset_y = ClampFinite(chain.offset_y, -0.05f, 0.05f, 0.0f);
             chain.fixed_dt_accumulator -= kFixedStep;
             ++chain_substeps;
         }
@@ -1325,14 +1397,23 @@ bool ApplySecondaryMotionToAvatar(
                 blob = mesh.base_vertex_blob;
             }
             const std::size_t stride = mesh.vertex_stride;
+            const float min_y = mesh.bounds_min.y;
+            const float max_y = mesh.bounds_max.y;
+            const float inv_extent_y = 1.0f / std::max(0.0001f, max_y - min_y);
             for (std::uint32_t vi = 0U; vi < mesh.vertex_count; ++vi) {
                 const std::size_t base = static_cast<std::size_t>(vi) * stride;
                 if (base + 12U > blob.size()) {
                     break;
                 }
+                float px = 0.0f;
                 float py = 0.0f;
+                std::memcpy(&px, blob.data() + base, sizeof(float));
                 std::memcpy(&py, blob.data() + base + 4U, sizeof(float));
-                py += chain.offset;
+                const float height_w = std::max(0.0f, std::min(1.0f, (py - min_y) * inv_extent_y));
+                const float influence = 0.25f + (height_w * height_w) * 0.75f;
+                px += chain.offset_x * influence;
+                py += chain.offset_y * influence;
+                std::memcpy(blob.data() + base, &px, sizeof(float));
                 std::memcpy(blob.data() + base + 4U, &py, sizeof(float));
             }
 
@@ -1601,73 +1682,25 @@ bool ApplyStaticSkinningToVertexBlob(
         return false;
     }
 
-    const auto load_matrix16 = [](const std::vector<float>& src, std::size_t matrix_index) {
-        std::array<float, 16U> out = {
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f};
-        const std::size_t base = matrix_index * 16U;
-        if (base + 16U <= src.size()) {
-            for (std::size_t i = 0U; i < 16U; ++i) {
-                out[i] = src[base + i];
-            }
-        }
-        return out;
-    };
-    const auto mul_matrix4x4_col_major = [](const std::array<float, 16U>& a, const std::array<float, 16U>& b) {
-        std::array<float, 16U> out {};
-        for (std::size_t c = 0U; c < 4U; ++c) {
-            for (std::size_t r = 0U; r < 4U; ++r) {
-                out[c * 4U + r] =
-                    (a[0U * 4U + r] * b[c * 4U + 0U]) +
-                    (a[1U * 4U + r] * b[c * 4U + 1U]) +
-                    (a[2U * 4U + r] * b[c * 4U + 2U]) +
-                    (a[3U * 4U + r] * b[c * 4U + 3U]);
-            }
-        }
-        return out;
-    };
-    const auto invert_matrix4x4_col_major = [](const std::array<float, 16U>& in) {
-        DirectX::XMFLOAT4X4 row_major {};
-        for (std::size_t r = 0U; r < 4U; ++r) {
-            for (std::size_t c = 0U; c < 4U; ++c) {
-                reinterpret_cast<float*>(&row_major)[r * 4U + c] = in[c * 4U + r];
-            }
-        }
-        DirectX::XMVECTOR det = {};
-        const auto inv_row = DirectX::XMMatrixInverse(&det, DirectX::XMLoadFloat4x4(&row_major));
-        DirectX::XMFLOAT4X4 inv_row_store {};
-        DirectX::XMStoreFloat4x4(&inv_row_store, inv_row);
-        std::array<float, 16U> out {};
-        for (std::size_t c = 0U; c < 4U; ++c) {
-            for (std::size_t r = 0U; r < 4U; ++r) {
-                out[c * 4U + r] = reinterpret_cast<float*>(&inv_row_store)[r * 4U + c];
-            }
-        }
-        return out;
-    };
-
     const std::size_t bind_pose_count = skin_payload.bind_poses_16xn.size() / 16U;
-    std::vector<std::array<float, 16U>> skin_matrices(
-        bind_pose_count,
-        std::array<float, 16U>{
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f});
+    std::vector<DirectX::XMMATRIX> skin_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
     const bool has_skeleton_pose =
         skeleton_payload != nullptr && IsValidSkeletonPosePayload(skin_payload, *skeleton_payload);
     for (std::size_t i = 0U; i < bind_pose_count; ++i) {
-        const auto bind_m = load_matrix16(skin_payload.bind_poses_16xn, i);
+        DirectX::XMFLOAT4X4 bind_pose {};
+        for (std::size_t j = 0U; j < 16U; ++j) {
+            reinterpret_cast<float*>(&bind_pose)[j] = skin_payload.bind_poses_16xn[i * 16U + j];
+        }
+        const auto bind_m = DirectX::XMLoadFloat4x4(&bind_pose);
         if (has_skeleton_pose) {
-            const auto bone_world = load_matrix16(skeleton_payload->bone_matrices_16xn, i);
-            // glTF/VRM matrices are consumed as column-major. skin = jointGlobal * inverseBind.
-            skin_matrices[i] = mul_matrix4x4_col_major(bone_world, bind_m);
+            DirectX::XMFLOAT4X4 bone_m {};
+            for (std::size_t j = 0U; j < 16U; ++j) {
+                reinterpret_cast<float*>(&bone_m)[j] = skeleton_payload->bone_matrices_16xn[i * 16U + j];
+            }
+            skin_matrices[i] = DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(&bone_m), bind_m);
         } else {
-            // Without a skeleton pose payload, use inverse(inverseBind) to recover
-            // bind-pose joint world so static fallback remains stable.
-            skin_matrices[i] = invert_matrix4x4_col_major(bind_m);
+            DirectX::XMVECTOR det = {};
+            skin_matrices[i] = DirectX::XMMatrixInverse(&det, bind_m);
         }
     }
 
@@ -1679,10 +1712,10 @@ bool ApplyStaticSkinningToVertexBlob(
         std::memcpy(&px, vertex_blob->data() + base, sizeof(float));
         std::memcpy(&py, vertex_blob->data() + base + 4U, sizeof(float));
         std::memcpy(&pz, vertex_blob->data() + base + 8U, sizeof(float));
+        const auto p = DirectX::XMVectorSet(px, py, pz, 1.0f);
+
         const auto& sw = decoded_weights[vi];
-        float ax = 0.0f;
-        float ay = 0.0f;
-        float az = 0.0f;
+        DirectX::XMVECTOR accum = DirectX::XMVectorZero();
         float total_weight = 0.0f;
         for (std::size_t i = 0U; i < 4U; ++i) {
             const float w = sw.weights[i];
@@ -1690,27 +1723,21 @@ bool ApplyStaticSkinningToVertexBlob(
             if (w <= 0.000001f || bone_index < 0 || static_cast<std::size_t>(bone_index) >= skin_matrices.size()) {
                 continue;
             }
-            const auto& m = skin_matrices[static_cast<std::size_t>(bone_index)];
-            const float tx = (m[0U] * px) + (m[4U] * py) + (m[8U] * pz) + m[12U];
-            const float ty = (m[1U] * px) + (m[5U] * py) + (m[9U] * pz) + m[13U];
-            const float tz = (m[2U] * px) + (m[6U] * py) + (m[10U] * pz) + m[14U];
-            ax += tx * w;
-            ay += ty * w;
-            az += tz * w;
+            const auto tp = DirectX::XMVector3TransformCoord(p, skin_matrices[static_cast<std::size_t>(bone_index)]);
+            accum = DirectX::XMVectorAdd(accum, DirectX::XMVectorScale(tp, w));
             total_weight += w;
         }
         if (total_weight <= 0.000001f) {
             continue;
         }
         if (std::abs(total_weight - 1.0f) > 0.0001f) {
-            const float inv = 1.0f / total_weight;
-            ax *= inv;
-            ay *= inv;
-            az *= inv;
+            accum = DirectX::XMVectorScale(accum, 1.0f / total_weight);
         }
-        std::memcpy(vertex_blob->data() + base, &ax, sizeof(float));
-        std::memcpy(vertex_blob->data() + base + 4U, &ay, sizeof(float));
-        std::memcpy(vertex_blob->data() + base + 8U, &az, sizeof(float));
+        DirectX::XMFLOAT3 out_pos {};
+        DirectX::XMStoreFloat3(&out_pos, accum);
+        std::memcpy(vertex_blob->data() + base, &out_pos.x, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 4U, &out_pos.y, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 8U, &out_pos.z, sizeof(float));
     }
     return true;
 }
@@ -1856,13 +1883,14 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
             avatar_it->second.warning_codes.push_back("XAV2_SKINNING_STATIC_DISABLED");
         }
     }
-    if (!avatar_pkg.skin_payloads.empty()) {
+    const bool bypass_vrm_static_skinning = avatar_pkg.source_type == AvatarSourceType::Vrm;
+    if (bypass_vrm_static_skinning && !avatar_pkg.skin_payloads.empty()) {
         auto avatar_it = g_state.avatars.find(handle);
         if (avatar_it != g_state.avatars.end()) {
             PushAvatarWarningUnique(
                 &avatar_it->second,
-                "W_RENDER: XAV2_SKINNING_CONVENTION: column-major skinMatrix=jointGlobal*inverseBind",
-                "XAV2_SKINNING_CONVENTION");
+                "W_RENDER: VRM_SKINNING_STATIC_BYPASS: using transformed bind vertices.",
+                "VRM_SKINNING_STATIC_BYPASS");
         }
     }
     std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
@@ -1884,7 +1912,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         const avatar::SkeletonRenderPayload* skeleton_payload = nullptr;
         bool force_static_skinning_fallback = false;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
-        if (skin_it != skin_by_mesh.end()) {
+        if (!bypass_vrm_static_skinning && skin_it != skin_by_mesh.end()) {
             const auto check = ValidateSkinPayload(payload, *skin_it->second);
             if (check.valid) {
                 skin_payload = skin_it->second;
@@ -2506,6 +2534,35 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryExtractShaderParamFloat(payload.shader_params_json, "_MatCapStrength", &matcap_strength)) {
             material.matcap_strength = std::max(0.0f, std::min(1.0f, matcap_strength));
         }
+        float outline_width = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_OutlineWidth", &outline_width) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_OutlineWidth", &outline_width)) {
+            material.outline_width = std::max(0.0f, std::min(1.0f, outline_width));
+        }
+        float outline_mix = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_OutlineLightingMix", &outline_mix) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_OutlineLightingMix", &outline_mix)) {
+            material.outline_lighting_mix = std::max(0.0f, std::min(1.0f, outline_mix));
+        }
+        float uv_scroll_x = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_UvAnimScrollX", &uv_scroll_x) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_UvAnimScrollX", &uv_scroll_x)) {
+            material.uv_anim_scroll_x = std::max(-2.0f, std::min(2.0f, uv_scroll_x));
+        }
+        float uv_scroll_y = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_UvAnimScrollY", &uv_scroll_y) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_UvAnimScrollY", &uv_scroll_y)) {
+            material.uv_anim_scroll_y = std::max(-2.0f, std::min(2.0f, uv_scroll_y));
+        }
+        float uv_rot = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_UvAnimRotation", &uv_rot) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_UvAnimRotation", &uv_rot)) {
+            material.uv_anim_rotation = std::max(-6.0f, std::min(6.0f, uv_rot));
+        }
+        material.uv_anim_enabled =
+            std::abs(material.uv_anim_scroll_x) > 0.0001f ||
+            std::abs(material.uv_anim_scroll_y) > 0.0001f ||
+            std::abs(material.uv_anim_rotation) > 0.0001f;
         std::array<float, 4U> matcap_color = {0.0f, 0.0f, 0.0f, 1.0f};
         if (TryGetTypedColorParam(payload, "_MatCapColor", &matcap_color) ||
             TryExtractShaderParamColor(payload.shader_params_json, "_MatCapColor", &matcap_color) ||
@@ -2617,6 +2674,26 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                 std::ostringstream warning;
                 warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
                         << ", slot=matcap, ref=" << matcap_texture_ref;
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                }
+            }
+        }
+        std::string uv_anim_mask_ref;
+        const bool has_typed_uv_mask_ref =
+            TryGetTypedTextureRef(payload, "uvAnimationMask", &uv_anim_mask_ref) ||
+            TryGetTypedTextureRef(payload, "_UvAnimMaskTex", &uv_anim_mask_ref);
+        if (!uv_anim_mask_ref.empty()) {
+            const auto tex_it = textures_by_key.find(NormalizeRefKey(uv_anim_mask_ref));
+            if (tex_it != textures_by_key.end()) {
+                material.uv_anim_mask_srv = CreateTextureSrvFromPayload(device, tex_it->second);
+                material.uv_anim_enabled = true;
+            } else if (has_typed_uv_mask_ref) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                        << ", slot=uvAnimationMask, ref=" << uv_anim_mask_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -2843,6 +2920,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     }
 
     const auto quality = SanitizeRenderQualityOptions(g_state.render_quality);
+    const float frame_dt = std::max(1.0f / 240.0f, std::min(1.0f / 15.0f, ctx->delta_time_seconds));
+    g_state.runtime_time_seconds =
+        std::fmod(std::max(0.0f, g_state.runtime_time_seconds + frame_dt), 3600.0f);
     const float clear_color[4] = {
         quality.background_rgba[0],
         quality.background_rgba[1],
@@ -2882,6 +2962,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     std::vector<DrawItem> opaque_draws;
     std::vector<DrawItem> mask_draws;
     std::vector<DrawItem> blend_draws;
+    std::vector<DrawItem> outline_draws;
     std::uint32_t frame_draw_calls = 0U;
     const float fov_deg = quality.fov_deg;
     const float tan_half_fov = std::tan(DirectX::XMConvertToRadians(fov_deg) * 0.5f);
@@ -3035,6 +3116,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             } else {
                 opaque_draws.push_back(item);
             }
+            if (material != nullptr && material->outline_width > 0.0005f) {
+                outline_draws.push_back(item);
+            }
         }
     }
     std::sort(blend_draws.begin(), blend_draws.end(), [](const DrawItem& a, const DrawItem& b) {
@@ -3056,8 +3140,11 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float liltoon_params[4];
         float liltoon_aux[4];
         float alpha_misc[4];
+        float outline_params[4];
+        float uv_anim_params[4];
+        float time_params[4];
     };
-    auto draw_pass = [&](const DrawItem& item) {
+    auto draw_pass = [&](const DrawItem& item, bool outline_pass) {
         if (item.mesh == nullptr || item.mesh->vertex_buffer == nullptr || item.mesh->index_buffer == nullptr || item.pkg == nullptr) {
             return;
         }
@@ -3069,6 +3156,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ID3D11ShaderResourceView* rim_srv = nullptr;
         ID3D11ShaderResourceView* emission_srv = nullptr;
         ID3D11ShaderResourceView* matcap_srv = nullptr;
+        ID3D11ShaderResourceView* uv_mask_srv = nullptr;
         if (item.material != nullptr) {
             if (!item.material->alpha_mode.empty()) {
                 alpha_mode = item.material->alpha_mode;
@@ -3080,6 +3168,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             rim_srv = item.material->rim_srv;
             emission_srv = item.material->emission_srv;
             matcap_srv = item.material->matcap_srv;
+            uv_mask_srv = item.material->uv_anim_mask_srv;
         }
         std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
             return static_cast<char>(std::toupper(c));
@@ -3098,15 +3187,25 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);
         }
-        device_ctx->RSSetState((double_sided || force_no_cull_for_xav2) ? renderer.raster_cull_none : renderer.raster_cull_back);
+        if (outline_pass) {
+            device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
+            device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
+            if (double_sided || force_no_cull_for_xav2) {
+                device_ctx->RSSetState(renderer.raster_cull_none);
+            } else {
+                device_ctx->RSSetState(renderer.raster_cull_front);
+            }
+        } else {
+            device_ctx->RSSetState((double_sided || force_no_cull_for_xav2) ? renderer.raster_cull_none : renderer.raster_cull_back);
+        }
 
         const UINT stride = item.mesh->vertex_stride;
         const UINT offset = 0U;
         device_ctx->IASetVertexBuffers(0U, 1U, &item.mesh->vertex_buffer, &stride, &offset);
         device_ctx->IASetIndexBuffer(item.mesh->index_buffer, DXGI_FORMAT_R32_UINT, 0U);
         device_ctx->PSSetSamplers(0U, 1U, &renderer.linear_sampler);
-        ID3D11ShaderResourceView* srvs[5] = {base_srv, normal_srv, rim_srv, emission_srv, matcap_srv};
-        device_ctx->PSSetShaderResources(0U, 5U, srvs);
+        ID3D11ShaderResourceView* srvs[6] = {base_srv, normal_srv, rim_srv, emission_srv, matcap_srv, uv_mask_srv};
+        device_ctx->PSSetShaderResources(0U, 6U, srvs);
 
         const auto world_view_proj = item.world * view * proj;
         const auto world_view_proj_t = DirectX::XMMatrixTranspose(world_view_proj);
@@ -3145,8 +3244,20 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.liltoon_params[3] = emission_srv != nullptr ? 1.0f : 0.0f;
             cb.liltoon_aux[0] = matcap_srv != nullptr ? 1.0f : 0.0f;
             cb.liltoon_aux[1] = item.material->matcap_strength;
-            cb.liltoon_aux[2] = 0.0f;
+            cb.liltoon_aux[2] = uv_mask_srv != nullptr ? 1.0f : 0.0f;
             cb.liltoon_aux[3] = 0.0f;
+            cb.outline_params[0] = item.material->outline_width * 0.02f;
+            cb.outline_params[1] = item.material->outline_lighting_mix;
+            cb.outline_params[2] = 0.0f;
+            cb.outline_params[3] = outline_pass ? 1.0f : 0.0f;
+            cb.uv_anim_params[0] = item.material->uv_anim_scroll_x;
+            cb.uv_anim_params[1] = item.material->uv_anim_scroll_y;
+            cb.uv_anim_params[2] = item.material->uv_anim_rotation;
+            cb.uv_anim_params[3] = item.material->uv_anim_enabled ? 1.0f : 0.0f;
+            cb.time_params[0] = g_state.runtime_time_seconds;
+            cb.time_params[1] = frame_dt;
+            cb.time_params[2] = 0.0f;
+            cb.time_params[3] = 0.0f;
         } else {
             cb.base_color[0] = 1.0f;
             cb.base_color[1] = 1.0f;
@@ -3180,6 +3291,18 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.liltoon_aux[1] = 0.0f;
             cb.liltoon_aux[2] = 0.0f;
             cb.liltoon_aux[3] = 0.0f;
+            cb.outline_params[0] = 0.0f;
+            cb.outline_params[1] = 0.0f;
+            cb.outline_params[2] = 0.0f;
+            cb.outline_params[3] = 0.0f;
+            cb.uv_anim_params[0] = 0.0f;
+            cb.uv_anim_params[1] = 0.0f;
+            cb.uv_anim_params[2] = 0.0f;
+            cb.uv_anim_params[3] = 0.0f;
+            cb.time_params[0] = g_state.runtime_time_seconds;
+            cb.time_params[1] = frame_dt;
+            cb.time_params[2] = 0.0f;
+            cb.time_params[3] = 0.0f;
         }
         cb.alpha_misc[0] = is_mask ? alpha_cutoff : 0.0f;
         cb.alpha_misc[1] = is_mask ? 1.0f : 0.0f;
@@ -3192,8 +3315,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->Unmap(renderer.constant_buffer, 0U);
         }
         device_ctx->DrawIndexed(item.mesh->index_count, 0U, 0);
-        ID3D11ShaderResourceView* null_srvs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-        device_ctx->PSSetShaderResources(0U, 5U, null_srvs);
+        ID3D11ShaderResourceView* null_srvs[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+        device_ctx->PSSetShaderResources(0U, 6U, null_srvs);
         ++frame_draw_calls;
     };
     std::uint32_t frame_pass_count = 0U;
@@ -3203,17 +3326,23 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     if (!mask_draws.empty()) {
         ++frame_pass_count;
     }
+    if (!outline_draws.empty()) {
+        ++frame_pass_count;
+    }
     if (!blend_draws.empty()) {
         ++frame_pass_count;
     }
     for (const auto& item : opaque_draws) {
-        draw_pass(item);
+        draw_pass(item, false);
     }
     for (const auto& item : mask_draws) {
-        draw_pass(item);
+        draw_pass(item, false);
+    }
+    for (const auto& item : outline_draws) {
+        draw_pass(item, true);
     }
     for (const auto& item : blend_draws) {
-        draw_pass(item);
+        draw_pass(item, false);
     }
 
     if (g_state.spout.IsActive()) {

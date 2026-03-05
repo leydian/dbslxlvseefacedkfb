@@ -583,6 +583,136 @@ std::array<float, 16U> MulMatrix4x4(
     return out;
 }
 
+bool TryInvertMatrix4x4(
+    const std::array<float, 16U>& m,
+    std::array<float, 16U>* out_inv) {
+    if (out_inv == nullptr) {
+        return false;
+    }
+    std::array<float, 16U> inv {};
+    inv[0] = m[5] * m[10] * m[15] -
+             m[5] * m[11] * m[14] -
+             m[9] * m[6] * m[15] +
+             m[9] * m[7] * m[14] +
+             m[13] * m[6] * m[11] -
+             m[13] * m[7] * m[10];
+
+    inv[4] = -m[4] * m[10] * m[15] +
+             m[4] * m[11] * m[14] +
+             m[8] * m[6] * m[15] -
+             m[8] * m[7] * m[14] -
+             m[12] * m[6] * m[11] +
+             m[12] * m[7] * m[10];
+
+    inv[8] = m[4] * m[9] * m[15] -
+             m[4] * m[11] * m[13] -
+             m[8] * m[5] * m[15] +
+             m[8] * m[7] * m[13] +
+             m[12] * m[5] * m[11] -
+             m[12] * m[7] * m[9];
+
+    inv[12] = -m[4] * m[9] * m[14] +
+              m[4] * m[10] * m[13] +
+              m[8] * m[5] * m[14] -
+              m[8] * m[6] * m[13] -
+              m[12] * m[5] * m[10] +
+              m[12] * m[6] * m[9];
+
+    inv[1] = -m[1] * m[10] * m[15] +
+             m[1] * m[11] * m[14] +
+             m[9] * m[2] * m[15] -
+             m[9] * m[3] * m[14] -
+             m[13] * m[2] * m[11] +
+             m[13] * m[3] * m[10];
+
+    inv[5] = m[0] * m[10] * m[15] -
+             m[0] * m[11] * m[14] -
+             m[8] * m[2] * m[15] +
+             m[8] * m[3] * m[14] +
+             m[12] * m[2] * m[11] -
+             m[12] * m[3] * m[10];
+
+    inv[9] = -m[0] * m[9] * m[15] +
+             m[0] * m[11] * m[13] +
+             m[8] * m[1] * m[15] -
+             m[8] * m[3] * m[13] -
+             m[12] * m[1] * m[11] +
+             m[12] * m[3] * m[9];
+
+    inv[13] = m[0] * m[9] * m[14] -
+              m[0] * m[10] * m[13] -
+              m[8] * m[1] * m[14] +
+              m[8] * m[2] * m[13] +
+              m[12] * m[1] * m[10] -
+              m[12] * m[2] * m[9];
+
+    inv[2] = m[1] * m[6] * m[15] -
+             m[1] * m[7] * m[14] -
+             m[5] * m[2] * m[15] +
+             m[5] * m[3] * m[14] +
+             m[13] * m[2] * m[7] -
+             m[13] * m[3] * m[6];
+
+    inv[6] = -m[0] * m[6] * m[15] +
+             m[0] * m[7] * m[14] +
+             m[4] * m[2] * m[15] -
+             m[4] * m[3] * m[14] -
+             m[12] * m[2] * m[7] +
+             m[12] * m[3] * m[6];
+
+    inv[10] = m[0] * m[5] * m[15] -
+              m[0] * m[7] * m[13] -
+              m[4] * m[1] * m[15] +
+              m[4] * m[3] * m[13] +
+              m[12] * m[1] * m[7] -
+              m[12] * m[3] * m[5];
+
+    inv[14] = -m[0] * m[5] * m[14] +
+              m[0] * m[6] * m[13] +
+              m[4] * m[1] * m[14] -
+              m[4] * m[2] * m[13] -
+              m[12] * m[1] * m[6] +
+              m[12] * m[2] * m[5];
+
+    inv[3] = -m[1] * m[6] * m[11] +
+             m[1] * m[7] * m[10] +
+             m[5] * m[2] * m[11] -
+             m[5] * m[3] * m[10] -
+             m[9] * m[2] * m[7] +
+             m[9] * m[3] * m[6];
+
+    inv[7] = m[0] * m[6] * m[11] -
+             m[0] * m[7] * m[10] -
+             m[4] * m[2] * m[11] +
+             m[4] * m[3] * m[10] +
+             m[8] * m[2] * m[7] -
+             m[8] * m[3] * m[6];
+
+    inv[11] = -m[0] * m[5] * m[11] +
+              m[0] * m[7] * m[9] +
+              m[4] * m[1] * m[11] -
+              m[4] * m[3] * m[9] -
+              m[8] * m[1] * m[7] +
+              m[8] * m[3] * m[5];
+
+    inv[15] = m[0] * m[5] * m[10] -
+              m[0] * m[6] * m[9] -
+              m[4] * m[1] * m[10] +
+              m[4] * m[2] * m[9] +
+              m[8] * m[1] * m[6] -
+              m[8] * m[2] * m[5];
+
+    float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (!std::isfinite(det) || std::abs(det) <= 1e-8f) {
+        return false;
+    }
+    const float inv_det = 1.0f / det;
+    for (std::size_t i = 0U; i < 16U; ++i) {
+        (*out_inv)[i] = inv[i] * inv_det;
+    }
+    return true;
+}
+
 bool AreMatrix4x4NearlyEqual(
     const std::array<float, 16U>& a,
     const std::array<float, 16U>& b,
@@ -2589,7 +2719,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     } else {
                         mesh_node_transforms[mesh_index] = MakeIdentityMatrix4x4();
                         mesh_has_node_transform[mesh_index] = false;
-                        }
+                    }
                 }
             }
         }
@@ -2612,9 +2742,16 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         }
     }
     if (node_transform_conflict_mesh_count > 0U) {
+        std::string sample_conflict_mesh = "unknown";
+        for (std::size_t mesh_i = 0U; mesh_i < mesh_node_transform_conflict.size(); ++mesh_i) {
+            if (mesh_node_transform_conflict[mesh_i] && mesh_i < mesh_names_by_index.size()) {
+                sample_conflict_mesh = mesh_names_by_index[mesh_i];
+                break;
+            }
+        }
         pkg.warnings.push_back(
             "W_NODE: VRM_NODE_TRANSFORM_CONFLICT: meshes=" + std::to_string(node_transform_conflict_mesh_count) +
-            ", bake=skipped");
+            ", bake=skipped, sampleMesh=" + sample_conflict_mesh);
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_CONFLICT");
     }
 
@@ -3232,8 +3369,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
-            if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i] &&
-                (mesh_i >= mesh_has_skin.size() || !mesh_has_skin[mesh_i])) {
+            if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
                 ApplyPositionTransformToVertexBlob(
                     &mesh_payload.vertex_blob,
                     mesh_payload.vertex_stride,
@@ -3315,12 +3451,27 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                             SkeletonRenderPayload skeleton_payload;
                             skeleton_payload.mesh_name = mesh_payload.name;
                             skeleton_payload.bone_matrices_16xn.reserve(skin_defs[skin_index].joints.size() * 16U);
+                            std::array<float, 16U> mesh_global_for_skin = MakeIdentityMatrix4x4();
+                            if (mesh_i < mesh_node_transforms.size() &&
+                                mesh_i < mesh_node_transform_conflict.size() &&
+                                !mesh_node_transform_conflict[mesh_i]) {
+                                mesh_global_for_skin = mesh_node_transforms[mesh_i];
+                            }
+                            std::array<float, 16U> mesh_inv_for_skin = MakeIdentityMatrix4x4();
+                            if (!TryInvertMatrix4x4(mesh_global_for_skin, &mesh_inv_for_skin)) {
+                                mesh_inv_for_skin = MakeIdentityMatrix4x4();
+                                pkg.warnings.push_back(
+                                    "W_SKIN: VRM_MESH_GLOBAL_INVERSE_FAILED: mesh=" + mesh_payload.name);
+                            }
                             for (const auto joint_index : skin_defs[skin_index].joints) {
                                 std::array<float, 16U> bone_m = MakeIdentityMatrix4x4();
                                 if (joint_index >= 0 &&
                                     static_cast<std::size_t>(joint_index) < node_global_transforms.size()) {
                                     bone_m = node_global_transforms[static_cast<std::size_t>(joint_index)];
                                 }
+                                // Convert joint global pose into mesh space so skinning uses
+                                // a consistent space with inverseBind matrices.
+                                bone_m = MulMatrix4x4(mesh_inv_for_skin, bone_m);
                                 skeleton_payload.bone_matrices_16xn.insert(
                                     skeleton_payload.bone_matrices_16xn.end(),
                                     bone_m.begin(),
@@ -3458,22 +3609,47 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     pkg.parser_stage = "payload";
     std::uint32_t transformed_mesh_count = 0U;
     for (std::size_t i = 0U; i < mesh_has_node_transform.size(); ++i) {
-        if (mesh_has_node_transform[i] && (i >= mesh_has_skin.size() || !mesh_has_skin[i])) {
+        if (mesh_has_node_transform[i]) {
             ++transformed_mesh_count;
         }
     }
     if (transformed_mesh_count > 0U) {
+        std::string sample_applied_mesh = "unknown";
+        for (std::size_t mesh_i = 0U; mesh_i < mesh_has_node_transform.size(); ++mesh_i) {
+            if (mesh_has_node_transform[mesh_i] && mesh_i < mesh_names_by_index.size()) {
+                sample_applied_mesh = mesh_names_by_index[mesh_i];
+                break;
+            }
+        }
         pkg.warnings.push_back(
-            "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count));
+            "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count) +
+            ", sampleMesh=" + sample_applied_mesh);
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
     }
     pkg.warnings.push_back("W_NODE: VRM_NODE_TRANSFORM_BASIS: global");
     if (skinned_primitive_count > 0U) {
+        std::uint32_t skinned_transform_injected_mesh_count = 0U;
+        std::uint32_t skinned_transform_conflict_mesh_count = 0U;
+        for (std::size_t mesh_i = 0U; mesh_i < mesh_has_skin.size(); ++mesh_i) {
+            if (!mesh_has_skin[mesh_i]) {
+                continue;
+            }
+            if (mesh_i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[mesh_i]) {
+                ++skinned_transform_conflict_mesh_count;
+            } else if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
+                ++skinned_transform_injected_mesh_count;
+            }
+        }
         pkg.warnings.push_back(
             "W_SKIN: VRM_SKIN_PAYLOAD_STATUS: skinnedPrimitives=" + std::to_string(skinned_primitive_count) +
             ", emitted=" + std::to_string(skinned_payload_emitted) +
             ", failed=" + std::to_string(skinned_payload_failed));
-        pkg.warnings.push_back("W_SKIN: VRM_SKINNING_CONVENTION: column-major jointGlobal*inverseBind");
+        pkg.warnings.push_back(
+            "W_SKIN: VRM_SKIN_NODE_TRANSFORM_STATUS: injectedMeshes=" +
+            std::to_string(skinned_transform_injected_mesh_count) +
+            ", conflictMeshes=" + std::to_string(skinned_transform_conflict_mesh_count));
+        pkg.warnings.push_back("W_SKIN: VRM_SKIN_SPACE: mesh");
+        pkg.warnings.push_back("W_SKIN: VRM_SKINNING_CONVENTION: meshJoint*inverseBind");
         if (skinned_payload_failed > 0U) {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
         }
@@ -3549,10 +3725,11 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             pkg.warnings.push_back(
                 "W_SPRINGBONE: extracted spring payloads spring=" + std::to_string(pkg.springbone_payloads.size()) +
                 ", colliders=" + std::to_string(pkg.physics_colliders.size()));
+            pkg.warnings.push_back("W_SPRINGBONE: runtime simulation payload-ready");
         } else {
             pkg.warnings.push_back("W_SPRINGBONE: metadata present but runtime payload extraction is partial");
+            pkg.missing_features.push_back("SpringBone runtime simulation");
         }
-        pkg.missing_features.push_back("SpringBone runtime simulation");
     } else {
         pkg.missing_features.push_back("SpringBone metadata");
     }

@@ -12,7 +12,7 @@
 - `vxavatar`: 4 reports
 - `wpf`: 6 reports
 - `release`: 3 reports
-- `vrm`: 8 reports
+- `vrm`: 9 reports
 - `winui`: 3 reports
 - `workspace`: 3 reports
 - `avatar`: 2 reports
@@ -29,4 +29,5 @@
 
 ## Next Steps
 - Pick three key reports and review promotion to long-term references.
-- Newly added: review `2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md` for onboarding KPI instrumentation (`within_3min_success`) rollout readiness.
+- Newly added: review `2026-03-06_vrm_springbone_mtoon_runtime_refinement.md` for SpringBone solver and MToon advanced runtime uplift validation notes.
+- Newly added: review `2026-03-06_onboarding_kpi_summary_automation.md` for diagnostics KPI rollup automation and operational gating readiness.

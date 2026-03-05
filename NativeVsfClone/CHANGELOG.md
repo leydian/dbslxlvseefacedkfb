@@ -2,6 +2,100 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - VRM SpringBone runtime refinement + MToon advanced runtime application
+
+### Summary
+
+Implemented a runtime-focused VRM quality refinement slice that upgraded secondary motion behavior from single-axis deformation to bounded 2-axis response, and promoted MToon advanced fields (outline/uv-animation) from payload-only extraction into active render-path behavior.
+
+### Changed
+
+- SpringBone runtime refinement in nativecore:
+  - `src/nativecore/native_core.cpp`
+  - chain runtime model upgraded to 2-axis offsets/velocities (`offset_x/y`, `velocity_x/y`).
+  - replaced oscillation-biased single-axis solve with damped target solve using tracked head influence.
+  - added 2D radial length constraint and stability damping on constraint hit.
+  - upgraded mesh deformation from y-only to x/y with height-based influence weighting.
+  - unsupported collider classifier adjusted to treat only `Unknown` as unsupported in runtime warning path.
+- MToon advanced runtime application:
+  - `src/nativecore/native_core.cpp`
+  - GPU material runtime state expanded with:
+    - outline (`outline_width`, `outline_lighting_mix`)
+    - uv animation (`uv_anim_scroll_x/y`, `uv_anim_rotation`, `uv_anim_enabled`)
+    - uv animation mask texture SRV (`uv_anim_mask_srv`)
+  - renderer pipeline expanded with front-cull raster state for outline pass.
+  - shader constant contract expanded with:
+    - `outline_params`
+    - `uv_anim_params`
+    - `time_params`
+  - pixel shader extended with time-based UV scroll/rotation and mask-weighted UV blend (`tex5`).
+  - render loop extended with runtime clock accumulation and dedicated outline draw pass.
+- Typed param/texture wiring for advanced MToon:
+  - `src/nativecore/native_core.cpp`
+  - added extraction/mapping for:
+    - `_OutlineWidth`
+    - `_OutlineLightingMix`
+    - `_UvAnimScrollX`
+    - `_UvAnimScrollY`
+    - `_UvAnimRotation`
+  - added typed texture ingestion for `uvAnimationMask` / `_UvAnimMaskTex` with unresolved-texture diagnostics.
+- SpringBone missing-feature reporting correction:
+  - `src/avatar/vrm_loader.cpp`
+  - `SpringBone runtime simulation` missing feature is now reported only when metadata exists but runtime payload extraction is partial.
+  - payload-ready spring path now emits explicit readiness warning instead of unconditional missing feature.
+- Reports:
+  - `docs/reports/vrm_springbone_mtoon_runtime_refinement_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_springbone_mtoon_runtime_refinement.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build .\\build --config Release --target nativecore avatar_tool`: PASS
+- `powershell -ExecutionPolicy Bypass -File .\\tools\\vrm_quality_gate.ps1 -Profile fixed5`: PASS (GateA..GateJ)
+- `avatar_tool ..\\sample\\NewOnYou.vrm`: Spring payload-ready path validated (`MissingFeatures: 3`)
+- `avatar_tool \"..\\sample\\Kikyo_FT Variant.vrm\"`: no-payload path validated (`MissingFeatures: 4`)
+
+## 2026-03-06 - Onboarding KPI diagnostics summary automation (3-minute success rollup)
+
+### Summary
+
+Added automation to compute and export onboarding KPI rollups from telemetry events so first-run success metrics are immediately available in diagnostics artifacts and offline report scripts.
+
+### Changed
+
+- Host diagnostics bundle export expansion:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added `onboarding_kpi_summary.txt` to diagnostics bundle payload.
+  - wired onboarding KPI rollup generation in `ExportDiagnosticsBundle(...)`.
+- Host telemetry aggregation helpers:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added in-process KPI rollup builder:
+    - session cardinality based on `session_started_at`
+    - output-started session count
+    - within-3-minute success session count/rate
+    - output milestone counters
+  - appended repro command guidance for KPI script execution.
+- Telemetry snapshot contract:
+  - `host/HostCore/PlatformFeatures.cs`
+  - added `TelemetryService.Snapshot()` for safe read-only event copies used by KPI aggregation.
+- Offline KPI report script:
+  - `tools/onboarding_kpi_summary.ps1`
+  - reads telemetry JSON array, computes onboarding funnel/KPI summary, writes:
+    - `build/reports/onboarding_kpi_summary.json`
+    - `build/reports/onboarding_kpi_summary.txt`
+
+### Verification
+
+- `dotnet build host\\WpfHost\\WpfHost.csproj -c Release` PASS
+- `powershell -ExecutionPolicy Bypass -File .\\tools\\onboarding_kpi_summary.ps1 -TelemetryPath .\\build\\reports\\telemetry_latest.json` PASS (sample telemetry smoke)
+
+### Documentation
+
+- `docs/reports/onboarding_kpi_summary_automation_2026-03-06.md`
+- `docs/reports/weekly/2026-W10/2026-03-06_onboarding_kpi_summary_automation.md`
+- `docs/reports/weekly/2026-W10/INDEX.md`
+
 ## 2026-03-06 - WPF consumer UI onboarding uplift + 3-minute success telemetry instrumentation
 
 ### Summary
