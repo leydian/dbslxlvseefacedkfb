@@ -12,6 +12,7 @@ param(
     [switch]$EnableHostE2E,
     [switch]$EnableNuGetMirrorBootstrap,
     [switch]$EnableMediapipeSanity,
+    [switch]$EnableSpout2Interop,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
@@ -131,6 +132,12 @@ if ($EnableMediapipeSanity) {
         -Command "powershell -ExecutionPolicy Bypass -File .\tools\mediapipe_sidecar_sanity.ps1"))
 }
 
+if ($EnableSpout2Interop) {
+    $results.Add((Invoke-Gate `
+        -Name "Spout2 interop gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\spout2_interop_gate.ps1 -SkipNativeBuild -NoRestore"))
+}
+
 if ($EnableXav2CompressionQuality) {
     $results.Add((Invoke-Gate `
         -Name "XAV2 compression quality gate" `
@@ -169,6 +176,7 @@ $lines.Add("- SampleProfileResolve: build/reports/sample_profile_resolve_latest.
 $lines.Add("- NuGetMirrorBootstrap: build/reports/nuget_mirror_bootstrap_summary.txt")
 $lines.Add("- HostE2E: build/reports/host_e2e_gate_summary.txt")
 $lines.Add("- MediaPipeSidecarSanity: build/reports/mediapipe_sidecar_sanity_summary.txt")
+$lines.Add("- Spout2Interop: build/reports/spout2_interop_gate_summary.txt")
 $lines.Add("- Xav2CompressionQuality: build/reports/xav2_compression_quality_gate_summary.txt")
 $lines.Add("- Xav2Parity: build/reports/xav2_parity_gate_summary.txt")
 

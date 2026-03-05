@@ -2267,9 +2267,21 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     }
 
     if (g_state.spout.IsActive()) {
-        std::vector<std::uint8_t> pixels;
-        if (CaptureRtvBgra(device, device_ctx, rtv, ctx->width, ctx->height, &pixels)) {
-            g_state.spout.SubmitFrame(pixels.data(), static_cast<std::uint32_t>(pixels.size()));
+        bool submitted_on_gpu = false;
+        if (g_state.spout.WantsGpuTextureSubmit()) {
+            ID3D11Resource* resource = nullptr;
+            rtv->GetResource(&resource);
+            if (resource != nullptr) {
+                submitted_on_gpu = g_state.spout.SubmitFrameTexture(device, resource);
+                resource->Release();
+            }
+        }
+
+        if (!submitted_on_gpu) {
+            std::vector<std::uint8_t> pixels;
+            if (CaptureRtvBgra(device, device_ctx, rtv, ctx->width, ctx->height, &pixels)) {
+                g_state.spout.SubmitFrame(pixels.data(), static_cast<std::uint32_t>(pixels.size()));
+            }
         }
     }
 #endif

@@ -17,8 +17,16 @@ class IStreamingOutput {
     virtual ~IStreamingOutput() = default;
     virtual bool Start(const StreamConfig& cfg) = 0;
     virtual void SubmitFrame(const void* bgra_pixels, std::uint32_t bytes) = 0;
+    // Optional fast path for GPU texture sharing backends (Spout2).
+    virtual bool WantsGpuTextureSubmit() const { return false; }
+    virtual bool SubmitFrameTexture(void* d3d11_device, void* d3d11_texture) {
+        (void)d3d11_device;
+        (void)d3d11_texture;
+        return false;
+    }
+    virtual const char* ActiveBackendName() const { return "legacy-shared-memory"; }
+    virtual std::uint64_t FallbackCount() const { return 0U; }
     virtual void Stop() = 0;
 };
 
 }  // namespace vsfclone::stream
-

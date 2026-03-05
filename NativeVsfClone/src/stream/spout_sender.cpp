@@ -53,14 +53,33 @@ bool SpoutSender::Start(const StreamConfig& cfg) {
     if (cfg.width == 0U || cfg.height == 0U) {
         return false;
     }
+    config_ = cfg;
+    config_.channel_name = SanitizeChannelName(config_.channel_name);
+    frame_counter_ = 0U;
+    fallback_count_ = 0U;
+    backend_mode_ = BackendMode::None;
+
+#if !defined(_WIN32)
+    return false;
+#else
+    // Start on legacy transport first and allow runtime GPU-path takeover on first texture submit.
+    // This keeps startup deterministic and preserves v1 fallback behavior.
+    if (!StartLegacySharedMemory(config_)) {
+        return false;
+    }
+    backend_mode_ = BackendMode::LegacySharedMemory;
+    active_ = true;
+    return true;
+#endif
+}
+
+bool SpoutSender::StartLegacySharedMemory(const StreamConfig& cfg) {
 #if !defined(_WIN32)
     (void)cfg;
     return false;
 #else
     config_ = cfg;
-    config_.channel_name = SanitizeChannelName(config_.channel_name);
     mapping_name_ = "Local\\VsfCloneSpout_" + config_.channel_name;
-    frame_counter_ = 0;
 
     const std::uint64_t pixel_bytes = static_cast<std::uint64_t>(config_.width) * static_cast<std::uint64_t>(config_.height) * 4ULL;
     const std::uint64_t total_bytes = pixel_bytes + sizeof(SharedFrameHeader);
@@ -99,7 +118,6 @@ bool SpoutSender::Start(const StreamConfig& cfg) {
     UnmapViewOfFile(view);
 
     mapping_ = mapping;
-    active_ = true;
     return true;
 #endif
 }
@@ -108,6 +126,19 @@ void SpoutSender::SubmitFrame(const void* bgra_pixels, std::uint32_t bytes) {
     if (!active_ || bgra_pixels == nullptr) {
         return;
     }
+#if !defined(_WIN32)
+    (void)bgra_pixels;
+    (void)bytes;
+#else
+    if (backend_mode_ != BackendMode::LegacySharedMemory) {
+        // GPU path became active after start; keep CPU copy path disabled.
+        return;
+    }
+    SubmitLegacySharedMemory(bgra_pixels, bytes);
+#endif
+}
+
+void SpoutSender::SubmitLegacySharedMemory(const void* bgra_pixels, std::uint32_t bytes) {
 #if !defined(_WIN32)
     (void)bgra_pixels;
     (void)bytes;
@@ -137,15 +168,68 @@ void SpoutSender::SubmitFrame(const void* bgra_pixels, std::uint32_t bytes) {
 #endif
 }
 
+bool SpoutSender::WantsGpuTextureSubmit() const {
+    return active_;
+}
+
+bool SpoutSender::SubmitFrameTexture(void* d3d11_device, void* d3d11_texture) {
+    if (!active_ || d3d11_device == nullptr || d3d11_texture == nullptr) {
+        return false;
+    }
+
+    if (backend_mode_ == BackendMode::Spout2Gpu) {
+        if (TrySendSpout2(d3d11_device, d3d11_texture)) {
+            ++frame_counter_;
+            return true;
+        }
+        // Degrade to legacy transport without dropping stream state.
+        StopSpout2();
+        backend_mode_ = BackendMode::LegacySharedMemory;
+        ++fallback_count_;
+        return false;
+    }
+
+    if (TryInitSpout2(d3d11_device, d3d11_texture) && TrySendSpout2(d3d11_device, d3d11_texture)) {
+        backend_mode_ = BackendMode::Spout2Gpu;
+        ++frame_counter_;
+        return true;
+    }
+    return false;
+}
+
+const char* SpoutSender::ActiveBackendName() const {
+    switch (backend_mode_) {
+        case BackendMode::Spout2Gpu:
+            return "spout2-gpu";
+        case BackendMode::LegacySharedMemory:
+            return "legacy-shared-memory";
+        default:
+            return "inactive";
+    }
+}
+
+std::uint64_t SpoutSender::FallbackCount() const {
+    return fallback_count_;
+}
+
 void SpoutSender::Stop() {
+#if defined(_WIN32)
+    StopSpout2();
+    StopLegacySharedMemory();
+#endif
+    active_ = false;
+    frame_counter_ = 0U;
+    fallback_count_ = 0U;
+    backend_mode_ = BackendMode::None;
+}
+
+void SpoutSender::StopLegacySharedMemory() {
 #if defined(_WIN32)
     if (mapping_ != nullptr) {
         CloseHandle(static_cast<HANDLE>(mapping_));
         mapping_ = nullptr;
     }
 #endif
-    active_ = false;
-    frame_counter_ = 0;
 }
 
 bool SpoutSender::IsActive() const {
@@ -154,6 +238,34 @@ bool SpoutSender::IsActive() const {
 
 std::uint64_t SpoutSender::FrameCount() const {
     return frame_counter_;
+}
+
+bool SpoutSender::TryInitSpout2(void* d3d11_device, void* d3d11_texture) {
+    (void)d3d11_device;
+    (void)d3d11_texture;
+#if defined(_WIN32) && defined(VSFCLONE_SPOUT2_ENABLED)
+    // SDK integration point: when Spout2 SDK is configured, initialize sender here.
+    return false;
+#else
+    return false;
+#endif
+}
+
+bool SpoutSender::TrySendSpout2(void* d3d11_device, void* d3d11_texture) {
+    (void)d3d11_device;
+    (void)d3d11_texture;
+#if defined(_WIN32) && defined(VSFCLONE_SPOUT2_ENABLED)
+    // SDK integration point: send ID3D11Texture2D frame through Spout2 here.
+    return false;
+#else
+    return false;
+#endif
+}
+
+void SpoutSender::StopSpout2() {
+#if defined(_WIN32) && defined(VSFCLONE_SPOUT2_ENABLED)
+    // SDK integration point: release Spout2 sender resources here.
+#endif
 }
 
 }  // namespace vsfclone::stream

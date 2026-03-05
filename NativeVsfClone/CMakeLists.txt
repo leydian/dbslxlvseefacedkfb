@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VSFCLONE_BUILD_CONSOLE "Build CLI/console entrypoint" ON)
+option(VSFCLONE_ENABLE_SPOUT2 "Enable Spout2 GPU sender integration when SDK is available" ON)
 
 if(MSVC)
     # Use static CRT to reduce runtime dependency issues for host-side nativecore loading.
@@ -32,6 +33,30 @@ target_include_directories(vsfclone_core
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+
+if(WIN32 AND VSFCLONE_ENABLE_SPOUT2)
+    set(VSFCLONE_SPOUT2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Spout2")
+    set(VSFCLONE_SPOUT2_INCLUDE_DIR "${VSFCLONE_SPOUT2_ROOT}/include")
+    if(EXISTS "${VSFCLONE_SPOUT2_INCLUDE_DIR}")
+        message(STATUS "Spout2 include path detected: ${VSFCLONE_SPOUT2_INCLUDE_DIR}")
+        target_include_directories(vsfclone_core PRIVATE "${VSFCLONE_SPOUT2_INCLUDE_DIR}")
+        target_compile_definitions(vsfclone_core PRIVATE VSFCLONE_SPOUT2_ENABLED=1)
+
+        set(VSFCLONE_SPOUT2_LIB_HINTS
+            "${VSFCLONE_SPOUT2_ROOT}/lib/SpoutLibrary.lib"
+            "${VSFCLONE_SPOUT2_ROOT}/lib/x64/SpoutLibrary.lib"
+            "${VSFCLONE_SPOUT2_ROOT}/Lib/x64/SpoutLibrary.lib")
+        foreach(_spout_lib IN LISTS VSFCLONE_SPOUT2_LIB_HINTS)
+            if(EXISTS "${_spout_lib}")
+                message(STATUS "Spout2 library detected: ${_spout_lib}")
+                target_link_libraries(vsfclone_core PRIVATE "${_spout_lib}")
+                break()
+            endif()
+        endforeach()
+    else()
+        message(STATUS "Spout2 SDK not found at ${VSFCLONE_SPOUT2_INCLUDE_DIR}; falling back to legacy shared-memory sender.")
+    endif()
+endif()
 
 add_library(nativecore SHARED
     src/nativecore/native_core.cpp

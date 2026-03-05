@@ -8,6 +8,7 @@ param(
     [switch]$EnableWinUiMinRepro,
     [switch]$EnableNuGetMirrorBootstrap,
     [switch]$EnableMediapipeSanity,
+    [switch]$EnableSpout2Interop,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
     [switch]$SkipVersionContractCheck,
@@ -70,6 +71,7 @@ try {
             )
             if ($EnableXav2CompressionQuality) { $args += "-EnableXav2CompressionQuality" }
             if ($EnableXav2Parity) { $args += "-EnableXav2Parity" }
+            if ($EnableSpout2Interop) { $args += "-EnableSpout2Interop" }
             & powershell @args
         }))
     } else {
@@ -149,6 +151,7 @@ $lines.Add("EnableHostE2E: $EnableHostE2E")
 $lines.Add("EnableWinUiMinRepro: $EnableWinUiMinRepro")
 $lines.Add("EnableNuGetMirrorBootstrap: $EnableNuGetMirrorBootstrap")
 $lines.Add("EnableMediapipeSanity: $EnableMediapipeSanity")
+$lines.Add("EnableSpout2Interop: $EnableSpout2Interop")
 $lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
 $lines.Add("EnableXav2Parity: $EnableXav2Parity")
 $lines.Add("DurationSec: $durationSec")
@@ -167,6 +170,7 @@ $lines.Add("- build/reports/host_e2e_gate_summary.txt")
 $lines.Add("- build/reports/winui_xaml_min_repro_summary.txt")
 $lines.Add("- build/reports/nuget_mirror_bootstrap_summary.txt")
 $lines.Add("- build/reports/mediapipe_sidecar_sanity_summary.txt")
+$lines.Add("- build/reports/spout2_interop_gate_summary.txt")
 $lines.Add("- build/reports/xav2_compression_quality_gate_summary.txt")
 $lines.Add("- build/reports/xav2_parity_gate_summary.txt")
 
