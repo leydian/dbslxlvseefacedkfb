@@ -11,6 +11,7 @@ param(
         "NewOnYou.vrm"
     ),
     [int]$MaxSamples = 5,
+    [double]$TargetProfileReductionPercent = 8.0,
     [double]$TargetSizeReductionPercent = 20.0,
     [double]$TargetWriteTimeReductionPercent = 30.0,
     [double]$TargetBufferReductionPercent = 25.0,
@@ -37,19 +38,18 @@ function Parse-AvatarToolOutput {
 
 function Pick-Samples {
     param([string]$Dir, [string[]]$Allowlist, [int]$MaxCount)
-    $picked = @()
+    $picked = [System.Collections.Generic.List[object]]::new()
     foreach ($name in $Allowlist) {
         $p = Join-Path $Dir $name
         if (Test-Path -LiteralPath $p) {
-            $picked += (Get-Item -LiteralPath $p)
+            $picked.Add((Get-Item -LiteralPath $p))
         }
     }
     if ($picked.Count -eq 0) {
-        $picked = Get-ChildItem -Path $Dir -Filter *.vrm -File | Sort-Object Name | Select-Object -First $MaxCount
+        return @(Get-ChildItem -Path $Dir -Filter *.vrm -File | Sort-Object Name | Select-Object -First $MaxCount)
     } else {
-        $picked = $picked | Select-Object -First $MaxCount
+        return @($picked | Select-Object -First $MaxCount)
     }
-    return $picked
 }
 
 if (-not (Test-Path -LiteralPath $VrmToXav2Path)) { throw "vrm_to_xav2 not found: $VrmToXav2Path" }
@@ -63,11 +63,13 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $allowPath = Join-Path $ReportDir "vrm_to_xav2_strict_allowlist.txt"
 @(
     "# strict allowlist example"
+    "VRM_NODE_TRANSFORM_APPLIED"
+    "XAV4_RIG_REQUIRED_HUMANOID_MISSING"
     "XAV2_PHYSICS_REF_MISSING"
     "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED"
 ) | Set-Content -Path $allowPath -Encoding UTF8
 
-$samples = Pick-Samples -Dir $SampleDir -Allowlist $SampleAllowlist -MaxCount $MaxSamples
+$samples = @(Pick-Samples -Dir $SampleDir -Allowlist $SampleAllowlist -MaxCount $MaxSamples)
 if ($samples.Count -eq 0) { throw "no vrm samples found under $SampleDir" }
 
 $rows = [System.Collections.Generic.List[object]]::new()
@@ -75,74 +77,114 @@ $gateA = $true # conversion/load pass
 $gateB = $true # diagnostics contract
 $gateC = $true # strict allowlist smoke
 $gateD = $true # kpi
+$gateE = $true # profile reduction kpi
+$gateQ = $true # quality gate (P0 + runtime validation)
 
 foreach ($sample in $samples) {
     $base = [System.IO.Path]::GetFileNameWithoutExtension($sample.Name)
-    $compressedOut = Join-Path $outDir ($base + ".xav2")
+    $optimizedOut = Join-Path $outDir ($base + ".opt.xav2")
+    $losslessOut = Join-Path $outDir ($base + ".lossless.xav2")
     $rawOut = Join-Path $outDir ($base + ".raw.xav2")
-    $diagPath = Join-Path $outDir ($base + ".diag.json")
-    $perfPath = Join-Path $outDir ($base + ".perf.json")
+    $optDiagPath = Join-Path $outDir ($base + ".opt.diag.json")
+    $optPerfPath = Join-Path $outDir ($base + ".opt.perf.json")
+    $losslessDiagPath = Join-Path $outDir ($base + ".lossless.diag.json")
+    $losslessPerfPath = Join-Path $outDir ($base + ".lossless.perf.json")
     $rawDiagPath = Join-Path $outDir ($base + ".raw.diag.json")
     $rawPerfPath = Join-Path $outDir ($base + ".raw.perf.json")
 
-    & $VrmToXav2Path --diag-json $diagPath --perf-metrics-json $perfPath $sample.FullName $compressedOut | Out-Null
+    & $VrmToXav2Path --profile runtime_optimized --diag-json $optDiagPath --perf-metrics-json $optPerfPath $sample.FullName $optimizedOut | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $gateA = $false
-        $rows.Add([PSCustomObject]@{ name = $sample.Name; status = "FAIL"; reason = "compressed convert failed" })
+        $rows.Add([PSCustomObject]@{ name = $sample.Name; status = "FAIL"; reason = "runtime_optimized convert failed" })
         continue
     }
-    & $VrmToXav2Path --no-compress --diag-json $rawDiagPath --perf-metrics-json $rawPerfPath $sample.FullName $rawOut | Out-Null
+    & $VrmToXav2Path --profile lossless --diag-json $losslessDiagPath --perf-metrics-json $losslessPerfPath $sample.FullName $losslessOut | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $gateA = $false
+        $rows.Add([PSCustomObject]@{ name = $sample.Name; status = "FAIL"; reason = "lossless convert failed" })
+        continue
+    }
+    & $VrmToXav2Path --profile lossless --no-compress --diag-json $rawDiagPath --perf-metrics-json $rawPerfPath $sample.FullName $rawOut | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $gateA = $false
         $rows.Add([PSCustomObject]@{ name = $sample.Name; status = "FAIL"; reason = "raw convert failed" })
         continue
     }
 
-    $probeLines = & $AvatarToolPath $compressedOut
+    $probeLines = & $AvatarToolPath $optimizedOut
     $probe = Parse-AvatarToolOutput -Lines $probeLines
     $probeOk = ($probe.Compat -eq "full") -and ($probe.ParserStage -eq "runtime-ready") -and ($probe.PrimaryError -eq "NONE")
     if (-not $probeOk) {
         $gateA = $false
     }
 
-    if (-not (Test-Path -LiteralPath $diagPath) -or -not (Test-Path -LiteralPath $perfPath)) {
+    if (-not (Test-Path -LiteralPath $optDiagPath) -or -not (Test-Path -LiteralPath $optPerfPath) -or
+        -not (Test-Path -LiteralPath $losslessDiagPath) -or -not (Test-Path -LiteralPath $losslessPerfPath)) {
         $gateB = $false
     }
-    $diag = if (Test-Path -LiteralPath $diagPath) { Get-Content -Raw -Path $diagPath | ConvertFrom-Json } else { $null }
-    $perf = if (Test-Path -LiteralPath $perfPath) { Get-Content -Raw -Path $perfPath | ConvertFrom-Json } else { $null }
+    $optDiag = if (Test-Path -LiteralPath $optDiagPath) { Get-Content -Raw -Path $optDiagPath | ConvertFrom-Json } else { $null }
+    $optPerf = if (Test-Path -LiteralPath $optPerfPath) { Get-Content -Raw -Path $optPerfPath | ConvertFrom-Json } else { $null }
+    $losslessDiag = if (Test-Path -LiteralPath $losslessDiagPath) { Get-Content -Raw -Path $losslessDiagPath | ConvertFrom-Json } else { $null }
+    $losslessPerf = if (Test-Path -LiteralPath $losslessPerfPath) { Get-Content -Raw -Path $losslessPerfPath | ConvertFrom-Json } else { $null }
     $rawPerf = if (Test-Path -LiteralPath $rawPerfPath) { Get-Content -Raw -Path $rawPerfPath | ConvertFrom-Json } else { $null }
 
-    if ($null -eq $diag -or $null -eq $perf -or $null -eq $rawPerf) {
+    if ($null -eq $optDiag -or $null -eq $optPerf -or $null -eq $losslessDiag -or $null -eq $losslessPerf -or $null -eq $rawPerf) {
         $gateB = $false
         $rows.Add([PSCustomObject]@{ name = $sample.Name; status = "FAIL"; reason = "missing diag/perf artifacts" })
         continue
     }
-    if (($diag.sectionCount -le 0) -or ($diag.rawTotalBytes -le 0) -or ($diag.writtenTotalBytes -le 0)) {
+    if (($optDiag.sectionCount -le 0) -or ($optDiag.rawTotalBytes -le 0) -or ($optDiag.writtenTotalBytes -le 0) -or
+        ($losslessDiag.sectionCount -le 0) -or ($losslessDiag.rawTotalBytes -le 0) -or ($losslessDiag.writtenTotalBytes -le 0)) {
+        $gateB = $false
+    }
+    if (($optDiag.profile -ne "runtime_optimized") -or ($losslessDiag.profile -ne "lossless")) {
+        $gateB = $false
+    }
+    if (($null -eq $optDiag.runtimeValidation) -or ($null -eq $optDiag.qualityGate)) {
         $gateB = $false
     }
 
-    & $VrmToXav2Path --strict --strict-allowlist $allowPath $sample.FullName (Join-Path $outDir ($base + ".strict.xav2")) | Out-Null
+    $qualityOk = $false
+    if (($null -ne $optDiag.runtimeValidation) -and ($null -ne $optDiag.qualityGate)) {
+        $runtimeReady = [bool]$optDiag.runtimeValidation.runtimeReady
+        $qualityPass = [bool]$optDiag.qualityGate.pass
+        $qualityOk = $runtimeReady -and $qualityPass
+    }
+    if (-not $qualityOk) {
+        $gateQ = $false
+    }
+
+    & $VrmToXav2Path --strict --profile lossless --strict-allowlist $allowPath $sample.FullName (Join-Path $outDir ($base + ".strict.xav2")) | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $gateC = $false
     }
 
+    $profileReduction = 0.0
     $sizeReduction = 0.0
     $writeReduction = 0.0
     $bufferReduction = 0.0
+    if ([double]$losslessPerf.writtenTotalBytes -gt 0) {
+        $profileReduction = (1.0 - ([double]$optPerf.writtenTotalBytes / [double]$losslessPerf.writtenTotalBytes)) * 100.0
+    }
     if ([double]$rawPerf.writtenTotalBytes -gt 0) {
-        $sizeReduction = (1.0 - ([double]$perf.writtenTotalBytes / [double]$rawPerf.writtenTotalBytes)) * 100.0
+        $sizeReduction = (1.0 - ([double]$optPerf.writtenTotalBytes / [double]$rawPerf.writtenTotalBytes)) * 100.0
     }
     if ([double]$rawPerf.timingMs.write -gt 0) {
-        $writeReduction = (1.0 - ([double]$perf.timingMs.write / [double]$rawPerf.timingMs.write)) * 100.0
+        $writeReduction = (1.0 - ([double]$optPerf.timingMs.write / [double]$rawPerf.timingMs.write)) * 100.0
     }
     if ([double]$rawPerf.maxPayloadBufferBytes -gt 0) {
-        $bufferReduction = (1.0 - ([double]$perf.maxPayloadBufferBytes / [double]$rawPerf.maxPayloadBufferBytes)) * 100.0
+        $bufferReduction = (1.0 - ([double]$optPerf.maxPayloadBufferBytes / [double]$rawPerf.maxPayloadBufferBytes)) * 100.0
+    }
+
+    $profileKpiOk = ($profileReduction -ge $TargetProfileReductionPercent)
+    if (-not $profileKpiOk) {
+        $gateE = $false
     }
 
     $kpiOk = ($sizeReduction -ge $TargetSizeReductionPercent) -and
              ($writeReduction -ge $TargetWriteTimeReductionPercent) -and
              ($bufferReduction -ge $TargetBufferReductionPercent)
-    if ($EnforceKpi -and (-not $kpiOk)) {
+    if (-not $kpiOk) {
         $gateD = $false
     }
 
@@ -152,20 +194,24 @@ foreach ($sample in $samples) {
         compat = $probe.Compat
         parser_stage = $probe.ParserStage
         primary_error = $probe.PrimaryError
-        section_count = [int]$diag.sectionCount
-        compressed_sections = [int]$diag.compressedSectionCount
+        section_count = [int]$optDiag.sectionCount
+        compressed_sections = [int]$optDiag.compressedSectionCount
+        profile_reduction_pct = [Math]::Round($profileReduction, 2)
         size_reduction_pct = [Math]::Round($sizeReduction, 2)
         write_reduction_pct = [Math]::Round($writeReduction, 2)
         buffer_reduction_pct = [Math]::Round($bufferReduction, 2)
+        quality_ok = $qualityOk
+        profile_kpi_ok = $profileKpiOk
         kpi_ok = $kpiOk
     })
 }
 
-$overall = $gateA -and $gateB -and $gateC -and (($EnforceKpi -and $gateD) -or (-not $EnforceKpi))
+$overall = $gateA -and $gateB -and $gateC -and $gateQ -and (($EnforceKpi -and $gateD -and $gateE) -or (-not $EnforceKpi))
 $summary = [ordered]@{
     generated = (Get-Date).ToString("s")
     enforce_kpi = [bool]$EnforceKpi
     kpi_targets = [ordered]@{
+        profile_reduction_percent = $TargetProfileReductionPercent
         size_reduction_percent = $TargetSizeReductionPercent
         write_time_reduction_percent = $TargetWriteTimeReductionPercent
         buffer_reduction_percent = $TargetBufferReductionPercent
@@ -174,6 +220,8 @@ $summary = [ordered]@{
         gate_a_conversion_and_load = if ($gateA) { "PASS" } else { "FAIL" }
         gate_b_diag_contract = if ($gateB) { "PASS" } else { "FAIL" }
         gate_c_strict_allowlist_smoke = if ($gateC) { "PASS" } else { "FAIL" }
+        gate_q_quality = if ($gateQ) { "PASS" } else { "FAIL" }
+        gate_e_profile_kpi = if ($gateE) { "PASS" } else { "FAIL" }
         gate_d_kpi = if ($gateD) { "PASS" } else { "FAIL" }
         overall = if ($overall) { "PASS" } else { "FAIL" }
     }
@@ -193,12 +241,14 @@ $lines += "Gate Results"
 $lines += "- GateA (conversion and load): $($summary.gates.gate_a_conversion_and_load)"
 $lines += "- GateB (diag contract): $($summary.gates.gate_b_diag_contract)"
 $lines += "- GateC (strict allowlist smoke): $($summary.gates.gate_c_strict_allowlist_smoke)"
+$lines += "- GateQ (quality): $($summary.gates.gate_q_quality)"
+$lines += "- GateE (profile kpi): $($summary.gates.gate_e_profile_kpi)"
 $lines += "- GateD (kpi): $($summary.gates.gate_d_kpi)"
 $lines += "- Overall: $($summary.gates.overall)"
 $lines += ""
 $lines += "Rows"
 foreach ($row in $rows) {
-    $lines += "- $($row.name): status=$($row.status), compat=$($row.compat), stage=$($row.parser_stage), primary=$($row.primary_error), sections=$($row.section_count), compressed=$($row.compressed_sections), sizeRed=$($row.size_reduction_pct)%, writeRed=$($row.write_reduction_pct)%, bufferRed=$($row.buffer_reduction_pct)%, kpi=$($row.kpi_ok)"
+    $lines += "- $($row.name): status=$($row.status), compat=$($row.compat), stage=$($row.parser_stage), primary=$($row.primary_error), sections=$($row.section_count), compressed=$($row.compressed_sections), quality=$($row.quality_ok), profileRed=$($row.profile_reduction_pct)%, sizeRed=$($row.size_reduction_pct)%, writeRed=$($row.write_reduction_pct)%, bufferRed=$($row.buffer_reduction_pct)%, profileKpi=$($row.profile_kpi_ok), kpi=$($row.kpi_ok)"
 }
 $lines += ""
 $lines += "Artifacts"

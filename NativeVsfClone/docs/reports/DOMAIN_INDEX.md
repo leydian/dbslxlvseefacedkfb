@@ -81,6 +81,7 @@ Domain-level report navigation hub.
 - [2026-03-03_vrm_runtime_slice.md](./weekly/2026-W10/2026-03-03_vrm_runtime_slice.md)
 
 ## vsfavatar
+- [2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md](./weekly/2026-W10/2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md)
 - [2026-03-06_vsfavatar_error_contract_and_target_gate_update.md](./weekly/2026-W10/2026-03-06_vsfavatar_error_contract_and_target_gate_update.md)
 - [2026-03-06_vsfavatar_sidecar_v5_contract_and_gate_wiring.md](./weekly/2026-W10/2026-03-06_vsfavatar_sidecar_v5_contract_and_gate_wiring.md)
 - [2026-03-05_vsfavatar_render_gate_and_error_contract.md](./weekly/2026-W10/2026-03-05_vsfavatar_render_gate_and_error_contract.md)

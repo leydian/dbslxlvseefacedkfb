@@ -1,12 +1,14 @@
 
 #include <array>
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <string>
@@ -38,11 +40,18 @@ constexpr std::uint16_t kSectionPhysicsColliderPayload = 0x001AU;
 constexpr std::uint16_t kSectionFlagPayloadCompressedLz4 = 0x0001U;
 
 struct CliOptions {
+    enum class ExportProfile {
+        Lossless = 0,
+        RuntimeOptimized,
+    };
+
     bool strict = false;
     bool enable_compression = true;
+    bool compression_overridden = false;
     std::string diag_json_path;
     std::string strict_allowlist_path;
     std::string perf_metrics_json_path;
+    ExportProfile profile = ExportProfile::Lossless;
     std::string input_path;
     std::string output_path;
 };
@@ -77,6 +86,29 @@ struct PerfMetrics {
     std::uint64_t validate_ms = 0U;
     std::uint64_t write_ms = 0U;
     std::uint64_t total_ms = 0U;
+};
+
+struct ProfileDecisions {
+    std::uint32_t skipped_material_legacy_param_sections = 0U;
+    std::uint32_t skipped_disabled_springbones = 0U;
+    std::uint32_t skipped_disabled_physbones = 0U;
+    std::uint64_t stripped_blendshape_normal_bytes = 0U;
+    std::uint64_t stripped_blendshape_tangent_bytes = 0U;
+};
+
+struct RuntimeValidation {
+    bool attempted = false;
+    bool load_ok = false;
+    std::string compat = "unknown";
+    std::string parser_stage;
+    std::string primary_error_code;
+    std::vector<std::string> warning_codes;
+    std::vector<std::string> missing_features;
+};
+
+struct QualitySummary {
+    std::vector<std::string> p0_issue_codes;
+    std::vector<std::string> p0_runtime_warning_codes;
 };
 
 void WriteU16Le(std::ofstream* out, std::uint16_t value) {
@@ -174,6 +206,16 @@ std::string BoolJson(bool value) {
     return value ? "true" : "false";
 }
 
+std::string ProfileName(CliOptions::ExportProfile profile) {
+    switch (profile) {
+        case CliOptions::ExportProfile::RuntimeOptimized:
+            return "runtime_optimized";
+        case CliOptions::ExportProfile::Lossless:
+        default:
+            return "lossless";
+    }
+}
+
 std::string TrimAscii(std::string value) {
     auto is_space = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
     while (!value.empty() && is_space(static_cast<unsigned char>(value.front()))) {
@@ -197,6 +239,34 @@ std::string ToUpperAscii(std::string value) {
 
 std::string NormalizeCode(std::string value) {
     return ToUpperAscii(TrimAscii(std::move(value)));
+}
+
+std::string CompatToString(vsfclone::avatar::AvatarCompatLevel level) {
+    switch (level) {
+        case vsfclone::avatar::AvatarCompatLevel::Full:
+            return "full";
+        case vsfclone::avatar::AvatarCompatLevel::Partial:
+            return "partial";
+        case vsfclone::avatar::AvatarCompatLevel::Failed:
+            return "failed";
+        default:
+            return "unknown";
+    }
+}
+
+bool IsFiniteF32(float value) {
+    return std::isfinite(value);
+}
+
+std::string NormalizeMorphKey(std::string value) {
+    std::string out;
+    out.reserve(value.size());
+    for (const unsigned char c : value) {
+        if (std::isalnum(c) != 0) {
+            out.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+    return out;
 }
 
 std::uint64_t MillisecondsSince(const std::chrono::steady_clock::time_point& start) {
@@ -244,7 +314,7 @@ void AppendStringArrayJson(std::string* out, const std::vector<std::string>& val
     *out += "]";
 }
 
-std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg) {
+std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg, CliOptions::ExportProfile profile) {
     std::vector<std::string> mesh_refs;
     mesh_refs.reserve(pkg.mesh_payloads.size());
     for (const auto& mesh : pkg.mesh_payloads) {
@@ -264,6 +334,7 @@ std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg) {
     std::string out = "{";
     out += "\"schemaVersion\":1,";
     out += "\"exporterVersion\":\"0.4.0\",";
+    out += "\"exportProfile\":\"" + ProfileName(profile) + "\",";
     out += "\"avatarId\":\"" + EscapeJson(fs::path(pkg.source_path).stem().string()) + "\",";
     out += "\"displayName\":\"" + EscapeJson(pkg.display_name.empty() ? fs::path(pkg.source_path).stem().string() : pkg.display_name) + "\",";
     out += "\"sourceExt\":\".vrm\",";
@@ -447,7 +518,11 @@ bool BuildSkeletonRigSection(const vsfclone::avatar::SkeletonRigPayload& rig, st
     return true;
 }
 
-bool BuildBlendShapeSection(const vsfclone::avatar::BlendShapeRenderPayload& blendshape, std::vector<std::uint8_t>* out) {
+bool BuildBlendShapeSection(
+    const vsfclone::avatar::BlendShapeRenderPayload& blendshape,
+    bool strip_normals_and_tangents,
+    ProfileDecisions* profile_decisions,
+    std::vector<std::uint8_t>* out) {
     if (out == nullptr || blendshape.frames.size() > std::numeric_limits<std::uint32_t>::max()) {
         return false;
     }
@@ -466,10 +541,21 @@ bool BuildBlendShapeSection(const vsfclone::avatar::BlendShapeRenderPayload& ble
         AppendF32Le(out, frame.weight);
         AppendU32Le(out, static_cast<std::uint32_t>(frame.delta_vertices.size()));
         out->insert(out->end(), frame.delta_vertices.begin(), frame.delta_vertices.end());
-        AppendU32Le(out, static_cast<std::uint32_t>(frame.delta_normals.size()));
-        out->insert(out->end(), frame.delta_normals.begin(), frame.delta_normals.end());
-        AppendU32Le(out, static_cast<std::uint32_t>(frame.delta_tangents.size()));
-        out->insert(out->end(), frame.delta_tangents.begin(), frame.delta_tangents.end());
+        if (strip_normals_and_tangents) {
+            if (profile_decisions != nullptr) {
+                profile_decisions->stripped_blendshape_normal_bytes +=
+                    static_cast<std::uint64_t>(frame.delta_normals.size());
+                profile_decisions->stripped_blendshape_tangent_bytes +=
+                    static_cast<std::uint64_t>(frame.delta_tangents.size());
+            }
+            AppendU32Le(out, 0U);
+            AppendU32Le(out, 0U);
+        } else {
+            AppendU32Le(out, static_cast<std::uint32_t>(frame.delta_normals.size()));
+            out->insert(out->end(), frame.delta_normals.begin(), frame.delta_normals.end());
+            AppendU32Le(out, static_cast<std::uint32_t>(frame.delta_tangents.size()));
+            out->insert(out->end(), frame.delta_tangents.begin(), frame.delta_tangents.end());
+        }
     }
     return true;
 }
@@ -801,12 +887,103 @@ std::vector<ValidationIssue> ValidatePackageForExport(const vsfclone::avatar::Av
     }
 
     for (const auto& rig : pkg.skeleton_rig_payloads) {
-        for (const auto& bone : rig.bones) {
+        if (rig.bones.empty()) {
+            PushIssue(&issues, "XAV4_RIG_EMPTY", "mesh=" + rig.mesh_name + ", no rig bones", true);
+            continue;
+        }
+        std::unordered_set<std::uint32_t> humanoid_ids;
+        const std::size_t bone_count = rig.bones.size();
+        for (std::size_t i = 0U; i < rig.bones.size(); ++i) {
+            const auto& bone = rig.bones[i];
             if (bone.local_matrix_16.size() != 16U) {
                 PushIssue(&issues, "XAV4_RIG_MATRIX_INVALID",
                           "mesh=" + rig.mesh_name + ", bone=" + bone.bone_name + ", matrixCount=" +
                               std::to_string(bone.local_matrix_16.size()),
                           true);
+            }
+            for (float v : bone.local_matrix_16) {
+                if (!IsFiniteF32(v)) {
+                    PushIssue(&issues, "XAV4_RIG_MATRIX_NONFINITE",
+                              "mesh=" + rig.mesh_name + ", bone=" + bone.bone_name,
+                              true);
+                    break;
+                }
+            }
+            if (bone.parent_index < -1 || bone.parent_index >= static_cast<std::int32_t>(bone_count)) {
+                PushIssue(&issues, "XAV4_RIG_PARENT_INDEX_INVALID",
+                          "mesh=" + rig.mesh_name + ", bone=" + bone.bone_name + ", parent=" +
+                              std::to_string(bone.parent_index),
+                          true);
+            }
+            if (bone.parent_index == static_cast<std::int32_t>(i)) {
+                PushIssue(&issues, "XAV4_RIG_PARENT_SELF_LOOP",
+                          "mesh=" + rig.mesh_name + ", bone=" + bone.bone_name,
+                          true);
+            }
+            if (bone.humanoid_id != vsfclone::avatar::HumanoidBoneId::Unknown) {
+                humanoid_ids.insert(static_cast<std::uint32_t>(bone.humanoid_id));
+            }
+        }
+
+        if (!humanoid_ids.empty()) {
+            const std::array<vsfclone::avatar::HumanoidBoneId, 5> required_ids = {
+                vsfclone::avatar::HumanoidBoneId::Hips,
+                vsfclone::avatar::HumanoidBoneId::Spine,
+                vsfclone::avatar::HumanoidBoneId::Head,
+                vsfclone::avatar::HumanoidBoneId::LeftUpperArm,
+                vsfclone::avatar::HumanoidBoneId::RightUpperArm,
+            };
+            for (const auto id : required_ids) {
+                if (humanoid_ids.find(static_cast<std::uint32_t>(id)) == humanoid_ids.end()) {
+                    PushIssue(&issues, "XAV4_RIG_REQUIRED_HUMANOID_MISSING",
+                              "mesh=" + rig.mesh_name + ", humanoidId=" +
+                                  std::to_string(static_cast<std::uint32_t>(id)),
+                              true);
+                }
+            }
+        }
+    }
+
+    std::unordered_set<std::string> blendshape_keys;
+    for (const auto& blendshape : pkg.blendshape_payloads) {
+        for (const auto& frame : blendshape.frames) {
+            const std::size_t vbytes = frame.delta_vertices.size();
+            const std::size_t nbytes = frame.delta_normals.size();
+            const std::size_t tbytes = frame.delta_tangents.size();
+            if ((vbytes % 12U) != 0U) {
+                PushIssue(&issues, "XAV2_BLENDSHAPE_DELTA_VERTEX_INVALID",
+                          "mesh=" + blendshape.mesh_name + ", frame=" + frame.name +
+                              ", vertexBytes=" + std::to_string(vbytes),
+                          true);
+            }
+            if (!frame.delta_normals.empty() && nbytes != vbytes) {
+                PushIssue(&issues, "XAV2_BLENDSHAPE_DELTA_NORMAL_MISMATCH",
+                          "mesh=" + blendshape.mesh_name + ", frame=" + frame.name,
+                          true);
+            }
+            if (!frame.delta_tangents.empty() && tbytes != vbytes) {
+                PushIssue(&issues, "XAV2_BLENDSHAPE_DELTA_TANGENT_MISMATCH",
+                          "mesh=" + blendshape.mesh_name + ", frame=" + frame.name,
+                          true);
+            }
+            blendshape_keys.insert(NormalizeMorphKey(frame.name));
+        }
+    }
+
+    if (!blendshape_keys.empty()) {
+        const std::array<std::string, 7> required_keys = {"a", "i", "u", "e", "o", "blink", "joy"};
+        for (const auto& required : required_keys) {
+            bool present = false;
+            for (const auto& key : blendshape_keys) {
+                if (key == required || key.find(required) != std::string::npos) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) {
+                PushIssue(&issues, "XAV2_BLENDSHAPE_CORE_MISSING",
+                          "requiredKey=" + required,
+                          false);
             }
         }
     }
@@ -853,9 +1030,31 @@ StrictDecision EvaluateStrictDecision(
         return decision;
     }
 
+    static const std::unordered_set<std::string> kHardRejectCodes = {
+        "XAV2_ASSET_MISSING",
+        "XAV2_SCHEMA_INVALID",
+        "XAV2_SKIN_SCHEMA_INVALID",
+        "XAV2_SKELETON_SCHEMA_INVALID",
+        "XAV4_RIG_SCHEMA_INVALID",
+        "XAV4_RIG_MATRIX_INVALID",
+        "XAV4_RIG_MATRIX_NONFINITE",
+        "XAV4_RIG_PARENT_INDEX_INVALID",
+        "XAV4_RIG_PARENT_SELF_LOOP",
+        "XAV2_BLENDSHAPE_SCHEMA_INVALID",
+        "XAV2_BLENDSHAPE_DELTA_VERTEX_INVALID",
+        "XAV2_BLENDSHAPE_DELTA_NORMAL_MISMATCH",
+        "XAV2_BLENDSHAPE_DELTA_TANGENT_MISMATCH",
+        "XAV2_PHYSICS_SCHEMA_INVALID",
+        "XAV2_PHYSICS_REF_MISSING",
+        "XAV2_PHYSICS_COLLIDER_DUPLICATE",
+    };
     auto classify = [&](const std::string& raw_code, std::vector<std::string>* accepted, std::vector<std::string>* rejected) {
         const std::string code = NormalizeCode(raw_code);
         if (code.empty()) {
+            return;
+        }
+        if (kHardRejectCodes.find(code) != kHardRejectCodes.end()) {
+            rejected->push_back(code);
             return;
         }
         if (!allowlist.empty() && allowlist.find(code) != allowlist.end()) {
@@ -874,13 +1073,73 @@ StrictDecision EvaluateStrictDecision(
     return decision;
 }
 
+RuntimeValidation ValidateRuntimeOutput(const std::string& output_path) {
+    RuntimeValidation validation;
+    validation.attempted = true;
+
+    vsfclone::avatar::AvatarLoaderFacade facade;
+    const auto loaded = facade.Load(output_path);
+    if (!loaded.ok) {
+        validation.load_ok = false;
+        validation.primary_error_code = "LOAD_FAILED";
+        return validation;
+    }
+
+    validation.load_ok = true;
+    const auto& pkg = loaded.value;
+    validation.compat = CompatToString(pkg.compat_level);
+    validation.parser_stage = pkg.parser_stage;
+    validation.primary_error_code = pkg.primary_error_code;
+    validation.warning_codes = pkg.warning_codes;
+    validation.missing_features = pkg.missing_features;
+    return validation;
+}
+
+QualitySummary BuildQualitySummary(
+    const std::vector<ValidationIssue>& issues,
+    const RuntimeValidation& runtime_validation) {
+    QualitySummary summary;
+    std::unordered_set<std::string> seen_issue_codes;
+    for (const auto& issue : issues) {
+        if (issue.error) {
+            const std::string code = NormalizeCode(issue.code);
+            if (!code.empty() && seen_issue_codes.insert(code).second) {
+                summary.p0_issue_codes.push_back(code);
+            }
+        }
+    }
+    static const std::unordered_set<std::string> kRuntimeP0Codes = {
+        "XAV2_ASSET_MISSING",
+        "XAV2_SCHEMA_INVALID",
+        "XAV2_SKIN_SCHEMA_INVALID",
+        "XAV2_SKELETON_SCHEMA_INVALID",
+        "XAV4_RIG_SCHEMA_INVALID",
+        "XAV2_BLENDSHAPE_SCHEMA_INVALID",
+        "XAV2_PHYSICS_SCHEMA_INVALID",
+        "XAV2_PHYSICS_REF_MISSING",
+        "XAV4_RIG_PARENT_INDEX_INVALID",
+        "XAV4_RIG_MATRIX_NONFINITE",
+    };
+    std::unordered_set<std::string> seen_runtime_codes;
+    for (const auto& code_raw : runtime_validation.warning_codes) {
+        const std::string code = NormalizeCode(code_raw);
+        if (kRuntimeP0Codes.find(code) != kRuntimeP0Codes.end() && seen_runtime_codes.insert(code).second) {
+            summary.p0_runtime_warning_codes.push_back(code);
+        }
+    }
+    return summary;
+}
+
 bool WriteDiagJson(
     const std::string& path,
     const CliOptions& options,
     const vsfclone::avatar::AvatarPackage& pkg,
     const WriteStats& stats,
+    const ProfileDecisions& profile_decisions,
     const std::vector<ValidationIssue>& issues,
     const StrictDecision& strict_decision,
+    const RuntimeValidation& runtime_validation,
+    const QualitySummary& quality_summary,
     const PerfMetrics& perf,
     const std::string& output_path) {
     std::ofstream out(path, std::ios::binary);
@@ -890,6 +1149,7 @@ bool WriteDiagJson(
     out << "{";
     out << "\"input\":\"" << EscapeJson(options.input_path) << "\",";
     out << "\"output\":\"" << EscapeJson(output_path) << "\",";
+    out << "\"profile\":\"" << EscapeJson(ProfileName(options.profile)) << "\",";
     out << "\"strict\":" << BoolJson(options.strict) << ",";
     out << "\"strictAllowlistPath\":\"" << EscapeJson(options.strict_allowlist_path) << "\",";
     out << "\"compressionEnabled\":" << BoolJson(options.enable_compression) << ",";
@@ -910,6 +1170,13 @@ bool WriteDiagJson(
     out << "\"springBone\":" << pkg.springbone_payloads.size() << ",";
     out << "\"physBone\":" << pkg.physbone_payloads.size() << ",";
     out << "\"collider\":" << pkg.physics_colliders.size();
+    out << "},";
+    out << "\"profileDecisions\":{";
+    out << "\"skippedMaterialLegacyParamSections\":" << profile_decisions.skipped_material_legacy_param_sections << ",";
+    out << "\"skippedDisabledSpringBones\":" << profile_decisions.skipped_disabled_springbones << ",";
+    out << "\"skippedDisabledPhysBones\":" << profile_decisions.skipped_disabled_physbones << ",";
+    out << "\"strippedBlendShapeNormalBytes\":" << profile_decisions.stripped_blendshape_normal_bytes << ",";
+    out << "\"strippedBlendShapeTangentBytes\":" << profile_decisions.stripped_blendshape_tangent_bytes;
     out << "},";
     out << "\"warningCodes\":[";
     for (std::size_t i = 0; i < pkg.warning_codes.size(); ++i) {
@@ -979,6 +1246,54 @@ bool WriteDiagJson(
         out << "}";
     }
     out << "],";
+    out << "\"runtimeValidation\":{";
+    out << "\"attempted\":" << BoolJson(runtime_validation.attempted) << ",";
+    out << "\"loadOk\":" << BoolJson(runtime_validation.load_ok) << ",";
+    out << "\"compat\":\"" << EscapeJson(runtime_validation.compat) << "\",";
+    out << "\"parserStage\":\"" << EscapeJson(runtime_validation.parser_stage) << "\",";
+    out << "\"primaryErrorCode\":\"" << EscapeJson(runtime_validation.primary_error_code) << "\",";
+    out << "\"warningCodes\":[";
+    for (std::size_t i = 0; i < runtime_validation.warning_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(runtime_validation.warning_codes[i]) << "\"";
+    }
+    out << "],";
+    out << "\"missingFeatures\":[";
+    for (std::size_t i = 0; i < runtime_validation.missing_features.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(runtime_validation.missing_features[i]) << "\"";
+    }
+    out << "],";
+    const bool runtime_ready = runtime_validation.load_ok && runtime_validation.compat == "full" &&
+                               runtime_validation.parser_stage == "runtime-ready" &&
+                               runtime_validation.primary_error_code == "NONE";
+    out << "\"runtimeReady\":" << BoolJson(runtime_ready);
+    out << "},";
+    out << "\"qualityGate\":{";
+    out << "\"p0IssueCodes\":[";
+    for (std::size_t i = 0; i < quality_summary.p0_issue_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(quality_summary.p0_issue_codes[i]) << "\"";
+    }
+    out << "],";
+    out << "\"p0RuntimeWarningCodes\":[";
+    for (std::size_t i = 0; i < quality_summary.p0_runtime_warning_codes.size(); ++i) {
+        if (i > 0U) {
+            out << ",";
+        }
+        out << "\"" << EscapeJson(quality_summary.p0_runtime_warning_codes[i]) << "\"";
+    }
+    out << "],";
+    const bool quality_pass = quality_summary.p0_issue_codes.empty() && quality_summary.p0_runtime_warning_codes.empty() &&
+                              runtime_ready;
+    out << "\"pass\":" << BoolJson(quality_pass);
+    out << "},";
     out << "\"issues\":[";
     for (std::size_t i = 0; i < issues.size(); ++i) {
         if (i > 0U) {
@@ -999,6 +1314,7 @@ bool WritePerfMetricsJson(
     const std::string& path,
     const CliOptions& options,
     const WriteStats& stats,
+    const ProfileDecisions& profile_decisions,
     const PerfMetrics& perf) {
     std::ofstream out(path, std::ios::binary);
     if (!out) {
@@ -1007,12 +1323,20 @@ bool WritePerfMetricsJson(
     out << "{";
     out << "\"input\":\"" << EscapeJson(options.input_path) << "\",";
     out << "\"output\":\"" << EscapeJson(options.output_path) << "\",";
+    out << "\"profile\":\"" << EscapeJson(ProfileName(options.profile)) << "\",";
     out << "\"compressionEnabled\":" << BoolJson(options.enable_compression) << ",";
     out << "\"sections\":" << stats.section_count << ",";
     out << "\"compressedSections\":" << stats.compressed_section_count << ",";
     out << "\"rawTotalBytes\":" << stats.raw_total_bytes << ",";
     out << "\"writtenTotalBytes\":" << stats.written_total_bytes << ",";
     out << "\"maxPayloadBufferBytes\":" << stats.max_payload_buffer_bytes << ",";
+    out << "\"profileDecisions\":{";
+    out << "\"skippedMaterialLegacyParamSections\":" << profile_decisions.skipped_material_legacy_param_sections << ",";
+    out << "\"skippedDisabledSpringBones\":" << profile_decisions.skipped_disabled_springbones << ",";
+    out << "\"skippedDisabledPhysBones\":" << profile_decisions.skipped_disabled_physbones << ",";
+    out << "\"strippedBlendShapeNormalBytes\":" << profile_decisions.stripped_blendshape_normal_bytes << ",";
+    out << "\"strippedBlendShapeTangentBytes\":" << profile_decisions.stripped_blendshape_tangent_bytes;
+    out << "},";
     out << "\"timingMs\":{";
     out << "\"load\":" << perf.load_ms << ",";
     out << "\"validate\":" << perf.validate_ms << ",";
@@ -1034,6 +1358,23 @@ std::optional<CliOptions> ParseArgs(int argc, char** argv, std::string* out_erro
         }
         if (arg == "--no-compress") {
             options.enable_compression = false;
+            options.compression_overridden = true;
+            continue;
+        }
+        if (arg == "--profile") {
+            if (i + 1 >= argc) {
+                *out_error = "--profile requires a value: lossless|runtime_optimized";
+                return std::nullopt;
+            }
+            const std::string value = NormalizeCode(argv[++i]);
+            if (value == "LOSSLESS") {
+                options.profile = CliOptions::ExportProfile::Lossless;
+            } else if (value == "RUNTIME_OPTIMIZED") {
+                options.profile = CliOptions::ExportProfile::RuntimeOptimized;
+            } else {
+                *out_error = "unknown profile: " + std::string(argv[i]);
+                return std::nullopt;
+            }
             continue;
         }
         if (arg == "--diag-json") {
@@ -1069,7 +1410,7 @@ std::optional<CliOptions> ParseArgs(int argc, char** argv, std::string* out_erro
 
     if (positional.size() != 2U) {
         *out_error =
-            "Usage: vrm_to_xav2 [--strict] [--strict-allowlist <path>] [--no-compress] [--diag-json <path>] [--perf-metrics-json <path>] <input.vrm> <output.xav2>";
+            "Usage: vrm_to_xav2 [--strict] [--strict-allowlist <path>] [--profile <lossless|runtime_optimized>] [--no-compress] [--diag-json <path>] [--perf-metrics-json <path>] <input.vrm> <output.xav2>";
         return std::nullopt;
     }
     options.input_path = positional[0];
@@ -1111,7 +1452,10 @@ int main(int argc, char** argv) {
         std::cerr << arg_error << "\n";
         return 1;
     }
-    const CliOptions options = *options_opt;
+    CliOptions options = *options_opt;
+    if (options.profile == CliOptions::ExportProfile::RuntimeOptimized && !options.compression_overridden) {
+        options.enable_compression = true;
+    }
 
     PerfMetrics perf;
     vsfclone::avatar::AvatarLoaderFacade facade;
@@ -1154,13 +1498,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const std::string manifest = BuildManifest(pkg);
+    const std::string manifest = BuildManifest(pkg, options.profile);
     out.write("XAV2", 4);
     WriteU16Le(&out, kXav2Version);
     WriteU32Le(&out, static_cast<std::uint32_t>(manifest.size()));
     out.write(manifest.data(), static_cast<std::streamsize>(manifest.size()));
 
     WriteStats stats;
+    ProfileDecisions profile_decisions;
     std::vector<std::uint8_t> payload;
     stats.max_payload_buffer_bytes = std::max<std::uint64_t>(stats.max_payload_buffer_bytes, payload.capacity());
     const auto t_write = std::chrono::steady_clock::now();
@@ -1188,10 +1533,18 @@ int main(int argc, char** argv) {
         if (!BuildMaterialSection(mat, &payload) || !write_payload(kSectionMaterialOverride, "material")) {
             return 1;
         }
-        if (!BuildMaterialParamsSection(mat, &payload) || !write_payload(kSectionMaterialShaderParams, "material-params")) {
-            return 1;
+        const bool has_typed =
+            !mat.typed_float_params.empty() || !mat.typed_color_params.empty() || !mat.typed_texture_params.empty();
+        const bool skip_legacy_mat_params =
+            (options.profile == CliOptions::ExportProfile::RuntimeOptimized) && has_typed;
+        if (skip_legacy_mat_params) {
+            ++profile_decisions.skipped_material_legacy_param_sections;
+        } else {
+            if (!BuildMaterialParamsSection(mat, &payload) || !write_payload(kSectionMaterialShaderParams, "material-params")) {
+                return 1;
+            }
         }
-        if (!mat.typed_float_params.empty() || !mat.typed_color_params.empty() || !mat.typed_texture_params.empty()) {
+        if (has_typed) {
             if (!BuildMaterialTypedParamsSection(mat, &payload) || !write_payload(kSectionMaterialTypedParams, "material-typed")) {
                 return 1;
             }
@@ -1213,7 +1566,10 @@ int main(int argc, char** argv) {
         }
     }
     for (const auto& blendshape : pkg.blendshape_payloads) {
-        if (!BuildBlendShapeSection(blendshape, &payload) || !write_payload(kSectionBlendShapePayload, "blendshape")) {
+        const bool strip_blendshape_normals =
+            options.profile == CliOptions::ExportProfile::RuntimeOptimized;
+        if (!BuildBlendShapeSection(blendshape, strip_blendshape_normals, &profile_decisions, &payload) ||
+            !write_payload(kSectionBlendShapePayload, "blendshape")) {
             return 1;
         }
     }
@@ -1223,11 +1579,19 @@ int main(int argc, char** argv) {
         }
     }
     for (const auto& spring : pkg.springbone_payloads) {
+        if (options.profile == CliOptions::ExportProfile::RuntimeOptimized && !spring.enabled) {
+            ++profile_decisions.skipped_disabled_springbones;
+            continue;
+        }
         if (!BuildSpringBoneSection(spring, &payload) || !write_payload(kSectionSpringBonePayload, "springbone")) {
             return 1;
         }
     }
     for (const auto& phys : pkg.physbone_payloads) {
+        if (options.profile == CliOptions::ExportProfile::RuntimeOptimized && !phys.enabled) {
+            ++profile_decisions.skipped_disabled_physbones;
+            continue;
+        }
         if (!BuildPhysBoneSection(phys, &payload) || !write_payload(kSectionPhysBonePayload, "physbone")) {
             return 1;
         }
@@ -1237,23 +1601,40 @@ int main(int argc, char** argv) {
         std::cerr << "Write failed.\n";
         return 1;
     }
+    out.flush();
+    out.close();
     perf.write_ms = MillisecondsSince(t_write);
     perf.total_ms = MillisecondsSince(t0);
 
+    const RuntimeValidation runtime_validation = ValidateRuntimeOutput(options.output_path);
+    const QualitySummary quality_summary = BuildQualitySummary(issues, runtime_validation);
+
     if (!options.diag_json_path.empty()) {
-        if (!WriteDiagJson(options.diag_json_path, options, pkg, stats, issues, strict_decision, perf, options.output_path)) {
+        if (!WriteDiagJson(
+                options.diag_json_path,
+                options,
+                pkg,
+                stats,
+                profile_decisions,
+                issues,
+                strict_decision,
+                runtime_validation,
+                quality_summary,
+                perf,
+                options.output_path)) {
             std::cerr << "Failed to write diagnostics json: " << options.diag_json_path << "\n";
             return 1;
         }
     }
     if (!options.perf_metrics_json_path.empty()) {
-        if (!WritePerfMetricsJson(options.perf_metrics_json_path, options, stats, perf)) {
+        if (!WritePerfMetricsJson(options.perf_metrics_json_path, options, stats, profile_decisions, perf)) {
             std::cerr << "Failed to write perf metrics json: " << options.perf_metrics_json_path << "\n";
             return 1;
         }
     }
 
-    std::cout << "Wrote XAV2(v" << kXav2Version << "): " << options.output_path << "\n";
+    std::cout << "Wrote XAV2(v" << kXav2Version << ", profile=" << ProfileName(options.profile)
+              << "): " << options.output_path << "\n";
     std::cout << "Sections=" << stats.section_count
               << ", CompressedSections=" << stats.compressed_section_count
               << ", Meshes=" << pkg.mesh_payloads.size()
@@ -1267,6 +1648,21 @@ int main(int argc, char** argv) {
               << ", validate=" << perf.validate_ms
               << ", write=" << perf.write_ms
               << ", total=" << perf.total_ms
+              << "\n";
+    std::cout << "ProfileDecisions: skippedMaterialLegacyParams=" << profile_decisions.skipped_material_legacy_param_sections
+              << ", skippedDisabledSpringBones=" << profile_decisions.skipped_disabled_springbones
+              << ", skippedDisabledPhysBones=" << profile_decisions.skipped_disabled_physbones
+              << ", strippedBlendShapeNormalBytes=" << profile_decisions.stripped_blendshape_normal_bytes
+              << ", strippedBlendShapeTangentBytes=" << profile_decisions.stripped_blendshape_tangent_bytes
+              << "\n";
+    std::cout << "RuntimeValidation: attempted=" << (runtime_validation.attempted ? "true" : "false")
+              << ", loadOk=" << (runtime_validation.load_ok ? "true" : "false")
+              << ", compat=" << runtime_validation.compat
+              << ", stage=" << runtime_validation.parser_stage
+              << ", primary=" << runtime_validation.primary_error_code
+              << "\n";
+    std::cout << "QualityGate: p0Issues=" << quality_summary.p0_issue_codes.size()
+              << ", p0RuntimeWarnings=" << quality_summary.p0_runtime_warning_codes.size()
               << "\n";
     if (options.strict) {
         std::cout << "StrictPolicy: sourceAccepted=" << strict_decision.accepted_source_warning_codes.size()
