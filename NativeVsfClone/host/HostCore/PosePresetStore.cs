@@ -167,6 +167,16 @@ public sealed class PosePresetStore : IPosePresetStore
 
     private static List<PoseBoneUiOffset> NormalizeOffsets(IEnumerable<PoseBoneUiOffset>? source)
     {
+        static bool IsArmLinkedBone(PoseBoneKind bone)
+        {
+            return bone == PoseBoneKind.LeftShoulder ||
+                bone == PoseBoneKind.RightShoulder ||
+                bone == PoseBoneKind.LeftLowerArm ||
+                bone == PoseBoneKind.RightLowerArm ||
+                bone == PoseBoneKind.LeftHand ||
+                bone == PoseBoneKind.RightHand;
+        }
+
         var map = (source ?? Enumerable.Empty<PoseBoneUiOffset>())
             .GroupBy(x => x.Bone)
             .ToDictionary(
@@ -203,20 +213,9 @@ public sealed class PosePresetStore : IPosePresetStore
 
             output.Add(new PoseBoneUiOffset(
                 bone,
-                Clamp(
-                    src.PitchDeg,
-                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm
-                        ? -90.0f
-                        : bone is PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand
-                            ? -60.0f
-                            : -45.0f,
-                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm
-                        ? 90.0f
-                        : bone is PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand
-                            ? 60.0f
-                            : 45.0f),
-                Clamp(src.YawDeg, -45.0f, 45.0f),
-                Clamp(src.RollDeg, -45.0f, 45.0f)));
+                IsArmLinkedBone(bone) ? 0.0f : Clamp(src.PitchDeg, -180.0f, 180.0f),
+                Clamp(src.YawDeg, -180.0f, 180.0f),
+                Clamp(src.RollDeg, -180.0f, 180.0f)));
         }
 
         return output;

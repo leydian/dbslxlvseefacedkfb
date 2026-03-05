@@ -107,6 +107,7 @@ Report list for this week.
 - [2026-03-06_wpf_arm_chain_coupling_shoulder_lowerarm_hand.md](./2026-03-06_wpf_arm_chain_coupling_shoulder_lowerarm_hand.md)
 - [2026-03-06_wpf_arm_pose_slider_wiring.md](./2026-03-06_wpf_arm_pose_slider_wiring.md)
 - [2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md](./2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md)
+- [2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md](./2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md)
 - [2026-03-06_wpf_light_glass_editorial_ui_refresh.md](./2026-03-06_wpf_light_glass_editorial_ui_refresh.md)
 - [2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md](./2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md)
 - [2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md](./2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md)

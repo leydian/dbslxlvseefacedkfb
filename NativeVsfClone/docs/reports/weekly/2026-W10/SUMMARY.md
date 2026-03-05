@@ -10,7 +10,7 @@
 - `vsfavatar`: 8 reports
 - `r01`: 4 reports
 - `vxavatar`: 4 reports
-- `wpf`: 14 reports
+- `wpf`: 15 reports
 - `release`: 3 reports
 - `vrm`: 14 reports
 - `winui`: 3 reports
@@ -38,6 +38,7 @@
 - Newly added: review `2026-03-06_wpf_render_only_mode_toggle.md` for WPF render-only mode toggle, F11 UX, and layout/resize sync behavior.
 - Newly added: review `2026-03-06_wpf_arm_pose_slider_wiring.md` for both/per-arm pitch slider control flow and pose sync/busy-gating behavior in WPF host.
 - Newly added: review `2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md` for arm filtering/tuning, suggested arm preset automation, and native arm-pose update optimization.
+- Newly added: review `2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md` for upper-arm-only safety rollback, preset linked-bone pitch neutralization, and native static-skinning arm-pose scope reduction.
 - Newly added: review `2026-03-06_wpf_light_glass_editorial_ui_refresh.md` for WPF design token expansion, left-rail + workspace layout modernization, and render-only visibility sync updates.
 - Newly added: review `2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md` for single-active rail navigation, diagnostics default-collapse policy, dual-theme runtime switch, and lightweight section transition optimization.
 - Newly added: review `2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md` for HostCore-backed workspace restore, core keyboard shortcuts, nav keyboard traversal, and section-focused primary control routing.

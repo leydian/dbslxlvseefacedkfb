@@ -53,9 +53,9 @@ public sealed partial class HostController
         EnableSmoothing: true,
         SmoothingTauMs: 80.0f,
         DeadbandDeg: 0.8f,
-        SoftClampDeg: 55.0f,
-        HardClampMinDeg: -80.0f,
-        HardClampMaxDeg: 85.0f,
+        SoftClampDeg: 180.0f,
+        HardClampMinDeg: -180.0f,
+        HardClampMaxDeg: 180.0f,
         MaxDegreesPerSecond: 420.0f);
     private readonly Dictionary<PoseBoneKind, ArmPoseFilterState> _armPoseFilterState = new();
     private readonly List<ArmPoseSample> _armPoseHistory = new();
@@ -69,9 +69,6 @@ public sealed partial class HostController
     private static readonly TimeSpan ArmPoseCaptureDelay = TimeSpan.FromMilliseconds(500);
     private const float ArmPoseSuggestionMinDeltaDeg = 1.0f;
     private const float ArmPoseSuggestionQuantizeDeg = 5.0f;
-    private const float ArmShoulderCouplingRatio = 0.55f;
-    private const float ArmLowerArmCouplingRatio = 0.85f;
-    private const float ArmHandCouplingRatio = 0.45f;
 
     public HostController()
         : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new PosePresetStore(), new TrackingInputService())
@@ -570,8 +567,8 @@ public sealed partial class HostController
             return NcResultCode.InvalidArgument;
         }
 
-        var clampedYaw = Clamp(yawDeg, -45.0f, 45.0f);
-        var clampedRoll = Clamp(rollDeg, -45.0f, 45.0f);
+        var clampedYaw = Clamp(yawDeg, -180.0f, 180.0f);
+        var clampedRoll = Clamp(rollDeg, -180.0f, 180.0f);
         var clampedPitch = ClampPitchForBone(bone, pitchDeg);
         if (bone == PoseBoneKind.LeftUpperArm || bone == PoseBoneKind.RightUpperArm)
         {
@@ -585,10 +582,6 @@ public sealed partial class HostController
             clampedPitch,
             clampedYaw,
             clampedRoll);
-        if (bone == PoseBoneKind.LeftUpperArm || bone == PoseBoneKind.RightUpperArm)
-        {
-            ApplyArmChainCoupling(bone, clampedPitch);
-        }
         var rc = ApplyPoseOffsetsInternal("SetPoseOffset");
         RefreshState();
         return rc;
@@ -614,14 +607,14 @@ public sealed partial class HostController
         {
             SmoothingTauMs = Clamp(tuning.SmoothingTauMs, 10.0f, 240.0f),
             DeadbandDeg = Clamp(tuning.DeadbandDeg, 0.0f, 3.0f),
-            SoftClampDeg = Clamp(tuning.SoftClampDeg, 20.0f, 75.0f),
-            HardClampMinDeg = Clamp(tuning.HardClampMinDeg, -90.0f, -40.0f),
-            HardClampMaxDeg = Clamp(tuning.HardClampMaxDeg, 40.0f, 90.0f),
+            SoftClampDeg = Clamp(tuning.SoftClampDeg, 0.0f, 180.0f),
+            HardClampMinDeg = Clamp(tuning.HardClampMinDeg, -180.0f, -1.0f),
+            HardClampMaxDeg = Clamp(tuning.HardClampMaxDeg, 1.0f, 180.0f),
             MaxDegreesPerSecond = Clamp(tuning.MaxDegreesPerSecond, 60.0f, 720.0f),
         };
         if (_armPoseTuning.HardClampMinDeg >= _armPoseTuning.HardClampMaxDeg - 1.0f)
         {
-            _armPoseTuning = _armPoseTuning with { HardClampMinDeg = -80.0f, HardClampMaxDeg = 85.0f };
+            _armPoseTuning = _armPoseTuning with { HardClampMinDeg = -180.0f, HardClampMaxDeg = 180.0f };
         }
         _armPoseFilterState.Clear();
         RefreshState();
@@ -1376,44 +1369,7 @@ public sealed partial class HostController
 
     private static float ClampPitchForBone(PoseBoneKind bone, float pitchDeg)
     {
-        return bone switch
-        {
-            PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm => Clamp(pitchDeg, -90.0f, 90.0f),
-            PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand => Clamp(pitchDeg, -60.0f, 60.0f),
-            _ => Clamp(pitchDeg, -45.0f, 45.0f),
-        };
-    }
-
-    private void ApplyArmChainCoupling(PoseBoneKind upperArmBone, float upperArmPitchDeg)
-    {
-        if (upperArmBone == PoseBoneKind.LeftUpperArm)
-        {
-            ApplyLinkedBonePitch(PoseBoneKind.LeftShoulder, upperArmPitchDeg * ArmShoulderCouplingRatio);
-            ApplyLinkedBonePitch(PoseBoneKind.LeftLowerArm, upperArmPitchDeg * ArmLowerArmCouplingRatio);
-            ApplyLinkedBonePitch(PoseBoneKind.LeftHand, upperArmPitchDeg * ArmHandCouplingRatio);
-        }
-        else if (upperArmBone == PoseBoneKind.RightUpperArm)
-        {
-            ApplyLinkedBonePitch(PoseBoneKind.RightShoulder, upperArmPitchDeg * ArmShoulderCouplingRatio);
-            ApplyLinkedBonePitch(PoseBoneKind.RightLowerArm, upperArmPitchDeg * ArmLowerArmCouplingRatio);
-            ApplyLinkedBonePitch(PoseBoneKind.RightHand, upperArmPitchDeg * ArmHandCouplingRatio);
-        }
-    }
-
-    private void ApplyLinkedBonePitch(PoseBoneKind bone, float pitchDeg)
-    {
-        var idx = FindPoseIndex(bone);
-        if (idx < 0)
-        {
-            return;
-        }
-
-        var current = _poseOffsets[idx];
-        _poseOffsets[idx] = new PoseBoneUiOffset(
-            bone,
-            ClampPitchForBone(bone, pitchDeg),
-            current.YawDeg,
-            current.RollDeg);
+        return Clamp(pitchDeg, -180.0f, 180.0f);
     }
 
     private float ProcessArmPitchInput(PoseBoneKind bone, float rawPitchDeg)

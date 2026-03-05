@@ -2,6 +2,46 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Arm deformation hotfix (upper-arm-only runtime policy)
+
+### Summary
+
+Implemented a safety-first rollback for arm pose behavior to resolve severe sleeve/arm deformation observed under chain-coupled arm motion.
+
+- Upper-arm pose remains controllable with existing filtering/tuning behavior.
+- Shoulder/lower-arm/hand automatic pitch coupling is disabled.
+- Preset normalization now neutralizes linked arm pitch channels.
+- Native static skinning arm pose application is reduced to upper-arm nodes only.
+
+### Changed
+
+- Host arm pose coupling rollback:
+  - `host/HostCore/HostController.cs`
+  - removed arm-chain coupling constants and linked-bone write helpers.
+  - `SetPoseOffset(...)` no longer propagates upper-arm pitch to shoulder/lower-arm/hand.
+- Preset safety normalization:
+  - `host/HostCore/PosePresetStore.cs`
+  - linked arm bones (`Left/RightShoulder`, `Left/RightLowerArm`, `Left/RightHand`) now normalize to `pitch=0`.
+  - yaw/roll normalization behavior is preserved.
+- Native arm pose application scope reduction:
+  - `src/nativecore/native_core.cpp`
+  - `ApplyArmPoseToAvatar(...)` now applies runtime pose to:
+    - `LeftUpperArm`
+    - `RightUpperArm`
+  - linked arm poses are treated as neutral in runtime static skinning path.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md`
+  - `docs/reports/wpf_arm_pose_upperarm_only_hotfix_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -v minimal`: PASS
+  - initial sandboxed restore failed with `NU1301` (nuget network restricted), re-run with network-enabled execution passed.
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+
 ## 2026-03-06 - Arm chain coupling for natural raise/lower (shoulder/lower-arm/hand)
 
 ### Summary

@@ -2590,12 +2590,12 @@ bool ApplyArmPoseToAvatar(
 
     const auto left_upper_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
     const auto right_upper_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
-    const auto left_shoulder_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_SHOULDER));
-    const auto right_shoulder_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_SHOULDER));
-    const auto left_lower_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_LOWER_ARM));
-    const auto right_lower_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_LOWER_ARM));
-    const auto left_hand_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_HAND));
-    const auto right_hand_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_HAND));
+    const NcPoseBoneOffset left_shoulder_pose {};
+    const NcPoseBoneOffset right_shoulder_pose {};
+    const NcPoseBoneOffset left_lower_arm_pose {};
+    const NcPoseBoneOffset right_lower_arm_pose {};
+    const NcPoseBoneOffset left_hand_pose {};
+    const NcPoseBoneOffset right_hand_pose {};
     auto& pose_state = g_state.arm_pose_states[handle];
     auto abs_max_delta = [](const NcPoseBoneOffset& a, const NcPoseBoneOffset& b) {
         return std::max(
@@ -2712,12 +2712,6 @@ bool ApplyArmPoseToAvatar(
         };
         apply_humanoid_pose(avatar::HumanoidBoneId::LeftUpperArm, left_upper_arm_pose);
         apply_humanoid_pose(avatar::HumanoidBoneId::RightUpperArm, right_upper_arm_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::LeftShoulder, left_shoulder_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::RightShoulder, right_shoulder_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::LeftLowerArm, left_lower_arm_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::RightLowerArm, right_lower_arm_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::LeftHand, left_hand_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::RightHand, right_hand_pose);
 
         avatar::SkeletonRenderPayload posed_skeleton;
         posed_skeleton.mesh_name = skeleton_payload->mesh_name;
@@ -4327,14 +4321,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ++avatar_slot;
         std::uint32_t material_index_oob_count = 0U;
         std::uint32_t mesh_extent_outlier_skipped_count = 0U;
-        std::uint32_t bounds_outlier_excluded_count = 0U;
+        std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
             if (it->second.source_type == AvatarSourceType::Xav2) {
-                if (mesh_index < preview_bounds_excluded.size() && preview_bounds_excluded[mesh_index] != 0U) {
-                    ++bounds_outlier_excluded_count;
-                    continue;
-                }
                 const float ex = std::max(mesh.bounds_max.x - mesh.bounds_min.x, 0.0f);
                 const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
                 const float ez = std::max(mesh.bounds_max.z - mesh.bounds_min.z, 0.0f);
@@ -4408,7 +4398,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_BOUNDS_OUTLIER_EXCLUDED: meshes=" << bounds_outlier_excluded_count;
+                warning << "W_RENDER: XAV2_BOUNDS_OUTLIER_EXCLUDED: autofit_meshes=" << bounds_outlier_excluded_count;
                 if (!excluded_mesh_names.empty()) {
                     warning << ", names=";
                     for (std::size_t i = 0U; i < excluded_mesh_names.size(); ++i) {
