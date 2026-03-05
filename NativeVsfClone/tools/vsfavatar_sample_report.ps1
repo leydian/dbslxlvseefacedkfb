@@ -99,6 +99,9 @@ foreach ($f in $files) {
         "  SidecarSerializedAttempts: $($sidecar.serialized_attempt_count)" | Add-Content -Path $OutputPath
         "  SidecarSerializedBestPath: $($sidecar.serialized_best_candidate_path)" | Add-Content -Path $OutputPath
         "  SidecarSerializedBestScore: $($sidecar.serialized_best_candidate_score)" | Add-Content -Path $OutputPath
+        "  SidecarRecoveryAttemptProfile: $($sidecar.recovery_attempt_profile)" | Add-Content -Path $OutputPath
+        "  SidecarMeshExtractStage: $($sidecar.mesh_extract_stage)" | Add-Content -Path $OutputPath
+        "  SidecarTimingMs: $($sidecar.timing_ms)" | Add-Content -Path $OutputPath
         "  SidecarFailedReadOffset: $($sidecar.failed_block_read_offset)" | Add-Content -Path $OutputPath
         "  SidecarFailedCompressedSize: $($sidecar.failed_block_compressed_size)" | Add-Content -Path $OutputPath
         "  SidecarFailedUncompressedSize: $($sidecar.failed_block_uncompressed_size)" | Add-Content -Path $OutputPath
@@ -111,6 +114,8 @@ foreach ($f in $files) {
             ReadOffset = [uint64]($sidecar.failed_block_read_offset)
             CSize = [uint64]($sidecar.failed_block_compressed_size)
             USize = [uint64]($sidecar.failed_block_uncompressed_size)
+            MeshExtractStage = "$($sidecar.mesh_extract_stage)"
+            TimingMs = [uint64]($sidecar.timing_ms)
         }
     } catch {
         "  SidecarParseError: failed to parse JSON output" | Add-Content -Path $OutputPath
@@ -123,6 +128,8 @@ foreach ($f in $files) {
             ReadOffset = 0
             CSize = 0
             USize = 0
+            MeshExtractStage = ""
+            TimingMs = 0
         }
     }
     "" | Add-Content -Path $OutputPath

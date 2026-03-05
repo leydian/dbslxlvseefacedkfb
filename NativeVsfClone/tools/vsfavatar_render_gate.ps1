@@ -50,6 +50,8 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
             ParserStage = ""
             PrimaryError = ""
             MeshPayloads = 0
+            SidecarMeshExtractStage = ""
+            SidecarTimingMs = ""
         }
         continue
     }
@@ -68,6 +70,14 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
         $currentSample.MeshPayloads = [int]$matches[1]
         continue
     }
+    if ($line -match '^\s+SidecarMeshExtractStage:\s*(.*)$') {
+        $currentSample.SidecarMeshExtractStage = $matches[1].Trim()
+        continue
+    }
+    if ($line -match '^\s+SidecarTimingMs:\s*(.*)$') {
+        $currentSample.SidecarTimingMs = $matches[1].Trim()
+        continue
+    }
 }
 if ($null -ne $currentSample) {
     $sampleRows += $currentSample
@@ -84,7 +94,10 @@ $emptyPrimaryCount = @($lines | Where-Object { $_ -match '^\s+PrimaryError:\s*$'
 $noEmptyPrimaryOnComplete = $completeStageCount -gt 0 -and $emptyPrimaryCount -eq 0
 $targetRow = $sampleRows | Where-Object { $_.Name -like $TargetSamplePattern } | Select-Object -First 1
 $targetSamplePresent = $null -ne $targetRow
-$overall = $atLeastOneRenderable -and $noEmptyPrimaryOnComplete -and $targetSamplePresent
+$targetHasContractFields = $targetSamplePresent -and
+    (-not [string]::IsNullOrWhiteSpace("$($targetRow.SidecarMeshExtractStage)")) -and
+    (-not [string]::IsNullOrWhiteSpace("$($targetRow.SidecarTimingMs)"))
+$overall = $atLeastOneRenderable -and $noEmptyPrimaryOnComplete -and $targetSamplePresent -and $targetHasContractFields
 
 $summary = @()
 $summary += "VSFAvatar Render Gate Summary"
@@ -97,6 +110,7 @@ $summary += "Gate Results"
 $summary += "- GateR1 (at least one sample has mesh payloads): $(if($atLeastOneRenderable){'PASS'}else{'FAIL'})"
 $summary += "- GateR2 (complete-stage rows have primary error code): $(if($noEmptyPrimaryOnComplete){'PASS'}else{'FAIL'})"
 $summary += "- GateR3 (target sample row present): $(if($targetSamplePresent){'PASS'}else{'FAIL'})"
+$summary += "- GateR4 (target row has sidecar contract fields): $(if($targetHasContractFields){'PASS'}else{'FAIL'})"
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Metrics"
@@ -108,10 +122,14 @@ if ($targetSamplePresent) {
     $summary += "- target_stage: $($targetRow.ParserStage)"
     $summary += "- target_primary_error: $($targetRow.PrimaryError)"
     $summary += "- target_mesh_payloads: $($targetRow.MeshPayloads)"
+    $summary += "- target_mesh_extract_stage: $($targetRow.SidecarMeshExtractStage)"
+    $summary += "- target_timing_ms: $($targetRow.SidecarTimingMs)"
 } else {
     $summary += "- target_stage: n/a"
     $summary += "- target_primary_error: n/a"
     $summary += "- target_mesh_payloads: n/a"
+    $summary += "- target_mesh_extract_stage: n/a"
+    $summary += "- target_timing_ms: n/a"
 }
 
 $summaryDir = Split-Path -Parent $SummaryPath

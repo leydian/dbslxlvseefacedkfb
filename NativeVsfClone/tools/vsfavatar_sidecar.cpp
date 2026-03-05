@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <chrono>
 
 #include "vsfclone/vsf/unityfs_reader.h"
 
@@ -42,8 +43,8 @@ std::string EscapeJson(const std::string& s) {
 void PrintErrorJson(const std::string& error) {
     std::cout << "{"
               << "\"status\":\"error\","
-              << "\"schema_version\":4,"
-              << "\"extractor_version\":\"inhouse-sidecar-v4\","
+              << "\"schema_version\":5,"
+              << "\"extractor_version\":\"inhouse-sidecar-v5\","
               << "\"error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"primary_error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"error_message\":\"" << EscapeJson(error) << "\","
@@ -74,6 +75,7 @@ std::string TruncateForSummary(const std::string& text, std::size_t max_chars) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    const auto started_at = std::chrono::steady_clock::now();
     if (argc < 2) {
         PrintErrorJson("usage: vsfavatar_sidecar <path_to_vsfavatar>");
         return 1;
@@ -176,12 +178,38 @@ int main(int argc, char** argv) {
     if (p.probe_stage == "complete" && p.object_table_parsed) {
         primary_error_code = "NONE";
     }
+    std::string mesh_extract_stage = "mesh-extract-not-attempted";
+    if (!p.object_table_parsed) {
+        mesh_extract_stage = "object-table-unavailable";
+    } else if (mesh_count == 0U) {
+        mesh_extract_stage = "object-table-ready-no-mesh";
+    } else {
+        mesh_extract_stage = "mesh-objects-discovered-payload-pending";
+    }
+
+    const std::string recovery_attempt_profile =
+        p.serialized_attempt_count > 0U || p.reconstruction_candidate_count > 1U
+            ? "serialized-candidate-scan-v1"
+            : "metadata-recon-baseline-v1";
+
+    if (primary_error_code == "NONE") {
+        if (mesh_extract_stage == "mesh-objects-discovered-payload-pending") {
+            primary_error_code = "VSF_MESH_EXTRACT_FAILED";
+        } else if (p.probe_stage == "failed-serialized") {
+            primary_error_code = "VSF_SERIALIZED_TABLE_INCOMPLETE";
+        } else if (mesh_extract_stage == "object-table-ready-no-mesh") {
+            primary_error_code = "VSF_MESH_PAYLOAD_MISSING";
+        }
+    }
+
     const bool can_emit_placeholder_payload = p.probe_stage == "complete" && p.object_table_parsed && mesh_count == 0U;
     const std::string render_payload_mode = can_emit_placeholder_payload ? "placeholder_quad_v1" : "none";
     const std::uint32_t mesh_payload_count = can_emit_placeholder_payload ? 1U : 0U;
     const std::uint32_t material_payload_count = can_emit_placeholder_payload ? 1U : 0U;
     const std::string serialized_best_candidate_path =
         p.serialized_best_candidate_path.empty() ? "NONE" : p.serialized_best_candidate_path;
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started_at).count();
     if (can_emit_placeholder_payload) {
         warnings.push_back("W_RENDER_PAYLOAD: placeholder quad emitted (mesh extraction pending).");
         missing_features.push_back("authored mesh payload extraction");
@@ -189,12 +217,15 @@ int main(int argc, char** argv) {
 
     std::cout << "{"
               << "\"status\":\"ok\","
-              << "\"schema_version\":4,"
-              << "\"extractor_version\":\"inhouse-sidecar-v4\","
+              << "\"schema_version\":5,"
+              << "\"extractor_version\":\"inhouse-sidecar-v5\","
               << "\"display_name\":\"" << EscapeJson(fs::path(path).stem().string()) << "\","
               << "\"compat_level\":\"" << compat_level << "\","
               << "\"probe_stage\":\"" << EscapeJson(p.probe_stage) << "\","
               << "\"primary_error_code\":\"" << EscapeJson(primary_error_code) << "\","
+              << "\"recovery_attempt_profile\":\"" << EscapeJson(recovery_attempt_profile) << "\","
+              << "\"mesh_extract_stage\":\"" << EscapeJson(mesh_extract_stage) << "\","
+              << "\"timing_ms\":" << elapsed_ms << ","
               << "\"object_table_parsed\":" << (p.object_table_parsed ? "true" : "false") << ","
               << "\"mesh_count\":" << mesh_count << ","
               << "\"material_count\":" << material_count << ","

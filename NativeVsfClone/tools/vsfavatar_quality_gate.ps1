@@ -305,6 +305,9 @@ $requiredFields = @(
     "SidecarSerializedAttempts",
     "SidecarSerializedBestPath",
     "SidecarSerializedBestScore",
+    "SidecarRecoveryAttemptProfile",
+    "SidecarMeshExtractStage",
+    "SidecarTimingMs",
     "SidecarOffsetFamily",
     "SidecarReconCandidateCount",
     "SidecarBestCandidateScore",
@@ -324,6 +327,8 @@ $primaryCounts = @{}
 $objectTableParsedTrue = 0
 $objectTableParsedFalse = 0
 $serializedAttempts = @()
+$sidecarTimingMs = @()
+$meshExtractStageCounts = @{}
 
 if ($UseFixedSet -and $sampleNames.Count -ne $FixedSamples.Count) {
     $gateA = $false
@@ -364,6 +369,9 @@ foreach ($name in $sampleNames) {
     $primary = $sample["SidecarPrimaryError"]
     if ($primaryCounts.ContainsKey($primary)) { $primaryCounts[$primary] += 1 } else { $primaryCounts[$primary] = 1 }
     $serializedAttempts += (To-UInt64 $sample["SidecarSerializedAttempts"])
+    $sidecarTimingMs += (To-UInt64 $sample["SidecarTimingMs"])
+    $meshExtractStage = "$($sample["SidecarMeshExtractStage"])"
+    if ($meshExtractStageCounts.ContainsKey($meshExtractStage)) { $meshExtractStageCounts[$meshExtractStage] += 1 } else { $meshExtractStageCounts[$meshExtractStage] = 1 }
 
     if ($stage -eq "failed-serialized" -or $stage -eq "complete") {
         $gateB = $true
@@ -408,6 +416,12 @@ $attemptMax = [uint64]0
 if ($serializedAttempts.Count -gt 0) {
     $attemptAvg = [Math]::Round((($serializedAttempts | Measure-Object -Sum).Sum / $serializedAttempts.Count), 3)
     $attemptMax = [uint64](($serializedAttempts | Measure-Object -Maximum).Maximum)
+}
+$timingAvg = 0.0
+$timingMax = [uint64]0
+if ($sidecarTimingMs.Count -gt 0) {
+    $timingAvg = [Math]::Round((($sidecarTimingMs | Measure-Object -Sum).Sum / $sidecarTimingMs.Count), 3)
+    $timingMax = [uint64](($sidecarTimingMs | Measure-Object -Maximum).Maximum)
 }
 
 $improved = 0
@@ -465,6 +479,8 @@ $summary += ""
 $summary += "Probe Metrics"
 $summary += "- SerializedAttempts_Avg: $attemptAvg"
 $summary += "- SerializedAttempts_Max: $attemptMax"
+$summary += "- SidecarTimingMs_Avg: $timingAvg"
+$summary += "- SidecarTimingMs_Max: $timingMax"
 $summary += "- ObjectTableParsed_True: $objectTableParsedTrue"
 $summary += "- ObjectTableParsed_False: $objectTableParsedFalse"
 $summary += ""
@@ -501,10 +517,19 @@ foreach ($k in ($primaryCounts.Keys | Sort-Object)) {
         Count = [int]$primaryCounts[$k]
     }
 }
+foreach ($k in ($meshExtractStageCounts.Keys | Sort-Object)) {
+    $aggregateRows += [PSCustomObject]@{
+        Metric = "MeshExtractStage"
+        Key = "$k"
+        Count = [int]$meshExtractStageCounts[$k]
+    }
+}
 $aggregateRows += [PSCustomObject]@{ Metric = "ObjectTableParsed"; Key = "True"; Count = $objectTableParsedTrue }
 $aggregateRows += [PSCustomObject]@{ Metric = "ObjectTableParsed"; Key = "False"; Count = $objectTableParsedFalse }
 $aggregateRows += [PSCustomObject]@{ Metric = "SerializedAttempts"; Key = "Avg"; Count = $attemptAvg }
 $aggregateRows += [PSCustomObject]@{ Metric = "SerializedAttempts"; Key = "Max"; Count = $attemptMax }
+$aggregateRows += [PSCustomObject]@{ Metric = "SidecarTimingMs"; Key = "Avg"; Count = $timingAvg }
+$aggregateRows += [PSCustomObject]@{ Metric = "SidecarTimingMs"; Key = "Max"; Count = $timingMax }
 
 $aggregateSummary = @()
 $aggregateSummary += "VSFAvatar Aggregate Metrics"
@@ -528,6 +553,15 @@ $aggregateSummary += ""
 $aggregateSummary += "Serialized Attempts"
 $aggregateSummary += "- Avg: $attemptAvg"
 $aggregateSummary += "- Max: $attemptMax"
+$aggregateSummary += ""
+$aggregateSummary += "Sidecar Timing (ms)"
+$aggregateSummary += "- Avg: $timingAvg"
+$aggregateSummary += "- Max: $timingMax"
+$aggregateSummary += ""
+$aggregateSummary += "Mesh Extract Stage Distribution"
+foreach ($k in ($meshExtractStageCounts.Keys | Sort-Object)) {
+    $aggregateSummary += "- ${k}: $($meshExtractStageCounts[$k])"
+}
 
 $summaryDir = Split-Path -Parent $SummaryPath
 if (-not (Test-Path $summaryDir)) {

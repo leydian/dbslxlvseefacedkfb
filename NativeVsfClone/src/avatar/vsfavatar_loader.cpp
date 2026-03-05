@@ -349,8 +349,8 @@ static std::vector<std::string> GetJsonStringArray(const std::string& json, cons
 
 static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
     const auto schema_version = GetJsonU32(output, "schema_version");
-    if (schema_version != 2U && schema_version != 3U && schema_version != 4U) {
-        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2, 3, or 4");
+    if (schema_version != 2U && schema_version != 3U && schema_version != 4U && schema_version != 5U) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2, 3, 4, or 5");
     }
     const auto status = GetJsonString(output, "status");
     if (status.empty()) {
@@ -377,6 +377,17 @@ static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
     }
     if (status == "ok" && !HasJsonKey(output, "missing_features")) {
         return core::Result<bool>::Fail("SCHEMA_INVALID: missing missing_features");
+    }
+    if (status == "ok" && schema_version >= 5U) {
+        if (GetJsonString(output, "recovery_attempt_profile").empty()) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing recovery_attempt_profile");
+        }
+        if (GetJsonString(output, "mesh_extract_stage").empty()) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing mesh_extract_stage");
+        }
+        if (!HasJsonKey(output, "timing_ms")) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing timing_ms");
+        }
     }
     return core::Result<bool>::Ok(true);
 }
@@ -580,6 +591,18 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     if (!serialized_best_candidate_path.empty()) {
         pkg.warnings.push_back("W_SERIALIZED_PATH: " + serialized_best_candidate_path);
     }
+    const auto recovery_attempt_profile = GetJsonString(output, "recovery_attempt_profile");
+    if (!recovery_attempt_profile.empty()) {
+        pkg.warnings.push_back("W_RECOVERY_PROFILE: " + recovery_attempt_profile);
+    }
+    const auto mesh_extract_stage = GetJsonString(output, "mesh_extract_stage");
+    if (!mesh_extract_stage.empty()) {
+        pkg.warnings.push_back("W_MESH_EXTRACT_STAGE: " + mesh_extract_stage);
+    }
+    const auto timing_ms = GetJsonU64(output, "timing_ms", 0ULL);
+    if (HasJsonKey(output, "timing_ms")) {
+        pkg.warnings.push_back("W_TIMING_MS: " + std::to_string(timing_ms));
+    }
     const auto serialized_detail_error_code = GetJsonString(output, "serialized_detail_error_code");
     const auto serialized_last_failure_offset = GetJsonU64(output, "serialized_last_failure_offset");
     const auto serialized_last_failure_window_size = GetJsonU64(output, "serialized_last_failure_window_size");
@@ -638,8 +661,16 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.missing_features.push_back("mesh/material object discovery");
     }
     if (pkg.mesh_payloads.empty() && pkg.compat_level != AvatarCompatLevel::Failed) {
-        pkg.primary_error_code = "VSF_MESH_PAYLOAD_MISSING";
-        pkg.warnings.push_back("W_PRIMARY: VSF_MESH_PAYLOAD_MISSING");
+        if (pkg.primary_error_code.empty() || pkg.primary_error_code == "NONE") {
+            if (mesh_extract_stage == "mesh-objects-discovered-payload-pending") {
+                pkg.primary_error_code = "VSF_MESH_EXTRACT_FAILED";
+            } else if (pkg.parser_stage == "failed-serialized") {
+                pkg.primary_error_code = "VSF_SERIALIZED_TABLE_INCOMPLETE";
+            } else {
+                pkg.primary_error_code = "VSF_MESH_PAYLOAD_MISSING";
+            }
+        }
+        pkg.warnings.push_back("W_PRIMARY: " + pkg.primary_error_code);
         if (std::find(pkg.missing_features.begin(), pkg.missing_features.end(), "authored mesh payload extraction") ==
             pkg.missing_features.end()) {
             pkg.missing_features.push_back("authored mesh payload extraction");
