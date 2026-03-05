@@ -242,6 +242,18 @@ public partial class MainWindow : Window
             MessageBox.Show(this, _validationState.AvatarPathError, "입력 오류 (Invalid Input)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        var runtime = _controller.LastSnapshot.Runtime;
+        if (!runtime.RuntimePathMatch)
+        {
+            RevealDiagnosticsForFailure("LoadAvatar.RuntimePathMismatch");
+            ReportUserFailure(
+                "LoadAvatar",
+                $"Runtime path mismatch ({runtime.RuntimePathWarningCode}). Launch the dist/wpf build and retry.",
+                $"Loaded nativecore path: {NormalizeDiagField(runtime.NativeCoreModulePath)}\n" +
+                $"Expected nativecore path: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}\n" +
+                $"WarningCode: {NormalizeDiagField(runtime.RuntimePathWarningCode)}");
+            return;
+        }
 
         if (!int.TryParse(LoadTimeoutTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMs))
         {
@@ -1416,6 +1428,9 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
         runtimeSb.AppendLine($"NativeCoreModulePath: {NormalizeDiagField(runtime.NativeCoreModulePath)}");
         runtimeSb.AppendLine($"NativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}");
+        runtimeSb.AppendLine($"ExpectedNativeCoreModulePath: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}");
+        runtimeSb.AppendLine($"RuntimePathMatch: {runtime.RuntimePathMatch}");
+        runtimeSb.AppendLine($"RuntimePathWarningCode: {NormalizeDiagField(runtime.RuntimePathWarningCode)}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;

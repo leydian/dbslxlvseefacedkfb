@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+
 namespace HostCore;
 
 public sealed record DiagnosticsModel(
@@ -15,15 +18,27 @@ public sealed record DiagnosticsModel(
     ulong SpoutFallbackCount,
     string SpoutLastErrorCode,
     string NativeCoreModulePath,
-    string NativeCoreModuleTimestampUtc)
+    string NativeCoreModuleTimestampUtc,
+    string ExpectedNativeCoreModulePath,
+    bool RuntimePathMatch,
+    string RuntimePathWarningCode)
 {
     public static DiagnosticsModel Empty =>
-        new(string.Empty, 0U, false, false, 0.0f, 0.0f, 0.0f, 0.0f, 0U, "unknown", false, 0UL, string.Empty, string.Empty, string.Empty);
+        new(string.Empty, 0U, false, false, 0.0f, 0.0f, 0.0f, 0.0f, 0U, "unknown", false, 0UL, string.Empty, string.Empty, string.Empty, string.Empty, false, "HOST_RUNTIME_PATH_UNKNOWN");
 
     public static DiagnosticsModel FromNative(in NcRuntimeStats stats, in NcSpoutDiagnostics spout)
     {
         var nativeCorePath = NativeCoreInterop.GetLoadedNativeCorePath();
         var nativeCoreTimestampUtc = NativeCoreInterop.GetLoadedNativeCoreTimestampUtc();
+        var expectedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "nativecore.dll"));
+        var normalizedLoaded = string.IsNullOrWhiteSpace(nativeCorePath) ? string.Empty : Path.GetFullPath(nativeCorePath);
+        var pathMatch = !string.IsNullOrWhiteSpace(normalizedLoaded) &&
+                        string.Equals(normalizedLoaded, expectedPath, StringComparison.OrdinalIgnoreCase);
+        var warningCode = pathMatch
+            ? string.Empty
+            : string.IsNullOrWhiteSpace(normalizedLoaded)
+                ? "HOST_RUNTIME_PATH_UNKNOWN"
+                : "HOST_RUNTIME_MISMATCH_DIST_EXPECTED";
         return new DiagnosticsModel(
             LastError: NativeCoreInterop.FormatLastError(),
             RenderReadyAvatarCount: stats.RenderReadyAvatarCount,
@@ -39,7 +54,10 @@ public sealed record DiagnosticsModel(
             SpoutFallbackCount: spout.FallbackCount,
             SpoutLastErrorCode: spout.LastErrorCode ?? string.Empty,
             NativeCoreModulePath: nativeCorePath,
-            NativeCoreModuleTimestampUtc: nativeCoreTimestampUtc);
+            NativeCoreModuleTimestampUtc: nativeCoreTimestampUtc,
+            ExpectedNativeCoreModulePath: expectedPath,
+            RuntimePathMatch: pathMatch,
+            RuntimePathWarningCode: warningCode);
     }
 
     public static DiagnosticsModel Capture()
