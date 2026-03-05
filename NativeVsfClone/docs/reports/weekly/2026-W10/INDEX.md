@@ -87,6 +87,7 @@ Report list for this week.
 - [2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md](./2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_refinement.md](./2026-03-06_vrm_springbone_mtoon_runtime_refinement.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_uplift.md](./2026-03-06_vrm_springbone_mtoon_runtime_uplift.md)
+- [2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md](./2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md)
 - [2026-03-06_vrm_to_xav2_strict_allowlist_and_quality_gate.md](./2026-03-06_vrm_to_xav2_strict_allowlist_and_quality_gate.md)
 - [2026-03-06_vrm_to_xav2_v5_exporter_upgrade.md](./2026-03-06_vrm_to_xav2_v5_exporter_upgrade.md)
 - [2026-03-06_vrm_render_order_and_wpf_load_sequence_stabilization.md](./2026-03-06_vrm_render_order_and_wpf_load_sequence_stabilization.md)

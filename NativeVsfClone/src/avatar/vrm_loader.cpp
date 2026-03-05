@@ -1791,6 +1791,7 @@ struct MaterialInfo {
     float uv_anim_scroll_y = 0.0f;
     float uv_anim_rotation = 0.0f;
     bool has_matcap_binding = false;
+    bool matcap_declared = false;
     bool has_outline_binding = false;
     bool has_uv_anim_binding = false;
     bool has_mtoon_binding = false;
@@ -3088,6 +3089,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     }
                     std::vector<float> matcap_factor;
                     if (TryGetNumberArray(*mtoon, "matcapFactor", 3U, &matcap_factor)) {
+                        info.matcap_declared = true;
                         info.matcap_color = {matcap_factor[0], matcap_factor[1], matcap_factor[2], 1.0f};
                         info.matcap_strength = std::max(0.35f, info.matcap_strength);
                         info.has_matcap_binding = true;
@@ -3095,6 +3097,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     }
                     const auto* matcap_tex = FindKey(*mtoon, "matcapTexture");
                     if (matcap_tex != nullptr && matcap_tex->type == JsonValue::Type::Object) {
+                        info.matcap_declared = true;
                         std::size_t texture_index = std::numeric_limits<std::size_t>::max();
                         if (TryGetIndex(*matcap_tex, "index", &texture_index)) {
                             if (resolve_texture_name(texture_index, &info.matcap_texture_name, "matcapTexture for material '" + info.name + "'")) {
@@ -3301,6 +3304,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     std::uint32_t skinned_primitive_count = 0U;
     std::uint32_t skinned_payload_emitted = 0U;
     std::uint32_t skinned_payload_failed = 0U;
+    std::vector<bool> mesh_node_transform_skin_bypass;
+    mesh_node_transform_skin_bypass.assign(meshes_v->array_value.size(), false);
     for (std::size_t mesh_i = 0U; mesh_i < meshes_v->array_value.size(); ++mesh_i) {
         const auto& mesh = meshes_v->array_value[mesh_i];
         if (mesh.type != JsonValue::Type::Object) {
@@ -3370,10 +3375,15 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 continue;
             }
             if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
-                ApplyPositionTransformToVertexBlob(
-                    &mesh_payload.vertex_blob,
-                    mesh_payload.vertex_stride,
-                    mesh_node_transforms[mesh_i]);
+                const bool is_skinned_mesh = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
+                if (is_skinned_mesh) {
+                    mesh_node_transform_skin_bypass[mesh_i] = true;
+                } else {
+                    ApplyPositionTransformToVertexBlob(
+                        &mesh_payload.vertex_blob,
+                        mesh_payload.vertex_stride,
+                        mesh_node_transforms[mesh_i]);
+                }
             }
 
             const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
@@ -3609,14 +3619,16 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     pkg.parser_stage = "payload";
     std::uint32_t transformed_mesh_count = 0U;
     for (std::size_t i = 0U; i < mesh_has_node_transform.size(); ++i) {
-        if (mesh_has_node_transform[i]) {
+        if (mesh_has_node_transform[i] && !(i < mesh_has_skin.size() && mesh_has_skin[i])) {
             ++transformed_mesh_count;
         }
     }
     if (transformed_mesh_count > 0U) {
         std::string sample_applied_mesh = "unknown";
         for (std::size_t mesh_i = 0U; mesh_i < mesh_has_node_transform.size(); ++mesh_i) {
-            if (mesh_has_node_transform[mesh_i] && mesh_i < mesh_names_by_index.size()) {
+            if (mesh_has_node_transform[mesh_i] &&
+                !(mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i]) &&
+                mesh_i < mesh_names_by_index.size()) {
                 sample_applied_mesh = mesh_names_by_index[mesh_i];
                 break;
             }
@@ -3625,6 +3637,23 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count) +
             ", sampleMesh=" + sample_applied_mesh);
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
+    }
+    std::uint32_t node_transform_skin_bypass_count = 0U;
+    std::string sample_skin_bypass_mesh = "unknown";
+    for (std::size_t mesh_i = 0U; mesh_i < mesh_node_transform_skin_bypass.size(); ++mesh_i) {
+        if (!mesh_node_transform_skin_bypass[mesh_i]) {
+            continue;
+        }
+        ++node_transform_skin_bypass_count;
+        if (sample_skin_bypass_mesh == "unknown" && mesh_i < mesh_names_by_index.size()) {
+            sample_skin_bypass_mesh = mesh_names_by_index[mesh_i];
+        }
+    }
+    if (node_transform_skin_bypass_count > 0U) {
+        pkg.warnings.push_back(
+            "W_NODE: VRM_NODE_TRANSFORM_SKIN_BYPASS: meshes=" + std::to_string(node_transform_skin_bypass_count) +
+            ", sampleMesh=" + sample_skin_bypass_mesh);
+        pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIN_BYPASS");
     }
     pkg.warnings.push_back("W_NODE: VRM_NODE_TRANSFORM_BASIS: global");
     if (skinned_primitive_count > 0U) {
@@ -3735,15 +3764,21 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
     bool has_mtoon_binding = false;
     bool has_matcap_binding = false;
+    bool has_matcap_declared = false;
     bool has_outline_binding = false;
     bool has_uv_anim_binding = false;
+    std::uint32_t unresolved_matcap_materials = 0U;
     for (const auto& m : parsed_materials) {
         if (m.has_mtoon_binding) {
             has_mtoon_binding = true;
         }
+        has_matcap_declared = has_matcap_declared || m.matcap_declared;
         has_matcap_binding = has_matcap_binding || m.has_matcap_binding;
         has_outline_binding = has_outline_binding || m.has_outline_binding;
         has_uv_anim_binding = has_uv_anim_binding || m.has_uv_anim_binding;
+        if (m.matcap_declared && !m.has_matcap_binding) {
+            ++unresolved_matcap_materials;
+        }
     }
     if (!has_mtoon_binding) {
         pkg.missing_features.push_back("MToon advanced parameter binding");
@@ -3755,8 +3790,10 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         if (!has_uv_anim_binding) {
             pkg.missing_features.push_back("MToon uv animation");
         }
-        if (!has_matcap_binding) {
-            pkg.missing_features.push_back("MToon matcap");
+        if (has_matcap_declared && !has_matcap_binding) {
+            pkg.warnings.push_back(
+                "W_MTOON: VRM_MTOON_MATCAP_UNRESOLVED: materials=" + std::to_string(unresolved_matcap_materials));
+            pkg.warning_codes.push_back("VRM_MTOON_MATCAP_UNRESOLVED");
         }
     }
 

@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - VRM MToon diagnostics precision + safe material fallback + warning priority
+
+### Summary
+
+Implemented a VRM-focused compatibility hardening pass that removes false-positive `MToon matcap` missing-feature reporting, adds renderer-side safe fallback for unresolved VRM material texture references, and improves UI-facing warning selection so render/material issues are surfaced ahead of incidental trailing warnings.
+
+### Changed
+
+- VRM loader MToon diagnostics refinement:
+  - `src/avatar/vrm_loader.cpp`
+  - added per-material `matcap_declared` tracking.
+  - `MToon matcap` is no longer added to `missing_features` when matcap is simply unused by the asset.
+  - added explicit warning/code path for declared-but-unresolved matcap:
+    - warning: `W_MTOON: VRM_MTOON_MATCAP_UNRESOLVED: materials=<n>`
+    - code: `VRM_MTOON_MATCAP_UNRESOLVED`
+- Native renderer VRM material safe fallback:
+  - `src/nativecore/native_core.cpp`
+  - added unresolved texture tracking per slot (`base/normal/rim/emission/matcap/uvAnimationMask`) during material resource build.
+  - for VRM sources, unresolved slots now trigger conservative fallback values instead of unstable shading contribution.
+  - fallback emits dedicated warning code:
+    - `VRM_MATERIAL_SAFE_FALLBACK_APPLIED`
+  - existing XAV2 fallback path remains intact and still reports `XAV2_MATERIAL_FALLBACK_APPLIED`.
+- Warning metadata/selection priority:
+  - `src/nativecore/native_core.cpp`
+  - warning classifier updated to recognize VRM render fallback/mtoon unresolved codes under render category.
+  - `FillAvatarInfo` now prefers render/material-oriented warning code/message for `last_warning_code` and `last_warning` when available, reducing diagnostic masking by non-render trailing warnings.
+- Documentation updates:
+  - `docs/reports/vrm_mtoon_diagnostics_and_safe_material_fallback_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build-thumb --config Release --target nativecore avatar_tool`: PASS
+- `NativeVsfClone/build-thumb/Release/avatar_tool.exe sample/개인작11-3.vrm`: PASS
+  - `MissingFeatures: 2`
+  - `LastMissingFeature: MToon uv animation`
+  - `MToon matcap` no longer reported as generic missing feature.
+- `NativeVsfClone/build-thumb/Release/avatar_tool.exe sample/Kikyo_FT Variant.vrm`: PASS
+  - no regression to `MToon matcap` missing-feature reporting.
+
 ## 2026-03-06 - WPF UI v4 operation hub + first-broadcast timing telemetry
 
 ### Summary
