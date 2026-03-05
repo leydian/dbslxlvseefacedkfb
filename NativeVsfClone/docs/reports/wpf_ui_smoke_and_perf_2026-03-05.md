@@ -74,15 +74,15 @@ Quantitative runtime metrics capture status:
 Artifacts and outcomes:
 
 - `build/reports/host_publish_latest.txt`
-  - generated: `2026-03-05T16:01:21.4764432+09:00`
+  - generated: `2026-03-05T16:42:47.5904580+09:00`
   - `HostPublishMode: WPF_PLUS_WINUI`
   - WPF publish: PASS, WinUI publish: FAIL (`TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
 - `build/reports/vsfavatar_gate_summary.txt`
-  - generated: `2026-03-05T16:10:11`
+  - generated: `2026-03-05T16:57:03`
   - `Overall: PASS`
   - `HostTrackStatus: PASS_WPF_BASELINE`
 - `build/reports/quality_baseline_summary.txt`
-  - generated: `2026-03-05T16:10:21`
+  - generated: `2026-03-05T16:49:46`
   - `Overall: PASS`
 
 ## Acceptance Gate for Closure

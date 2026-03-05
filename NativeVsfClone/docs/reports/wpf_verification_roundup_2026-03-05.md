@@ -142,3 +142,24 @@ Additional WPF crash evidence captured from Application event log:
 - provider: `.NET Runtime`, event id: `1026`
 - unhandled exception: `System.DllNotFoundException`
 - stack includes WPF hwnd subclass hook path (`SetWindowLongPtrWndProc`).
+
+## Follow-up Update (2026-03-05, final pass in this round)
+
+Latest verification snapshot after WinUI project-property simplification attempt:
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - run time: `2026-03-05T16:42:47.5904580+09:00`
+  - WPF publish: PASS
+  - WinUI publish: FAIL (`TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:57:03`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:49:46`
+  - `Overall: PASS`
+
+Outcome:
+
+- WPF-first release path remains stable in this round.
+- WinUI blocker remains open and is not resolved by csproj publish-property simplification.

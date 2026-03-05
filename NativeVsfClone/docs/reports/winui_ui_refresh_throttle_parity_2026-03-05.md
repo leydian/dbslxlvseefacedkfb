@@ -151,6 +151,43 @@ Investigation attempt applied during this rerun:
 - outcome: no improvement; same XAML compiler failure signature persisted.
 - decision: reverted target-framework experiment and retained baseline project target (`net8.0-windows10.0.19041.0`).
 
+## Follow-up Verification Update (2026-03-05, final pass in this round)
+
+Additional mitigation attempt:
+
+- simplified `host/WinUiHost/WinUiHost.csproj` for build stability:
+  - `EnableMsixTooling`: `true` -> `false`
+  - removed publish-oriented defaults from project-level build path:
+    - `RuntimeIdentifier`
+    - `SelfContained`
+    - `PublishSingleFile`
+    - `WindowsAppSDKSelfContained`
+    - `UseRidGraph`
+  - kept publish control in `tools/publish_hosts.ps1` invocation arguments
+
+Validation after this adjustment:
+
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release`: FAIL
+  - `MSB3073` (`XamlCompiler.exe`) persists
+- `publish_hosts.ps1 -IncludeWinUi`
+  - `Host publish run: 2026-03-05T16:42:47.5904580+09:00`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL
+  - class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:57:03`
+  - `HostTrackStatus: PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:49:46`
+  - `Overall: PASS`
+
+Conclusion for this pass:
+
+- blocker is not resolved by project-level publish/build property simplification alone.
+- parity behavior remains implemented; remaining gap is still XAML toolchain execution in this environment.
+
 ## Detailed Change Inventory (This Round)
 
 Code changes:

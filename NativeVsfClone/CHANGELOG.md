@@ -2,6 +2,44 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - WinUI blocker mitigation attempt (csproj simplification) + final rerun
+
+### Summary
+
+Applied a focused WinUI blocker mitigation attempt by simplifying `WinUiHost.csproj` build-time properties, then reran host/gate/baseline verification.
+
+- `WinUiHost.csproj` simplification:
+  - `EnableMsixTooling`: `true` -> `false`
+  - removed project-level publish defaults (`RuntimeIdentifier`, `SelfContained`, `PublishSingleFile`, `WindowsAppSDKSelfContained`, `UseRidGraph`)
+- verification outcome:
+  - WinUI build/publish still fails at `XamlCompiler.exe` (`MSB3073`)
+  - classification remains `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- WPF-first path and quality gates remained PASS
+
+### Verification (latest)
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - run: `2026-03-05T16:42:47.5904580+09:00`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`WMC9999`/`MSB3073`)
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:57:03`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:49:46`
+  - `Overall: PASS`
+
+### Documentation updates
+
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
+  - appended final-pass mitigation attempt and rerun snapshot
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - refreshed latest verification timestamps
+- `docs/reports/wpf_verification_roundup_2026-03-05.md`
+  - appended final follow-up snapshot for this round
+
 ## 2026-03-05 - Host blocker follow-up rerun (WinUI persists, WPF crash signal clarified)
 
 ### Summary
