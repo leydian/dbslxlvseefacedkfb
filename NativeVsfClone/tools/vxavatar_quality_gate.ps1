@@ -17,6 +17,7 @@ param(
     ),
     [switch]$UseFixedSet,
     [switch]$RequireRealFullSamples,
+    [switch]$EnableLegacyVxVxa2Checks,
     [string[]]$FixedVxSamples = @(
         "demo_mvp.vxavatar"
     ),
@@ -158,6 +159,10 @@ $gateH = $true
 $failReasons = @()
 
 $requiredFields = @("InputKind", "InputTag", "Format", "Compat", "ParserStage", "PrimaryError")
+$supportedKinds = @("XAV2")
+if ($EnableLegacyVxVxa2Checks) {
+    $supportedKinds = @("XAV2", "VXAvatar", "VXA2")
+}
 
 $foundFixedVx = 0
 $foundCorruptVx = 0
@@ -170,6 +175,18 @@ $foundRealFull = 0
 foreach ($name in $sampleNames) {
     $sample = $current.Samples[$name]
 
+    if (-not (Require-Field -Sample $sample -Field "InputKind") -or -not (Require-Field -Sample $sample -Field "InputTag")) {
+        $gateD = $false
+        $failReasons += "GateD: $name missing required identity fields (InputKind/InputTag)"
+        continue
+    }
+
+    $kind = $sample["InputKind"]
+    $tag = $sample["InputTag"]
+    if (-not (Is-OneOf -Value $kind -Allowed $supportedKinds)) {
+        continue
+    }
+
     foreach ($field in $requiredFields) {
         if (-not (Require-Field -Sample $sample -Field $field)) {
             $gateD = $false
@@ -177,12 +194,6 @@ foreach ($name in $sampleNames) {
         }
     }
 
-    if (-not (Require-Field -Sample $sample -Field "InputKind") -or -not (Require-Field -Sample $sample -Field "InputTag")) {
-        continue
-    }
-
-    $kind = $sample["InputKind"]
-    $tag = $sample["InputTag"]
     $format = $sample["Format"]
     $compat = $sample["Compat"]
     $stage = $sample["ParserStage"]
@@ -330,21 +341,23 @@ foreach ($name in $sampleNames) {
     }
 }
 
-if ($foundFixedVx -eq 0) {
-    $gateA = $false
-    $failReasons += "GateA: no fixed-valid VXAvatar sample found"
-}
-if ($foundCorruptVx -eq 0) {
-    $gateB = $false
-    $failReasons += "GateB: no synthetic-corrupt-vxavatar sample found"
-}
-if ($foundFixedVxa2 -eq 0) {
-    $gateC = $false
-    $failReasons += "GateC: no fixed-valid VXA2 sample found"
-}
-if ($foundCorruptVxa2 -eq 0) {
-    $gateC = $false
-    $failReasons += "GateC: no synthetic-corrupt-vxa2 sample found"
+if ($EnableLegacyVxVxa2Checks) {
+    if ($foundFixedVx -eq 0) {
+        $gateA = $false
+        $failReasons += "GateA: no fixed-valid VXAvatar sample found"
+    }
+    if ($foundCorruptVx -eq 0) {
+        $gateB = $false
+        $failReasons += "GateB: no synthetic-corrupt-vxavatar sample found"
+    }
+    if ($foundFixedVxa2 -eq 0) {
+        $gateC = $false
+        $failReasons += "GateC: no fixed-valid VXA2 sample found"
+    }
+    if ($foundCorruptVxa2 -eq 0) {
+        $gateC = $false
+        $failReasons += "GateC: no synthetic-corrupt-vxa2 sample found"
+    }
 }
 if ($foundFixedXav2 -eq 0) {
     $gateF = $false
@@ -360,9 +373,9 @@ if ($Profile -eq "full" -and $RequireRealFullSamples -and $foundRealFull -eq 0) 
 }
 
 $overallPass = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateG -and $gateH
-$gateAStatus = if ($gateA) { "PASS" } else { "FAIL" }
-$gateBStatus = if ($gateB) { "PASS" } else { "FAIL" }
-$gateCStatus = if ($gateC) { "PASS" } else { "FAIL" }
+$gateAStatus = if ($EnableLegacyVxVxa2Checks) { if ($gateA) { "PASS" } else { "FAIL" } } else { "SKIP" }
+$gateBStatus = if ($EnableLegacyVxVxa2Checks) { if ($gateB) { "PASS" } else { "FAIL" } } else { "SKIP" }
+$gateCStatus = if ($EnableLegacyVxVxa2Checks) { if ($gateC) { "PASS" } else { "FAIL" } } else { "SKIP" }
 $gateDStatus = if ($gateD) { "PASS" } else { "FAIL" }
 $gateEStatus = if ($gateE) { "PASS" } else { "FAIL" }
 $gateFStatus = if ($gateF) { "PASS" } else { "FAIL" }
@@ -375,6 +388,7 @@ $summary += "Generated: $(Get-Date -Format s)"
 $summary += "ReportPath: $ReportPath"
 $summary += "Profile: $Profile"
 $summary += "UseFixedSet: $UseFixedSet"
+$summary += "EnableLegacyVxVxa2Checks: $EnableLegacyVxVxa2Checks"
 $summary += ""
 $summary += "Gate Results"
 $summary += "- GateA (fixed VXAvatar success contract): $gateAStatus"

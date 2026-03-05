@@ -77,6 +77,7 @@ Report list for this week.
 - [2026-03-06_release_automation_execution_update.md](./2026-03-06_release_automation_execution_update.md)
 - [2026-03-06_release_execution_board_20.md](./2026-03-06_release_execution_board_20.md)
 - [2026-03-06_release_execution_followup.md](./2026-03-06_release_execution_followup.md)
+- [2026-03-06_release_live_update_vx_policy_alignment_and_winui_repro.md](./2026-03-06_release_live_update_vx_policy_alignment_and_winui_repro.md)
 - [2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md](./2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md)
 - [2026-03-06_session_change_summary.md](./2026-03-06_session_change_summary.md)
 - [2026-03-06_spout2_full_interop_scaffold.md](./2026-03-06_spout2_full_interop_scaffold.md)
