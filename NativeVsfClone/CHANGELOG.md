@@ -2,6 +2,60 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Arm chain coupling for natural raise/lower (shoulder/lower-arm/hand)
+
+### Summary
+
+Implemented end-to-end arm-chain coupling so upper-arm raise/lower controls propagate to shoulder/lower-arm/hand for more natural motion, while preserving existing slider UX and backward compatibility of pose preset/session flows.
+
+### Changed
+
+- Host arm control and pose model expansion:
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - added pose bones:
+    - `Left/RightShoulder`
+    - `Left/RightLowerArm`
+    - `Left/RightHand`
+  - kept existing arm sliders (`Both/Left/Right upper-arm pitch`) and added automatic strong coupling:
+    - shoulder pitch = `0.55 * upper-arm pitch`
+    - lower-arm pitch = `0.85 * upper-arm pitch`
+    - hand pitch = `0.45 * upper-arm pitch`
+  - preserved linked bone yaw/roll while updating pitch only.
+  - added per-bone pitch clamp policy:
+    - upper/lower arm: `[-90, +90]`
+    - shoulder/hand: `[-60, +60]`
+    - others: `[-45, +45]`
+- Pose preset compatibility and normalization:
+  - `host/HostCore/PosePresetStore.cs`
+  - default/normalized offset sets now include new arm-chain bones.
+  - older preset payloads remain loadable; missing new bones are backfilled with neutral zero offsets.
+- WPF pose UI synchronization:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - Pose bone selector now exposes new bones.
+  - pitch slider range is dynamically adjusted by selected bone clamp profile.
+- Native pose ABI and static skinning application:
+  - `include/vsfclone/nativecore/api.h`
+  - `include/vsfclone/avatar/avatar_package.h`
+  - `src/avatar/vrm_loader.cpp`
+  - `src/nativecore/native_core.cpp`
+  - extended native pose bone IDs and humanoid bone IDs for shoulder/lower-arm/hand.
+  - VRM humanoid-name mapping now recognizes new chain bones.
+  - native static skinning pose application now applies offsets to:
+    - upper arm
+    - shoulder
+    - lower arm
+    - hand
+  - arm pose change-cache tracks all chain bones to avoid unnecessary reskinning work.
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -v minimal`: PASS
+- `cmake --build NativeVsfClone/build --target nativecore --config Debug`: PASS
+- environment note: NuGet restore required network-enabled/elevated execution in this workspace.
+
 ## 2026-03-06 - VRM MToon gate hardening (warning-code normalization + GateK/GateL)
 
 ### Summary

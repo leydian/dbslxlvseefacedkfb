@@ -295,6 +295,12 @@
                                         <ComboBoxItem Content="Head"/>
                                         <ComboBoxItem Content="LeftUpperArm"/>
                                         <ComboBoxItem Content="RightUpperArm"/>
+                                        <ComboBoxItem Content="LeftShoulder"/>
+                                        <ComboBoxItem Content="RightShoulder"/>
+                                        <ComboBoxItem Content="LeftLowerArm"/>
+                                        <ComboBoxItem Content="RightLowerArm"/>
+                                        <ComboBoxItem Content="LeftHand"/>
+                                        <ComboBoxItem Content="RightHand"/>
                                     </ComboBox>
                                 </Grid>
                                 <Grid Margin="0,0,0,8">

@@ -157,8 +157,14 @@ struct AvatarSecondaryMotionState {
 
 struct AvatarArmPoseState {
     bool initialized = false;
-    NcPoseBoneOffset left {};
-    NcPoseBoneOffset right {};
+    NcPoseBoneOffset left_upper_arm {};
+    NcPoseBoneOffset right_upper_arm {};
+    NcPoseBoneOffset left_shoulder {};
+    NcPoseBoneOffset right_shoulder {};
+    NcPoseBoneOffset left_lower_arm {};
+    NcPoseBoneOffset right_lower_arm {};
+    NcPoseBoneOffset left_hand {};
+    NcPoseBoneOffset right_hand {};
 };
 
 struct CoreState {
@@ -174,7 +180,7 @@ struct CoreState {
     osc::OscEndpoint osc;
     NcTrackingFrame latest_tracking {};
     NcRenderQualityOptions render_quality {};
-    std::array<NcPoseBoneOffset, 9U> pose_offsets {};
+    std::array<NcPoseBoneOffset, 15U> pose_offsets {};
     float last_frame_ms = 0.0f;
     float last_gpu_frame_ms = 0.0f;
     float last_cpu_frame_ms = 0.0f;
@@ -1888,7 +1894,7 @@ void SanitizeTrackingFrame(NcTrackingFrame* frame) {
 }
 
 bool IsValidPoseBoneId(std::uint32_t bone_id) {
-    return bone_id <= static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM);
+    return bone_id <= static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_HAND);
 }
 
 NcPoseBoneOffset SanitizePoseOffset(const NcPoseBoneOffset& src) {
@@ -1902,7 +1908,27 @@ NcPoseBoneOffset SanitizePoseOffset(const NcPoseBoneOffset& src) {
         }
         return std::max(min_v, std::min(max_v, value));
     };
-    out.pitch_deg = clamp_finite(out.pitch_deg, -45.0f, 45.0f);
+    float pitch_min = -45.0f;
+    float pitch_max = 45.0f;
+    switch (static_cast<NcPoseBoneId>(out.bone_id)) {
+        case NC_POSE_BONE_LEFT_UPPER_ARM:
+        case NC_POSE_BONE_RIGHT_UPPER_ARM:
+        case NC_POSE_BONE_LEFT_LOWER_ARM:
+        case NC_POSE_BONE_RIGHT_LOWER_ARM:
+            pitch_min = -90.0f;
+            pitch_max = 90.0f;
+            break;
+        case NC_POSE_BONE_LEFT_SHOULDER:
+        case NC_POSE_BONE_RIGHT_SHOULDER:
+        case NC_POSE_BONE_LEFT_HAND:
+        case NC_POSE_BONE_RIGHT_HAND:
+            pitch_min = -60.0f;
+            pitch_max = 60.0f;
+            break;
+        default:
+            break;
+    }
+    out.pitch_deg = clamp_finite(out.pitch_deg, pitch_min, pitch_max);
     out.yaw_deg = clamp_finite(out.yaw_deg, -180.0f, 180.0f);
     out.roll_deg = clamp_finite(out.roll_deg, -45.0f, 45.0f);
     return out;
@@ -1922,7 +1948,7 @@ struct SkinWeight4 {
     std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-constexpr std::size_t kPoseOffsetCapacity = 9U;
+constexpr std::size_t kPoseOffsetCapacity = 15U;
 
 std::array<NcPoseBoneOffset, kPoseOffsetCapacity> MakeDefaultPoseOffsets() {
     std::array<NcPoseBoneOffset, kPoseOffsetCapacity> out {};
@@ -2521,8 +2547,14 @@ bool ApplyArmPoseToAvatar(
         rig_by_mesh[NormalizeMeshKey(rig.mesh_name)] = &rig;
     }
 
-    const auto left_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
-    const auto right_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
+    const auto left_upper_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
+    const auto right_upper_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
+    const auto left_shoulder_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_SHOULDER));
+    const auto right_shoulder_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_SHOULDER));
+    const auto left_lower_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_LOWER_ARM));
+    const auto right_lower_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_LOWER_ARM));
+    const auto left_hand_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_HAND));
+    const auto right_hand_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_HAND));
     auto& pose_state = g_state.arm_pose_states[handle];
     auto abs_max_delta = [](const NcPoseBoneOffset& a, const NcPoseBoneOffset& b) {
         return std::max(
@@ -2530,8 +2562,14 @@ bool ApplyArmPoseToAvatar(
             std::max(std::abs(a.yaw_deg - b.yaw_deg), std::abs(a.roll_deg - b.roll_deg)));
     };
     if (pose_state.initialized &&
-        abs_max_delta(pose_state.left, left_arm_pose) < 0.2f &&
-        abs_max_delta(pose_state.right, right_arm_pose) < 0.2f) {
+        abs_max_delta(pose_state.left_upper_arm, left_upper_arm_pose) < 0.2f &&
+        abs_max_delta(pose_state.right_upper_arm, right_upper_arm_pose) < 0.2f &&
+        abs_max_delta(pose_state.left_shoulder, left_shoulder_pose) < 0.2f &&
+        abs_max_delta(pose_state.right_shoulder, right_shoulder_pose) < 0.2f &&
+        abs_max_delta(pose_state.left_lower_arm, left_lower_arm_pose) < 0.2f &&
+        abs_max_delta(pose_state.right_lower_arm, right_lower_arm_pose) < 0.2f &&
+        abs_max_delta(pose_state.left_hand, left_hand_pose) < 0.2f &&
+        abs_max_delta(pose_state.right_hand, right_hand_pose) < 0.2f) {
         return true;
     }
     bool any_mesh_updated = false;
@@ -2631,8 +2669,14 @@ bool ApplyArmPoseToAvatar(
                 posed_bone_matrices[base + j] = reinterpret_cast<float*>(&bone_m)[j];
             }
         };
-        apply_humanoid_pose(avatar::HumanoidBoneId::LeftUpperArm, left_arm_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::RightUpperArm, right_arm_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::LeftUpperArm, left_upper_arm_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::RightUpperArm, right_upper_arm_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::LeftShoulder, left_shoulder_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::RightShoulder, right_shoulder_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::LeftLowerArm, left_lower_arm_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::RightLowerArm, right_lower_arm_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::LeftHand, left_hand_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::RightHand, right_hand_pose);
 
         avatar::SkeletonRenderPayload posed_skeleton;
         posed_skeleton.mesh_name = skeleton_payload->mesh_name;
@@ -2665,8 +2709,14 @@ bool ApplyArmPoseToAvatar(
     }
     if (any_mesh_updated) {
         pose_state.initialized = true;
-        pose_state.left = left_arm_pose;
-        pose_state.right = right_arm_pose;
+        pose_state.left_upper_arm = left_upper_arm_pose;
+        pose_state.right_upper_arm = right_upper_arm_pose;
+        pose_state.left_shoulder = left_shoulder_pose;
+        pose_state.right_shoulder = right_shoulder_pose;
+        pose_state.left_lower_arm = left_lower_arm_pose;
+        pose_state.right_lower_arm = right_lower_arm_pose;
+        pose_state.left_hand = left_hand_pose;
+        pose_state.right_hand = right_hand_pose;
     }
     return true;
 }

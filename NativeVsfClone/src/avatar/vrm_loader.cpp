@@ -1909,6 +1909,24 @@ HumanoidBoneId ToHumanoidBoneId(std::string name) {
     if (key == "rightupperarm" || key == "rightarm") {
         return HumanoidBoneId::RightUpperArm;
     }
+    if (key == "leftshoulder") {
+        return HumanoidBoneId::LeftShoulder;
+    }
+    if (key == "rightshoulder") {
+        return HumanoidBoneId::RightShoulder;
+    }
+    if (key == "leftlowerarm" || key == "leftforearm") {
+        return HumanoidBoneId::LeftLowerArm;
+    }
+    if (key == "rightlowerarm" || key == "rightforearm") {
+        return HumanoidBoneId::RightLowerArm;
+    }
+    if (key == "lefthand") {
+        return HumanoidBoneId::LeftHand;
+    }
+    if (key == "righthand") {
+        return HumanoidBoneId::RightHand;
+    }
     return HumanoidBoneId::Unknown;
 }
 

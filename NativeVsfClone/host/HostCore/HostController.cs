@@ -69,6 +69,9 @@ public sealed partial class HostController
     private static readonly TimeSpan ArmPoseCaptureDelay = TimeSpan.FromMilliseconds(500);
     private const float ArmPoseSuggestionMinDeltaDeg = 1.0f;
     private const float ArmPoseSuggestionQuantizeDeg = 5.0f;
+    private const float ArmShoulderCouplingRatio = 0.55f;
+    private const float ArmLowerArmCouplingRatio = 0.85f;
+    private const float ArmHandCouplingRatio = 0.45f;
 
     public HostController()
         : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new PosePresetStore(), new TrackingInputService())
@@ -569,7 +572,7 @@ public sealed partial class HostController
 
         var clampedYaw = Clamp(yawDeg, -45.0f, 45.0f);
         var clampedRoll = Clamp(rollDeg, -45.0f, 45.0f);
-        var clampedPitch = Clamp(pitchDeg, -45.0f, 45.0f);
+        var clampedPitch = ClampPitchForBone(bone, pitchDeg);
         if (bone == PoseBoneKind.LeftUpperArm || bone == PoseBoneKind.RightUpperArm)
         {
             clampedPitch = ProcessArmPitchInput(bone, pitchDeg);
@@ -582,6 +585,10 @@ public sealed partial class HostController
             clampedPitch,
             clampedYaw,
             clampedRoll);
+        if (bone == PoseBoneKind.LeftUpperArm || bone == PoseBoneKind.RightUpperArm)
+        {
+            ApplyArmChainCoupling(bone, clampedPitch);
+        }
         var rc = ApplyPoseOffsetsInternal("SetPoseOffset");
         RefreshState();
         return rc;
@@ -1367,6 +1374,48 @@ public sealed partial class HostController
         return Math.Min(max, Math.Max(min, value));
     }
 
+    private static float ClampPitchForBone(PoseBoneKind bone, float pitchDeg)
+    {
+        return bone switch
+        {
+            PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm => Clamp(pitchDeg, -90.0f, 90.0f),
+            PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand => Clamp(pitchDeg, -60.0f, 60.0f),
+            _ => Clamp(pitchDeg, -45.0f, 45.0f),
+        };
+    }
+
+    private void ApplyArmChainCoupling(PoseBoneKind upperArmBone, float upperArmPitchDeg)
+    {
+        if (upperArmBone == PoseBoneKind.LeftUpperArm)
+        {
+            ApplyLinkedBonePitch(PoseBoneKind.LeftShoulder, upperArmPitchDeg * ArmShoulderCouplingRatio);
+            ApplyLinkedBonePitch(PoseBoneKind.LeftLowerArm, upperArmPitchDeg * ArmLowerArmCouplingRatio);
+            ApplyLinkedBonePitch(PoseBoneKind.LeftHand, upperArmPitchDeg * ArmHandCouplingRatio);
+        }
+        else if (upperArmBone == PoseBoneKind.RightUpperArm)
+        {
+            ApplyLinkedBonePitch(PoseBoneKind.RightShoulder, upperArmPitchDeg * ArmShoulderCouplingRatio);
+            ApplyLinkedBonePitch(PoseBoneKind.RightLowerArm, upperArmPitchDeg * ArmLowerArmCouplingRatio);
+            ApplyLinkedBonePitch(PoseBoneKind.RightHand, upperArmPitchDeg * ArmHandCouplingRatio);
+        }
+    }
+
+    private void ApplyLinkedBonePitch(PoseBoneKind bone, float pitchDeg)
+    {
+        var idx = FindPoseIndex(bone);
+        if (idx < 0)
+        {
+            return;
+        }
+
+        var current = _poseOffsets[idx];
+        _poseOffsets[idx] = new PoseBoneUiOffset(
+            bone,
+            ClampPitchForBone(bone, pitchDeg),
+            current.YawDeg,
+            current.RollDeg);
+    }
+
     private float ProcessArmPitchInput(PoseBoneKind bone, float rawPitchDeg)
     {
         var now = DateTimeOffset.UtcNow;
@@ -1695,6 +1744,12 @@ public sealed partial class HostController
             new(PoseBoneKind.Head, 0.0f, 0.0f, 0.0f),
             new(PoseBoneKind.LeftUpperArm, 0.0f, 0.0f, 0.0f),
             new(PoseBoneKind.RightUpperArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftShoulder, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightShoulder, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftLowerArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightLowerArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftHand, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightHand, 0.0f, 0.0f, 0.0f),
         };
     }
 
@@ -1715,6 +1770,12 @@ public sealed partial class HostController
             PoseBoneKind.Head => NcPoseBoneId.Head,
             PoseBoneKind.LeftUpperArm => NcPoseBoneId.LeftUpperArm,
             PoseBoneKind.RightUpperArm => NcPoseBoneId.RightUpperArm,
+            PoseBoneKind.LeftShoulder => NcPoseBoneId.LeftShoulder,
+            PoseBoneKind.RightShoulder => NcPoseBoneId.RightShoulder,
+            PoseBoneKind.LeftLowerArm => NcPoseBoneId.LeftLowerArm,
+            PoseBoneKind.RightLowerArm => NcPoseBoneId.RightLowerArm,
+            PoseBoneKind.LeftHand => NcPoseBoneId.LeftHand,
+            PoseBoneKind.RightHand => NcPoseBoneId.RightHand,
             _ => NcPoseBoneId.Unknown,
         };
     }

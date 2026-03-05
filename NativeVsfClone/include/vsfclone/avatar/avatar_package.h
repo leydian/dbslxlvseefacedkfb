@@ -200,6 +200,12 @@ enum class HumanoidBoneId : std::uint32_t {
     Head = 6,
     LeftUpperArm = 7,
     RightUpperArm = 8,
+    LeftShoulder = 9,
+    RightShoulder = 10,
+    LeftLowerArm = 11,
+    RightLowerArm = 12,
+    LeftHand = 13,
+    RightHand = 14,
 };
 
 struct SkeletonRigBonePayload {

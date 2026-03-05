@@ -48,6 +48,12 @@ public sealed class PosePresetStoreModel
             new(PoseBoneKind.Head, 0.0f, 0.0f, 0.0f),
             new(PoseBoneKind.LeftUpperArm, 0.0f, 0.0f, 0.0f),
             new(PoseBoneKind.RightUpperArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftShoulder, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightShoulder, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftLowerArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightLowerArm, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.LeftHand, 0.0f, 0.0f, 0.0f),
+            new(PoseBoneKind.RightHand, 0.0f, 0.0f, 0.0f),
         };
     }
 
@@ -178,6 +184,12 @@ public sealed class PosePresetStore : IPosePresetStore
             PoseBoneKind.Head,
             PoseBoneKind.LeftUpperArm,
             PoseBoneKind.RightUpperArm,
+            PoseBoneKind.LeftShoulder,
+            PoseBoneKind.RightShoulder,
+            PoseBoneKind.LeftLowerArm,
+            PoseBoneKind.RightLowerArm,
+            PoseBoneKind.LeftHand,
+            PoseBoneKind.RightHand,
         };
 
         var output = new List<PoseBoneUiOffset>(allBones.Length);
@@ -193,8 +205,16 @@ public sealed class PosePresetStore : IPosePresetStore
                 bone,
                 Clamp(
                     src.PitchDeg,
-                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm ? -90.0f : -45.0f,
-                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm ? 90.0f : 45.0f),
+                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm
+                        ? -90.0f
+                        : bone is PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand
+                            ? -60.0f
+                            : -45.0f,
+                    bone is PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm
+                        ? 90.0f
+                        : bone is PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand
+                            ? 60.0f
+                            : 45.0f),
                 Clamp(src.YawDeg, -45.0f, 45.0f),
                 Clamp(src.RollDeg, -45.0f, 45.0f)));
         }

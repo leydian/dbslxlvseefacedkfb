@@ -48,6 +48,12 @@ public enum PoseBoneKind
     Head = 5,
     LeftUpperArm = 6,
     RightUpperArm = 7,
+    LeftShoulder = 8,
+    RightShoulder = 9,
+    LeftLowerArm = 10,
+    RightLowerArm = 11,
+    LeftHand = 12,
+    RightHand = 13,
 }
 
 public sealed record PoseBoneUiOffset(

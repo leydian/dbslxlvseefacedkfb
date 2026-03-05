@@ -2272,6 +2272,7 @@ public partial class MainWindow : Window
 
         var selected = GetSelectedPoseBone() ?? PoseBoneKind.Hips;
         var current = _controller.PoseOffsets.FirstOrDefault(p => p.Bone == selected);
+        ConfigurePosePitchSliderRange(selected);
         PosePitchSlider.Value = current?.PitchDeg ?? 0.0f;
         PoseYawSlider.Value = current?.YawDeg ?? 0.0f;
         PoseRollSlider.Value = current?.RollDeg ?? 0.0f;
@@ -2296,6 +2297,23 @@ public partial class MainWindow : Window
             ArmBothPitchValueText.Text = ArmBothPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
         }
         _isSyncingPoseUi = false;
+    }
+
+    private void ConfigurePosePitchSliderRange(PoseBoneKind selected)
+    {
+        if (PosePitchSlider is null)
+        {
+            return;
+        }
+
+        var (minPitch, maxPitch) = selected switch
+        {
+            PoseBoneKind.LeftUpperArm or PoseBoneKind.RightUpperArm or PoseBoneKind.LeftLowerArm or PoseBoneKind.RightLowerArm => (-90.0, 90.0),
+            PoseBoneKind.LeftShoulder or PoseBoneKind.RightShoulder or PoseBoneKind.LeftHand or PoseBoneKind.RightHand => (-60.0, 60.0),
+            _ => (-45.0, 45.0),
+        };
+        PosePitchSlider.Minimum = minPitch;
+        PosePitchSlider.Maximum = maxPitch;
     }
 
     private void SyncTrackingPoseFilterControlsFromState()
@@ -2358,6 +2376,12 @@ public partial class MainWindow : Window
             5 => PoseBoneKind.Head,
             6 => PoseBoneKind.LeftUpperArm,
             7 => PoseBoneKind.RightUpperArm,
+            8 => PoseBoneKind.LeftShoulder,
+            9 => PoseBoneKind.RightShoulder,
+            10 => PoseBoneKind.LeftLowerArm,
+            11 => PoseBoneKind.RightLowerArm,
+            12 => PoseBoneKind.LeftHand,
+            13 => PoseBoneKind.RightHand,
             _ => null,
         };
     }
