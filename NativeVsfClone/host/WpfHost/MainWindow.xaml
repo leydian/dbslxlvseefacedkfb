@@ -14,14 +14,7 @@
             <StackPanel>
                 <GroupBox Header="Quick Actions" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="Use the core flow: Initialize -> Load -> Start outputs." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
-                        <WrapPanel Margin="0,0,0,8">
-                            <Button x:Name="InitializeButton" Content="Initialize" Click="Initialize_Click" Margin="0,0,8,8" MinWidth="94"/>
-                            <Button x:Name="LoadButton" Content="Load" Click="Load_Click" Margin="0,0,8,8" MinWidth="94"/>
-                            <Button x:Name="StartSpoutButton" Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,8" MinWidth="100"/>
-                            <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,8" MinWidth="100"/>
-                            <Button x:Name="ShutdownButton" Content="Shutdown" Click="Shutdown_Click" Margin="0,0,8,8" MinWidth="94"/>
-                        </WrapPanel>
+                        <TextBlock Text="Follow the flow in sections below: 1) Initialize, 2) Load avatar, 4) Start outputs." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
                         <Border Background="#EDF3FA" BorderBrush="#CAD8E8" BorderThickness="1" CornerRadius="4" Padding="8,6">
                             <TextBlock x:Name="QuickStatusText" Text="Session=Stopped | Avatar=None | Outputs=Off" TextWrapping="Wrap" Foreground="#243548" FontWeight="SemiBold"/>
                         </Border>
@@ -32,8 +25,8 @@
                     <StackPanel Margin="8">
                         <TextBlock Text="Runtime lifecycle controls." TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
                         <WrapPanel>
-                            <Button Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="92"/>
-                            <Button Content="Shutdown" Click="Shutdown_Click" MinWidth="92"/>
+                            <Button x:Name="InitializeButton" Content="Initialize" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button x:Name="ShutdownButton" Content="Shutdown" Click="Shutdown_Click" MinWidth="92"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
@@ -47,7 +40,7 @@
                         </DockPanel>
                         <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button Content="Load" Click="Load_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button x:Name="LoadButton" Content="Load" Click="Load_Click" Margin="0,0,8,0" MinWidth="92"/>
                             <Button x:Name="UnloadButton" Content="Unload" Click="Unload_Click" MinWidth="92"/>
                         </WrapPanel>
                     </StackPanel>
@@ -161,7 +154,7 @@
                             <TextBox Grid.Column="1" x:Name="SpoutChannelTextBox" Text="VsfClone"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <Button Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StartSpoutButton" Content="Start Spout" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
                             <Button x:Name="StopSpoutButton" Content="Stop Spout" Click="StopSpout_Click" MinWidth="110"/>
                         </WrapPanel>
 
@@ -183,7 +176,7 @@
                         <TextBlock x:Name="OscBindValidationText" Foreground="#B03030" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <TextBlock x:Name="OscPublishValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StartOscButton" Content="Start OSC" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
                             <Button x:Name="StopOscButton" Content="Stop OSC" Click="StopOsc_Click" MinWidth="110"/>
                         </WrapPanel>
                     </StackPanel>

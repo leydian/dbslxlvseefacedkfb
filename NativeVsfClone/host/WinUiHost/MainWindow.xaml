@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="VsfClone Host (WinUI)">
-    <Grid Padding="12">
+    <Grid Padding="12" MinWidth="1240" MinHeight="760">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="420"/>
             <ColumnDefinition Width="*"/>
@@ -227,13 +227,13 @@
 
             <Border Grid.Row="2" Padding="8" Background="#0F1720" BorderBrush="#2D3A48" BorderThickness="1">
                 <StackPanel>
-                    <TextBlock x:Name="SessionStatusText"/>
-                    <TextBlock x:Name="AvatarStatusText"/>
-                    <TextBlock x:Name="RenderStatusText"/>
-                    <TextBlock x:Name="FrameStatusText"/>
-                    <TextBlock x:Name="OutputStatusText"/>
-                    <TextBlock x:Name="BusyStatusText"/>
-                    <TextBlock x:Name="ErrorStatusText"/>
+                    <TextBlock x:Name="SessionStatusText" Foreground="#D7E6F5"/>
+                    <TextBlock x:Name="AvatarStatusText" Foreground="#D7E6F5"/>
+                    <TextBlock x:Name="RenderStatusText" Foreground="#D7E6F5"/>
+                    <TextBlock x:Name="FrameStatusText" Foreground="#D7E6F5"/>
+                    <TextBlock x:Name="OutputStatusText" Foreground="#D7E6F5"/>
+                    <TextBlock x:Name="BusyStatusText" Foreground="#D7E6F5"/>
+                    <TextBlock x:Name="ErrorStatusText" Foreground="#F2B8B5"/>
                 </StackPanel>
             </Border>
         </Grid>

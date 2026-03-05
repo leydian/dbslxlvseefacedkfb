@@ -5,9 +5,11 @@ using System.Text;
 using System.Threading.Tasks;
 using HostCore;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Windows.Graphics;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
 
@@ -35,12 +37,16 @@ public sealed partial class MainWindow : Window
     private string _lastAvatarText = string.Empty;
     private string _lastLogsText = string.Empty;
     private readonly IntPtr _hwnd;
+    private readonly AppWindow? _appWindow;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
+    private const int MinWindowWidth = 1240;
+    private const int MinWindowHeight = 760;
 
     public MainWindow()
     {
         InitializeComponent();
         _hwnd = WindowNative.GetWindowHandle(this);
+        _appWindow = ConfigureWindowBounds();
         _timer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(16.0);
         _timer.Tick += Timer_Tick;
@@ -71,6 +77,11 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
+        if (_appWindow is not null)
+        {
+            _appWindow.Changed -= AppWindow_Changed;
+        }
+
         _timer.Stop();
         _uiRefreshTimer.Stop();
         _resizeTimer.Stop();
@@ -582,41 +593,46 @@ public sealed partial class MainWindow : Window
         var session = _controller.SessionState;
         var outputs = _controller.Outputs;
         var operation = _controller.OperationState;
-        var hasAvatar = session.ActiveAvatarHandle.HasValue;
-        var isBusy = operation.IsBusy;
+        var uiState = HostUiPolicy.EvaluateAvailability(
+            session,
+            outputs,
+            operation,
+            _validationState,
+            _controller.RenderState,
+            CameraModeComboBox.SelectedIndex == 2);
+        var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
 
-        InitializeButton.IsEnabled = !session.IsInitialized && !isBusy;
-        ShutdownButton.IsEnabled = session.IsInitialized && !isBusy;
-        BrowseAvatarButton.IsEnabled = session.IsInitialized && !isBusy;
-        LoadButton.IsEnabled = session.IsInitialized && !isBusy && _validationState.AvatarPathValid;
-        UnloadButton.IsEnabled = session.IsInitialized && hasAvatar && !isBusy;
-        StartSpoutButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.SpoutActive && !isBusy;
-        StopSpoutButton.IsEnabled = outputs.SpoutActive && !isBusy;
-        StartOscButton.IsEnabled = session.IsInitialized && hasAvatar && !outputs.OscActive && !isBusy && _validationState.OscBindPortValid && _validationState.OscPublishAddressValid;
-        StopOscButton.IsEnabled = outputs.OscActive && !isBusy;
-        var renderControlsEnabled = session.IsInitialized && !isBusy;
-        var manualCameraMode = CameraModeComboBox.SelectedIndex == 2 || _controller.RenderState.CameraMode == RenderCameraMode.Manual;
-        BroadcastModeCheckBox.IsEnabled = renderControlsEnabled;
-        CameraModeComboBox.IsEnabled = renderControlsEnabled;
-        FramingSlider.IsEnabled = renderControlsEnabled;
-        HeadroomSlider.IsEnabled = renderControlsEnabled;
-        YawSlider.IsEnabled = renderControlsEnabled && manualCameraMode;
-        FovSlider.IsEnabled = renderControlsEnabled && manualCameraMode;
-        BackgroundPresetComboBox.IsEnabled = renderControlsEnabled;
-        MirrorModeCheckBox.IsEnabled = renderControlsEnabled;
-        DebugOverlayCheckBox.IsEnabled = renderControlsEnabled;
-        SavePresetButton.IsEnabled = renderControlsEnabled;
-        ApplyPresetButton.IsEnabled = renderControlsEnabled;
-        DeletePresetButton.IsEnabled = renderControlsEnabled;
-        ResetRenderButton.IsEnabled = renderControlsEnabled;
-        PresetNameTextBox.IsEnabled = renderControlsEnabled;
-        PresetComboBox.IsEnabled = renderControlsEnabled;
+        InitializeButton.IsEnabled = uiState.InitializeEnabled;
+        ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
+        BrowseAvatarButton.IsEnabled = uiState.BrowseAvatarEnabled;
+        LoadButton.IsEnabled = uiState.LoadEnabled;
+        UnloadButton.IsEnabled = uiState.UnloadEnabled;
+        StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
+        StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
+        StartOscButton.IsEnabled = uiState.StartOscEnabled;
+        StopOscButton.IsEnabled = uiState.StopOscEnabled;
 
-        SessionStatusText.Text = $"Session: {(session.IsInitialized ? "Initialized" : "Stopped")}";
-        AvatarStatusText.Text = $"Avatar: {(hasAvatar ? "Loaded" : "None")}";
-        RenderStatusText.Text = $"Render: {session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
-        OutputStatusText.Text = $"Outputs: Spout={(outputs.SpoutActive ? "On" : "Off")} OSC={(outputs.OscActive ? "On" : "Off")}";
-        BusyStatusText.Text = $"Busy: {(isBusy ? operation.CurrentOperation : "Idle")}";
+        BroadcastModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        CameraModeComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        FramingSlider.IsEnabled = uiState.RenderControlsEnabled;
+        HeadroomSlider.IsEnabled = uiState.RenderControlsEnabled;
+        YawSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
+        FovSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
+        BackgroundPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        ApplyPresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        DeletePresetButton.IsEnabled = uiState.RenderControlsEnabled;
+        ResetRenderButton.IsEnabled = uiState.RenderControlsEnabled;
+        PresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
+        PresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+
+        SessionStatusText.Text = $"Session: {statusText.SessionText}";
+        AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
+        RenderStatusText.Text = $"Render: {statusText.RenderText}";
+        OutputStatusText.Text = $"Outputs: {statusText.OutputText}";
+        BusyStatusText.Text = $"Busy: {statusText.BusyText}";
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
     }
@@ -785,6 +801,39 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Xaml.XamlRoot? GetXamlRoot()
     {
         return Content is FrameworkElement element ? element.XamlRoot : null;
+    }
+
+    private AppWindow? ConfigureWindowBounds()
+    {
+        var windowId = Win32Interop.GetWindowIdFromWindow(_hwnd);
+        var appWindow = AppWindow.GetFromWindowId(windowId);
+        if (appWindow is null)
+        {
+            return null;
+        }
+
+        appWindow.Changed += AppWindow_Changed;
+        var targetWidth = Math.Max(MinWindowWidth, appWindow.Size.Width);
+        var targetHeight = Math.Max(MinWindowHeight, appWindow.Size.Height);
+        appWindow.Resize(new SizeInt32(targetWidth, targetHeight));
+        return appWindow;
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (!args.DidSizeChange)
+        {
+            return;
+        }
+
+        var targetWidth = Math.Max(MinWindowWidth, sender.Size.Width);
+        var targetHeight = Math.Max(MinWindowHeight, sender.Size.Height);
+        if (targetWidth == sender.Size.Width && targetHeight == sender.Size.Height)
+        {
+            return;
+        }
+
+        sender.Resize(new SizeInt32(targetWidth, targetHeight));
     }
 
     private void UpdateRenderMetricsFromHost()
