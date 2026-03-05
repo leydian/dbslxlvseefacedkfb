@@ -2,6 +2,43 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Release execution board + fail-fast gate and dashboard split
+
+### Summary
+
+Converted the 20-item completion discussion into executable automation by adding a release execution board, a fail-fast release checklist script, a WinUI diagnostic matrix summary tool, and a split release-candidate dashboard (`WPF-only` vs `Full`).
+
+### Changed
+
+- release dashboard split status:
+  - `tools/release_gate_dashboard.ps1`
+  - added host-mode aware rows (`Host Publish (mode/WPF/WinUI)`)
+  - added gate summary booleans:
+    - `release_candidate_wpf_only`
+    - `release_candidate_full`
+  - text output now includes:
+    - `ReleaseCandidateWpfOnly`
+    - `ReleaseCandidateFull`
+- new fail-fast release checklist script:
+  - `tools/release_readiness_gate.ps1`
+  - sequence:
+    - `version_contract_check`
+    - `run_quality_baseline`
+    - `publish_hosts` (WPF-first, optional WinUI)
+    - `release_gate_dashboard`
+  - stops immediately on first failure and emits summary report.
+- new WinUI manifest matrix summarizer:
+  - `tools/winui_diag_matrix_summary.ps1`
+  - consumes multiple `winui_diagnostic_manifest.json` inputs and emits convergence summary.
+- execution board/report:
+  - `docs/reports/release_execution_board_20_2026-03-06.md`
+  - captures 20 items with statuses (`DONE/IN_PROGRESS/BLOCKED/TODO`) and runnable commands.
+- detailed execution update report:
+  - `docs/reports/release_automation_execution_update_2026-03-06.md`
+  - records implementation details, commands run, and artifact-level verification results.
+- docs index:
+  - `docs/INDEX.md` report link added.
+
 ## 2026-03-06 - VSFAvatar error contract/target gate stabilization
 
 ### Summary
