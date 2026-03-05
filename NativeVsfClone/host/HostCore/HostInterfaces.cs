@@ -55,6 +55,8 @@ public sealed record TrackingDiagnostics(
     bool IsActive,
     string DetectedFormat,
     double InputFps,
+    double CaptureFps,
+    double InferenceMsAvg,
     int LastPacketAgeMs,
     bool IsStale,
     ulong ReceivedPackets,
@@ -62,7 +64,9 @@ public sealed record TrackingDiagnostics(
     ulong ParseErrors,
     string StatusMessage,
     TrackingSourceType SourceType,
-    string SourceStatus);
+    string SourceStatus,
+    bool ModelSchemaOk = false,
+    string LastErrorCode = "");
 
 public interface ITrackingInputService
 {

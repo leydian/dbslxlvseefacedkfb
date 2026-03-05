@@ -27,7 +27,7 @@ public sealed partial class HostController
     private DateTimeOffset _lastOutputRecoveryAttemptUtc = DateTimeOffset.MinValue;
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
-    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
+    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
     private string _lastTrackingFormat = "unknown";
     private ulong _lastTrackingParseErrors;
     private bool _lastTrackingActive;

@@ -878,7 +878,7 @@ public sealed partial class MainWindow : Window
         TrackingOnnxModelPathTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} schema_ok={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
@@ -973,7 +973,7 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, schema_ok={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();

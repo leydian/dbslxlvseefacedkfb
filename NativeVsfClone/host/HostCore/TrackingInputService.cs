@@ -1,5 +1,9 @@
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using OpenCvSharp;
 
 namespace HostCore;
 
@@ -16,12 +20,16 @@ public sealed class TrackingInputService : ITrackingInputService
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
     private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30);
-    private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
+    private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
 
     private DateTimeOffset _lastPacketUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastFpsSampleUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastCaptureSampleUtc = DateTimeOffset.MinValue;
     private int _fpsSampleCount;
+    private int _captureSampleCount;
     private double _smoothedInputFps;
+    private double _smoothedCaptureFps;
+    private double _smoothedInferenceMs;
 
     private NcTrackingFrame _rawFrame = BuildNeutralFrame();
     private NcTrackingFrame _smoothedFrame = BuildNeutralFrame();
@@ -43,6 +51,24 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _refYaw;
     private float _refPitch;
     private float _refRoll;
+    private VideoCapture? _webcamCapture;
+    private InferenceSession? _onnxSession;
+    private WebcamOnnxSchema? _webcamSchema;
+
+    private static readonly string[] ArkitBlendshapeOrder =
+    {
+        "browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
+        "cheekPuff", "cheekSquintLeft", "cheekSquintRight", "eyeBlinkLeft", "eyeBlinkRight",
+        "eyeLookDownLeft", "eyeLookDownRight", "eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft",
+        "eyeLookOutRight", "eyeLookUpLeft", "eyeLookUpRight", "eyeSquintLeft", "eyeSquintRight",
+        "eyeWideLeft", "eyeWideRight", "jawForward", "jawLeft", "jawOpen",
+        "jawRight", "mouthClose", "mouthDimpleLeft", "mouthDimpleRight", "mouthFrownLeft",
+        "mouthFrownRight", "mouthFunnel", "mouthLeft", "mouthLowerDownLeft", "mouthLowerDownRight",
+        "mouthPressLeft", "mouthPressRight", "mouthPucker", "mouthRight", "mouthRollLower",
+        "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper", "mouthSmileLeft", "mouthSmileRight",
+        "mouthStretchLeft", "mouthStretchRight", "mouthUpperUpLeft", "mouthUpperUpRight", "noseSneerLeft",
+        "noseSneerRight", "tongueOut",
+    };
 
     public NcResultCode Start(TrackingStartOptions options)
     {
@@ -66,13 +92,19 @@ public sealed class TrackingInputService : ITrackingInputService
 
             if (_options.SourceType == TrackingSourceType.WebcamOnnx)
             {
+                var initRc = InitializeWebcamRuntime();
+                if (initRc != NcResultCode.Ok)
+                {
+                    return initRc;
+                }
+
                 _cts = new CancellationTokenSource();
                 _receiveTask = Task.Run(() => WebcamLoopAsync(_cts.Token));
                 _diagnostics = _diagnostics with
                 {
                     IsActive = true,
                     DetectedFormat = "webcam-onnx",
-                    SourceStatus = BuildWebcamSourceStatus(),
+                    SourceStatus = BuildWebcamSourceStatus("starting"),
                     StatusMessage = "starting:webcam-onnx",
                 };
                 return NcResultCode.Ok;
@@ -126,6 +158,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
             _udpClient = null;
             _receiveTask = null;
+            DisposeWebcamRuntime();
             _diagnostics = _diagnostics with
             {
                 IsActive = false,
@@ -182,6 +215,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 LastPacketAgeMs = ageMs,
                 IsStale = stale,
                 InputFps = _smoothedInputFps,
+                CaptureFps = _smoothedCaptureFps,
+                InferenceMsAvg = _smoothedInferenceMs,
                 StatusMessage = stale ? "stale (holding last frame)" : _diagnostics.StatusMessage,
             };
 
@@ -218,6 +253,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 LastPacketAgeMs = ageMs,
                 IsStale = stale,
                 InputFps = _smoothedInputFps,
+                CaptureFps = _smoothedCaptureFps,
+                InferenceMsAvg = _smoothedInferenceMs,
                 SourceType = _options.SourceType,
             };
             return _diagnostics;
@@ -249,9 +286,13 @@ public sealed class TrackingInputService : ITrackingInputService
         _refRoll = 0.0f;
         _lastPacketUtc = DateTimeOffset.MinValue;
         _lastFpsSampleUtc = DateTimeOffset.MinValue;
+        _lastCaptureSampleUtc = DateTimeOffset.MinValue;
         _fpsSampleCount = 0;
+        _captureSampleCount = 0;
         _smoothedInputFps = 0.0;
-        _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "listening", _options.SourceType, "initializing");
+        _smoothedCaptureFps = 0.0;
+        _smoothedInferenceMs = 0.0;
+        _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "listening", _options.SourceType, "initializing");
     }
 
     private async Task ReceiveLoopAsync(CancellationToken token)
@@ -329,40 +370,104 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private async Task WebcamLoopAsync(CancellationToken token)
     {
-        // ONNX-backed webcam inference is staged behind this source contract.
-        // Keep the tracking service alive with neutral frames so host/runtime paths are exercised.
-        var fps = Math.Clamp(_options.InferenceFpsCap, 5, 120);
-        var delay = TimeSpan.FromMilliseconds(1000.0 / fps);
+        var fpsCap = Math.Clamp(_options.InferenceFpsCap, 5, 120);
+        var targetFrameBudget = TimeSpan.FromMilliseconds(1000.0 / fpsCap);
+        using var frame = new Mat();
+        using var resized = new Mat();
+        using var rgb = new Mat();
+
         while (!token.IsCancellationRequested)
         {
-            lock (_sync)
+            var cycleStart = Stopwatch.GetTimestamp();
+            NcResultCode loopRc = NcResultCode.Ok;
+            string? loopError = null;
+            try
             {
-                _rawFrame = BuildNeutralFrame();
-                _rawHeadYaw = 0.0f;
-                _rawHeadPitch = 0.0f;
-                _rawHeadRoll = 0.0f;
-                _hasHeadYpr = true;
-
-                _expressionCache["eyeblinkleft"] = _rawFrame.BlinkL;
-                _expressionCache["eyeblinkright"] = _rawFrame.BlinkR;
-                _expressionCache["jawopen"] = _rawFrame.MouthOpen;
-                SnapshotExpressionWeights();
-
-                _lastPacketUtc = DateTimeOffset.UtcNow;
-                _hasFrame = true;
-                UpdateInputFps();
-                ApplySmoothing();
-                _diagnostics = _diagnostics with
+                if (_webcamCapture is null || _onnxSession is null || _webcamSchema is null)
                 {
-                    DetectedFormat = "webcam-onnx",
-                    SourceStatus = BuildWebcamSourceStatus(),
-                    StatusMessage = "receiving:webcam-placeholder",
-                };
+                    loopRc = NcResultCode.NotInitialized;
+                    loopError = "runtime not initialized";
+                }
+                else if (!_webcamCapture.Read(frame) || frame.Empty())
+                {
+                    loopRc = NcResultCode.Io;
+                    loopError = "camera frame read failed";
+                }
+                else
+                {
+                    UpdateCaptureFps();
+                    Cv2.Resize(frame, resized, new OpenCvSharp.Size(256, 256), interpolation: InterpolationFlags.Linear);
+                    Cv2.CvtColor(resized, rgb, ColorConversionCodes.BGR2RGB);
+                    var inputData = ConvertMatToInput(rgb);
+                    var inferWatch = Stopwatch.StartNew();
+                    var result = RunInference(_onnxSession, _webcamSchema, inputData);
+                    inferWatch.Stop();
+                    UpdateInferenceMs(inferWatch.Elapsed.TotalMilliseconds);
+
+                    lock (_sync)
+                    {
+                        _rawFrame = BuildNeutralFrame();
+                        _rawHeadYaw = result.HeadYawDeg;
+                        _rawHeadPitch = result.HeadPitchDeg;
+                        _rawHeadRoll = result.HeadRollDeg;
+                        _hasHeadYpr = true;
+                        _rawFrame.HeadPosX = result.HeadPosX;
+                        _rawFrame.HeadPosY = result.HeadPosY;
+                        _rawFrame.HeadPosZ = result.HeadPosZ;
+                        ApplyBlendshapeResult(result.BlendshapeWeights);
+
+                        _lastPacketUtc = DateTimeOffset.UtcNow;
+                        _hasFrame = true;
+                        UpdateInputFps();
+                        ApplySmoothing();
+                        _diagnostics = _diagnostics with
+                        {
+                            DetectedFormat = "webcam-onnx",
+                            InputFps = _smoothedInputFps,
+                            CaptureFps = _smoothedCaptureFps,
+                            InferenceMsAvg = _smoothedInferenceMs,
+                            SourceStatus = BuildWebcamSourceStatus("receiving"),
+                            StatusMessage = "receiving:webcam-onnx",
+                            ModelSchemaOk = true,
+                            LastErrorCode = string.Empty,
+                        };
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                loopRc = NcResultCode.Internal;
+                loopError = ex.Message;
+            }
+
+            if (loopRc != NcResultCode.Ok)
+            {
+                lock (_sync)
+                {
+                    _diagnostics = _diagnostics with
+                    {
+                        DroppedPackets = _diagnostics.DroppedPackets + 1,
+                        SourceStatus = BuildWebcamSourceStatus("error"),
+                        StatusMessage = $"webcam error: {loopError}",
+                        LastErrorCode = loopRc.ToString(),
+                    };
+                }
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(cycleStart);
+            var remaining = targetFrameBudget - elapsed;
+            if (remaining < TimeSpan.Zero)
+            {
+                continue;
             }
 
             try
             {
-                await Task.Delay(delay, token);
+                await Task.Delay(remaining, token);
             }
             catch (OperationCanceledException)
             {
@@ -371,11 +476,219 @@ public sealed class TrackingInputService : ITrackingInputService
         }
     }
 
-    private string BuildWebcamSourceStatus()
+    private string BuildWebcamSourceStatus(string stage)
     {
         var device = string.IsNullOrWhiteSpace(_options.WebcamDeviceId) ? "default-device" : _options.WebcamDeviceId;
         var model = string.IsNullOrWhiteSpace(_options.OnnxModelPath) ? "no-model" : "model-configured";
-        return $"webcam-placeholder:{device}:{model}:fps_cap={_options.InferenceFpsCap}";
+        return $"webcam-onnx:{stage}:{device}:{model}:fps_cap={_options.InferenceFpsCap}";
+    }
+
+    private NcResultCode InitializeWebcamRuntime()
+    {
+        DisposeWebcamRuntime();
+        if (string.IsNullOrWhiteSpace(_options.OnnxModelPath))
+        {
+            _diagnostics = _diagnostics with
+            {
+                IsActive = false,
+                SourceStatus = BuildWebcamSourceStatus("model-missing"),
+                StatusMessage = "webcam onnx model path is required",
+                ModelSchemaOk = false,
+                LastErrorCode = NcResultCode.InvalidArgument.ToString(),
+            };
+            return NcResultCode.InvalidArgument;
+        }
+
+        if (!File.Exists(_options.OnnxModelPath))
+        {
+            _diagnostics = _diagnostics with
+            {
+                IsActive = false,
+                SourceStatus = BuildWebcamSourceStatus("model-not-found"),
+                StatusMessage = $"onnx model not found: {_options.OnnxModelPath}",
+                ModelSchemaOk = false,
+                LastErrorCode = NcResultCode.InvalidArgument.ToString(),
+            };
+            return NcResultCode.InvalidArgument;
+        }
+
+        try
+        {
+            _webcamCapture = OpenCapture(_options.WebcamDeviceId);
+            if (_webcamCapture is null || !_webcamCapture.IsOpened())
+            {
+                _diagnostics = _diagnostics with
+                {
+                    IsActive = false,
+                    SourceStatus = BuildWebcamSourceStatus("camera-open-failed"),
+                    StatusMessage = "webcam open failed",
+                    ModelSchemaOk = false,
+                    LastErrorCode = NcResultCode.Io.ToString(),
+                };
+                return NcResultCode.Io;
+            }
+
+            _onnxSession = new InferenceSession(_options.OnnxModelPath);
+            var schema = WebcamOnnxSchema.TryCreate(_onnxSession, out var schemaError);
+            if (schema is null)
+            {
+                _diagnostics = _diagnostics with
+                {
+                    IsActive = false,
+                    SourceStatus = BuildWebcamSourceStatus("schema-mismatch"),
+                    StatusMessage = schemaError,
+                    ModelSchemaOk = false,
+                    LastErrorCode = NcResultCode.InvalidArgument.ToString(),
+                };
+                return NcResultCode.InvalidArgument;
+            }
+
+            _webcamSchema = schema;
+            _diagnostics = _diagnostics with
+            {
+                ModelSchemaOk = true,
+                LastErrorCode = string.Empty,
+                SourceStatus = BuildWebcamSourceStatus("initialized"),
+                StatusMessage = "webcam runtime initialized",
+            };
+            return NcResultCode.Ok;
+        }
+        catch (Exception ex)
+        {
+            DisposeWebcamRuntime();
+            _diagnostics = _diagnostics with
+            {
+                IsActive = false,
+                SourceStatus = BuildWebcamSourceStatus("init-failed"),
+                StatusMessage = $"webcam init failed: {ex.Message}",
+                ModelSchemaOk = false,
+                LastErrorCode = NcResultCode.Internal.ToString(),
+            };
+            return NcResultCode.Internal;
+        }
+    }
+
+    private void DisposeWebcamRuntime()
+    {
+        _webcamCapture?.Release();
+        _webcamCapture?.Dispose();
+        _webcamCapture = null;
+        _onnxSession?.Dispose();
+        _onnxSession = null;
+        _webcamSchema = null;
+    }
+
+    private static VideoCapture OpenCapture(string webcamDeviceId)
+    {
+        if (string.IsNullOrWhiteSpace(webcamDeviceId))
+        {
+            return new VideoCapture(0);
+        }
+
+        if (int.TryParse(webcamDeviceId, out var index))
+        {
+            return new VideoCapture(index);
+        }
+
+        return new VideoCapture(webcamDeviceId);
+    }
+
+    private static float[] ConvertMatToInput(Mat rgb)
+    {
+        const int width = 256;
+        const int height = 256;
+        var channelSize = width * height;
+        var data = new float[channelSize * 3];
+        var indexer = rgb.GetGenericIndexer<Vec3b>();
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var pixel = indexer[y, x];
+                var idx = (y * width) + x;
+                data[idx] = pixel.Item0 / 255.0f;
+                data[channelSize + idx] = pixel.Item1 / 255.0f;
+                data[(channelSize * 2) + idx] = pixel.Item2 / 255.0f;
+            }
+        }
+
+        return data;
+    }
+
+    private static WebcamInferenceResult RunInference(
+        InferenceSession session,
+        WebcamOnnxSchema schema,
+        float[] inputData)
+    {
+        var inputTensor = new DenseTensor<float>(inputData, schema.InputShape);
+        var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(schema.InputName, inputTensor) };
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = session.Run(inputs);
+
+        var blendOutput = outputs.FirstOrDefault(x => string.Equals(x.Name, schema.BlendshapeOutputName, StringComparison.Ordinal));
+        var poseOutput = outputs.FirstOrDefault(x => string.Equals(x.Name, schema.HeadPoseOutputName, StringComparison.Ordinal));
+        if (blendOutput is null || poseOutput is null)
+        {
+            throw new InvalidOperationException("missing required onnx output(s): blendshape/head pose");
+        }
+
+        var blendTensor = blendOutput.AsTensor<float>();
+        var blendArray = blendTensor.ToArray();
+        if (blendArray.Length != ArkitBlendshapeOrder.Length)
+        {
+            throw new InvalidOperationException($"blendshape output size mismatch: expected {ArkitBlendshapeOrder.Length}, got {blendArray.Length}");
+        }
+
+        var poseTensor = poseOutput.AsTensor<float>();
+        var poseArray = poseTensor.ToArray();
+        if (poseArray.Length < 3)
+        {
+            throw new InvalidOperationException("head pose output size mismatch: expected at least 3 values");
+        }
+
+        float headPosX = 0.0f;
+        float headPosY = 0.0f;
+        float headPosZ = 0.0f;
+        if (schema.HeadPosOutputName is not null)
+        {
+            var posOutput = outputs.FirstOrDefault(x => string.Equals(x.Name, schema.HeadPosOutputName, StringComparison.Ordinal));
+            if (posOutput is null)
+            {
+                throw new InvalidOperationException("head position output missing while schema requires it");
+            }
+            var posTensor = posOutput.AsTensor<float>();
+            var posArray = posTensor.ToArray();
+            if (posArray.Length < 3)
+            {
+                throw new InvalidOperationException("head position output size mismatch: expected at least 3 values");
+            }
+            headPosX = posArray[0];
+            headPosY = posArray[1];
+            headPosZ = posArray[2];
+        }
+
+        return new WebcamInferenceResult(
+            blendArray,
+            poseArray[0],
+            poseArray[1],
+            poseArray[2],
+            headPosX,
+            headPosY,
+            headPosZ);
+    }
+
+    private void ApplyBlendshapeResult(IReadOnlyList<float> blendshapeWeights)
+    {
+        for (var i = 0; i < ArkitBlendshapeOrder.Length; i++)
+        {
+            var key = NormalizeKey(ArkitBlendshapeOrder[i]);
+            var value = Clamp01(blendshapeWeights[i]);
+            _expressionCache[key] = value;
+        }
+
+        _rawFrame.BlinkL = _expressionCache["eyeblinkleft"];
+        _rawFrame.BlinkR = _expressionCache["eyeblinkright"];
+        _rawFrame.MouthOpen = _expressionCache["jawopen"];
+        SnapshotExpressionWeights();
     }
 
     private bool TryParsePacket(byte[] packet, out List<KeyValuePair<string, float>> updates, out string formatName)
@@ -828,6 +1141,46 @@ public sealed class TrackingInputService : ITrackingInputService
         _lastFpsSampleUtc = now;
     }
 
+    private void UpdateCaptureFps()
+    {
+        lock (_sync)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (_lastCaptureSampleUtc == DateTimeOffset.MinValue)
+            {
+                _lastCaptureSampleUtc = now;
+                _captureSampleCount = 0;
+            }
+
+            _captureSampleCount++;
+            var elapsed = (now - _lastCaptureSampleUtc).TotalSeconds;
+            if (elapsed < 0.5)
+            {
+                return;
+            }
+
+            var instant = _captureSampleCount / elapsed;
+            _smoothedCaptureFps = _smoothedCaptureFps <= 0.001 ? instant : (_smoothedCaptureFps * 0.7) + (instant * 0.3);
+            _captureSampleCount = 0;
+            _lastCaptureSampleUtc = now;
+        }
+    }
+
+    private void UpdateInferenceMs(double elapsedMs)
+    {
+        lock (_sync)
+        {
+            if (double.IsNaN(elapsedMs) || double.IsInfinity(elapsedMs) || elapsedMs < 0.0)
+            {
+                return;
+            }
+
+            _smoothedInferenceMs = _smoothedInferenceMs <= 0.001
+                ? elapsedMs
+                : (_smoothedInferenceMs * 0.7) + (elapsedMs * 0.3);
+        }
+    }
+
     private static (float x, float y, float z, float w) ToQuaternion(float pitchDeg, float yawDeg, float rollDeg)
     {
         var pitch = DegreesToRadians(pitchDeg) * 0.5f;
@@ -933,6 +1286,105 @@ public sealed class TrackingInputService : ITrackingInputService
             BlinkR = 0.0f,
             MouthOpen = 0.0f,
         };
+    }
+
+    private sealed record WebcamInferenceResult(
+        float[] BlendshapeWeights,
+        float HeadYawDeg,
+        float HeadPitchDeg,
+        float HeadRollDeg,
+        float HeadPosX,
+        float HeadPosY,
+        float HeadPosZ);
+
+    private sealed record WebcamOnnxSchema(
+        string InputName,
+        int[] InputShape,
+        string BlendshapeOutputName,
+        string HeadPoseOutputName,
+        string? HeadPosOutputName)
+    {
+        private static readonly int[] ExpectedInput = { 1, 3, 256, 256 };
+        private static readonly int[] ExpectedBlend = { 1, 52 };
+        private static readonly int[] ExpectedPose = { 1, 3 };
+
+        public static WebcamOnnxSchema? TryCreate(InferenceSession session, out string error)
+        {
+            const string inputName = "input";
+            const string blendName = "blendshape";
+            const string poseName = "head_pose";
+            const string posName = "head_pos";
+            error = string.Empty;
+
+            if (!session.InputMetadata.TryGetValue(inputName, out var inputMeta))
+            {
+                error = "onnx schema mismatch: missing input 'input' [1,3,256,256]";
+                return null;
+            }
+
+            if (!ValidateShape(inputMeta.Dimensions, ExpectedInput))
+            {
+                error = "onnx schema mismatch: input 'input' must be [1,3,256,256]";
+                return null;
+            }
+
+            if (!session.OutputMetadata.TryGetValue(blendName, out var blendMeta) ||
+                !ValidateShape(blendMeta.Dimensions, ExpectedBlend))
+            {
+                error = "onnx schema mismatch: output 'blendshape' must be [1,52]";
+                return null;
+            }
+
+            if (!session.OutputMetadata.TryGetValue(poseName, out var poseMeta) ||
+                !ValidateShape(poseMeta.Dimensions, ExpectedPose))
+            {
+                error = "onnx schema mismatch: output 'head_pose' must be [1,3]";
+                return null;
+            }
+
+            string? optionalPosOutput = null;
+            if (session.OutputMetadata.TryGetValue(posName, out var posMeta))
+            {
+                if (!ValidateShape(posMeta.Dimensions, ExpectedPose))
+                {
+                    error = "onnx schema mismatch: output 'head_pos' must be [1,3] when present";
+                    return null;
+                }
+                optionalPosOutput = posName;
+            }
+
+            return new WebcamOnnxSchema(inputName, ExpectedInput, blendName, poseName, optionalPosOutput);
+        }
+
+        private static bool ValidateShape(IReadOnlyList<int> actual, IReadOnlyList<int> expected)
+        {
+            if (actual.Count != expected.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < expected.Count; i++)
+            {
+                var expectedDim = expected[i];
+                var actualDim = actual[i];
+                if (i == 0)
+                {
+                    // Allow dynamic batch for user-supplied models.
+                    if (actualDim == -1 || actualDim == expectedDim)
+                    {
+                        continue;
+                    }
+                    return false;
+                }
+
+                if (actualDim != expectedDim)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);

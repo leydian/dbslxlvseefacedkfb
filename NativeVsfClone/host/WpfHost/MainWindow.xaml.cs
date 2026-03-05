@@ -1097,18 +1097,17 @@ public partial class MainWindow : Window
         }
 
         var firstColon = warningText.IndexOf(':');
-        if (firstColon < 0 || firstColon >= warningText.Length - 1)
+        if (firstColon < 0)
         {
             return "unknown";
         }
 
-        var secondColon = warningText.IndexOf(':', firstColon + 1);
-        if (secondColon < 0 || secondColon <= firstColon + 1)
+        var firstToken = warningText.Substring(0, firstColon).Trim();
+        if (string.IsNullOrWhiteSpace(firstToken))
         {
             return "unknown";
         }
-
-        return warningText.Substring(firstColon + 1, secondColon - firstColon - 1).Trim();
+        return firstToken;
     }
 
     private string BuildLogsText()
