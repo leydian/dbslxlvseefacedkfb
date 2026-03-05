@@ -8,6 +8,7 @@ Domain-level report navigation hub.
 
 ## arkit52
 - [2026-03-06_arkit52_strict_full_support_pipeline.md](./weekly/2026-W10/2026-03-06_arkit52_strict_full_support_pipeline.md)
+- [2026-03-06_arkit52_quality_refinement_hybrid_fallback.md](./weekly/2026-W10/2026-03-06_arkit52_quality_refinement_hybrid_fallback.md)
 
 ## consumer
 - [2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md](./weekly/2026-W10/2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md)

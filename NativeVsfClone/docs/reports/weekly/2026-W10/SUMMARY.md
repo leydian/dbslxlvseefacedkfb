@@ -23,7 +23,7 @@
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
 - `nativecore`: 2 reports
-- `arkit52`: 1 reports
+- `arkit52`: 2 reports
 - `runtime`: 1 reports
 - `spout2`: 1 reports
 - `vxa2`: 1 reports
@@ -39,3 +39,4 @@
 - Newly added: review `2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md` for arm filtering/tuning, suggested arm preset automation, and native arm-pose update optimization.
 - Newly added: review `2026-03-06_wpf_light_glass_editorial_ui_refresh.md` for WPF design token expansion, left-rail + workspace layout modernization, and render-only visibility sync updates.
 - Newly added: review `2026-03-06_arkit52_strict_full_support_pipeline.md` for strict ARKit52 channel binding policy, host/native coverage diagnostics, and non-fatal missing-channel warning behavior.
+- Newly added: review `2026-03-06_arkit52_quality_refinement_hybrid_fallback.md` for strict-first hybrid fallback routing, ARKit quality scoring, per-group calibration tuning, and fallback warning telemetry.

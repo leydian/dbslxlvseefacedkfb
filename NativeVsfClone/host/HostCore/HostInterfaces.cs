@@ -118,9 +118,14 @@ public sealed record TrackingDiagnostics(
     string SwitchBlockedReason = "",
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
     float PoseDeadbandDeg = 0.9f,
+    int Arkit52StrictCount = 0,
+    int Arkit52FallbackCount = 0,
     int Arkit52SubmittedCount = 0,
     int Arkit52MissingCount = 52,
-    string Arkit52MissingKeys = "");
+    string Arkit52MissingKeys = "",
+    string Arkit52TopMissingKeys = "",
+    double Arkit52QualityScore = 0.0,
+    double Arkit52QualityStageMs = 0.0);
 
 public interface ITrackingInputService
 {

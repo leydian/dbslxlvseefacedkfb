@@ -1522,6 +1522,7 @@ public sealed class TrackingInputService : ITrackingInputService
         {
             return Clamp01(value);
         }
+        var profile = GetCalibrationProfile(normalized);
 
         if (!_calibrationBaseline.TryGetValue(normalized, out var baseline))
         {
@@ -1530,7 +1531,9 @@ public sealed class TrackingInputService : ITrackingInputService
         }
         else
         {
-            var alpha = _calibrationFrames < CalibrationWarmupFrames ? 0.06f : 0.01f;
+            var alpha = _calibrationFrames < CalibrationWarmupFrames
+                ? profile.WarmupAlpha
+                : profile.SteadyAlpha;
             baseline = Ema(baseline, value, alpha);
             _calibrationBaseline[normalized] = baseline;
         }
@@ -1541,10 +1544,35 @@ public sealed class TrackingInputService : ITrackingInputService
             return Clamp01(value);
         }
 
-        var denom = MathF.Max(0.18f, 1.0f - baseline);
+        var denom = MathF.Max(profile.MinDenominator, 1.0f - baseline);
         var normalizedValue = (value - baseline) / denom;
         _calibrationState = "stable";
         return Clamp01(normalizedValue);
+    }
+
+    private static ChannelCalibrationProfile GetCalibrationProfile(string normalizedChannel)
+    {
+        if (normalizedChannel.StartsWith("eye", StringComparison.Ordinal) ||
+            normalizedChannel.StartsWith("blink", StringComparison.Ordinal))
+        {
+            return new ChannelCalibrationProfile(0.08f, 0.02f, 0.12f);
+        }
+
+        if (normalizedChannel.StartsWith("mouth", StringComparison.Ordinal) ||
+            normalizedChannel.StartsWith("jaw", StringComparison.Ordinal) ||
+            normalizedChannel.StartsWith("tongue", StringComparison.Ordinal))
+        {
+            return new ChannelCalibrationProfile(0.05f, 0.015f, 0.16f);
+        }
+
+        if (normalizedChannel.StartsWith("brow", StringComparison.Ordinal) ||
+            normalizedChannel.StartsWith("nose", StringComparison.Ordinal) ||
+            normalizedChannel.StartsWith("cheek", StringComparison.Ordinal))
+        {
+            return new ChannelCalibrationProfile(0.04f, 0.012f, 0.18f);
+        }
+
+        return new ChannelCalibrationProfile(0.06f, 0.01f, 0.18f);
     }
 
     private void AdvanceCalibration()
@@ -2095,6 +2123,11 @@ public sealed class TrackingInputService : ITrackingInputService
         long SourceTimestampUnixMs,
         double ParseMs,
         IReadOnlyDictionary<string, float> BlendshapeWeights);
+
+    private readonly record struct ChannelCalibrationProfile(
+        float WarmupAlpha,
+        float SteadyAlpha,
+        float MinDenominator);
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);
     private readonly record struct OscValue(OscValueKind Kind, float FloatValue, string StringValue);

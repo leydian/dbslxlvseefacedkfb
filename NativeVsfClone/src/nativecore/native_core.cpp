@@ -165,6 +165,7 @@ struct CoreState {
     bool initialized = false;
     std::uint64_t next_avatar_handle = 1;
     std::unordered_map<std::uint64_t, AvatarPackage> avatars;
+    std::unordered_map<std::uint64_t, std::string> avatar_preview_debug;
     std::unordered_map<std::uint64_t, AvatarSecondaryMotionState> secondary_motion_states;
     std::unordered_map<std::uint64_t, AvatarArmPoseState> arm_pose_states;
     std::unordered_set<std::uint64_t> render_ready_avatars;
@@ -591,6 +592,10 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
                      << ", opaque=" << mode_counts.opaque
                      << ", mask=" << mode_counts.mask
                      << ", blend=" << mode_counts.blend;
+        const auto preview_it = g_state.avatar_preview_debug.find(handle);
+        if (preview_it != g_state.avatar_preview_debug.end() && !preview_it->second.empty()) {
+            pass_summary << ", " << preview_it->second;
+        }
         CopyString(
             out_info->last_render_pass_summary,
             sizeof(out_info->last_render_pass_summary),
@@ -1223,6 +1228,38 @@ const std::array<const char*, 52U> kArkit52Canonical = {
     "mouthStretchLeft", "mouthStretchRight", "mouthUpperUpLeft", "mouthUpperUpRight", "noseSneerLeft",
     "noseSneerRight", "tongueOut",
 };
+
+const std::unordered_map<std::string, std::vector<std::string>> kArkit52FallbackCandidates = {
+    {"eyeblinkleft", {"blinkl", "blinkleft", "eyecloseleft"}},
+    {"eyeblinkright", {"blinkr", "blinkright", "eyecloseright"}},
+    {"jawopen", {"mouthopen", "visemeaa", "aa"}},
+    {"mouthsmileleft", {"smileleft", "smilel", "smile"}},
+    {"mouthsmileright", {"smileright", "smiler", "smile"}},
+    {"browinnerup", {"browup", "browsup", "innerbrowup"}},
+    {"mouthfunnel", {"funnel", "moutho", "visemeo"}},
+    {"mouthpucker", {"pucker", "mouthu", "visemeu"}},
+};
+
+bool TryResolveArkitFallbackWeight(
+    const std::string& canonical_channel,
+    const std::unordered_map<std::string, float>& incoming,
+    float* out_weight) {
+    if (out_weight == nullptr) {
+        return false;
+    }
+    const auto it = kArkit52FallbackCandidates.find(canonical_channel);
+    if (it == kArkit52FallbackCandidates.end()) {
+        return false;
+    }
+    for (const auto& candidate : it->second) {
+        const auto w_it = incoming.find(candidate);
+        if (w_it != incoming.end()) {
+            *out_weight = std::max(0.0f, std::min(1.0f, w_it->second));
+            return true;
+        }
+    }
+    return false;
+}
 
 bool HasArkit52ExpressionBindings(const AvatarPackage& pkg) {
     std::size_t bound_channels = 0U;
@@ -2207,16 +2244,19 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
             avatar_it->second.warning_codes.push_back("XAV2_SKINNING_STATIC_DISABLED");
         }
     }
-    const bool bypass_vrm_static_skinning = avatar_pkg.source_type == AvatarSourceType::Vrm;
-    if (bypass_vrm_static_skinning && !avatar_pkg.skin_payloads.empty()) {
+    const bool bypass_xav2_static_skinning = avatar_pkg.source_type == AvatarSourceType::Xav2;
+    if (bypass_xav2_static_skinning && !avatar_pkg.skin_payloads.empty()) {
         auto avatar_it = g_state.avatars.find(handle);
         if (avatar_it != g_state.avatars.end()) {
             PushAvatarWarningUnique(
                 &avatar_it->second,
-                "W_RENDER: VRM_SKINNING_STATIC_BYPASS: using loader-provided mesh-space skinned vertices.",
-                "VRM_SKINNING_STATIC_BYPASS");
+                "W_RENDER: XAV2_SKINNING_STATIC_BYPASS: using mesh payload vertex positions.",
+                "XAV2_SKINNING_STATIC_BYPASS");
         }
     }
+    // Keep VRM on the same validated skinning path as other formats to avoid
+    // mesh-space mismatch between body and attached parts on some avatars.
+    const bool bypass_vrm_static_skinning = false;
     std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
     skin_by_mesh.reserve(avatar_pkg.skin_payloads.size());
     for (const auto& skin : avatar_pkg.skin_payloads) {
@@ -2236,7 +2276,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         const avatar::SkeletonRenderPayload* skeleton_payload = nullptr;
         bool force_static_skinning_fallback = false;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
-        if (!bypass_vrm_static_skinning && skin_it != skin_by_mesh.end()) {
+        if (!bypass_vrm_static_skinning && !bypass_xav2_static_skinning && skin_it != skin_by_mesh.end()) {
             const auto check = ValidateSkinPayload(payload, *skin_it->second);
             if (check.valid) {
                 skin_payload = skin_it->second;
@@ -3631,6 +3671,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         // can push the visible avatar out of frame after reload/recovery paths.
         const float x_offset = 0.0f;
         const float preview_yaw = PreviewYawRadiansForAvatarSource(it->second.source_type);
+        {
+            std::ostringstream preview_debug;
+            preview_debug << "extent=(" << extent_x << "/" << extent_y << "/" << extent_z
+                          << "), fit_scale=" << fit_scale
+                          << ", center=(" << cx << "/" << cy << "/" << cz << ")";
+            g_state.avatar_preview_debug[handle] = preview_debug.str();
+        }
         const auto raw_head_rot = DirectX::XMVectorSet(
             g_state.latest_tracking.head_rot_quat[0],
             g_state.latest_tracking.head_rot_quat[1],
@@ -4319,6 +4366,7 @@ NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32
             continue;
         }
         const bool arkit52_mode = vsfclone::nativecore::HasArkit52ExpressionBindings(pkg);
+        std::size_t fallback_applied_count = 0U;
 
         std::string summary;
         std::size_t shown = 0U;
@@ -4338,6 +4386,14 @@ NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32
                 if (it != incoming.end()) {
                     weight = it->second;
                     matched = true;
+                }
+            }
+            if (!matched && arkit52_mode) {
+                float fallback_weight = 0.0f;
+                if (vsfclone::nativecore::TryResolveArkitFallbackWeight(expr_name, incoming, &fallback_weight)) {
+                    weight = fallback_weight;
+                    matched = true;
+                    ++fallback_applied_count;
                 }
             }
             if (!matched && !arkit52_mode && mapping == "blink") {
@@ -4375,6 +4431,11 @@ NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32
             }
         }
         pkg.last_expression_summary = summary;
+        if (arkit52_mode && fallback_applied_count > 0U) {
+            std::ostringstream message;
+            message << "W_EXPRESSION: ARKIT52 fallback aliases applied count=" << fallback_applied_count;
+            vsfclone::nativecore::PushAvatarWarningUnique(&pkg, message.str(), "W_ARKIT52_FALLBACK_APPLIED");
+        }
     }
 
     vsfclone::nativecore::ClearError();

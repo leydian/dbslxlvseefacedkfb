@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -780,34 +781,18 @@ public sealed partial class HostController
                 TrackResult("SetTrackingFrameNeutral", trackingRc);
             }
         }
-        int? arkit52SubmittedCount = null;
-        int? arkit52MissingCount = null;
-        string? arkit52MissingKeys = null;
+        Arkit52ResolutionSummary? arkit52Summary = null;
         if (_trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
             expressionWeights.Count > 0)
         {
-            var submittedCount = 0;
-            var arkit52Missing = new List<string>();
-            foreach (var channel in Arkit52Channels.NormalizedOrder)
+            var stageWatch = Stopwatch.StartNew();
+            var resolved = BuildExpressionPayloadWithArkitFallback(expressionWeights);
+            stageWatch.Stop();
+            arkit52Summary = resolved.Summary with
             {
-                if (expressionWeights.ContainsKey(channel))
-                {
-                    submittedCount++;
-                }
-                else
-                {
-                    arkit52Missing.Add(channel);
-                }
-            }
-
-            var payload = expressionWeights
-                .Where(static pair => !IsPoseChannel(pair.Key))
-                .Select(static pair => new NcExpressionWeight
-                {
-                    Name = pair.Key,
-                    Weight = Math.Clamp(pair.Value, 0.0f, 1.0f),
-                })
-                .ToArray();
+                QualityStageMs = stageWatch.Elapsed.TotalMilliseconds,
+            };
+            var payload = resolved.Payload;
             if (payload.Length > 0)
             {
                 var exprRc = NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
@@ -822,18 +807,20 @@ public sealed partial class HostController
                     _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
                 }
             }
-            arkit52SubmittedCount = submittedCount;
-            arkit52MissingCount = arkit52Missing.Count;
-            arkit52MissingKeys = string.Join(",", arkit52Missing);
         }
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
-        if (arkit52SubmittedCount.HasValue && arkit52MissingCount.HasValue)
+        if (arkit52Summary is not null)
         {
             _trackingDiagnostics = _trackingDiagnostics with
             {
-                Arkit52SubmittedCount = arkit52SubmittedCount.Value,
-                Arkit52MissingCount = arkit52MissingCount.Value,
-                Arkit52MissingKeys = arkit52MissingKeys ?? string.Empty,
+                Arkit52StrictCount = arkit52Summary.StrictCount,
+                Arkit52FallbackCount = arkit52Summary.FallbackCount,
+                Arkit52SubmittedCount = arkit52Summary.SubmittedCount,
+                Arkit52MissingCount = arkit52Summary.MissingCount,
+                Arkit52MissingKeys = arkit52Summary.MissingKeys,
+                Arkit52TopMissingKeys = arkit52Summary.TopMissingKeys,
+                Arkit52QualityScore = arkit52Summary.QualityScore,
+                Arkit52QualityStageMs = arkit52Summary.QualityStageMs,
             };
         }
         ReconcileTrackingDiagnostics();
@@ -1466,6 +1453,105 @@ public sealed partial class HostController
                key.Equals("headposy", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("headposz", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static Arkit52PayloadResolution BuildExpressionPayloadWithArkitFallback(
+        IReadOnlyDictionary<string, float> expressionWeights)
+    {
+        var normalized = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in expressionWeights)
+        {
+            if (IsPoseChannel(pair.Key))
+            {
+                continue;
+            }
+
+            var key = Arkit52Channels.NormalizeKey(pair.Key);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            normalized[key] = Math.Clamp(pair.Value, 0.0f, 1.0f);
+        }
+
+        var strictCount = 0;
+        var fallbackCount = 0;
+        var missing = new List<string>();
+        foreach (var channel in Arkit52Channels.NormalizedOrder)
+        {
+            if (normalized.ContainsKey(channel))
+            {
+                strictCount++;
+                continue;
+            }
+
+            if (TryResolveFallbackChannel(channel, normalized, out var fallbackValue))
+            {
+                normalized[channel] = fallbackValue;
+                fallbackCount++;
+                continue;
+            }
+
+            missing.Add(channel);
+        }
+
+        var payload = normalized
+            .Select(static pair => new NcExpressionWeight
+            {
+                Name = pair.Key,
+                Weight = Math.Clamp(pair.Value, 0.0f, 1.0f),
+            })
+            .ToArray();
+        var submittedCount = strictCount + fallbackCount;
+        var qualityScore = Math.Clamp((strictCount + (fallbackCount * 0.7)) / 52.0, 0.0, 1.0);
+        var topMissing = string.Join(",", missing.Take(8));
+        var summary = new Arkit52ResolutionSummary(
+            strictCount,
+            fallbackCount,
+            submittedCount,
+            missing.Count,
+            string.Join(",", missing),
+            topMissing,
+            qualityScore,
+            0.0);
+        return new Arkit52PayloadResolution(payload, summary);
+    }
+
+    private static bool TryResolveFallbackChannel(
+        string canonicalChannel,
+        IReadOnlyDictionary<string, float> normalizedWeights,
+        out float value)
+    {
+        value = 0.0f;
+        if (!Arkit52Channels.FallbackCandidatesByChannel.TryGetValue(canonicalChannel, out var candidates))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            if (normalizedWeights.TryGetValue(candidates[i], out value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private sealed record Arkit52PayloadResolution(
+        NcExpressionWeight[] Payload,
+        Arkit52ResolutionSummary Summary);
+
+    private sealed record Arkit52ResolutionSummary(
+        int StrictCount,
+        int FallbackCount,
+        int SubmittedCount,
+        int MissingCount,
+        string MissingKeys,
+        string TopMissingKeys,
+        double QualityScore,
+        double QualityStageMs);
 
     private NcResultCode ApplyPoseOffsetsInternal(string source)
     {

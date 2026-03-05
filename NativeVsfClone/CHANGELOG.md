@@ -2,6 +2,51 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - ARKit52 quality refinement (hybrid fallback + per-group calibration)
+
+### Summary
+
+Enhanced ARKit52 expression quality with strict-first hybrid fallback resolution, richer ARKit quality diagnostics, and channel-group adaptive calibration tuning. Added native fallback alias application telemetry for ARKit mode to improve operator visibility in partial-mapping scenarios.
+
+### Changed
+
+- Host ARKit52 resolution and diagnostics:
+  - `host/HostCore/Arkit52Channels.cs`
+    - added limited fallback candidate table for critical channels.
+  - `host/HostCore/HostController.cs`
+    - added strict-first ARKit payload resolution with fallback-only-on-miss behavior.
+    - added ARKit quality summary metrics calculation (`strict/fallback/missing/score/stage_ms`).
+  - `host/HostCore/HostInterfaces.cs`
+    - extended `TrackingDiagnostics` with:
+      - `Arkit52StrictCount`
+      - `Arkit52FallbackCount`
+      - `Arkit52TopMissingKeys`
+      - `Arkit52QualityScore`
+      - `Arkit52QualityStageMs`
+- Tracking calibration refinement:
+  - `host/HostCore/TrackingInputService.cs`
+    - channel-group calibration profile split (eye, mouth/jaw, brow/nose/cheek).
+    - adaptive baseline update now uses profile-specific alpha/denominator tuning.
+- Native ARKit fallback telemetry:
+  - `src/nativecore/native_core.cpp`
+    - ARKit-mode fallback alias resolution for selected channels in `nc_set_expression_weights(...)`.
+    - emits `W_ARKIT52_FALLBACK_APPLIED` when fallback aliases are used.
+- WinUI tracking diagnostics display:
+  - `host/WinUiHost/MainWindow.xaml.cs`
+    - status/runtime text now includes strict/fallback counts and quality score/stage timing.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_arkit52_quality_refinement_hybrid_fallback.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -c Release --no-restore`: blocked by environment network restriction (`NU1301`, `api.nuget.org`)
+
 ## 2026-03-06 - WPF Light Glass Editorial UI refresh
 
 ### Summary

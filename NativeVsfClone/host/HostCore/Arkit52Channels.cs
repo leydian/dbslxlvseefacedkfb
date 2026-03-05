@@ -31,6 +31,19 @@ internal static class Arkit52Channels
     public static readonly IReadOnlySet<string> NormalizedSet =
         new HashSet<string>(NormalizedOrder, StringComparer.OrdinalIgnoreCase);
 
+    public static readonly IReadOnlyDictionary<string, ReadOnlyCollection<string>> FallbackCandidatesByChannel =
+        new Dictionary<string, ReadOnlyCollection<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["eyeblinkleft"] = ToNormalizedList("blinkl", "blinkleft", "eyecloseleft"),
+            ["eyeblinkright"] = ToNormalizedList("blinkr", "blinkright", "eyecloseright"),
+            ["jawopen"] = ToNormalizedList("mouthopen", "visemeaa", "aa"),
+            ["mouthsmileleft"] = ToNormalizedList("smileleft", "smilel", "smile"),
+            ["mouthsmileright"] = ToNormalizedList("smileright", "smiler", "smile"),
+            ["browinnerup"] = ToNormalizedList("browup", "browsup", "innerbrowup"),
+            ["mouthfunnel"] = ToNormalizedList("funnel", "moutho", "visemeo"),
+            ["mouthpucker"] = ToNormalizedList("pucker", "mouthu", "visemeu"),
+        };
+
     public static string NormalizeKey(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -47,5 +60,15 @@ internal static class Arkit52Channels
             }
         }
         return sb.ToString();
+    }
+
+    private static ReadOnlyCollection<string> ToNormalizedList(params string[] items)
+    {
+        return Array.AsReadOnly(
+            items
+                .Select(NormalizeKey)
+                .Where(static s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray());
     }
 }
