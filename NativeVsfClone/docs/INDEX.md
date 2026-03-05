@@ -17,6 +17,7 @@ Entry point for `NativeVsfClone` documentation.
 
 - [TEMPLATE.md](./reports/TEMPLATE.md)
 - [tracking_latency_lock_followup_2026-03-06.md](./reports/tracking_latency_lock_followup_2026-03-06.md)
+- [host_pose_tracking_refinement_execution_2026-03-06.md](./reports/host_pose_tracking_refinement_execution_2026-03-06.md)
 - [wpf_render_drag_capture_stabilization_2026-03-06.md](./reports/wpf_render_drag_capture_stabilization_2026-03-06.md)
 - [tracking_render_followup_2026-03-06.md](./reports/tracking_render_followup_2026-03-06.md)
 - [release_execution_followup_2026-03-06.md](./reports/release_execution_followup_2026-03-06.md)
@@ -49,6 +50,7 @@ Entry point for `NativeVsfClone` documentation.
 - [host_exe_publish_2026-03-02.md](./reports/host_exe_publish_2026-03-02.md)
 - [host_execution_round_2026-03-05.md](./reports/host_execution_round_2026-03-05.md)
 - [host_gate_execution_round_2026-03-04.md](./reports/host_gate_execution_round_2026-03-04.md)
+- [host_pose_tracking_refinement_execution_2026-03-06.md](./reports/host_pose_tracking_refinement_execution_2026-03-06.md)
 - [host_plan_execution_update_2026-03-04.md](./reports/host_plan_execution_update_2026-03-04.md)
 - [host_runtime_parity_smoke_checklist_2026-03-04.md](./reports/host_runtime_parity_smoke_checklist_2026-03-04.md)
 - [host_stabilization_round_2026-03-03.md](./reports/host_stabilization_round_2026-03-03.md)
