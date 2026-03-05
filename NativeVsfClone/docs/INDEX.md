@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [xav2_native_uv_offset_fix_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_native_uv_offset_fix_2026-03-05.md): native XAV2 render-path UV decode fix for expanded-stride Unity payloads to resolve scrambled texture mapping
 - [xav2_liltoon_texture_export_fallback_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_liltoon_texture_export_fallback_2026-03-05.md): Unity XAV2 exporter texture-path hardening for lilToon/non-readable textures via RenderTexture fallback and expanded base map property probe
 - [session_change_summary_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/session_change_summary_2026-03-05.md): consolidated latest-session rollup covering WPF crash hotfix, Unity XAV2 relaxed export menu, avatar extension policy trim, and current host load-failure behavior
 - [xav2_relaxed_export_menu_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_relaxed_export_menu_2026-03-05.md): Unity XAV2 strict-policy bypass path addition via opt-in relaxed export menu with mode-aware diagnostics/logging

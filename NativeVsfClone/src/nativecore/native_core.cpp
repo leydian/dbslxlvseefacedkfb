@@ -669,11 +669,15 @@ bool BuildGpuMeshForPayload(const avatar::MeshRenderPayload& payload, ID3D11Devi
     std::vector<std::uint8_t> gpu_vertex_blob;
     gpu_vertex_blob.reserve(static_cast<std::size_t>(vertex_count) * 20U);
     const auto* src = payload.vertex_blob.data();
+    const std::uint32_t uv_offset = (src_stride >= 32U) ? 24U : 12U;
     for (std::uint32_t i = 0U; i < vertex_count; ++i) {
         const std::size_t base = static_cast<std::size_t>(i) * src_stride;
         gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base, src + base + 12U);
-        if (src_stride >= 20U) {
-            gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base + 12U, src + base + 20U);
+        if (src_stride >= (uv_offset + 8U)) {
+            gpu_vertex_blob.insert(
+                gpu_vertex_blob.end(),
+                src + base + uv_offset,
+                src + base + uv_offset + 8U);
         } else {
             const std::array<float, 2U> uv_zero = {0.0f, 0.0f};
             const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uv_zero.data());
