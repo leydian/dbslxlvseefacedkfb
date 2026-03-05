@@ -528,7 +528,7 @@ namespace VsfClone.Xav2.Runtime
                 materialsByName[name] = material;
             }
 
-            material.ShaderFamily = string.IsNullOrWhiteSpace(shaderFamily) ? "legacy" : shaderFamily;
+            material.ShaderFamily = NormalizeShaderFamily(shaderFamily);
             material.FeatureFlags = featureFlags;
             material.TypedFloatParams.Clear();
             material.TypedColorParams.Clear();
@@ -587,7 +587,7 @@ namespace VsfClone.Xav2.Runtime
             material.TypedSchemaVersion = schemaVersion;
             material.MaterialParamEncoding = schemaVersion >= 3 ? $"typed-v{schemaVersion}" : "typed-v2";
 
-            if (string.Equals(material.ShaderFamily, "liltoon", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(material.ShaderFamily, "legacy", StringComparison.OrdinalIgnoreCase))
             {
                 if (!material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)))
                 {
@@ -597,7 +597,7 @@ namespace VsfClone.Xav2.Runtime
                     }
                 }
             }
-            else if (!string.Equals(material.ShaderFamily, "legacy", StringComparison.OrdinalIgnoreCase))
+            if (!IsSupportedShaderFamily(material.ShaderFamily))
             {
                 if (!AddWarningOrFail(
                         diagnostics,
@@ -1016,6 +1016,31 @@ namespace VsfClone.Xav2.Runtime
             {
                 var hasTyped = material.MaterialParamEncoding.StartsWith("typed-v", StringComparison.OrdinalIgnoreCase) ||
                                material.TypedTextureParams.Count > 0;
+                var fallbackReasons = new List<string>();
+                if (!IsCanonicalAlphaMode(material.AlphaMode))
+                {
+                    fallbackReasons.Add("alpha_mode_defaulted");
+                }
+                if (hasTyped && !IsSupportedShaderFamily(material.ShaderFamily))
+                {
+                    fallbackReasons.Add("unsupported_shader_family");
+                }
+                if (hasTyped &&
+                    !material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)) &&
+                    !ContainsAny(material.ShaderParamsJson, "\"_BaseColor\"", "\"_Color\""))
+                {
+                    fallbackReasons.Add("base_color_defaulted");
+                }
+                if (fallbackReasons.Count > 0)
+                {
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV2_MATERIAL_FALLBACK_APPLIED: material={material.Name}, reason={string.Join("|", fallbackReasons)}"))
+                    {
+                        return false;
+                    }
+                }
                 if (!hasTyped)
                 {
                     continue;
@@ -1148,6 +1173,53 @@ namespace VsfClone.Xav2.Runtime
             return string.IsNullOrWhiteSpace(value)
                 ? string.Empty
                 : value.Replace('\\', '/').Trim().ToLowerInvariant();
+        }
+
+        private static string NormalizeShaderFamily(string value)
+        {
+            var key = NormalizeRefKey(value);
+            return string.IsNullOrWhiteSpace(key) ? "legacy" : key;
+        }
+
+        private static bool IsSupportedShaderFamily(string value)
+        {
+            var key = NormalizeShaderFamily(value);
+            return key == "legacy" ||
+                   key == "liltoon" ||
+                   key == "poiyomi" ||
+                   key == "potatoon" ||
+                   key == "realtoon";
+        }
+
+        private static bool IsCanonicalAlphaMode(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return true;
+            }
+
+            return string.Equals(value, "OPAQUE", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "MASK", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(value, "BLEND", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ContainsAny(string source, params string[] needles)
+        {
+            if (string.IsNullOrEmpty(source) || needles == null || needles.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var needle in needles)
+            {
+                if (!string.IsNullOrEmpty(needle) &&
+                    source.IndexOf(needle, StringComparison.Ordinal) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool AddWarningOrFail(Xav2LoadDiagnostics diagnostics, Xav2LoadOptions options, string warning)

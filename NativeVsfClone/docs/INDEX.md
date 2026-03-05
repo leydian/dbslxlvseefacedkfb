@@ -16,6 +16,7 @@ Entry point for `NativeVsfClone` documentation.
 ## Recent Reports
 
 - [TEMPLATE.md](./reports/TEMPLATE.md)
+- [xav2_liltoon_parity_material_extension_2026-03-06.md](./reports/xav2_liltoon_parity_material_extension_2026-03-06.md)
 - [xav2_typed_v3_ultra_parity_foundation_2026-03-06.md](./reports/xav2_typed_v3_ultra_parity_foundation_2026-03-06.md)
 - [tracking_latency_lock_followup_2026-03-06.md](./reports/tracking_latency_lock_followup_2026-03-06.md)
 - [xav2_warning_contract_gate_upgrade_2026-03-06.md](./reports/xav2_warning_contract_gate_upgrade_2026-03-06.md)
@@ -114,6 +115,7 @@ Entry point for `NativeVsfClone` documentation.
 - [xav2_import_rig_accuracy_hardening_followup_2026-03-06.md](./reports/xav2_import_rig_accuracy_hardening_followup_2026-03-06.md)
 - [xav2_import_v4_rig_hardening_2026-03-06.md](./reports/xav2_import_v4_rig_hardening_2026-03-06.md)
 - [xav2_liltoon_texture_export_fallback_2026-03-05.md](./reports/xav2_liltoon_texture_export_fallback_2026-03-05.md)
+- [xav2_liltoon_parity_material_extension_2026-03-06.md](./reports/xav2_liltoon_parity_material_extension_2026-03-06.md)
 - [xav2_native_unknown_section_parity_2026-03-03.md](./reports/xav2_native_unknown_section_parity_2026-03-03.md)
 - [xav2_native_uv_offset_fix_2026-03-05.md](./reports/xav2_native_uv_offset_fix_2026-03-05.md)
 - [xav2_policy_gateH_ci_2026-03-03.md](./reports/xav2_policy_gateH_ci_2026-03-03.md)

@@ -89,6 +89,27 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialParams_AdvancedLilToonEntries_Parses()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true, typedIncludeAdvancedEntries: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                var material = payload.Materials[0];
+                Assert.That(material.TypedFloatParams.Exists(p => p.Id == "_MatCapBlend"), Is.True);
+                Assert.That(material.TypedFloatParams.Exists(p => p.Id == "_EmissionStrength"), Is.True);
+                Assert.That(material.TypedColorParams.Exists(p => p.Id == "_MatCapColor"), Is.True);
+                Assert.That(material.TypedTextureParams.Exists(p => p.Slot == "matcap"), Is.True);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_TypedMaterialParamsV2_LegacyShape_Parses()
         {
             var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true, typedSchemaVersion: 2));
@@ -152,6 +173,28 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialSupportedShaderFamily_DoesNotWarnUnsupported()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "poiyomi"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY")),
+                    Is.False);
+                Assert.That(diagnostics.WarningCodes, Does.Not.Contain("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_TypedMaterialUnsupportedShaderFamily_Warns()
         {
             var path = WriteTempFile(
@@ -166,6 +209,7 @@ namespace VsfClone.Xav2.Runtime.Tests
                     diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY")),
                     Is.True);
                 Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY"));
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_FALLBACK_APPLIED"));
             }
             finally
             {
@@ -534,6 +578,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             string typedBaseTextureRefOverride = null,
             string typedShaderFamilyOverride = null,
             bool typedIncludeBaseColor = true,
+            bool typedIncludeAdvancedEntries = false,
             bool addSkinSection = false,
             bool addSkeletonSection = false,
             bool addRigSection = false,
@@ -611,6 +656,7 @@ namespace VsfClone.Xav2.Runtime.Tests
                         "material_0",
                         typedShaderFamilyOverride ?? "liltoon",
                         typedIncludeBaseColor,
+                        typedIncludeAdvancedEntries,
                         typedSchemaVersion,
                         unresolvedTypedTextureRef
                             ? "texture_missing_typed"
@@ -704,6 +750,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             string name,
             string shaderFamily,
             bool includeBaseColor,
+            bool includeAdvancedEntries,
             ushort schemaVersion,
             string baseTextureRef)
         {
@@ -717,11 +764,20 @@ namespace VsfClone.Xav2.Runtime.Tests
                 bw.Write(schemaVersion);
             }
 
-            bw.Write((ushort)1);
+            var floatCount = (ushort)(includeAdvancedEntries ? 3 : 1);
+            bw.Write(floatCount);
             WriteSizedString(bw, "_Cutoff");
             bw.Write(0.5f);
+            if (includeAdvancedEntries)
+            {
+                WriteSizedString(bw, "_EmissionStrength");
+                bw.Write(1.15f);
+                WriteSizedString(bw, "_MatCapBlend");
+                bw.Write(0.45f);
+            }
 
-            bw.Write((ushort)(includeBaseColor ? 1 : 0));
+            var colorCount = (ushort)((includeBaseColor ? 1 : 0) + (includeAdvancedEntries ? 1 : 0));
+            bw.Write(colorCount);
             if (includeBaseColor)
             {
                 WriteSizedString(bw, "_BaseColor");
@@ -730,10 +786,23 @@ namespace VsfClone.Xav2.Runtime.Tests
                 bw.Write(1.0f);
                 bw.Write(1.0f);
             }
+            if (includeAdvancedEntries)
+            {
+                WriteSizedString(bw, "_MatCapColor");
+                bw.Write(0.7f);
+                bw.Write(0.7f);
+                bw.Write(0.85f);
+                bw.Write(1.0f);
+            }
 
-            bw.Write((ushort)1);
+            bw.Write((ushort)(includeAdvancedEntries ? 2 : 1));
             WriteSizedString(bw, "base");
             WriteSizedString(bw, baseTextureRef);
+            if (includeAdvancedEntries)
+            {
+                WriteSizedString(bw, "matcap");
+                WriteSizedString(bw, baseTextureRef);
+            }
 
             return ms.ToArray();
         }

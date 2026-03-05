@@ -2,6 +2,42 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 lilToon parity material extension (unity/native)
+
+### Summary
+
+Extended the `.xav2` lilToon quality path by adding high-impact typed material coverage (matcap/emission-strength family), syncing Unity importer behavior, and expanding native shader/material consumption for stronger Unity-to-native visual parity.
+
+### Changed
+
+- Unity extractor typed-v3 expansion:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - added lilToon typed entries:
+    - float: `_EmissionStrength`, `_MatCapBlend`
+    - color: `_MatCapColor`
+    - texture slot: `matcap`
+  - extended property aliases and set `FeatureMatCap`.
+- Unity importer parity updates:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Importer.cs`
+  - mapped typed `matcap` slot and `_MatCapColor` / `_EmissionStrength` / `_MatCapBlend` aliases to Unity material properties.
+- Native lilToon shading/material expansion:
+  - `src/nativecore/native_core.cpp`
+  - added GPU material fields/resources for emission/matcap texture paths.
+  - expanded pixel shader constants/resources (`t3` emission, `t4` matcap).
+  - added parse/apply paths for `_EmissionStrength`, `_MatCapBlend`, `_MatCapColor` and related aliases.
+  - unresolved typed texture diagnostics now also cover `emission` and `matcap` slots.
+- Runtime loader test expansion:
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - added advanced lilToon typed parse test for matcap/emission-strength entries.
+- Documentation update:
+  - `docs/reports/xav2_liltoon_parity_material_extension_2026-03-06.md`
+  - `docs/INDEX.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone\build --config Release --target nativecore` PASS
+- Unity EditMode tests were updated but not executed in this environment.
+
 ## 2026-03-06 - XAV2 typed-v3 + UltraParity foundation (native/unity/host/gate)
 
 ### Summary

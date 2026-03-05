@@ -49,6 +49,20 @@ std::string NormalizeRefKey(const std::string& raw) {
     return ToLower(out);
 }
 
+std::string NormalizeShaderFamily(const std::string& raw) {
+    const std::string key = NormalizeRefKey(raw);
+    return key.empty() ? "legacy" : key;
+}
+
+bool IsSupportedShaderFamily(const std::string& raw) {
+    const std::string key = NormalizeShaderFamily(raw);
+    return key == "legacy" ||
+           key == "liltoon" ||
+           key == "poiyomi" ||
+           key == "potatoon" ||
+           key == "realtoon";
+}
+
 HumanoidBoneId ToHumanoidBoneId(const std::string& bone_name_raw) {
     std::string key;
     key.reserve(bone_name_raw.size());
@@ -698,6 +712,7 @@ bool ParseMaterialTypedParamsSection(
     if (!ReadSizedString(bytes, &cursor, end, &out_payload->shader_family) || out_payload->shader_family.empty()) {
         return false;
     }
+    out_payload->shader_family = NormalizeShaderFamily(out_payload->shader_family);
     const auto feature_flags = ReadU32Le(bytes, cursor);
     if (!feature_flags) {
         return false;
@@ -1165,7 +1180,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
                 PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
             }
-            if (typed_payload.shader_family != "liltoon" && typed_payload.shader_family != "legacy") {
+            if (!IsSupportedShaderFamily(typed_payload.shader_family)) {
                 PushWarning(
                     &pkg,
                     "W_PARSE: XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY: material=" + typed_payload.name +
@@ -1292,7 +1307,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             payload.typed_float_params = typed_it->second.typed_float_params;
             payload.typed_color_params = typed_it->second.typed_color_params;
             payload.typed_texture_params = typed_it->second.typed_texture_params;
-            if (payload.shader_family == "liltoon") {
+            if (payload.shader_family != "legacy") {
                 const auto has_base_color = std::any_of(
                     payload.typed_color_params.begin(),
                     payload.typed_color_params.end(),

@@ -73,14 +73,18 @@ struct GpuMaterialResource {
     std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
     std::array<float, 4U> rim_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 4U> matcap_color = {0.0f, 0.0f, 0.0f, 1.0f};
     float shade_mix = 0.0f;
     float emission_strength = 0.0f;
     float normal_strength = 0.0f;
     float rim_strength = 0.0f;
+    float matcap_strength = 0.0f;
     float rim_power = 2.0f;
     ID3D11ShaderResourceView* base_color_srv = nullptr;
     ID3D11ShaderResourceView* normal_srv = nullptr;
     ID3D11ShaderResourceView* rim_srv = nullptr;
+    ID3D11ShaderResourceView* emission_srv = nullptr;
+    ID3D11ShaderResourceView* matcap_srv = nullptr;
 };
 
 struct RendererResources {
@@ -197,6 +201,30 @@ std::string BuildMaterialDiagSummary(const avatar::MaterialDiagnosticsEntry& dia
        << diag.typed_float_param_count << "/"
        << diag.typed_texture_param_count;
     return ss.str();
+}
+
+struct MaterialModeCounts {
+    std::uint32_t opaque = 0U;
+    std::uint32_t mask = 0U;
+    std::uint32_t blend = 0U;
+};
+
+MaterialModeCounts CountMaterialModes(const AvatarPackage& pkg) {
+    MaterialModeCounts counts {};
+    for (const auto& diag : pkg.material_diagnostics) {
+        std::string alpha_mode = diag.alpha_mode;
+        std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::toupper(c));
+        });
+        if (alpha_mode == "MASK") {
+            ++counts.mask;
+        } else if (alpha_mode == "BLEND") {
+            ++counts.blend;
+        } else {
+            ++counts.opaque;
+        }
+    }
+    return counts;
 }
 
 struct WarningMeta {
@@ -323,6 +351,10 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     }
     out_info->critical_warning_count = critical_warning_count;
     out_info->material_diag_count = static_cast<std::uint32_t>(pkg.material_diagnostics.size());
+    const auto mode_counts = CountMaterialModes(pkg);
+    out_info->opaque_material_count = mode_counts.opaque;
+    out_info->mask_material_count = mode_counts.mask;
+    out_info->blend_material_count = mode_counts.blend;
     out_info->missing_feature_count = static_cast<std::uint32_t>(pkg.missing_features.size());
     out_info->expression_count = static_cast<std::uint32_t>(pkg.expressions.size());
     if (out_info->detected_format == NC_AVATAR_FORMAT_VRM && out_info->expression_count == 0U) {
@@ -361,6 +393,16 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
             out_info->last_material_diag,
             sizeof(out_info->last_material_diag),
             BuildMaterialDiagSummary(pkg.material_diagnostics.back()));
+    }
+    {
+        std::ostringstream pass_summary;
+        pass_summary << "opaque=" << mode_counts.opaque
+                     << ", mask=" << mode_counts.mask
+                     << ", blend=" << mode_counts.blend;
+        CopyString(
+            out_info->last_render_pass_summary,
+            sizeof(out_info->last_render_pass_summary),
+            pass_summary.str());
     }
     if (!pkg.missing_features.empty()) {
         CopyString(out_info->last_missing_feature, sizeof(out_info->last_missing_feature), pkg.missing_features.back());
@@ -439,6 +481,14 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
         material->rim_srv->Release();
         material->rim_srv = nullptr;
     }
+    if (material->emission_srv != nullptr) {
+        material->emission_srv->Release();
+        material->emission_srv = nullptr;
+    }
+    if (material->matcap_srv != nullptr) {
+        material->matcap_srv->Release();
+        material->matcap_srv = nullptr;
+    }
     material->alpha_mode = "OPAQUE";
     material->alpha_cutoff = 0.5f;
     material->double_sided = false;
@@ -446,10 +496,12 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
     material->shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
     material->emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
     material->rim_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    material->matcap_color = {0.0f, 0.0f, 0.0f, 1.0f};
     material->shade_mix = 0.0f;
     material->emission_strength = 0.0f;
     material->normal_strength = 0.0f;
     material->rim_strength = 0.0f;
+    material->matcap_strength = 0.0f;
     material->rim_power = 2.0f;
 }
 
@@ -592,8 +644,10 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 shade_color;\n"
         "  float4 emission_color;\n"
         "  float4 rim_color;\n"
+        "  float4 matcap_color;\n"
         "  float4 liltoon_mix;\n"
         "  float4 liltoon_params;\n"
+        "  float4 liltoon_aux;\n"
         "  float4 alpha_misc;\n"
         "};\n"
         "struct VSIn { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
@@ -613,13 +667,17 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 shade_color;\n"
         "  float4 emission_color;\n"
         "  float4 rim_color;\n"
+        "  float4 matcap_color;\n"
         "  float4 liltoon_mix;\n"
         "  float4 liltoon_params;\n"
+        "  float4 liltoon_aux;\n"
         "  float4 alpha_misc;\n"
         "};\n"
         "Texture2D tex0 : register(t0);\n"
         "Texture2D tex1 : register(t1);\n"
         "Texture2D tex2 : register(t2);\n"
+        "Texture2D tex3 : register(t3);\n"
+        "Texture2D tex4 : register(t4);\n"
         "SamplerState samp0 : register(s0);\n"
         "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float3 nrm : NORMAL, float2 uv : TEXCOORD0) : SV_TARGET {\n"
         "  float alpha_cutoff = alpha_misc.x;\n"
@@ -628,6 +686,9 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float use_texture_alpha = alpha_misc.w;\n"
         "  float use_normal_tex = liltoon_params.y;\n"
         "  float use_rim_tex = liltoon_params.z;\n"
+        "  float use_emission_tex = liltoon_params.w;\n"
+        "  float use_matcap_tex = liltoon_aux.x;\n"
+        "  float matcap_strength = saturate(liltoon_aux.y);\n"
         "  float4 out_color = color;\n"
         "  float3 normal = normalize(nrm);\n"
         "  if (use_normal_tex > 0.5) {\n"
@@ -635,7 +696,8 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "    normal = normalize(float3(normal.xy + ntex.xy * saturate(liltoon_mix.z), max(0.15, normal.z * abs(ntex.z))));\n"
         "  }\n"
         "  float3 light_dir = normalize(float3(0.35, 0.45, 0.82));\n"
-        "  float lit = lerp(0.6, 1.0, saturate(dot(normal, light_dir)));\n"
+        "  float ndotl = saturate(dot(normal, light_dir));\n"
+        "  float lit = lerp(0.55, 1.0, ndotl);\n"
         "  if (has_texture > 0.5) {\n"
         "    float4 texel = tex0.Sample(samp0, uv);\n"
         "    out_color.rgb *= texel.rgb;\n"
@@ -644,13 +706,23 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "    }\n"
         "  }\n"
         "  out_color.rgb *= lit;\n"
-        "  out_color.rgb = lerp(out_color.rgb, out_color.rgb * shade_color.rgb, saturate(liltoon_mix.x));\n"
-        "  out_color.rgb += emission_color.rgb * saturate(liltoon_mix.y);\n"
+        "  float shade_t = saturate((1.0 - ndotl) * saturate(liltoon_mix.x) * 1.2);\n"
+        "  out_color.rgb = lerp(out_color.rgb, out_color.rgb * shade_color.rgb, shade_t);\n"
+        "  float3 emission_term = emission_color.rgb;\n"
+        "  if (use_emission_tex > 0.5) {\n"
+        "    emission_term *= tex3.Sample(samp0, uv).rgb;\n"
+        "  }\n"
+        "  out_color.rgb += emission_term * saturate(liltoon_mix.y);\n"
         "  float rim = pow(saturate(1.0 - normal.z), max(0.1, liltoon_params.x)) * saturate(liltoon_mix.w);\n"
         "  if (use_rim_tex > 0.5) {\n"
         "    rim *= tex2.Sample(samp0, uv).a;\n"
         "  }\n"
         "  out_color.rgb += rim_color.rgb * rim;\n"
+        "  if (use_matcap_tex > 0.5 && matcap_strength > 0.001) {\n"
+        "    float2 mc_uv = normal.xy * 0.5 + 0.5;\n"
+        "    float3 matcap = tex4.Sample(samp0, mc_uv).rgb * matcap_color.rgb;\n"
+        "    out_color.rgb += matcap * matcap_strength;\n"
+        "  }\n"
         "  if (alpha_mode_mask > 0.5 && out_color.a < alpha_cutoff) {\n"
         "    clip(-1.0);\n"
         "  }\n"
@@ -744,8 +816,10 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         float shade_color[4];
         float emission_color[4];
         float rim_color[4];
+        float matcap_color[4];
         float liltoon_mix[4];
         float liltoon_params[4];
+        float liltoon_aux[4];
         float alpha_misc[4];
     };
     D3D11_BUFFER_DESC cb_desc {};
@@ -1629,6 +1703,33 @@ std::string ToUpperAscii(std::string s) {
     return s;
 }
 
+std::string CanonicalizeAlphaMode(std::string alpha_mode) {
+    alpha_mode = ToUpperAscii(alpha_mode);
+    if (alpha_mode == "MASK" || alpha_mode == "BLEND") {
+        return alpha_mode;
+    }
+    return "OPAQUE";
+}
+
+std::string NormalizeShaderFamilyKey(const std::string& shader_family) {
+    const std::string key = NormalizeRefKey(shader_family);
+    return key.empty() ? "legacy" : key;
+}
+
+bool IsSupportedShaderFamilyKey(const std::string& shader_family) {
+    const std::string key = NormalizeShaderFamilyKey(shader_family);
+    return key == "legacy" ||
+           key == "liltoon" ||
+           key == "poiyomi" ||
+           key == "potatoon" ||
+           key == "realtoon";
+}
+
+bool IsTypedEncoding(std::string encoding) {
+    encoding = NormalizeRefKey(std::move(encoding));
+    return encoding.rfind("typed-v", 0U) == 0U;
+}
+
 bool ParseFloatToken(const std::string& token, float* out_value) {
     if (out_value == nullptr) {
         return false;
@@ -1754,7 +1855,7 @@ bool TryGetTypedTextureRef(
 }
 
 std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
-    std::string alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : ToUpperAscii(payload.alpha_mode);
+    std::string alpha_mode = CanonicalizeAlphaMode(payload.alpha_mode);
     const std::string typed_encoding = NormalizeRefKey(payload.material_param_encoding);
     if (typed_encoding == "typed-v2" || typed_encoding == "typed-v3") {
         if (payload.feature_flags & (1U << 1)) {
@@ -1790,7 +1891,7 @@ std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
     if (TryExtractShaderParamFloat(payload.shader_params_json, "_Mode", &value) && value >= 2.0f) {
         return "BLEND";
     }
-    return alpha_mode;
+    return CanonicalizeAlphaMode(alpha_mode);
 }
 
 bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& avatar_pkg, std::uint64_t handle, ID3D11Device* device) {
@@ -1809,6 +1910,20 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
     }
     for (const auto& payload : avatar_pkg.material_payloads) {
         GpuMaterialResource material {};
+        std::vector<std::string> fallback_reasons;
+        const std::string shader_family = NormalizeShaderFamilyKey(payload.shader_family);
+        const bool family_supported = IsSupportedShaderFamilyKey(shader_family);
+        const bool has_typed_payload =
+            IsTypedEncoding(payload.material_param_encoding) ||
+            !payload.typed_float_params.empty() ||
+            !payload.typed_color_params.empty() ||
+            !payload.typed_texture_params.empty();
+        if (has_typed_payload && !family_supported) {
+            fallback_reasons.push_back("unsupported_shader_family");
+        }
+        if (!payload.alpha_mode.empty() && CanonicalizeAlphaMode(payload.alpha_mode) != ToUpperAscii(payload.alpha_mode)) {
+            fallback_reasons.push_back("alpha_mode_defaulted");
+        }
         material.alpha_mode = ResolveAlphaMode(payload);
         material.alpha_cutoff = payload.alpha_cutoff;
         material.double_sided = payload.double_sided;
@@ -1817,9 +1932,16 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             material.alpha_cutoff = std::max(0.0f, std::min(1.0f, typed_cutoff));
         }
         std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
-        if (!TryGetTypedColorParam(payload, "_BaseColor", &base_color) &&
-            !TryExtractShaderParamColor(payload.shader_params_json, "_BaseColor", &base_color)) {
-            (void)TryExtractShaderParamColor(payload.shader_params_json, "_Color", &base_color);
+        const bool has_typed_base_color = TryGetTypedColorParam(payload, "_BaseColor", &base_color);
+        bool has_base_color = has_typed_base_color;
+        if (!has_base_color) {
+            has_base_color = TryExtractShaderParamColor(payload.shader_params_json, "_BaseColor", &base_color);
+        }
+        if (!has_base_color) {
+            has_base_color = TryExtractShaderParamColor(payload.shader_params_json, "_Color", &base_color);
+        }
+        if (!has_base_color) {
+            fallback_reasons.push_back("base_color_defaulted");
         }
         for (float& c : base_color) {
             c = std::max(0.0f, std::min(1.0f, c));
@@ -1873,9 +1995,36 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryExtractShaderParamFloat(payload.shader_params_json, "_BumpScale", &bump_scale)) {
             material.normal_strength = std::max(0.0f, std::min(1.0f, bump_scale));
         }
+        float emission_strength = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_EmissionStrength", &emission_strength) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_EmissionMapStrength", &emission_strength) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_EmissionStrength", &emission_strength)) {
+            material.emission_strength = std::max(material.emission_strength, std::max(0.0f, std::min(3.0f, emission_strength)));
+        }
+        float matcap_strength = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_MatCapBlend", &matcap_strength) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_MatCapBlend", &matcap_strength) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_MatCapBlendUV1", &matcap_strength) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_MatCapStrength", &matcap_strength)) {
+            material.matcap_strength = std::max(0.0f, std::min(1.0f, matcap_strength));
+        }
+        std::array<float, 4U> matcap_color = {0.0f, 0.0f, 0.0f, 1.0f};
+        if (TryGetTypedColorParam(payload, "_MatCapColor", &matcap_color) ||
+            TryExtractShaderParamColor(payload.shader_params_json, "_MatCapColor", &matcap_color) ||
+            TryExtractShaderParamColor(payload.shader_params_json, "_MatCapTexColor", &matcap_color)) {
+            for (float& c : matcap_color) {
+                c = std::max(0.0f, std::min(1.0f, c));
+            }
+            material.matcap_strength = std::max(material.matcap_strength, 0.35f);
+        }
+        material.matcap_color = matcap_color;
 
         std::string base_texture_ref = payload.base_color_texture_name;
-        const bool has_typed_base_ref = TryGetTypedTextureRef(payload, "base", &base_texture_ref);
+        const bool has_typed_base_ref =
+            TryGetTypedTextureRef(payload, "base", &base_texture_ref) ||
+            TryGetTypedTextureRef(payload, "main", &base_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_MainTex", &base_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_BaseMap", &base_texture_ref);
         if (!base_texture_ref.empty()) {
             const auto tex_it = textures_by_key.find(NormalizeRefKey(base_texture_ref));
             if (tex_it != textures_by_key.end()) {
@@ -1893,7 +2042,9 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         }
 
         std::string normal_texture_ref;
-        const bool has_typed_normal_ref = TryGetTypedTextureRef(payload, "normal", &normal_texture_ref);
+        const bool has_typed_normal_ref =
+            TryGetTypedTextureRef(payload, "normal", &normal_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_BumpMap", &normal_texture_ref);
         if (!normal_texture_ref.empty()) {
             const auto tex_it = textures_by_key.find(NormalizeRefKey(normal_texture_ref));
             if (tex_it != textures_by_key.end()) {
@@ -1914,7 +2065,9 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         }
 
         std::string rim_texture_ref;
-        const bool has_typed_rim_ref = TryGetTypedTextureRef(payload, "rim", &rim_texture_ref);
+        const bool has_typed_rim_ref =
+            TryGetTypedTextureRef(payload, "rim", &rim_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_RimTex", &rim_texture_ref);
         if (!rim_texture_ref.empty()) {
             const auto tex_it = textures_by_key.find(NormalizeRefKey(rim_texture_ref));
             if (tex_it != textures_by_key.end()) {
@@ -1929,6 +2082,66 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                     avatar_it->second.warnings.push_back(warning.str());
                     avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
                 }
+            }
+        }
+        std::string emission_texture_ref;
+        const bool has_typed_emission_ref =
+            TryGetTypedTextureRef(payload, "emission", &emission_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_EmissionMap", &emission_texture_ref);
+        if (!emission_texture_ref.empty()) {
+            const auto tex_it = textures_by_key.find(NormalizeRefKey(emission_texture_ref));
+            if (tex_it != textures_by_key.end()) {
+                material.emission_srv = CreateTextureSrvFromPayload(device, tex_it->second);
+                material.emission_strength = std::max(material.emission_strength, 0.75f);
+            } else if (has_typed_emission_ref) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                        << ", slot=emission, ref=" << emission_texture_ref;
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                }
+            }
+        }
+
+        std::string matcap_texture_ref;
+        const bool has_typed_matcap_ref =
+            TryGetTypedTextureRef(payload, "matcap", &matcap_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_MatCapTex", &matcap_texture_ref) ||
+            TryGetTypedTextureRef(payload, "_MatCapTexture", &matcap_texture_ref);
+        if (!matcap_texture_ref.empty()) {
+            const auto tex_it = textures_by_key.find(NormalizeRefKey(matcap_texture_ref));
+            if (tex_it != textures_by_key.end()) {
+                material.matcap_srv = CreateTextureSrvFromPayload(device, tex_it->second);
+                material.matcap_strength = std::max(material.matcap_strength, 0.35f);
+            } else if (has_typed_matcap_ref) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                        << ", slot=matcap, ref=" << matcap_texture_ref;
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                }
+            }
+        }
+        if (!fallback_reasons.empty()) {
+            std::ostringstream reasons;
+            for (std::size_t i = 0U; i < fallback_reasons.size(); ++i) {
+                if (i > 0U) {
+                    reasons << '|';
+                }
+                reasons << fallback_reasons[i];
+            }
+            std::ostringstream warning;
+            warning << "W_RENDER: XAV2_MATERIAL_FALLBACK_APPLIED: material=" << payload.name
+                    << ", family=" << shader_family
+                    << ", reason=" << reasons.str();
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                avatar_it->second.warnings.push_back(warning.str());
+                avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_FALLBACK_APPLIED");
             }
         }
         materials.push_back(std::move(material));
@@ -2323,7 +2536,11 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         }
     }
     std::sort(blend_draws.begin(), blend_draws.end(), [](const DrawItem& a, const DrawItem& b) {
-        return a.view_z > b.view_z;
+        const float dz = std::abs(a.view_z - b.view_z);
+        if (dz > 1e-4f) {
+            return a.view_z > b.view_z;
+        }
+        return a.mesh_index < b.mesh_index;
     });
 
     struct alignas(16) SceneConstants {
@@ -2332,8 +2549,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float shade_color[4];
         float emission_color[4];
         float rim_color[4];
+        float matcap_color[4];
         float liltoon_mix[4];
         float liltoon_params[4];
+        float liltoon_aux[4];
         float alpha_misc[4];
     };
     auto draw_pass = [&](const DrawItem& item) {
@@ -2346,6 +2565,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ID3D11ShaderResourceView* base_srv = nullptr;
         ID3D11ShaderResourceView* normal_srv = nullptr;
         ID3D11ShaderResourceView* rim_srv = nullptr;
+        ID3D11ShaderResourceView* emission_srv = nullptr;
+        ID3D11ShaderResourceView* matcap_srv = nullptr;
         if (item.material != nullptr) {
             if (!item.material->alpha_mode.empty()) {
                 alpha_mode = item.material->alpha_mode;
@@ -2355,12 +2576,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             base_srv = item.material->base_color_srv;
             normal_srv = item.material->normal_srv;
             rim_srv = item.material->rim_srv;
+            emission_srv = item.material->emission_srv;
+            matcap_srv = item.material->matcap_srv;
         }
         std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
             return static_cast<char>(std::toupper(c));
         });
         const bool is_mask = (alpha_mode == "MASK");
-        const bool is_blend = (alpha_mode == "BLEND") || (item.material != nullptr && item.material->base_color[3] < 0.999f);
+        const bool is_blend = (alpha_mode == "BLEND");
         const bool force_no_cull_for_xav2 = (item.pkg != nullptr && item.pkg->source_type == AvatarSourceType::Xav2);
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (is_blend) {
@@ -2380,8 +2603,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         device_ctx->IASetVertexBuffers(0U, 1U, &item.mesh->vertex_buffer, &stride, &offset);
         device_ctx->IASetIndexBuffer(item.mesh->index_buffer, DXGI_FORMAT_R32_UINT, 0U);
         device_ctx->PSSetSamplers(0U, 1U, &renderer.linear_sampler);
-        ID3D11ShaderResourceView* srvs[3] = {base_srv, normal_srv, rim_srv};
-        device_ctx->PSSetShaderResources(0U, 3U, srvs);
+        ID3D11ShaderResourceView* srvs[5] = {base_srv, normal_srv, rim_srv, emission_srv, matcap_srv};
+        device_ctx->PSSetShaderResources(0U, 5U, srvs);
 
         const auto world_view_proj = item.world * view * proj;
         const auto world_view_proj_t = DirectX::XMMatrixTranspose(world_view_proj);
@@ -2406,6 +2629,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.rim_color[1] = item.material->rim_color[1];
             cb.rim_color[2] = item.material->rim_color[2];
             cb.rim_color[3] = item.material->rim_color[3];
+            cb.matcap_color[0] = item.material->matcap_color[0];
+            cb.matcap_color[1] = item.material->matcap_color[1];
+            cb.matcap_color[2] = item.material->matcap_color[2];
+            cb.matcap_color[3] = item.material->matcap_color[3];
             cb.liltoon_mix[0] = item.material->shade_mix;
             cb.liltoon_mix[1] = item.material->emission_strength;
             cb.liltoon_mix[2] = item.material->normal_strength;
@@ -2413,7 +2640,11 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.liltoon_params[0] = item.material->rim_power;
             cb.liltoon_params[1] = normal_srv != nullptr ? 1.0f : 0.0f;
             cb.liltoon_params[2] = rim_srv != nullptr ? 1.0f : 0.0f;
-            cb.liltoon_params[3] = 0.0f;
+            cb.liltoon_params[3] = emission_srv != nullptr ? 1.0f : 0.0f;
+            cb.liltoon_aux[0] = matcap_srv != nullptr ? 1.0f : 0.0f;
+            cb.liltoon_aux[1] = item.material->matcap_strength;
+            cb.liltoon_aux[2] = 0.0f;
+            cb.liltoon_aux[3] = 0.0f;
         } else {
             cb.base_color[0] = 1.0f;
             cb.base_color[1] = 1.0f;
@@ -2431,6 +2662,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.rim_color[1] = 0.0f;
             cb.rim_color[2] = 0.0f;
             cb.rim_color[3] = 1.0f;
+            cb.matcap_color[0] = 0.0f;
+            cb.matcap_color[1] = 0.0f;
+            cb.matcap_color[2] = 0.0f;
+            cb.matcap_color[3] = 1.0f;
             cb.liltoon_mix[0] = 0.0f;
             cb.liltoon_mix[1] = 0.0f;
             cb.liltoon_mix[2] = 0.0f;
@@ -2439,6 +2674,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.liltoon_params[1] = 0.0f;
             cb.liltoon_params[2] = 0.0f;
             cb.liltoon_params[3] = 0.0f;
+            cb.liltoon_aux[0] = 0.0f;
+            cb.liltoon_aux[1] = 0.0f;
+            cb.liltoon_aux[2] = 0.0f;
+            cb.liltoon_aux[3] = 0.0f;
         }
         cb.alpha_misc[0] = is_mask ? alpha_cutoff : 0.0f;
         cb.alpha_misc[1] = is_mask ? 1.0f : 0.0f;
@@ -2451,8 +2690,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->Unmap(renderer.constant_buffer, 0U);
         }
         device_ctx->DrawIndexed(item.mesh->index_count, 0U, 0);
-        ID3D11ShaderResourceView* null_srvs[3] = {nullptr, nullptr, nullptr};
-        device_ctx->PSSetShaderResources(0U, 3U, null_srvs);
+        ID3D11ShaderResourceView* null_srvs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+        device_ctx->PSSetShaderResources(0U, 5U, null_srvs);
         ++frame_draw_calls;
     };
     std::uint32_t frame_pass_count = 0U;

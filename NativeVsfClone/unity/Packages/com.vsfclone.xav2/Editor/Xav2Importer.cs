@@ -951,6 +951,7 @@ namespace VsfClone.Xav2.Editor
             if (string.Equals(slot, "emission", StringComparison.OrdinalIgnoreCase))
             {
                 if (material.HasProperty("_EmissionMap")) material.SetTexture("_EmissionMap", texture);
+                if (material.HasProperty("_EmissionBlendMask")) material.SetTexture("_EmissionBlendMask", texture);
                 return;
             }
             if (string.Equals(slot, "shade", StringComparison.OrdinalIgnoreCase))
@@ -961,6 +962,13 @@ namespace VsfClone.Xav2.Editor
             if (string.Equals(slot, "rim", StringComparison.OrdinalIgnoreCase))
             {
                 if (material.HasProperty("_RimTex")) material.SetTexture("_RimTex", texture);
+                return;
+            }
+            if (string.Equals(slot, "matcap", StringComparison.OrdinalIgnoreCase))
+            {
+                if (material.HasProperty("_MatCapTex")) material.SetTexture("_MatCapTex", texture);
+                if (material.HasProperty("_MatCapTexture")) material.SetTexture("_MatCapTexture", texture);
+                if (material.HasProperty("_MatCapBlendMask")) material.SetTexture("_MatCapBlendMask", texture);
             }
         }
 
@@ -981,6 +989,12 @@ namespace VsfClone.Xav2.Editor
                 }
                 return;
             }
+            if (string.Equals(value.Id, "_MatCapColor", StringComparison.Ordinal))
+            {
+                if (material.HasProperty("_MatCapColor")) material.SetColor("_MatCapColor", color);
+                if (material.HasProperty("_MatCapTexColor")) material.SetColor("_MatCapTexColor", color);
+                return;
+            }
 
             if (material.HasProperty(value.Id))
             {
@@ -998,6 +1012,19 @@ namespace VsfClone.Xav2.Editor
             if (material.HasProperty(value.Id))
             {
                 material.SetFloat(value.Id, value.Value);
+                return;
+            }
+            if (string.Equals(value.Id, "_EmissionStrength", StringComparison.Ordinal))
+            {
+                if (material.HasProperty("_EmissionMapStrength")) material.SetFloat("_EmissionMapStrength", value.Value);
+                if (material.HasProperty("_EmissionStrength")) material.SetFloat("_EmissionStrength", value.Value);
+                return;
+            }
+            if (string.Equals(value.Id, "_MatCapBlend", StringComparison.Ordinal))
+            {
+                if (material.HasProperty("_MatCapBlend")) material.SetFloat("_MatCapBlend", value.Value);
+                if (material.HasProperty("_MatCapBlendUV1")) material.SetFloat("_MatCapBlendUV1", value.Value);
+                if (material.HasProperty("_MatCapStrength")) material.SetFloat("_MatCapStrength", value.Value);
             }
         }
 

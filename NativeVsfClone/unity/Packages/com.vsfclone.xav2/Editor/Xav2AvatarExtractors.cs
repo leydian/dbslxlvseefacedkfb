@@ -23,6 +23,7 @@ namespace VsfClone.Xav2.Editor
         private const uint FeatureEmission = 1U << 3;
         private const uint FeatureRim = 1U << 4;
         private const uint FeatureShade = 1U << 5;
+        private const uint FeatureMatCap = 1U << 6;
 
         public Xav2AvatarPayload Extract(GameObject avatarRoot, Xav2ExportOptions options)
         {
@@ -348,11 +349,14 @@ namespace VsfClone.Xav2.Editor
                 AddTypedColor(item, material, "_ShadeColor", "_ShadeColor");
                 AddTypedColor(item, material, "_EmissionColor", "_EmissionColor");
                 AddTypedColor(item, material, "_RimColor", "_RimColor");
+                AddTypedColor(item, material, "_MatCapColor", "_MatCapColor", "_MatCapTexColor");
 
                 AddTypedFloat(item, material, "_Cutoff", "_Cutoff");
                 AddTypedFloat(item, material, "_BumpScale", "_BumpScale");
                 AddTypedFloat(item, material, "_RimFresnelPower", "_RimFresnelPower");
                 AddTypedFloat(item, material, "_RimLightingMix", "_RimLightingMix");
+                AddTypedFloat(item, material, "_EmissionStrength", "_EmissionMapStrength", "_EmissionStrength");
+                AddTypedFloat(item, material, "_MatCapBlend", "_MatCapBlend", "_MatCapBlendUV1", "_MatCapStrength");
 
                 AddTypedTexture(item, "base", baseTextureName);
                 var shadeTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_ShadeTexture", "_ShadowColorTex");
@@ -365,6 +369,8 @@ namespace VsfClone.Xav2.Editor
                 AddTypedTexture(item, "mask", maskTextureName);
                 var rimTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_RimColorTex", "_RimTex");
                 AddTypedTexture(item, "rim", rimTextureName);
+                var matcapTextureName = EnsureTextureRefForProperty(material, payload, textureNameSet, "_MatCapTex", "_MatCapTexture", "_MatCapBlendMask");
+                AddTypedTexture(item, "matcap", matcapTextureName);
 
                 if (!string.IsNullOrEmpty(shadeTextureName) || HasTypedColor(item, "_ShadeColor"))
                 {
@@ -381,6 +387,10 @@ namespace VsfClone.Xav2.Editor
                 if (!string.IsNullOrEmpty(rimTextureName) || HasTypedColor(item, "_RimColor"))
                 {
                     item.FeatureFlags |= FeatureRim;
+                }
+                if (!string.IsNullOrEmpty(matcapTextureName) || HasTypedColor(item, "_MatCapColor"))
+                {
+                    item.FeatureFlags |= FeatureMatCap;
                 }
             }
             payload.Materials.Add(item);
@@ -536,7 +546,13 @@ namespace VsfClone.Xav2.Editor
                 keywords = new List<string>(material.shaderKeywords ?? Array.Empty<string>())
             };
 
-            var floatProps = new[] { "_Cutoff", "_Mode", "_ZWrite", "_BumpScale", "_Metallic", "_Glossiness" };
+            var floatProps = new[]
+            {
+                "_Cutoff", "_Mode", "_ZWrite", "_BumpScale",
+                "_Metallic", "_Glossiness", "_RimFresnelPower",
+                "_RimLightingMix", "_EmissionMapStrength", "_EmissionStrength",
+                "_MatCapBlend", "_MatCapBlendUV1", "_MatCapStrength"
+            };
             foreach (var p in floatProps)
             {
                 if (material.HasProperty(p))
@@ -544,7 +560,7 @@ namespace VsfClone.Xav2.Editor
                     pack.properties.Add($"{p}={material.GetFloat(p):0.######}");
                 }
             }
-            var colorProps = new[] { "_Color", "_BaseColor", "_ShadeColor", "_EmissionColor" };
+            var colorProps = new[] { "_Color", "_BaseColor", "_ShadeColor", "_EmissionColor", "_RimColor", "_MatCapColor", "_MatCapTexColor" };
             foreach (var p in colorProps)
             {
                 if (material.HasProperty(p))
