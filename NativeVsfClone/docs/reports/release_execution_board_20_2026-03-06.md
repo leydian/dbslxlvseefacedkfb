@@ -141,6 +141,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\winui_xaml_min_repro.ps1 -NoRes
 
 # 14) Resolve sample profile
 powershell -ExecutionPolicy Bypass -File .\tools\sample_profile_resolve.ps1 -Profile fixed_set
+
+# 15) MediaPipe sidecar sanity
+powershell -ExecutionPolicy Bypass -File .\tools\mediapipe_sidecar_sanity.ps1
 ```
 
 ## Acceptance for This Pass

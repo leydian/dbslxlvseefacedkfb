@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 
@@ -10,10 +10,20 @@ public sealed class RenderHwndHost : HwndHost
     private const int WsVisible = 0x10000000;
     private const int WsClipSiblings = 0x04000000;
     private const int WsClipChildren = 0x02000000;
+    private const int WmRButtonDown = 0x0204;
+    private const int WmRButtonUp = 0x0205;
+    private const int WmMouseMove = 0x0200;
+    private const int WmMouseWheel = 0x020A;
 
     private IntPtr _hwnd = IntPtr.Zero;
+    private bool _rightDragActive;
 
     public IntPtr Hwnd => _hwnd;
+
+    public event EventHandler<RenderMouseDragEventArgs>? RenderRightDragStarted;
+    public event EventHandler<RenderMouseDragEventArgs>? RenderRightDragMoved;
+    public event EventHandler<RenderMouseDragEventArgs>? RenderRightDragCompleted;
+    public event EventHandler<RenderMouseWheelEventArgs>? RenderMouseWheel;
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
@@ -43,6 +53,47 @@ public sealed class RenderHwndHost : HwndHost
     {
         _ = DestroyWindow(hwnd.Handle);
         _hwnd = IntPtr.Zero;
+    }
+
+    protected override IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        switch (msg)
+        {
+            case WmRButtonDown:
+            {
+                _rightDragActive = true;
+                var (x, y) = GetPointFromLParam(lParam);
+                RenderRightDragStarted?.Invoke(this, new RenderMouseDragEventArgs(x, y));
+                break;
+            }
+            case WmMouseMove:
+            {
+                if (_rightDragActive)
+                {
+                    var (x, y) = GetPointFromLParam(lParam);
+                    RenderRightDragMoved?.Invoke(this, new RenderMouseDragEventArgs(x, y));
+                }
+                break;
+            }
+            case WmRButtonUp:
+            {
+                var (x, y) = GetPointFromLParam(lParam);
+                if (_rightDragActive)
+                {
+                    RenderRightDragCompleted?.Invoke(this, new RenderMouseDragEventArgs(x, y));
+                }
+                _rightDragActive = false;
+                break;
+            }
+            case WmMouseWheel:
+            {
+                var delta = GetWheelDeltaFromWParam(wParam);
+                RenderMouseWheel?.Invoke(this, new RenderMouseWheelEventArgs(delta));
+                break;
+            }
+        }
+
+        return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
     }
 
     protected override void OnWindowPositionChanged(System.Windows.Rect rcBoundingBox)
@@ -88,4 +139,21 @@ public sealed class RenderHwndHost : HwndHost
         int nWidth,
         int nHeight,
         [MarshalAs(UnmanagedType.Bool)] bool repaint);
+
+    private static (int x, int y) GetPointFromLParam(IntPtr lParam)
+    {
+        var value = unchecked((int)(long)lParam);
+        var x = (short)(value & 0xFFFF);
+        var y = (short)((value >> 16) & 0xFFFF);
+        return (x, y);
+    }
+
+    private static int GetWheelDeltaFromWParam(IntPtr wParam)
+    {
+        var value = unchecked((int)(long)wParam);
+        return (short)((value >> 16) & 0xFFFF);
+    }
 }
+
+public sealed record RenderMouseDragEventArgs(int X, int Y);
+public sealed record RenderMouseWheelEventArgs(int Delta);

@@ -72,7 +72,11 @@ public sealed record TrackingDiagnostics(
     TrackingSourceType SourceType,
     string SourceStatus,
     bool ModelSchemaOk = false,
-    string LastErrorCode = "");
+    string LastErrorCode = "",
+    string ActiveSource = "none",
+    int FallbackCount = 0,
+    string CalibrationState = "idle",
+    string ConfidenceSummary = "");
 
 public interface ITrackingInputService
 {

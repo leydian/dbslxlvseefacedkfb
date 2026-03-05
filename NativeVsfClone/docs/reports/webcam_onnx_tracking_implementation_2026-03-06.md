@@ -1,5 +1,7 @@
 # Webcam ONNX Tracking Implementation Update (2026-03-06)
 
+> Note (2026-03-06): this report is superseded by `webcam_mediapipe_runtime_integration_2026-03-06.md`.
+
 ## Summary
 
 This update completes the `Webcam (ONNX)` tracking runtime path in HostCore by replacing the placeholder loop with real webcam capture + ONNX inference and surfacing runtime diagnostics to WPF/WinUI status views.

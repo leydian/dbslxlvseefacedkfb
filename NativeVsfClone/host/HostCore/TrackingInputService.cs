@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Diagnostics.CodeAnalysis;
 
 namespace HostCore;
@@ -12,6 +11,10 @@ public sealed class TrackingInputService : ITrackingInputService
 {
     private const ushort DefaultListenPort = 49983;
     private const int DefaultStaleTimeoutMs = 500;
+    private const int IfacialFallbackAgeMs = 650;
+    private const int IfacialRecoveryAgeMs = 180;
+    private const int IfacialRecoveryStreakRequired = 10;
+    private const int CalibrationWarmupFrames = 90;
 
     private readonly object _sync = new();
     private readonly Dictionary<string, float> _expressionCache = new(StringComparer.OrdinalIgnoreCase);
@@ -59,6 +62,15 @@ public sealed class TrackingInputService : ITrackingInputService
     private bool _hasMediapipePacket;
     private string _latestMediapipeError = string.Empty;
     private long _lastMediapipeFrameId;
+    private DateTimeOffset _lastIfacialPacketUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastWebcamPacketUtc = DateTimeOffset.MinValue;
+    private TrackingRuntimeSource _activeRuntimeSource = TrackingRuntimeSource.None;
+    private int _fallbackCount;
+    private int _ifacialRecoveryStreak;
+    private int _ifacialConsecutiveFailures;
+    private int _calibrationFrames;
+    private readonly Dictionary<string, float> _calibrationBaseline = new(StringComparer.OrdinalIgnoreCase);
+    private string _calibrationState = "idle";
 
     private static readonly string[] ArkitBlendshapeOrder =
     {
@@ -108,12 +120,15 @@ public sealed class TrackingInputService : ITrackingInputService
                 }
 
                 _receiveTask = Task.Run(() => WebcamLoopAsync(_cts.Token));
+                _activeRuntimeSource = TrackingRuntimeSource.Webcam;
                 _diagnostics = _diagnostics with
                 {
                     IsActive = true,
                     DetectedFormat = "webcam-mediapipe",
                     SourceStatus = BuildWebcamSourceStatus("starting"),
                     StatusMessage = "starting:webcam-mediapipe",
+                    ActiveSource = "webcam",
+                    ConfidenceSummary = BuildConfidenceSummary(),
                 };
                 return NcResultCode.Ok;
             }
@@ -136,13 +151,36 @@ public sealed class TrackingInputService : ITrackingInputService
 
             _cts = new CancellationTokenSource();
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+            _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
             _diagnostics = _diagnostics with
             {
                 IsActive = true,
                 SourceType = TrackingSourceType.OscIfacial,
                 SourceStatus = $"udp-listening:{_options.ListenPort}",
                 StatusMessage = $"listening:{_options.ListenPort}",
+                ActiveSource = "ifacial",
+                ConfidenceSummary = BuildConfidenceSummary(),
             };
+
+            // Start webcam sidecar as fallback path, but do not fail OSC start when unavailable.
+            var fallbackRc = InitializeWebcamRuntime();
+            if (fallbackRc == NcResultCode.Ok)
+            {
+                _ = Task.Run(() => WebcamLoopAsync(_cts.Token));
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = "ifacial-active:webcam-fallback-ready",
+                    StatusMessage = $"listening:{_options.ListenPort}; fallback=webcam-ready",
+                };
+            }
+            else
+            {
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = "ifacial-active:webcam-fallback-unavailable",
+                    StatusMessage = $"listening:{_options.ListenPort}; fallback=webcam-unavailable",
+                };
+            }
             return NcResultCode.Ok;
         }
     }
@@ -174,6 +212,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 IsStale = true,
                 SourceStatus = "stopped",
                 StatusMessage = "stopped",
+                ActiveSource = "none",
+                ConfidenceSummary = BuildConfidenceSummary(),
             };
             return NcResultCode.Ok;
         }
@@ -218,6 +258,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 ? int.MaxValue
                 : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - _lastPacketUtc).TotalMilliseconds);
             var stale = ageMs > _options.StaleTimeoutMs;
+            EvaluateSourceArbitration(ageMs);
             _diagnostics = _diagnostics with
             {
                 LastPacketAgeMs = ageMs,
@@ -227,6 +268,10 @@ public sealed class TrackingInputService : ITrackingInputService
                 InferenceMsAvg = _smoothedInferenceMs,
                 SourceStatus = stale ? "stale-reset-to-neutral" : _diagnostics.SourceStatus,
                 StatusMessage = stale ? "stale (reset to neutral)" : _diagnostics.StatusMessage,
+                ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                FallbackCount = _fallbackCount,
+                CalibrationState = _calibrationState,
+                ConfidenceSummary = BuildConfidenceSummary(),
             };
 
             frame = stale ? BuildNeutralFrame() : _lastOutputFrame;
@@ -257,6 +302,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 ? int.MaxValue
                 : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - _lastPacketUtc).TotalMilliseconds);
             var stale = ageMs > _options.StaleTimeoutMs;
+            EvaluateSourceArbitration(ageMs);
             _diagnostics = _diagnostics with
             {
                 LastPacketAgeMs = ageMs,
@@ -265,6 +311,10 @@ public sealed class TrackingInputService : ITrackingInputService
                 CaptureFps = _smoothedCaptureFps,
                 InferenceMsAvg = _smoothedInferenceMs,
                 SourceType = _options.SourceType,
+                ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                FallbackCount = _fallbackCount,
+                CalibrationState = _calibrationState,
+                ConfidenceSummary = BuildConfidenceSummary(),
             };
             return _diagnostics;
         }
@@ -301,11 +351,39 @@ public sealed class TrackingInputService : ITrackingInputService
         _smoothedInputFps = 0.0;
         _smoothedCaptureFps = 0.0;
         _smoothedInferenceMs = 0.0;
+        _lastIfacialPacketUtc = DateTimeOffset.MinValue;
+        _lastWebcamPacketUtc = DateTimeOffset.MinValue;
+        _activeRuntimeSource = TrackingRuntimeSource.None;
+        _fallbackCount = 0;
+        _ifacialRecoveryStreak = 0;
+        _ifacialConsecutiveFailures = 0;
+        _calibrationFrames = 0;
+        _calibrationBaseline.Clear();
+        _calibrationState = "calibrating";
         _latestMediapipePacket = null;
         _hasMediapipePacket = false;
         _latestMediapipeError = string.Empty;
         _lastMediapipeFrameId = 0;
-        _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "listening", _options.SourceType, "initializing");
+        _diagnostics = new TrackingDiagnostics(
+            true,
+            "unknown",
+            0.0,
+            0.0,
+            0.0,
+            int.MaxValue,
+            true,
+            0,
+            0,
+            0,
+            "listening",
+            _options.SourceType,
+            "initializing",
+            false,
+            string.Empty,
+            "none",
+            0,
+            _calibrationState,
+            "ifacial=0.00,webcam=0.00");
     }
 
     private async Task ReceiveLoopAsync(CancellationToken token)
@@ -358,6 +436,7 @@ public sealed class TrackingInputService : ITrackingInputService
                         ? "TRACKING_PARSE_THRESHOLD_EXCEEDED"
                         : "TRACKING_PARSE_FAILED",
                 };
+                _ifacialConsecutiveFailures++;
                 continue;
             }
 
@@ -374,19 +453,31 @@ public sealed class TrackingInputService : ITrackingInputService
                         ? "TRACKING_DROP_THRESHOLD_EXCEEDED"
                         : "TRACKING_NO_MAPPED_CHANNELS",
                 };
+                _ifacialConsecutiveFailures++;
                 continue;
             }
 
-                _lastPacketUtc = DateTimeOffset.UtcNow;
-                _hasFrame = true;
-                UpdateInputFps();
-                ApplySmoothing();
+                _ifacialConsecutiveFailures = 0;
+                _lastIfacialPacketUtc = DateTimeOffset.UtcNow;
+                EvaluateSourceArbitration(0);
+                if (ShouldConsumeIfacialFrame())
+                {
+                    _lastPacketUtc = _lastIfacialPacketUtc;
+                    _hasFrame = true;
+                    UpdateInputFps();
+                    ApplySmoothing();
+                    AdvanceCalibration();
+                }
                 _diagnostics = _diagnostics with
                 {
                     DetectedFormat = formatName,
-                    SourceStatus = "udp-receiving",
+                    SourceStatus = _activeRuntimeSource == TrackingRuntimeSource.Ifacial ? "ifacial-active" : "ifacial-recovering",
                     StatusMessage = $"receiving:{formatName}",
                     LastErrorCode = string.Empty,
+                    ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                    FallbackCount = _fallbackCount,
+                    CalibrationState = _calibrationState,
+                    ConfidenceSummary = BuildConfidenceSummary(),
                 };
             }
         }
@@ -430,7 +521,16 @@ public sealed class TrackingInputService : ITrackingInputService
 
                 if (packet is not null)
                 {
-                    ApplyMediapipePacket(packet);
+                    lock (_sync)
+                    {
+                        _lastWebcamPacketUtc = DateTimeOffset.UtcNow;
+                        EvaluateSourceArbitration(0);
+                    }
+
+                    if (ShouldConsumeWebcamFrame())
+                    {
+                        ApplyMediapipePacket(packet);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -450,9 +550,13 @@ public sealed class TrackingInputService : ITrackingInputService
                     _diagnostics = _diagnostics with
                     {
                         DroppedPackets = _diagnostics.DroppedPackets + 1,
-                        SourceStatus = BuildWebcamSourceStatus("stream-error"),
+                        SourceStatus = _activeRuntimeSource == TrackingRuntimeSource.Webcam
+                            ? BuildWebcamSourceStatus("fallback-active")
+                            : BuildWebcamSourceStatus("standby"),
                         StatusMessage = $"webcam error: {loopError}",
                         LastErrorCode = $"TRACKING_MEDIAPIPE_{loopRc}".ToUpperInvariant(),
+                        ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                        ConfidenceSummary = BuildConfidenceSummary(),
                     };
                 }
             }
@@ -608,24 +712,316 @@ public sealed class TrackingInputService : ITrackingInputService
             _rawFrame.HeadPosZ = packet.HeadPosZ;
             ApplyMediapipeBlendshapeResult(packet);
 
-            _lastPacketUtc = DateTimeOffset.UtcNow;
+            _lastPacketUtc = _lastWebcamPacketUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _lastWebcamPacketUtc;
             _hasFrame = true;
             UpdateInputFps();
             UpdateCaptureFps(packet.CaptureFps);
             UpdateInferenceMs(packet.InferenceMs);
             ApplySmoothing();
+            AdvanceCalibration();
             _diagnostics = _diagnostics with
             {
                 DetectedFormat = "webcam-mediapipe",
                 InputFps = _smoothedInputFps,
                 CaptureFps = _smoothedCaptureFps,
                 InferenceMsAvg = _smoothedInferenceMs,
-                SourceStatus = BuildWebcamSourceStatus("receiving"),
-                StatusMessage = "receiving:webcam-mediapipe",
+                SourceStatus = _options.SourceType == TrackingSourceType.OscIfacial
+                    ? BuildWebcamSourceStatus("fallback-active")
+                    : BuildWebcamSourceStatus("receiving"),
+                StatusMessage = _options.SourceType == TrackingSourceType.OscIfacial
+                    ? "receiving:webcam-mediapipe (fallback)"
+                    : "receiving:webcam-mediapipe",
                 ModelSchemaOk = true,
                 LastErrorCode = string.Empty,
+                ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                FallbackCount = _fallbackCount,
+                CalibrationState = _calibrationState,
+                ConfidenceSummary = BuildConfidenceSummary(),
             };
         }
+    }
+
+    private void ApplyMediapipeBlendshapeResult(MediapipeFramePacket packet)
+    {
+        for (var i = 0; i < ArkitBlendshapeOrder.Length; i++)
+        {
+            var key = NormalizeKey(ArkitBlendshapeOrder[i]);
+            _expressionCache[key] = 0.0f;
+        }
+
+        _expressionCache["eyeblinkleft"] = ApplyAdaptiveCalibration("eyeblinkleft", Clamp01(packet.BlinkLeft));
+        _expressionCache["eyeblinkright"] = ApplyAdaptiveCalibration("eyeblinkright", Clamp01(packet.BlinkRight));
+        _expressionCache["jawopen"] = ApplyAdaptiveCalibration("jawopen", Clamp01(packet.MouthOpen));
+        _expressionCache["mouthsmileleft"] = ApplyAdaptiveCalibration("mouthsmileleft", Clamp01(packet.Smile));
+        _expressionCache["mouthsmileright"] = ApplyAdaptiveCalibration("mouthsmileright", Clamp01(packet.Smile));
+
+        foreach (var pair in packet.BlendshapeWeights)
+        {
+            var key = NormalizeKey(pair.Key);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+
+            _expressionCache[key] = ApplyAdaptiveCalibration(key, Clamp01(pair.Value));
+        }
+
+        _rawFrame.BlinkL = _expressionCache["eyeblinkleft"];
+        _rawFrame.BlinkR = _expressionCache["eyeblinkright"];
+        _rawFrame.MouthOpen = _expressionCache["jawopen"];
+        SnapshotExpressionWeights();
+    }
+
+    private MediapipeSidecarLaunchConfig BuildMediapipeSidecarLaunchConfig()
+    {
+        var pythonExe = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_PYTHON");
+        if (string.IsNullOrWhiteSpace(pythonExe))
+        {
+            pythonExe = "python";
+        }
+
+        var scriptPath = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT");
+        if (string.IsNullOrWhiteSpace(scriptPath))
+        {
+            var cwdCandidate = Path.Combine(Environment.CurrentDirectory, "tools", "mediapipe_webcam_sidecar.py");
+            if (File.Exists(cwdCandidate))
+            {
+                scriptPath = cwdCandidate;
+            }
+            else
+            {
+                var baseDirCandidate = Path.Combine(AppContext.BaseDirectory, "tools", "mediapipe_webcam_sidecar.py");
+                scriptPath = baseDirCandidate;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
+        {
+            return new MediapipeSidecarLaunchConfig(
+                false,
+                string.Empty,
+                string.Empty,
+                "mediapipe sidecar script not found. set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT to tools/mediapipe_webcam_sidecar.py");
+        }
+
+        var cameraArg = string.IsNullOrWhiteSpace(_options.CameraDeviceKey) ? "0" : _options.CameraDeviceKey.Trim();
+        var args = string.Create(
+            CultureInfo.InvariantCulture,
+            $"\"{scriptPath}\" --camera \"{cameraArg}\" --fps {_options.InferenceFpsCap}");
+        return new MediapipeSidecarLaunchConfig(true, pythonExe, args, string.Empty);
+    }
+
+    private Process? StartMediapipeSidecar(MediapipeSidecarLaunchConfig launch)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(launch.Executable, launch.Arguments)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+            };
+
+            var process = Process.Start(psi);
+            if (process is null)
+            {
+                _latestMediapipeError = "failed to start mediapipe process";
+                return null;
+            }
+
+            return process;
+        }
+        catch (Exception ex)
+        {
+            _latestMediapipeError = ex.Message;
+            return null;
+        }
+    }
+
+    private async Task ReadMediapipeStdoutLoopAsync(Process process, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && !process.HasExited)
+            {
+                var line = await process.StandardOutput.ReadLineAsync(token);
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                if (!TryParseMediapipePacket(line, out var packet))
+                {
+                    lock (_sync)
+                    {
+                        _diagnostics = _diagnostics with
+                        {
+                            ParseErrors = _diagnostics.ParseErrors + 1,
+                            SourceStatus = BuildWebcamSourceStatus("parse-failed"),
+                            StatusMessage = "mediapipe packet parse failed",
+                            LastErrorCode = "TRACKING_MEDIAPIPE_PACKET_PARSE_FAILED",
+                        };
+                    }
+                    continue;
+                }
+
+                lock (_sync)
+                {
+                    _latestMediapipePacket = packet;
+                    _hasMediapipePacket = true;
+                    _diagnostics = _diagnostics with
+                    {
+                        ReceivedPackets = _diagnostics.ReceivedPackets + 1,
+                    };
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path.
+        }
+        catch (Exception ex)
+        {
+            lock (_sync)
+            {
+                _latestMediapipeError = ex.Message;
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = BuildWebcamSourceStatus("read-failed"),
+                    StatusMessage = $"mediapipe read failed: {ex.Message}",
+                    LastErrorCode = "TRACKING_MEDIAPIPE_READ_FAILED",
+                };
+            }
+        }
+    }
+
+    private async Task ReadMediapipeStderrLoopAsync(Process process, CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && !process.HasExited)
+            {
+                var line = await process.StandardError.ReadLineAsync(token);
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                lock (_sync)
+                {
+                    _latestMediapipeError = line.Trim();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown path.
+        }
+        catch
+        {
+            // Diagnostics only.
+        }
+    }
+
+    private bool TryParseMediapipePacket(string jsonLine, [NotNullWhen(true)] out MediapipeFramePacket? packet)
+    {
+        packet = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonLine);
+            var root = doc.RootElement;
+
+            if (!TryReadNumber(root, "frame_id", out var frameIdRaw))
+            {
+                return false;
+            }
+            var frameId = (long)frameIdRaw;
+            if (frameId <= _lastMediapipeFrameId)
+            {
+                return false;
+            }
+
+            if (!TryReadNumber(root, "yaw_deg", out var yawDeg) ||
+                !TryReadNumber(root, "pitch_deg", out var pitchDeg) ||
+                !TryReadNumber(root, "roll_deg", out var rollDeg) ||
+                !TryReadNumber(root, "head_pos_x", out var headPosX) ||
+                !TryReadNumber(root, "head_pos_y", out var headPosY) ||
+                !TryReadNumber(root, "head_pos_z", out var headPosZ) ||
+                !TryReadNumber(root, "blink_l", out var blinkL) ||
+                !TryReadNumber(root, "blink_r", out var blinkR) ||
+                !TryReadNumber(root, "mouth_open", out var mouthOpen) ||
+                !TryReadNumber(root, "smile", out var smile))
+            {
+                return false;
+            }
+
+            var captureFps = 0.0;
+            var inferenceMs = 0.0;
+            var sourceConfidence = 0.75;
+            _ = TryReadNumber(root, "capture_fps", out captureFps);
+            _ = TryReadNumber(root, "inference_ms", out inferenceMs);
+            _ = TryReadNumber(root, "confidence", out sourceConfidence);
+
+            var blendshapes = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("blendshapes", out var blendRoot) &&
+                blendRoot.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in blendRoot.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetDouble(out var value))
+                    {
+                        blendshapes[prop.Name] = Clamp01((float)value);
+                    }
+                }
+            }
+
+            _lastMediapipeFrameId = frameId;
+            packet = new MediapipeFramePacket(
+                frameId,
+                (float)yawDeg,
+                (float)pitchDeg,
+                (float)rollDeg,
+                (float)headPosX,
+                (float)headPosY,
+                (float)headPosZ,
+                Clamp01((float)blinkL),
+                Clamp01((float)blinkR),
+                Clamp01((float)mouthOpen),
+                Clamp01((float)smile),
+                captureFps <= 0.0 ? 0.0 : captureFps,
+                inferenceMs <= 0.0 ? 0.0 : inferenceMs,
+                Clamp01((float)sourceConfidence),
+                blendshapes);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadNumber(JsonElement root, string propertyName, out double value)
+    {
+        value = 0.0;
+        if (!root.TryGetProperty(propertyName, out var element))
+        {
+            return false;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number)
+        {
+            return element.TryGetDouble(out value);
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return double.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        return false;
     }
 
     private bool TryParsePacket(byte[] packet, out List<KeyValuePair<string, float>> updates, out string formatName)
@@ -966,13 +1362,16 @@ public sealed class TrackingInputService : ITrackingInputService
         switch (normalized)
         {
             case "eyeblinkleft":
-                _rawFrame.BlinkL = Clamp01(value);
+                _rawFrame.BlinkL = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _expressionCache[normalized] = _rawFrame.BlinkL;
                 return true;
             case "eyeblinkright":
-                _rawFrame.BlinkR = Clamp01(value);
+                _rawFrame.BlinkR = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _expressionCache[normalized] = _rawFrame.BlinkR;
                 return true;
             case "jawopen":
-                _rawFrame.MouthOpen = Clamp01(value);
+                _rawFrame.MouthOpen = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _expressionCache[normalized] = _rawFrame.MouthOpen;
                 return true;
             case "headyaw":
                 _rawHeadYaw = value;
@@ -996,9 +1395,160 @@ public sealed class TrackingInputService : ITrackingInputService
                 _rawFrame.HeadPosZ = value;
                 return true;
             default:
-                _expressionCache[normalized] = Clamp01(value);
+                _expressionCache[normalized] = ApplyAdaptiveCalibration(normalized, Clamp01(value));
                 return true;
         }
+    }
+
+    private float ApplyAdaptiveCalibration(string key, float value)
+    {
+        var normalized = NormalizeKey(key);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return Clamp01(value);
+        }
+
+        if (!_calibrationBaseline.TryGetValue(normalized, out var baseline))
+        {
+            baseline = value;
+            _calibrationBaseline[normalized] = baseline;
+        }
+        else
+        {
+            var alpha = _calibrationFrames < CalibrationWarmupFrames ? 0.06f : 0.01f;
+            baseline = Ema(baseline, value, alpha);
+            _calibrationBaseline[normalized] = baseline;
+        }
+
+        if (_calibrationFrames < CalibrationWarmupFrames)
+        {
+            _calibrationState = "calibrating";
+            return Clamp01(value);
+        }
+
+        var denom = MathF.Max(0.18f, 1.0f - baseline);
+        var normalizedValue = (value - baseline) / denom;
+        _calibrationState = "stable";
+        return Clamp01(normalizedValue);
+    }
+
+    private void AdvanceCalibration()
+    {
+        _calibrationFrames = Math.Clamp(_calibrationFrames + 1, 0, 1000000);
+        if (_calibrationFrames < CalibrationWarmupFrames)
+        {
+            _calibrationState = "calibrating";
+        }
+        else if (_calibrationFrames > (CalibrationWarmupFrames * 5))
+        {
+            _calibrationState = "stable";
+        }
+    }
+
+    private void EvaluateSourceArbitration(int currentAgeMs)
+    {
+        if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
+        {
+            _activeRuntimeSource = TrackingRuntimeSource.Webcam;
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var ifacialAge = _lastIfacialPacketUtc == DateTimeOffset.MinValue
+            ? int.MaxValue
+            : (int)Math.Max(0.0, (now - _lastIfacialPacketUtc).TotalMilliseconds);
+        var webcamAge = _lastWebcamPacketUtc == DateTimeOffset.MinValue
+            ? int.MaxValue
+            : (int)Math.Max(0.0, (now - _lastWebcamPacketUtc).TotalMilliseconds);
+        var ageMs = currentAgeMs > 0 ? currentAgeMs : ifacialAge;
+
+        var shouldFallback = (ageMs >= IfacialFallbackAgeMs || _ifacialConsecutiveFailures >= 4) &&
+                             webcamAge < (_options.StaleTimeoutMs * 2);
+        if (shouldFallback && _activeRuntimeSource != TrackingRuntimeSource.Webcam)
+        {
+            _activeRuntimeSource = TrackingRuntimeSource.Webcam;
+            _fallbackCount++;
+            _ifacialRecoveryStreak = 0;
+        }
+
+        if (_activeRuntimeSource == TrackingRuntimeSource.Webcam)
+        {
+            var ifacialRecovered = ifacialAge <= IfacialRecoveryAgeMs && _ifacialConsecutiveFailures == 0;
+            if (ifacialRecovered)
+            {
+                _ifacialRecoveryStreak++;
+                if (_ifacialRecoveryStreak >= IfacialRecoveryStreakRequired)
+                {
+                    _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
+                    _ifacialRecoveryStreak = 0;
+                }
+            }
+            else
+            {
+                _ifacialRecoveryStreak = 0;
+            }
+        }
+        else if (_activeRuntimeSource == TrackingRuntimeSource.None)
+        {
+            _activeRuntimeSource = ifacialAge < int.MaxValue ? TrackingRuntimeSource.Ifacial : TrackingRuntimeSource.Webcam;
+        }
+    }
+
+    private bool ShouldConsumeIfacialFrame()
+    {
+        if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
+        {
+            return false;
+        }
+
+        return _activeRuntimeSource != TrackingRuntimeSource.Webcam;
+    }
+
+    private bool ShouldConsumeWebcamFrame()
+    {
+        if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
+        {
+            return true;
+        }
+
+        return _activeRuntimeSource == TrackingRuntimeSource.Webcam;
+    }
+
+    private string BuildConfidenceSummary()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var ifacialAge = _lastIfacialPacketUtc == DateTimeOffset.MinValue
+            ? int.MaxValue
+            : (int)Math.Max(0.0, (now - _lastIfacialPacketUtc).TotalMilliseconds);
+        var webcamAge = _lastWebcamPacketUtc == DateTimeOffset.MinValue
+            ? int.MaxValue
+            : (int)Math.Max(0.0, (now - _lastWebcamPacketUtc).TotalMilliseconds);
+
+        var ifacialConfidence = ifacialAge == int.MaxValue
+            ? 0.0
+            : Math.Clamp(1.0 - (ifacialAge / 900.0), 0.0, 1.0);
+        if (_ifacialConsecutiveFailures > 0)
+        {
+            ifacialConfidence *= Math.Clamp(1.0 - (_ifacialConsecutiveFailures * 0.15), 0.0, 1.0);
+        }
+
+        var webcamConfidence = (_latestMediapipePacket is null)
+            ? (webcamAge == int.MaxValue ? 0.0 : Math.Clamp(1.0 - (webcamAge / 1200.0), 0.0, 1.0))
+            : Math.Clamp(_latestMediapipePacket.SourceConfidence, 0.0, 1.0);
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"ifacial={ifacialConfidence:F2},webcam={webcamConfidence:F2}");
+    }
+
+    private static string ToActiveSourceLabel(TrackingRuntimeSource source)
+    {
+        return source switch
+        {
+            TrackingRuntimeSource.Ifacial => "ifacial",
+            TrackingRuntimeSource.Webcam => "webcam",
+            _ => "none",
+        };
     }
 
     private void ApplySmoothing()
@@ -1078,10 +1628,18 @@ public sealed class TrackingInputService : ITrackingInputService
         _lastFpsSampleUtc = now;
     }
 
-    private void UpdateCaptureFps()
+    private void UpdateCaptureFps(double observedCaptureFps)
     {
         lock (_sync)
         {
+            if (observedCaptureFps > 0.0 && !double.IsNaN(observedCaptureFps) && !double.IsInfinity(observedCaptureFps))
+            {
+                _smoothedCaptureFps = _smoothedCaptureFps <= 0.001
+                    ? observedCaptureFps
+                    : (_smoothedCaptureFps * 0.7) + (observedCaptureFps * 0.3);
+                return;
+            }
+
             var now = DateTimeOffset.UtcNow;
             if (_lastCaptureSampleUtc == DateTimeOffset.MinValue)
             {
@@ -1225,19 +1783,38 @@ public sealed class TrackingInputService : ITrackingInputService
         };
     }
 
-    private sealed record WebcamInferenceResult(
+    private sealed record MediapipeSidecarLaunchConfig(
+        bool IsValid,
+        string Executable,
+        string Arguments,
+        string ErrorMessage);
+
+    private sealed record MediapipeFramePacket(
+        long FrameId,
         float HeadYawDeg,
         float HeadPitchDeg,
         float HeadRollDeg,
         float HeadPosX,
         float HeadPosY,
         float HeadPosZ,
-        float Blink,
+        float BlinkLeft,
+        float BlinkRight,
         float MouthOpen,
-        float Smile);
+        float Smile,
+        double CaptureFps,
+        double InferenceMs,
+        float SourceConfidence,
+        IReadOnlyDictionary<string, float> BlendshapeWeights);
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);
     private readonly record struct OscValue(OscValueKind Kind, float FloatValue, string StringValue);
+    private enum TrackingRuntimeSource
+    {
+        None = 0,
+        Ifacial = 1,
+        Webcam = 2,
+    }
+
     private enum OscValueKind
     {
         Float = 0,

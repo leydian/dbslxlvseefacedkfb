@@ -2169,7 +2169,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
         } else if (is_mask) {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
-            device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
+            device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);
         } else {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);

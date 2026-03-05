@@ -2,6 +2,60 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Hybrid tracking precision + render/VRM follow-up
+
+### Summary
+
+Completed a follow-up pass across tracking precision, render interaction, and VRM transform handling, with synchronized diagnostics updates and verification evidence.
+
+### Changed
+
+- hybrid tracking precision and diagnostics:
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/TrackingInputService.cs`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `tools/mediapipe_webcam_sidecar.py`
+  - `tools/mediapipe_sidecar_sanity.ps1`
+  - added source arbitration (`iFacial` primary + webcam fallback), adaptive calibration, and expanded tracking diagnostics (`active source`, `fallback count`, `calibration state`, `confidence summary`).
+- WPF render direct interaction:
+  - `host/WpfHost/RenderHwndHost.cs`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added right-drag yaw and mouse-wheel FOV direct controls mapped to manual camera mode updates.
+- VRM node transform support:
+  - `src/avatar/vrm_loader.cpp`
+  - added node transform matrix build/apply path for mesh vertex positions, plus warning codes for multi-node references and transform application.
+- native render path depth-state correction:
+  - `src/nativecore/native_core.cpp`
+  - adjusted depth-stencil state selection for the affected draw pass.
+- docs:
+  - `docs/reports/tracking_render_followup_2026-03-06.md`
+  - `docs/INDEX.md`
+
+## 2026-03-06 - Webcam tracking runtime pivot to MediaPipe sidecar
+
+### Summary
+
+Shifted webcam tracking from temporary in-process heuristics to a MediaPipe sidecar runtime contract, including packet ingestion, diagnostics wiring, and gate-level sanity checks.
+
+### Changed
+
+- MediaPipe runtime integration:
+  - `host/HostCore/TrackingInputService.cs`
+  - replaced pseudo frame-analysis path with sidecar process orchestration and JSON packet ingestion.
+  - mapped sidecar pose/expression fields into native tracking submit flow with error-classed diagnostics.
+- Sidecar runtime script:
+  - `tools/mediapipe_webcam_sidecar.py`
+  - added webcam capture + MediaPipe face mesh processing + JSONL frame output.
+- Automation and readiness:
+  - `tools/mediapipe_sidecar_sanity.ps1`
+  - `tools/run_quality_baseline.ps1`
+  - `tools/release_readiness_gate.ps1`
+  - added optional `-EnableMediapipeSanity` gate path and summary artifact emission.
+- Documentation:
+  - `docs/reports/webcam_mediapipe_runtime_integration_2026-03-06.md`
+  - `docs/INDEX.md`
+
 ## 2026-03-06 - Avatar render recovery bundle (VRM/XAV2 visibility, alpha contract, runtime diagnostics, redeploy stabilization)
 
 ### Summary

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -376,6 +377,148 @@ bool TryGetNumberArray(const JsonValue& root, const std::string& key, std::size_
         out->push_back(static_cast<float>(v->array_value[i].number_value));
     }
     return true;
+}
+
+std::array<float, 16U> MakeIdentityMatrix4x4() {
+    return {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f};
+}
+
+std::array<float, 16U> MulMatrix4x4(
+    const std::array<float, 16U>& a,
+    const std::array<float, 16U>& b) {
+    std::array<float, 16U> out {};
+    for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
+            out[static_cast<std::size_t>(c) * 4U + static_cast<std::size_t>(r)] =
+                (a[0U * 4U + static_cast<std::size_t>(r)] * b[static_cast<std::size_t>(c) * 4U + 0U]) +
+                (a[1U * 4U + static_cast<std::size_t>(r)] * b[static_cast<std::size_t>(c) * 4U + 1U]) +
+                (a[2U * 4U + static_cast<std::size_t>(r)] * b[static_cast<std::size_t>(c) * 4U + 2U]) +
+                (a[3U * 4U + static_cast<std::size_t>(r)] * b[static_cast<std::size_t>(c) * 4U + 3U]);
+        }
+    }
+    return out;
+}
+
+bool TryBuildNodeTransformMatrix(const JsonValue& node, std::array<float, 16U>* out_matrix, bool* out_non_identity) {
+    if (out_matrix == nullptr || out_non_identity == nullptr) {
+        return false;
+    }
+    *out_matrix = MakeIdentityMatrix4x4();
+    *out_non_identity = false;
+    if (node.type != JsonValue::Type::Object) {
+        return false;
+    }
+
+    const auto* matrix_v = FindKey(node, "matrix");
+    if (matrix_v != nullptr && matrix_v->type == JsonValue::Type::Array && matrix_v->array_value.size() >= 16U) {
+        for (std::size_t i = 0U; i < 16U; ++i) {
+            if (matrix_v->array_value[i].type != JsonValue::Type::Number) {
+                return false;
+            }
+            (*out_matrix)[i] = static_cast<float>(matrix_v->array_value[i].number_value);
+        }
+        for (std::size_t i = 0U; i < 16U; ++i) {
+            const float expected = (i % 5U) == 0U ? 1.0f : 0.0f;
+            if (std::abs((*out_matrix)[i] - expected) > 1e-5f) {
+                *out_non_identity = true;
+                break;
+            }
+        }
+        return true;
+    }
+
+    std::array<float, 3U> t = {0.0f, 0.0f, 0.0f};
+    std::array<float, 3U> s = {1.0f, 1.0f, 1.0f};
+    std::array<float, 4U> q = {0.0f, 0.0f, 0.0f, 1.0f};
+    std::vector<float> arr;
+    if (TryGetNumberArray(node, "translation", 3U, &arr)) {
+        t = {arr[0], arr[1], arr[2]};
+    }
+    if (TryGetNumberArray(node, "scale", 3U, &arr)) {
+        s = {arr[0], arr[1], arr[2]};
+    }
+    if (TryGetNumberArray(node, "rotation", 4U, &arr)) {
+        q = {arr[0], arr[1], arr[2], arr[3]};
+    }
+
+    const float q_len = std::sqrt((q[0] * q[0]) + (q[1] * q[1]) + (q[2] * q[2]) + (q[3] * q[3]));
+    if (q_len > 1e-6f && std::isfinite(q_len)) {
+        const float inv = 1.0f / q_len;
+        q[0] *= inv;
+        q[1] *= inv;
+        q[2] *= inv;
+        q[3] *= inv;
+    } else {
+        q = {0.0f, 0.0f, 0.0f, 1.0f};
+    }
+
+    const float x = q[0];
+    const float y = q[1];
+    const float z = q[2];
+    const float w = q[3];
+    const float xx = x * x;
+    const float yy = y * y;
+    const float zz = z * z;
+    const float xy = x * y;
+    const float xz = x * z;
+    const float yz = y * z;
+    const float wx = w * x;
+    const float wy = w * y;
+    const float wz = w * z;
+
+    std::array<float, 16U> rot = {
+        1.0f - 2.0f * (yy + zz), 2.0f * (xy + wz),        2.0f * (xz - wy),        0.0f,
+        2.0f * (xy - wz),        1.0f - 2.0f * (xx + zz), 2.0f * (yz + wx),        0.0f,
+        2.0f * (xz + wy),        2.0f * (yz - wx),        1.0f - 2.0f * (xx + yy), 0.0f,
+        0.0f,                    0.0f,                    0.0f,                    1.0f};
+    std::array<float, 16U> scale = {
+        s[0], 0.0f, 0.0f, 0.0f,
+        0.0f, s[1], 0.0f, 0.0f,
+        0.0f, 0.0f, s[2], 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 16U> trans = MakeIdentityMatrix4x4();
+    trans[12] = t[0];
+    trans[13] = t[1];
+    trans[14] = t[2];
+
+    *out_matrix = MulMatrix4x4(MulMatrix4x4(trans, rot), scale);
+    *out_non_identity =
+        std::abs(t[0]) > 1e-6f || std::abs(t[1]) > 1e-6f || std::abs(t[2]) > 1e-6f ||
+        std::abs(s[0] - 1.0f) > 1e-6f || std::abs(s[1] - 1.0f) > 1e-6f || std::abs(s[2] - 1.0f) > 1e-6f ||
+        std::abs(q[0]) > 1e-6f || std::abs(q[1]) > 1e-6f || std::abs(q[2]) > 1e-6f || std::abs(q[3] - 1.0f) > 1e-6f;
+    return true;
+}
+
+void ApplyPositionTransformToVertexBlob(
+    std::vector<std::uint8_t>* vertex_blob,
+    std::uint32_t vertex_stride,
+    const std::array<float, 16U>& m) {
+    if (vertex_blob == nullptr || vertex_blob->empty() || vertex_stride < 12U) {
+        return;
+    }
+    if ((vertex_blob->size() % vertex_stride) != 0U) {
+        return;
+    }
+    const std::size_t vertex_count = vertex_blob->size() / static_cast<std::size_t>(vertex_stride);
+    for (std::size_t i = 0U; i < vertex_count; ++i) {
+        const std::size_t base = i * static_cast<std::size_t>(vertex_stride);
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        std::memcpy(&x, vertex_blob->data() + base, sizeof(float));
+        std::memcpy(&y, vertex_blob->data() + base + 4U, sizeof(float));
+        std::memcpy(&z, vertex_blob->data() + base + 8U, sizeof(float));
+        const float tx = (m[0] * x) + (m[4] * y) + (m[8] * z) + m[12];
+        const float ty = (m[1] * x) + (m[5] * y) + (m[9] * z) + m[13];
+        const float tz = (m[2] * x) + (m[6] * y) + (m[10] * z) + m[14];
+        std::memcpy(vertex_blob->data() + base, &tx, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 4U, &ty, sizeof(float));
+        std::memcpy(vertex_blob->data() + base + 8U, &tz, sizeof(float));
+    }
 }
 
 std::string DetectTextureFormat(const std::string& mime_type, const std::string& name_hint) {
@@ -1178,6 +1321,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     std::vector<std::size_t> node_to_mesh_index;
+    std::vector<std::array<float, 16U>> mesh_node_transforms;
+    std::vector<bool> mesh_has_node_transform;
+    std::vector<std::uint32_t> mesh_node_ref_counts;
+    mesh_node_transforms.assign(meshes_v->array_value.size(), MakeIdentityMatrix4x4());
+    mesh_has_node_transform.assign(meshes_v->array_value.size(), false);
+    mesh_node_ref_counts.assign(meshes_v->array_value.size(), 0U);
     const auto* nodes_v = FindKey(root, "nodes");
     if (nodes_v != nullptr && nodes_v->type == JsonValue::Type::Array) {
         node_to_mesh_index.assign(
@@ -1191,8 +1340,30 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             std::size_t mesh_index = std::numeric_limits<std::size_t>::max();
             if (TryGetIndex(node, "mesh", &mesh_index)) {
                 node_to_mesh_index[node_i] = mesh_index;
+                if (mesh_index < mesh_node_ref_counts.size()) {
+                    mesh_node_ref_counts[mesh_index] += 1U;
+                    if (!mesh_has_node_transform[mesh_index]) {
+                        std::array<float, 16U> node_transform = MakeIdentityMatrix4x4();
+                        bool non_identity = false;
+                        if (TryBuildNodeTransformMatrix(node, &node_transform, &non_identity) && non_identity) {
+                            mesh_node_transforms[mesh_index] = node_transform;
+                            mesh_has_node_transform[mesh_index] = true;
+                        }
+                    }
+                }
             }
         }
+    }
+    std::uint32_t multi_ref_mesh_count = 0U;
+    for (const auto ref_count : mesh_node_ref_counts) {
+        if (ref_count > 1U) {
+            ++multi_ref_mesh_count;
+        }
+    }
+    if (multi_ref_mesh_count > 0U) {
+        pkg.warnings.push_back(
+            "W_NODE: VRM_MESH_MULTI_NODE_REF: meshes=" + std::to_string(multi_ref_mesh_count));
+        pkg.warning_codes.push_back("VRM_MESH_MULTI_NODE_REF");
     }
 
     std::unordered_map<std::string, std::vector<std::string>> mesh_frame_names;
@@ -1526,6 +1697,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
+            if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
+                ApplyPositionTransformToVertexBlob(
+                    &mesh_payload.vertex_blob,
+                    mesh_payload.vertex_stride,
+                    mesh_node_transforms[mesh_i]);
+            }
 
             const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
             if (uv0_v != nullptr && uv0_v->type == JsonValue::Type::Number) {
@@ -1626,6 +1803,17 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     }
 
     pkg.parser_stage = "payload";
+    std::uint32_t transformed_mesh_count = 0U;
+    for (const bool has_transform : mesh_has_node_transform) {
+        if (has_transform) {
+            ++transformed_mesh_count;
+        }
+    }
+    if (transformed_mesh_count > 0U) {
+        pkg.warnings.push_back(
+            "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count));
+        pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
+    }
     if (pkg.mesh_payloads.empty()) {
         pkg.primary_error_code = "VRM_ASSET_MISSING";
         pkg.compat_level = AvatarCompatLevel::Failed;

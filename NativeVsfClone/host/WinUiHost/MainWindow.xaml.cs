@@ -11,6 +11,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Windows.Graphics;
 using Windows.Storage.Pickers;
 using WinRT.Interop;
@@ -26,6 +27,8 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherQueueTimer _uiRefreshTimer;
     private readonly DispatcherQueueTimer _resizeTimer;
     private readonly DispatcherQueueTimer _renderApplyTimer;
+    private const float DragPixelsPerYawDegree = 6.0f;
+    private const float WheelNotchFovStep = 1.0f;
     private bool _isSyncingRenderUi;
     private bool _isSyncingPresetUi;
     private bool _isLogsTabActive;
@@ -45,6 +48,8 @@ public sealed partial class MainWindow : Window
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
     private const int MinWindowWidth = 1240;
     private const int MinWindowHeight = 760;
+    private bool _isRenderRightDragging;
+    private double _lastRenderDragX;
 
     public MainWindow()
     {
@@ -67,6 +72,11 @@ public sealed partial class MainWindow : Window
         _renderApplyTimer.Tick += RenderApplyTimer_Tick;
         Closed += MainWindow_Closed;
         RenderHost.SizeChanged += RenderHost_SizeChanged;
+        RenderHost.PointerPressed += RenderHost_PointerPressed;
+        RenderHost.PointerMoved += RenderHost_PointerMoved;
+        RenderHost.PointerReleased += RenderHost_PointerReleased;
+        RenderHost.PointerCanceled += RenderHost_PointerCanceled;
+        RenderHost.PointerWheelChanged += RenderHost_PointerWheelChanged;
 
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
@@ -90,6 +100,11 @@ public sealed partial class MainWindow : Window
             _appWindow.Changed -= AppWindow_Changed;
         }
 
+        RenderHost.PointerPressed -= RenderHost_PointerPressed;
+        RenderHost.PointerMoved -= RenderHost_PointerMoved;
+        RenderHost.PointerReleased -= RenderHost_PointerReleased;
+        RenderHost.PointerCanceled -= RenderHost_PointerCanceled;
+        RenderHost.PointerWheelChanged -= RenderHost_PointerWheelChanged;
         _timer.Stop();
         _uiRefreshTimer.Stop();
         _resizeTimer.Stop();
@@ -727,6 +742,80 @@ public sealed partial class MainWindow : Window
         _ = PushRenderUiState();
     }
 
+    private void RenderHost_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(RenderHost);
+        if (!point.Properties.IsRightButtonPressed)
+        {
+            return;
+        }
+
+        _isRenderRightDragging = true;
+        _lastRenderDragX = point.Position.X;
+        _ = RenderHost.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void RenderHost_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isRenderRightDragging || ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(RenderHost);
+        if (!point.Properties.IsRightButtonPressed)
+        {
+            EndRenderRightDrag(e.Pointer);
+            return;
+        }
+
+        var deltaX = point.Position.X - _lastRenderDragX;
+        _lastRenderDragX = point.Position.X;
+        if (Math.Abs(deltaX) < 0.001)
+        {
+            return;
+        }
+
+        var yawDelta = (float)(deltaX / DragPixelsPerYawDegree);
+        ApplyDirectRenderInteraction(yawDelta, 0.0f);
+        e.Handled = true;
+    }
+
+    private void RenderHost_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndRenderRightDrag(e.Pointer);
+    }
+
+    private void RenderHost_PointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        EndRenderRightDrag(e.Pointer);
+    }
+
+    private void RenderHost_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+
+        var delta = e.GetCurrentPoint(RenderHost).Properties.MouseWheelDelta;
+        if (delta == 0)
+        {
+            return;
+        }
+
+        var notch = delta / 120.0f;
+        var fovDelta = -notch * WheelNotchFovStep;
+        ApplyDirectRenderInteraction(0.0f, fovDelta);
+        e.Handled = true;
+    }
+
     private void QueueRenderApply()
     {
         _renderApplyTimer.Stop();
@@ -913,7 +1002,7 @@ public sealed partial class MainWindow : Window
         RefreshTrackingWebcamButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} err={tracking.LastErrorCode}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
@@ -928,6 +1017,38 @@ public sealed partial class MainWindow : Window
     private bool ShouldSkipRenderInteraction()
     {
         return _isSyncingRenderUi || _controller.OperationState.IsBusy;
+    }
+
+    private void EndRenderRightDrag(Microsoft.UI.Input.Pointer? pointer)
+    {
+        if (!_isRenderRightDragging)
+        {
+            return;
+        }
+
+        _isRenderRightDragging = false;
+        if (pointer is not null)
+        {
+            RenderHost.ReleasePointerCapture(pointer);
+        }
+    }
+
+    private void ApplyDirectRenderInteraction(float yawDelta, float fovDelta)
+    {
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+
+        var current = _controller.RenderState;
+        var next = current with
+        {
+            CameraMode = RenderCameraMode.Manual,
+            YawDeg = current.YawDeg + yawDelta,
+            FovDeg = current.FovDeg + fovDelta,
+        };
+        _ = _controller.ApplyRenderUiState(next);
+        UpdateUiState();
     }
 
     private void RefreshValidationState()
@@ -1008,7 +1129,7 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, active_source={tracking.ActiveSource}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
