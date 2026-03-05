@@ -268,8 +268,8 @@ namespace VsfClone.Xav2.Editor
         {
             public int schema = 1;
             public string shader = string.Empty;
-            public List<string> keywords = new();
-            public List<string> properties = new();
+            public List<string> keywords = new List<string>();
+            public List<string> properties = new List<string>();
         }
 
         private static string BuildShaderParamsJson(Material material)

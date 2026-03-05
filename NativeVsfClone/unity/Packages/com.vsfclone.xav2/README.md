@@ -4,7 +4,7 @@ Unity package for XAV2 export/runtime parsing.
 
 ## Scope (v0.1.0)
 
-- Unity `2022.3 LTS`
+- Unity `2021.3.18f1+` (LTS line)
 - Built-in Render Pipeline
 - Export-first workflow (`Scene AvatarRoot -> .xav2`)
 
@@ -44,3 +44,12 @@ Unknown section policy:
   - `Tests/Runtime/Xav2RuntimeLoaderTests.cs`
 - Recommended execution:
   - Unity Editor Test Runner (EditMode)
+
+## CI validation (2021.3.18f1)
+
+- Support is gated by:
+  - EditMode tests (`-runTests -testPlatform EditMode`)
+  - export smoke (`Xav2CiSmoke` export path)
+  - load smoke (`Xav2RuntimeLoader.TryLoad`, `runtime-ready`)
+- Local reproduction:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\unity_xav2_validate.ps1 -UnityEditorPath "<Unity.exe>" -UnityProjectPath "<UnityProjectPath>" -ExpectedUnityVersion "2021.3.18f1"`

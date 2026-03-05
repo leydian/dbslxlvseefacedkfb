@@ -1,0 +1,54 @@
+name: unity-xav2-2021-compat
+
+on:
+  pull_request:
+    paths:
+      - "unity/Packages/com.vsfclone.xav2/**"
+      - "tools/unity_xav2_validate.ps1"
+      - ".github/workflows/unity-xav2-compat.yml"
+      - "NativeVsfClone/unity/Packages/com.vsfclone.xav2/**"
+      - "NativeVsfClone/tools/unity_xav2_validate.ps1"
+      - "NativeVsfClone/.github/workflows/unity-xav2-compat.yml"
+  workflow_dispatch:
+
+jobs:
+  unity-2021-compat:
+    runs-on: [self-hosted, windows]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: NativeVsfClone
+    env:
+      UNITY_2021_3_18F1_EDITOR_PATH: ${{ vars.UNITY_2021_3_18F1_EDITOR_PATH }}
+      UNITY_XAV2_PROJECT_PATH: ${{ vars.UNITY_XAV2_PROJECT_PATH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Unity XAV2 compatibility (2021.3.18f1)
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\unity_xav2_validate.ps1 `
+            -UnityEditorPath "$env:UNITY_2021_3_18F1_EDITOR_PATH" `
+            -UnityProjectPath "$env:UNITY_XAV2_PROJECT_PATH" `
+            -ExpectedUnityVersion "2021.3.18f1"
+
+      - name: Upload Unity compatibility reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unity-xav2-2021-compat-reports
+          if-no-files-found: warn
+          path: |
+            build/reports/unity_xav2_editmode.log
+            build/reports/unity_xav2_editmode_results.xml
+            build/reports/unity_xav2_smoke.log
+            build/reports/unity_xav2_smoke_report.json
+            build/reports/unity_xav2_validation_summary.json
+            build/reports/unity_xav2_validation_summary.txt
+            NativeVsfClone/build/reports/unity_xav2_editmode.log
+            NativeVsfClone/build/reports/unity_xav2_editmode_results.xml
+            NativeVsfClone/build/reports/unity_xav2_smoke.log
+            NativeVsfClone/build/reports/unity_xav2_smoke_report.json
+            NativeVsfClone/build/reports/unity_xav2_validation_summary.json
+            NativeVsfClone/build/reports/unity_xav2_validation_summary.txt

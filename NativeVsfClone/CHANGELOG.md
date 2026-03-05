@@ -2,6 +2,119 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - Host blocker-closure implementation pass (WPF smoke stabilized, WinUI diagnostics hardened)
+
+### Summary
+
+Implemented the planned blocker-closure slice and executed new reruns with updated diagnostics contracts.
+
+- WPF headless launch-smoke failure was fixed (startup `NullReferenceException` guard).
+- WinUI diagnostics were hardened with NuGet probe/retry metadata and CI summary outputs.
+- WinUI blocker remains open, but failure classification is now stably `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` in latest local reruns.
+
+### Changed
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - added `_uiReady` startup gate to ignore early `TextChanged` events during XAML initialization.
+  - added null guards in `RefreshValidationState()` for validation controls.
+- `tools/publish_hosts.ps1`
+  - added `WinUiRestoreRetryCount`, `NuGetProbeTimeoutSeconds` options.
+  - added NU1301-aware publish retry wrapper.
+  - added `nuget_probe` capture (proxy/source summary) into WinUI diagnostic manifest and host publish log.
+  - extended root-cause extraction with NuGet auth signal (`401/403`) and explicit `NUGET_AUTH_FAILURE` mapping.
+- `tools/wpf_launch_smoke.ps1`
+  - added `AdditionalProbePaths` and PATH probe-path injection during smoke launch.
+  - added dependency hint extraction from event messages.
+  - added probe directory DLL inventory section in report artifact.
+  - narrowed event-log query window to run-start scope to avoid stale historical noise.
+- `tools/compare_winui_diag_manifest.ps1`
+  - expanded diff coverage with:
+    - `preflight.warnings`
+    - `nuget_probe.summary.*`
+    - `profiles[].command`
+- `.github/workflows/host-publish.yml`
+  - trigger paths now include `tools/compare_winui_diag_manifest.ps1`.
+  - WinUI diagnostics matrix job now writes per-OS summary artifact:
+    - `build/reports/winui_manifest_summary_*.txt`
+  - added step-summary output for quick matrix comparison.
+- docs updates:
+  - `docs/reports/host_blocker_status_board_2026-03-05.md`
+  - `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md`
+  - `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+
+### Verification (latest local execution)
+
+- `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -WinUiRestoreRetryCount 1 -NuGetProbeTimeoutSeconds 6` rerun x2
+  - WPF publish: PASS
+  - WPF launch smoke: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe`/`MSB3073`)
+  - WinUI failure class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `compare_winui_diag_manifest.ps1` (`runA` vs `runB`)
+  - output: `build/reports/winui_manifest_diff_runA_vs_runB.txt`
+  - result: all tracked fields `SAME`
+- direct WPF smoke rerun
+  - output: `build/reports/wpf_launch_smoke_latest.txt`
+  - `Status=PASS`, `ExitCode=0`
+
+## 2026-03-05 - Unity 2021.3.18f1 compatibility gate automation for XAV2 SDK
+
+### Summary
+
+Implemented an executable compatibility gate for Unity `2021.3.18f1` so SDK support is enforced by CI/runtime checks instead of documentation-only declaration.
+
+### Changed
+
+- Added Unity validation script:
+  - `tools/unity_xav2_validate.ps1`
+  - executes EditMode tests + export/load smoke and emits structured reports under `build/reports`.
+- Added Unity smoke execute-method entrypoint:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2CiSmoke.cs`
+  - builds a minimal AvatarRoot, exports `.xav2`, validates `TryLoad(...)` reaches `runtime-ready`.
+- Added CI workflow:
+  - `.github/workflows/unity-xav2-compat.yml`
+  - self-hosted Windows runner gate for `2021.3.18f1` with report artifact upload.
+- Updated docs:
+  - `README.md`
+  - `unity/Packages/com.vsfclone.xav2/README.md`
+  - documented support contract and local/CI validation command.
+
+### Verified
+
+- local static verification:
+  - workflow YAML, PowerShell script, and Unity editor execute-method wiring reviewed for path/report contract consistency.
+- note:
+  - Unity Editor runtime execution was not run in this shell environment (requires external Unity project path + editor binary).
+
+## 2026-03-05 - Unity XAV2 SDK minimum version expanded to 2021.3.18f1
+
+### Summary
+
+Expanded the Unity package compatibility contract from `2022.3 LTS` to `2021.3.18f1+` and aligned package/runtime authoring style for safer compilation on older editor toolchains.
+
+### Changed
+
+- `unity/Packages/com.vsfclone.xav2/package.json`
+  - lowered minimum Unity requirement from `2022.3` to `2021.3`
+  - added `unityRelease: 18f1`
+  - updated package description to `Unity 2021.3.18f1+`
+- `unity/Packages/com.vsfclone.xav2/README.md`
+  - updated supported Unity scope to `2021.3.18f1+`
+- `README.md`
+  - updated Unity XAV2 SDK target line to `2021.3.18f1+`
+- Unity package C# compatibility cleanup (target-typed `new()` removal):
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2ExportOptions.cs`
+
+### Verification
+
+- repository grep checks:
+  - confirmed Unity package metadata/documentation no longer references `2022.3` as minimum
+  - confirmed Unity package files no longer use target-typed `new()` expressions
+- note:
+  - Unity Editor runtime validation (`2021.3.18f1` EditMode tests/export smoke) has not been executed in this shell environment
+
 ## 2026-03-05 - Host execution follow-up: preflight unblock to publish-stage and deterministic NU1301 classification
 
 ### Summary

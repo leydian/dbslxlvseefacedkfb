@@ -205,7 +205,9 @@ Notes:
 ## Unity XAV2 SDK scaffold
 
 - Package path: `unity/Packages/com.vsfclone.xav2`
-- Target: Unity `2022.3 LTS` (Built-in RP)
+- Target: Unity `2021.3.18f1+` (Built-in RP)
+- Support contract:
+  - official support is gated by Unity `2021.3.18f1` CI validation (`EditMode tests + export/load smoke`)
 - Included:
   - runtime `.xav2` parser with diagnostics API:
     - `Xav2RuntimeLoader.Load(path)` (existing throw-on-failure path)
@@ -223,6 +225,17 @@ Notes:
   - local Unity runtime tests:
     - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
   - menu entry: `Tools/VsfClone/XAV2/Export Selected AvatarRoot`
+
+Validation automation:
+
+- script: `tools/unity_xav2_validate.ps1`
+- required environment on self-hosted runner/local host:
+  - `UNITY_2021_3_18F1_EDITOR_PATH` (Unity editor executable path)
+  - `UNITY_XAV2_PROJECT_PATH` (Unity project path that references this package)
+- local command:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\unity_xav2_validate.ps1 -UnityEditorPath "<Unity.exe>" -UnityProjectPath "<UnityProjectPath>" -ExpectedUnityVersion "2021.3.18f1"`
+- CI workflow:
+  - `.github/workflows/unity-xav2-compat.yml`
 
 ## VSFAvatar quality gate
 

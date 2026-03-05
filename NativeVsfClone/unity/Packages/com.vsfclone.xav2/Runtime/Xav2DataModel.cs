@@ -38,8 +38,8 @@ namespace VsfClone.Xav2.Runtime
         public string ErrorMessage = string.Empty;
         public string ParserStage = "header";
         public bool IsPartial;
-        public List<string> Warnings = new();
-        public List<string> WarningCodes = new();
+        public List<string> Warnings = new List<string>();
+        public List<string> WarningCodes = new List<string>();
     }
 
     [Serializable]
@@ -50,10 +50,10 @@ namespace VsfClone.Xav2.Runtime
         public string avatarId = string.Empty;
         public string displayName = string.Empty;
         public string sourceExt = ".vrm";
-        public List<string> meshRefs = new();
-        public List<string> materialRefs = new();
-        public List<string> textureRefs = new();
-        public List<string> strictShaderSet = new();
+        public List<string> meshRefs = new List<string>();
+        public List<string> materialRefs = new List<string>();
+        public List<string> textureRefs = new List<string>();
+        public List<string> strictShaderSet = new List<string>();
         public bool hasSkinning;
         public bool hasBlendShapes;
     }
@@ -78,7 +78,7 @@ namespace VsfClone.Xav2.Runtime
     public sealed class Xav2BlendShapePayload
     {
         public string MeshName = string.Empty;
-        public List<Xav2BlendShapeFramePayload> Frames = new();
+        public List<Xav2BlendShapeFramePayload> Frames = new List<Xav2BlendShapeFramePayload>();
     }
 
     public sealed class Xav2MeshPayload
@@ -110,11 +110,11 @@ namespace VsfClone.Xav2.Runtime
 
     public sealed class Xav2AvatarPayload
     {
-        public Xav2Manifest Manifest = new();
-        public List<Xav2MeshPayload> Meshes = new();
-        public List<Xav2MaterialPayload> Materials = new();
-        public List<Xav2TexturePayload> Textures = new();
-        public List<Xav2SkinPayload> Skins = new();
-        public List<Xav2BlendShapePayload> BlendShapes = new();
+        public Xav2Manifest Manifest = new Xav2Manifest();
+        public List<Xav2MeshPayload> Meshes = new List<Xav2MeshPayload>();
+        public List<Xav2MaterialPayload> Materials = new List<Xav2MaterialPayload>();
+        public List<Xav2TexturePayload> Textures = new List<Xav2TexturePayload>();
+        public List<Xav2SkinPayload> Skins = new List<Xav2SkinPayload>();
+        public List<Xav2BlendShapePayload> BlendShapes = new List<Xav2BlendShapePayload>();
     }
 }

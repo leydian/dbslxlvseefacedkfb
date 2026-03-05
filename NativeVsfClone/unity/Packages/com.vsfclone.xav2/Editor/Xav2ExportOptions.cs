@@ -7,7 +7,7 @@ namespace VsfClone.Xav2.Editor
     public sealed class Xav2ExportOptions
     {
         public bool FailOnMissingShader = true;
-        public List<string> StrictShaderSet = new()
+        public List<string> StrictShaderSet = new List<string>()
         {
             "lilToon",
             "Poiyomi",

@@ -51,6 +51,7 @@ Entry point for `NativeVsfClone` documentation.
 - [xav2_tryload_test_and_deterministic_gate_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_tryload_test_and_deterministic_gate_2026-03-03.md): XAV2 strict option path, runtime test suite, and deterministic VRM allowlist gate report
 - [xav2_native_unknown_section_parity_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_native_unknown_section_parity_2026-03-03.md): native XAV2 unknown-section policy parity and warning-code diagnostics expansion report
 - [xav2_policy_gateH_ci_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_policy_gateH_ci_2026-03-03.md): Gate H expansion for XAV2 policy contract and CI gate coverage
+- [xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md): Unity SDK support floor expansion (`2021.3.18f1+`) and CI gate automation report
 - [nativecore_render_quality_api_sync_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/nativecore_render_quality_api_sync_2026-03-02.md): nativecore render quality public C API sync report
 - [ui_render_benchmark_plan_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_render_benchmark_plan_2026-03-02.md): host render UI benchmark KPI and acceptance scenario plan
 - [vsfavatar_gate_harness_2026-03-03.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_gate_harness_2026-03-03.md): VSFAvatar quality gate harness report
