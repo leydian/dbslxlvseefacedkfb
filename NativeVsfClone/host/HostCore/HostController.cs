@@ -221,8 +221,7 @@ public sealed partial class HostController
         return ExecuteOperation("LoadAvatar", () =>
         {
             var normalizedPath = path?.Trim() ?? string.Empty;
-            _sessionPersistence = _sessionPersistence with { AvatarPath = normalizedPath, LastUpdatedUtc = DateTimeOffset.UtcNow };
-            PersistSessionSnapshot();
+            RecordAvatarSelection(normalizedPath);
             var previousHandle = _sessionService.ActiveAvatarHandle;
 
             var rc = _sessionService.LoadAvatar(normalizedPath);
@@ -743,11 +742,35 @@ public sealed partial class HostController
         var rc = NcResultCode.Ok;
         if (!suppressRenderDuringLoad)
         {
-            rc = _renderLoopService.Tick(deltaTimeSeconds);
-            SessionState = SessionState with { LastRenderRc = rc };
-            if (rc != NcResultCode.Ok)
+            if (_sessionService.ActiveAvatarHandle.HasValue)
             {
-                TrackResult("RenderTick", rc);
+                rc = _renderLoopService.Tick(deltaTimeSeconds);
+                if (rc == NcResultCode.Unsupported)
+                {
+                    var detail = NativeCoreInterop.FormatLastError();
+                    if (detail.Contains("no avatar has render resources", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var recoverRc = NativeCoreInterop.nc_create_render_resources(_sessionService.ActiveAvatarHandle.Value);
+                        TrackResult("RecoverRenderResourcesOnRenderTick", recoverRc);
+                        if (recoverRc == NcResultCode.Ok)
+                        {
+                            rc = _renderLoopService.Tick(deltaTimeSeconds);
+                            if (rc == NcResultCode.Ok)
+                            {
+                                TrackResult("RenderTickRecovered", NcResultCode.Ok);
+                            }
+                        }
+                    }
+                }
+                SessionState = SessionState with { LastRenderRc = rc };
+                if (rc != NcResultCode.Ok)
+                {
+                    TrackResult("RenderTick", rc);
+                }
+            }
+            else
+            {
+                SessionState = SessionState with { LastRenderRc = NcResultCode.Ok };
             }
         }
 

@@ -60,13 +60,17 @@
                             <StackPanel>
                                 <TextBlock Text="Action needed" FontWeight="SemiBold" Foreground="#7F1D1D" Margin="0,0,0,2"/>
                                 <TextBlock x:Name="BeginnerFailureHintText" TextWrapping="Wrap" Foreground="#7F1D1D"/>
-                                <Button x:Name="OpenDiagnosticsFromHintButton" Content="Open Advanced Diagnostics" Click="OpenDiagnosticsFromHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="180"/>
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button x:Name="OpenDiagnosticsFromHintButton" Content="Open Advanced Diagnostics" Click="OpenDiagnosticsFromHint_Click" HorizontalAlignment="Left" MinWidth="180"/>
+                                    <Button x:Name="DismissFailureHintButton" Content="Dismiss" Click="DismissFailureHint_Click" Margin="8,0,0,0" HorizontalAlignment="Left" MinWidth="90"/>
+                                </WrapPanel>
                             </StackPanel>
                         </Border>
                         <Border x:Name="OnboardingRecoveryPanel" Visibility="Collapsed" Background="#FFF8EE" BorderBrush="#F3D2A7" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock Text="복구 안내 (Recovery)" FontWeight="SemiBold" Foreground="#7C4012"/>
                                 <TextBlock x:Name="OnboardingRecoveryText" TextWrapping="Wrap" Foreground="#7C4012" Margin="0,2,0,0"/>
+                                <Button x:Name="DismissRecoveryHintButton" Content="Dismiss" Click="DismissFailureHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="90"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -90,6 +94,24 @@
                             <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged" />
                         </DockPanel>
                         <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                        <Border BorderBrush="#D7E0EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="132"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="120" Height="120" BorderBrush="#CCD8E6" BorderThickness="1" Background="#F5F9FE" CornerRadius="4" VerticalAlignment="Top">
+                                    <Image x:Name="AvatarPreviewImage" Stretch="UniformToFill"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                    <TextBlock Text="현재 선택 미리보기" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="AvatarPreviewStatusText" Text="선택된 파일 없음" Margin="0,4,0,8" TextWrapping="Wrap" Foreground="#5E6B78"/>
+                                    <Button x:Name="RetryAvatarPreviewButton" Content="미리보기 재생성" Click="RetryAvatarPreview_Click" MinWidth="120" HorizontalAlignment="Left"/>
+                                    <TextBlock Text="최근 사용 아바타" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                                    <ListBox x:Name="RecentAvatarListBox" Height="100" SelectionChanged="RecentAvatarList_SelectionChanged"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                         <WrapPanel>
                             <Button x:Name="LoadButton" Content="불러오기 (Load)" Click="Load_Click" Margin="0,0,8,0" MinWidth="130"/>
                             <Button x:Name="CancelLoadButton" Content="불러오기 취소" Click="CancelLoad_Click" Margin="0,0,8,0" MinWidth="130"/>
@@ -235,6 +257,37 @@
                                     <TextBlock Grid.Column="0" Text="Roll" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="PoseRollSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PoseRollValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock Text="Arm Pitch (팔 올림/내림)" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Both" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="ArmBothPitchSlider" Minimum="-90" Maximum="90" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="ArmBothPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Left Arm" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="ArmLeftPitchSlider" Minimum="-90" Maximum="90" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="ArmLeftPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Right Arm" VerticalAlignment="Center"/>
+                                    <Slider Grid.Column="1" x:Name="ArmRightPitchSlider" Minimum="-90" Maximum="90" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
+                                    <TextBlock Grid.Column="2" x:Name="ArmRightPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <WrapPanel Margin="0,0,0,8">
                                     <Button x:Name="PoseResetBoneButton" Content="Reset Bone" Width="100" Margin="0,0,8,0" Click="PoseResetBone_Click"/>

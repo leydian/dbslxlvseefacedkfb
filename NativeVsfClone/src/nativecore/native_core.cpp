@@ -61,6 +61,7 @@ struct GpuMeshResource {
     std::uint32_t vertex_stride = 12;
     DirectX::XMFLOAT3 bounds_min = {0.0f, 0.0f, 0.0f};
     DirectX::XMFLOAT3 bounds_max = {0.0f, 0.0f, 0.0f};
+    std::vector<std::uint8_t> bind_pose_vertex_blob;
     std::vector<std::uint8_t> base_vertex_blob;
     std::vector<std::uint8_t> deformed_vertex_blob;
 };
@@ -1833,6 +1834,60 @@ bool ApplyStaticSkinningToVertexBlob(
     return true;
 }
 
+void RecomputeMeshBoundsFromVertexBlob(GpuMeshResource* mesh) {
+    if (mesh == nullptr || mesh->base_vertex_blob.empty() || mesh->vertex_stride < 12U || mesh->vertex_count == 0U) {
+        return;
+    }
+    DirectX::XMFLOAT3 center = {0.0f, 0.0f, 0.0f};
+    DirectX::XMFLOAT3 bmin = {
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max(),
+        std::numeric_limits<float>::max()};
+    DirectX::XMFLOAT3 bmax = {
+        -std::numeric_limits<float>::max(),
+        -std::numeric_limits<float>::max(),
+        -std::numeric_limits<float>::max()};
+    const auto* bytes = mesh->base_vertex_blob.data();
+    for (std::uint32_t i = 0U; i < mesh->vertex_count; ++i) {
+        const std::size_t base = static_cast<std::size_t>(i) * mesh->vertex_stride;
+        float px = 0.0f;
+        float py = 0.0f;
+        float pz = 0.0f;
+        std::memcpy(&px, bytes + base, sizeof(float));
+        std::memcpy(&py, bytes + base + 4U, sizeof(float));
+        std::memcpy(&pz, bytes + base + 8U, sizeof(float));
+        center.x += px;
+        center.y += py;
+        center.z += pz;
+        bmin.x = std::min(bmin.x, px);
+        bmin.y = std::min(bmin.y, py);
+        bmin.z = std::min(bmin.z, pz);
+        bmax.x = std::max(bmax.x, px);
+        bmax.y = std::max(bmax.y, py);
+        bmax.z = std::max(bmax.z, pz);
+    }
+    const float inv_count = 1.0f / static_cast<float>(mesh->vertex_count);
+    center.x *= inv_count;
+    center.y *= inv_count;
+    center.z *= inv_count;
+    mesh->center = center;
+    mesh->bounds_min = bmin;
+    mesh->bounds_max = bmax;
+}
+
+bool UploadMeshVertexBlob(GpuMeshResource* mesh, ID3D11DeviceContext* device_ctx) {
+    if (mesh == nullptr || device_ctx == nullptr || mesh->vertex_buffer == nullptr || mesh->base_vertex_blob.empty()) {
+        return false;
+    }
+    D3D11_MAPPED_SUBRESOURCE mapped {};
+    if (FAILED(device_ctx->Map(mesh->vertex_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
+        return false;
+    }
+    std::memcpy(mapped.pData, mesh->base_vertex_blob.data(), mesh->base_vertex_blob.size());
+    device_ctx->Unmap(mesh->vertex_buffer, 0U);
+    return true;
+}
+
 bool BuildGpuMeshForPayload(
     const avatar::MeshRenderPayload& payload,
     const avatar::SkinRenderPayload* skin_payload,
@@ -1876,6 +1931,7 @@ bool BuildGpuMeshForPayload(
         }
     }
 
+    const std::vector<std::uint8_t> bind_pose_blob = gpu_vertex_blob;
     if (skin_payload != nullptr) {
         const bool can_apply_with_skeleton =
             skeleton_payload != nullptr && IsValidSkeletonPosePayload(*skin_payload, *skeleton_payload);
@@ -1954,6 +2010,7 @@ bool BuildGpuMeshForPayload(
     out_mesh->bounds_min = bmin;
     out_mesh->bounds_max = bmax;
     out_mesh->mesh_name = payload.name;
+    out_mesh->bind_pose_vertex_blob = bind_pose_blob;
     out_mesh->base_vertex_blob = gpu_vertex_blob;
     out_mesh->deformed_vertex_blob = gpu_vertex_blob;
     return true;
@@ -2056,6 +2113,112 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         meshes.push_back(mesh);
     }
     renderer->avatar_meshes[handle] = std::move(meshes);
+    return true;
+}
+
+bool ApplyArmPoseToAvatar(
+    RendererResources* renderer,
+    const AvatarPackage& avatar_pkg,
+    std::uint64_t handle,
+    ID3D11DeviceContext* device_ctx) {
+    if (renderer == nullptr || device_ctx == nullptr) {
+        return false;
+    }
+    auto mesh_it = renderer->avatar_meshes.find(handle);
+    if (mesh_it == renderer->avatar_meshes.end() || mesh_it->second.empty()) {
+        return true;
+    }
+    if (avatar_pkg.skin_payloads.empty() || avatar_pkg.skeleton_payloads.empty() || avatar_pkg.skeleton_rig_payloads.empty()) {
+        return true;
+    }
+
+    std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
+    skin_by_mesh.reserve(avatar_pkg.skin_payloads.size());
+    for (const auto& skin : avatar_pkg.skin_payloads) {
+        skin_by_mesh[NormalizeMeshKey(skin.mesh_name)] = &skin;
+    }
+    std::unordered_map<std::string, const avatar::SkeletonRenderPayload*> skeleton_by_mesh;
+    skeleton_by_mesh.reserve(avatar_pkg.skeleton_payloads.size());
+    for (const auto& skeleton : avatar_pkg.skeleton_payloads) {
+        skeleton_by_mesh[NormalizeMeshKey(skeleton.mesh_name)] = &skeleton;
+    }
+    std::unordered_map<std::string, const avatar::SkeletonRigPayload*> rig_by_mesh;
+    rig_by_mesh.reserve(avatar_pkg.skeleton_rig_payloads.size());
+    for (const auto& rig : avatar_pkg.skeleton_rig_payloads) {
+        rig_by_mesh[NormalizeMeshKey(rig.mesh_name)] = &rig;
+    }
+
+    const auto left_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
+    const auto right_arm_pose = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
+    auto& meshes = mesh_it->second;
+    for (auto& mesh : meshes) {
+        if (mesh.bind_pose_vertex_blob.empty()) {
+            continue;
+        }
+        const auto key = NormalizeMeshKey(mesh.mesh_name);
+        const auto skin_it = skin_by_mesh.find(key);
+        const auto skeleton_it = skeleton_by_mesh.find(key);
+        const auto rig_it = rig_by_mesh.find(key);
+        if (skin_it == skin_by_mesh.end() || skeleton_it == skeleton_by_mesh.end() || rig_it == rig_by_mesh.end()) {
+            continue;
+        }
+        const auto* skin_payload = skin_it->second;
+        const auto* skeleton_payload = skeleton_it->second;
+        const auto* rig_payload = rig_it->second;
+        if (skin_payload == nullptr || skeleton_payload == nullptr || rig_payload == nullptr) {
+            continue;
+        }
+        if (!IsValidSkeletonPosePayload(*skin_payload, *skeleton_payload)) {
+            continue;
+        }
+
+        std::vector<float> posed_bone_matrices = skeleton_payload->bone_matrices_16xn;
+        auto apply_humanoid_pose = [&](avatar::HumanoidBoneId humanoid_id, const NcPoseBoneOffset& pose) {
+            std::size_t bone_index = std::numeric_limits<std::size_t>::max();
+            for (std::size_t i = 0U; i < rig_payload->bones.size(); ++i) {
+                if (rig_payload->bones[i].humanoid_id == humanoid_id) {
+                    bone_index = i;
+                    break;
+                }
+            }
+            if (bone_index == std::numeric_limits<std::size_t>::max()) {
+                return;
+            }
+            const std::size_t base = bone_index * 16U;
+            if (base + 16U > posed_bone_matrices.size()) {
+                return;
+            }
+            DirectX::XMFLOAT4X4 bone_m {};
+            for (std::size_t j = 0U; j < 16U; ++j) {
+                reinterpret_cast<float*>(&bone_m)[j] = posed_bone_matrices[base + j];
+            }
+            const auto bone = DirectX::XMLoadFloat4x4(&bone_m);
+            const auto arm_rot = DirectX::XMMatrixRotationRollPitchYaw(
+                DirectX::XMConvertToRadians(pose.pitch_deg),
+                DirectX::XMConvertToRadians(pose.yaw_deg),
+                DirectX::XMConvertToRadians(pose.roll_deg));
+            const auto posed = DirectX::XMMatrixMultiply(bone, arm_rot);
+            DirectX::XMStoreFloat4x4(&bone_m, posed);
+            for (std::size_t j = 0U; j < 16U; ++j) {
+                posed_bone_matrices[base + j] = reinterpret_cast<float*>(&bone_m)[j];
+            }
+        };
+        apply_humanoid_pose(avatar::HumanoidBoneId::LeftUpperArm, left_arm_pose);
+        apply_humanoid_pose(avatar::HumanoidBoneId::RightUpperArm, right_arm_pose);
+
+        avatar::SkeletonRenderPayload posed_skeleton;
+        posed_skeleton.mesh_name = skeleton_payload->mesh_name;
+        posed_skeleton.bone_matrices_16xn = std::move(posed_bone_matrices);
+
+        auto posed_vertices = mesh.bind_pose_vertex_blob;
+        if (!ApplyStaticSkinningToVertexBlob(&posed_vertices, mesh.vertex_stride, *skin_payload, &posed_skeleton)) {
+            continue;
+        }
+        mesh.base_vertex_blob = std::move(posed_vertices);
+        mesh.deformed_vertex_blob = mesh.base_vertex_blob;
+        RecomputeMeshBoundsFromVertexBlob(&mesh);
+        (void)UploadMeshVertexBlob(&mesh, device_ctx);
+    }
     return true;
 }
 
@@ -2863,22 +3026,12 @@ DirectX::XMMATRIX ComputeUpperBodyPoseOffsetMatrix() {
     const auto upper_chest = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_UPPER_CHEST));
     const auto neck = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_NECK));
     const auto head = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_HEAD));
-    const auto left_arm = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_LEFT_UPPER_ARM));
-    const auto right_arm = GetPoseOffset(static_cast<std::uint32_t>(NC_POSE_BONE_RIGHT_UPPER_ARM));
-    const auto arm_avg = ScalePoseOffset(
-        NcPoseBoneOffset{
-            static_cast<std::uint32_t>(NC_POSE_BONE_UNKNOWN),
-            (left_arm.pitch_deg + right_arm.pitch_deg) * 0.5f,
-            (left_arm.yaw_deg + right_arm.yaw_deg) * 0.5f,
-            (left_arm.roll_deg + right_arm.roll_deg) * 0.5f},
-        0.35f);
     return PoseOffsetToMatrix(ScalePoseOffset(hips, 0.35f)) *
            PoseOffsetToMatrix(ScalePoseOffset(spine, 0.55f)) *
            PoseOffsetToMatrix(ScalePoseOffset(chest, 0.75f)) *
            PoseOffsetToMatrix(upper_chest) *
            PoseOffsetToMatrix(ScalePoseOffset(neck, 0.85f)) *
-           PoseOffsetToMatrix(head) *
-           PoseOffsetToMatrix(arm_avg);
+           PoseOffsetToMatrix(head);
 }
 
 bool CaptureRtvBgra(
@@ -2950,6 +3103,147 @@ bool CaptureRtvBgra(
     staging_texture->Release();
     src_texture->Release();
     return true;
+}
+
+bool TryAnsiToWide(const char* text, std::wstring* out) {
+    if (text == nullptr || out == nullptr) {
+        return false;
+    }
+    const int needed = MultiByteToWideChar(CP_ACP, 0, text, -1, nullptr, 0);
+    if (needed <= 1) {
+        return false;
+    }
+    out->assign(static_cast<std::size_t>(needed - 1), L'\0');
+    const int written = MultiByteToWideChar(
+        CP_ACP,
+        0,
+        text,
+        -1,
+        out->data(),
+        needed);
+    return written > 1;
+}
+
+bool EncodeBgraToPngFile(
+    const std::vector<std::uint8_t>& pixels,
+    std::uint32_t width,
+    std::uint32_t height,
+    const char* output_path) {
+    if (pixels.empty() || width == 0U || height == 0U || output_path == nullptr || output_path[0] == '\0') {
+        return false;
+    }
+    if (pixels.size() != static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U) {
+        return false;
+    }
+
+    std::wstring wide_path;
+    if (!TryAnsiToWide(output_path, &wide_path)) {
+        return false;
+    }
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool com_initialized = SUCCEEDED(hr);
+    if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
+        return false;
+    }
+
+    IWICImagingFactory* factory = nullptr;
+    IWICStream* stream = nullptr;
+    IWICBitmapEncoder* encoder = nullptr;
+    IWICBitmapFrameEncode* frame = nullptr;
+    IPropertyBag2* props = nullptr;
+    bool ok = false;
+
+    do {
+        hr = CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&factory));
+        if (FAILED(hr) || factory == nullptr) {
+            break;
+        }
+
+        hr = factory->CreateStream(&stream);
+        if (FAILED(hr) || stream == nullptr) {
+            break;
+        }
+
+        hr = stream->InitializeFromFilename(wide_path.c_str(), GENERIC_WRITE);
+        if (FAILED(hr)) {
+            break;
+        }
+
+        hr = factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
+        if (FAILED(hr) || encoder == nullptr) {
+            break;
+        }
+
+        hr = encoder->Initialize(stream, WICBitmapEncoderNoCache);
+        if (FAILED(hr)) {
+            break;
+        }
+
+        hr = encoder->CreateNewFrame(&frame, &props);
+        if (FAILED(hr) || frame == nullptr) {
+            break;
+        }
+
+        hr = frame->Initialize(props);
+        if (FAILED(hr)) {
+            break;
+        }
+
+        hr = frame->SetSize(static_cast<UINT>(width), static_cast<UINT>(height));
+        if (FAILED(hr)) {
+            break;
+        }
+
+        WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+        hr = frame->SetPixelFormat(&format);
+        if (FAILED(hr) || format != GUID_WICPixelFormat32bppBGRA) {
+            break;
+        }
+
+        const UINT stride = static_cast<UINT>(width * 4U);
+        const UINT image_size = static_cast<UINT>(pixels.size());
+        hr = frame->WritePixels(static_cast<UINT>(height), stride, image_size, const_cast<BYTE*>(pixels.data()));
+        if (FAILED(hr)) {
+            break;
+        }
+
+        hr = frame->Commit();
+        if (FAILED(hr)) {
+            break;
+        }
+
+        hr = encoder->Commit();
+        if (FAILED(hr)) {
+            break;
+        }
+
+        ok = true;
+    } while (false);
+
+    if (props != nullptr) {
+        props->Release();
+    }
+    if (frame != nullptr) {
+        frame->Release();
+    }
+    if (encoder != nullptr) {
+        encoder->Release();
+    }
+    if (stream != nullptr) {
+        stream->Release();
+    }
+    if (factory != nullptr) {
+        factory->Release();
+    }
+    if (com_initialized) {
+        CoUninitialize();
+    }
+    return ok;
 }
 #endif
 
@@ -3075,6 +3369,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         }
         if (!EnsureAvatarGpuMaterials(&renderer, it->second, handle, device)) {
             SetError(NC_ERROR_INTERNAL, "render", "failed to create material GPU resources", true);
+            return NC_ERROR_INTERNAL;
+        }
+        if (!ApplyArmPoseToAvatar(&renderer, it->second, handle, device_ctx)) {
+            SetError(NC_ERROR_INTERNAL, "render", "failed to apply arm pose offsets", true);
             return NC_ERROR_INTERNAL;
         }
         const auto material_resolve_end = std::chrono::steady_clock::now();
@@ -4203,6 +4501,141 @@ NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time_seconds) {
         return NC_ERROR_INTERNAL;
     }
 
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+#endif
+}
+
+NcResultCode nc_render_avatar_thumbnail_png(const NcThumbnailRequest* request) {
+#if !defined(_WIN32)
+    (void)request;
+    return NC_ERROR_UNSUPPORTED;
+#else
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (request == nullptr ||
+        request->handle == 0U ||
+        request->output_path == nullptr ||
+        request->output_path[0] == '\0' ||
+        request->width == 0U ||
+        request->height == 0U) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "thumbnail", "thumbnail request is invalid", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    if (request->width > 4096U || request->height > 4096U) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "thumbnail", "thumbnail size exceeds max 4096x4096", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    if (vsfclone::nativecore::g_state.avatars.find(request->handle) == vsfclone::nativecore::g_state.avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "thumbnail", "unknown avatar handle", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    if (vsfclone::nativecore::g_state.render_ready_avatars.find(request->handle) == vsfclone::nativecore::g_state.render_ready_avatars.end()) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "thumbnail", "avatar render resources are not ready", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    D3D_FEATURE_LEVEL feature_levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1};
+    D3D_FEATURE_LEVEL selected_level = D3D_FEATURE_LEVEL_11_0;
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* device_ctx = nullptr;
+    const HRESULT device_hr = D3D11CreateDevice(
+        nullptr,
+        D3D_DRIVER_TYPE_HARDWARE,
+        nullptr,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        feature_levels,
+        static_cast<UINT>(std::size(feature_levels)),
+        D3D11_SDK_VERSION,
+        &device,
+        &selected_level,
+        &device_ctx);
+    if (FAILED(device_hr) || device == nullptr || device_ctx == nullptr) {
+        if (device_ctx != nullptr) {
+            device_ctx->Release();
+        }
+        if (device != nullptr) {
+            device->Release();
+        }
+        vsfclone::nativecore::SetError(NC_ERROR_INTERNAL, "thumbnail", "failed to create thumbnail d3d11 device", true);
+        return NC_ERROR_INTERNAL;
+    }
+
+    D3D11_TEXTURE2D_DESC tex_desc {};
+    tex_desc.Width = request->width;
+    tex_desc.Height = request->height;
+    tex_desc.MipLevels = 1U;
+    tex_desc.ArraySize = 1U;
+    tex_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    tex_desc.SampleDesc.Count = 1U;
+    tex_desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    tex_desc.Usage = D3D11_USAGE_DEFAULT;
+    ID3D11Texture2D* target_texture = nullptr;
+    const HRESULT tex_hr = device->CreateTexture2D(&tex_desc, nullptr, &target_texture);
+    if (FAILED(tex_hr) || target_texture == nullptr) {
+        device_ctx->Release();
+        device->Release();
+        vsfclone::nativecore::SetError(NC_ERROR_INTERNAL, "thumbnail", "failed to create thumbnail render target texture", true);
+        return NC_ERROR_INTERNAL;
+    }
+
+    ID3D11RenderTargetView* rtv = nullptr;
+    const HRESULT rtv_hr = device->CreateRenderTargetView(target_texture, nullptr, &rtv);
+    if (FAILED(rtv_hr) || rtv == nullptr) {
+        target_texture->Release();
+        device_ctx->Release();
+        device->Release();
+        vsfclone::nativecore::SetError(NC_ERROR_INTERNAL, "thumbnail", "failed to create thumbnail render target view", true);
+        return NC_ERROR_INTERNAL;
+    }
+
+    const float delta = request->delta_time_seconds > 0.0f ? request->delta_time_seconds : (1.0f / 60.0f);
+    NcRenderContext ctx {};
+    ctx.hwnd = nullptr;
+    ctx.d3d11_device = device;
+    ctx.d3d11_device_context = device_ctx;
+    ctx.d3d11_rtv = rtv;
+    ctx.width = request->width;
+    ctx.height = request->height;
+    ctx.delta_time_seconds = delta;
+
+    const auto previous_ready = vsfclone::nativecore::g_state.render_ready_avatars;
+    vsfclone::nativecore::g_state.render_ready_avatars.clear();
+    vsfclone::nativecore::g_state.render_ready_avatars.insert(request->handle);
+    const NcResultCode render_rc = vsfclone::nativecore::RenderFrameLocked(&ctx);
+    vsfclone::nativecore::g_state.render_ready_avatars = previous_ready;
+    if (render_rc != NC_OK) {
+        rtv->Release();
+        target_texture->Release();
+        device_ctx->Release();
+        device->Release();
+        return render_rc;
+    }
+
+    std::vector<std::uint8_t> pixels;
+    if (!vsfclone::nativecore::CaptureRtvBgra(device, device_ctx, rtv, request->width, request->height, &pixels)) {
+        rtv->Release();
+        target_texture->Release();
+        device_ctx->Release();
+        device->Release();
+        vsfclone::nativecore::SetError(NC_ERROR_INTERNAL, "thumbnail", "failed to capture thumbnail pixels", true);
+        return NC_ERROR_INTERNAL;
+    }
+    if (!vsfclone::nativecore::EncodeBgraToPngFile(pixels, request->width, request->height, request->output_path)) {
+        rtv->Release();
+        target_texture->Release();
+        device_ctx->Release();
+        device->Release();
+        vsfclone::nativecore::SetError(NC_ERROR_IO, "thumbnail", "failed to encode thumbnail png", true);
+        return NC_ERROR_IO;
+    }
+
+    rtv->Release();
+    target_texture->Release();
+    device_ctx->Release();
+    device->Release();
     vsfclone::nativecore::ClearError();
     return NC_OK;
 #endif

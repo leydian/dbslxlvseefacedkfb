@@ -228,6 +228,17 @@ public struct NcWindowRenderTarget
     public uint Height;
 }
 
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct NcThumbnailRequest
+{
+    public ulong Handle;
+    [MarshalAs(UnmanagedType.LPStr)]
+    public string OutputPath;
+    public uint Width;
+    public uint Height;
+    public float DeltaTimeSeconds;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NcRenderQualityOptions
 {
@@ -362,6 +373,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_render_frame_to_window(IntPtr hwnd, float deltaTimeSeconds);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    public static extern NcResultCode nc_render_avatar_thumbnail_png(ref NcThumbnailRequest request);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_set_render_quality_options(ref NcRenderQualityOptions options);

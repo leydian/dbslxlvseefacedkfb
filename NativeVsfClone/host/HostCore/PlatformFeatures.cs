@@ -61,6 +61,14 @@ public sealed record TrackingInputSettings(
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
     float PoseDeadbandDeg = 0.9f);
 
+public sealed record RecentAvatarEntry(
+    string AvatarPath,
+    string DisplayName,
+    string ThumbnailPath,
+    string ThumbnailStatus,
+    DateTimeOffset LastUsedUtc,
+    string LastError);
+
 public sealed record SessionPersistenceModel(
     int Version,
     string AvatarPath,
@@ -69,18 +77,20 @@ public sealed record SessionPersistenceModel(
     string OscPublishAddress,
     SidecarSettings Sidecar,
     TrackingInputSettings Tracking,
+    IReadOnlyList<RecentAvatarEntry> RecentAvatars,
     string? LastProfileName,
     string UiMode,
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 6,
+        Version: 7,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
         OscPublishAddress: "127.0.0.1:39540",
         Sidecar: new SidecarSettings("sidecar", string.Empty, 15000, false),
         Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
+        RecentAvatars: Array.Empty<RecentAvatarEntry>(),
         LastProfileName: "quality",
         UiMode: "beginner",
         LastUpdatedUtc: DateTimeOffset.UtcNow);
@@ -167,13 +177,14 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 6,
+                    Version: 7,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
                     Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f),
+                    RecentAvatars: Array.Empty<RecentAvatarEntry>(),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
                     LastUpdatedUtc: legacy.LastUpdatedUtc));
@@ -205,8 +216,9 @@ public sealed class SessionStateStore
         var lastUpdated = model.LastUpdatedUtc == default ? DateTimeOffset.UtcNow : model.LastUpdatedUtc;
         return model with
         {
-            Version = Math.Max(6, model.Version),
+            Version = Math.Max(7, model.Version),
             Tracking = NormalizeTracking(model.Tracking),
+            RecentAvatars = NormalizeRecentAvatars(model.RecentAvatars),
             UiMode = mode,
             LastUpdatedUtc = lastUpdated,
         };
@@ -257,6 +269,57 @@ public sealed class SessionStateStore
         return string.Equals(value?.Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
             ? "advanced"
             : "beginner";
+    }
+
+    private static IReadOnlyList<RecentAvatarEntry> NormalizeRecentAvatars(IReadOnlyList<RecentAvatarEntry>? values)
+    {
+        if (values is null || values.Count == 0)
+        {
+            return Array.Empty<RecentAvatarEntry>();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var normalized = new List<RecentAvatarEntry>(Math.Min(12, values.Count));
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values
+                     .OrderByDescending(v => v.LastUsedUtc == default ? DateTimeOffset.MinValue : v.LastUsedUtc))
+        {
+            var path = value.AvatarPath?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+            if (!seen.Add(path))
+            {
+                continue;
+            }
+
+            normalized.Add(new RecentAvatarEntry(
+                path,
+                string.IsNullOrWhiteSpace(value.DisplayName) ? Path.GetFileNameWithoutExtension(path) : value.DisplayName.Trim(),
+                value.ThumbnailPath?.Trim() ?? string.Empty,
+                NormalizeThumbnailStatus(value.ThumbnailStatus),
+                value.LastUsedUtc == default ? now : value.LastUsedUtc,
+                value.LastError?.Trim() ?? string.Empty));
+            if (normalized.Count >= 12)
+            {
+                break;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeThumbnailStatus(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "ready" => "ready",
+            "pending" => "pending",
+            "failed" => "failed",
+            _ => "none",
+        };
     }
 
     private sealed record SessionPersistenceModelV1(

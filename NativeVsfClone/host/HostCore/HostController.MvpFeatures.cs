@@ -8,6 +8,7 @@ namespace HostCore;
 
 public sealed partial class HostController
 {
+    private const int MaxRecentAvatarEntries = 12;
     private static readonly JsonSerializerOptions FeatureJsonOptions = new()
     {
         WriteIndented = true,
@@ -110,6 +111,108 @@ public sealed partial class HostController
     {
         var plan = BuildImportPlan(path);
         return $"{plan.Guidance} Fallback: {plan.Fallback}";
+    }
+
+    public IReadOnlyList<RecentAvatarEntry> GetRecentAvatars()
+    {
+        return _sessionPersistence.RecentAvatars;
+    }
+
+    public void RecordAvatarSelection(string path)
+    {
+        var normalizedPath = path?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return;
+        }
+
+        var recent = UpsertRecentAvatar(
+            _sessionPersistence.RecentAvatars,
+            normalizedPath,
+            thumbnailStatus: null,
+            thumbnailPath: null,
+            lastError: null);
+        _sessionPersistence = _sessionPersistence with
+        {
+            AvatarPath = normalizedPath,
+            RecentAvatars = recent,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+    }
+
+    public void UpdateRecentAvatarThumbnail(string avatarPath, string thumbnailPath, string status, string lastError)
+    {
+        var normalizedPath = avatarPath?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return;
+        }
+
+        var normalizedStatus = NormalizeRecentThumbnailStatus(status);
+        var recent = UpsertRecentAvatar(
+            _sessionPersistence.RecentAvatars,
+            normalizedPath,
+            thumbnailStatus: normalizedStatus,
+            thumbnailPath: thumbnailPath?.Trim() ?? string.Empty,
+            lastError: lastError?.Trim() ?? string.Empty);
+        _sessionPersistence = _sessionPersistence with
+        {
+            RecentAvatars = recent,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+    }
+
+    private static IReadOnlyList<RecentAvatarEntry> UpsertRecentAvatar(
+        IReadOnlyList<RecentAvatarEntry> current,
+        string avatarPath,
+        string? thumbnailStatus,
+        string? thumbnailPath,
+        string? lastError)
+    {
+        var existing = current.FirstOrDefault(item =>
+            string.Equals(item.AvatarPath, avatarPath, StringComparison.OrdinalIgnoreCase));
+        var entry = new RecentAvatarEntry(
+            AvatarPath: avatarPath,
+            DisplayName: string.IsNullOrWhiteSpace(existing?.DisplayName)
+                ? Path.GetFileNameWithoutExtension(avatarPath)
+                : existing!.DisplayName,
+            ThumbnailPath: thumbnailPath ?? existing?.ThumbnailPath ?? string.Empty,
+            ThumbnailStatus: thumbnailStatus ?? existing?.ThumbnailStatus ?? "none",
+            LastUsedUtc: DateTimeOffset.UtcNow,
+            LastError: lastError ?? existing?.LastError ?? string.Empty);
+
+        var ordered = new List<RecentAvatarEntry>(MaxRecentAvatarEntries) { entry };
+        foreach (var item in current)
+        {
+            if (ordered.Count >= MaxRecentAvatarEntries)
+            {
+                break;
+            }
+            if (string.Equals(item.AvatarPath, avatarPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (!File.Exists(item.AvatarPath))
+            {
+                continue;
+            }
+            ordered.Add(item);
+        }
+
+        return ordered;
+    }
+
+    private static string NormalizeRecentThumbnailStatus(string? value)
+    {
+        return (value?.Trim().ToLowerInvariant()) switch
+        {
+            "ready" => "ready",
+            "pending" => "pending",
+            "failed" => "failed",
+            _ => "none",
+        };
     }
 
     public PreflightSummary RunPreflight()
@@ -954,6 +1057,10 @@ public sealed partial class HostController
              source.Contains("RenderTick", StringComparison.OrdinalIgnoreCase) ||
              detail.Contains("renderable mesh payloads", StringComparison.OrdinalIgnoreCase) ||
              detail.Contains("render resources", StringComparison.OrdinalIgnoreCase));
+        var isRenderResourceRecoveryPath =
+            source.Contains("RenderTick", StringComparison.OrdinalIgnoreCase) &&
+            rc == NcResultCode.Unsupported &&
+            detail.Contains("no avatar has render resources", StringComparison.OrdinalIgnoreCase);
 
         var category = rc switch
         {
@@ -1009,6 +1116,11 @@ public sealed partial class HostController
                  source.Contains("StartOsc", StringComparison.OrdinalIgnoreCase))
         {
             action = "Verify output settings and active avatar state, then restart outputs.";
+        }
+        else if (isRenderResourceRecoveryPath)
+        {
+            title = "Render resources are not ready yet";
+            action = "Automatic recovery was attempted. Retry once; if it persists, reload avatar then export diagnostics bundle.";
         }
         else if (source.Contains("Preflight", StringComparison.OrdinalIgnoreCase))
         {

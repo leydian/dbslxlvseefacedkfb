@@ -221,6 +221,14 @@ typedef struct NcWindowRenderTarget {
     uint32_t height;
 } NcWindowRenderTarget;
 
+typedef struct NcThumbnailRequest {
+    NcAvatarHandle handle;
+    const char* output_path;
+    uint32_t width;
+    uint32_t height;
+    float delta_time_seconds;
+} NcThumbnailRequest;
+
 typedef struct NcRuntimeStats {
     uint32_t render_ready_avatar_count;
     uint32_t spout_active;
@@ -272,6 +280,7 @@ VSFCLONE_API NcResultCode nc_create_window_render_target(const NcWindowRenderTar
 VSFCLONE_API NcResultCode nc_resize_window_render_target(const NcWindowRenderTarget* target);
 VSFCLONE_API NcResultCode nc_destroy_window_render_target(void* hwnd);
 VSFCLONE_API NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time_seconds);
+VSFCLONE_API NcResultCode nc_render_avatar_thumbnail_png(const NcThumbnailRequest* request);
 VSFCLONE_API NcResultCode nc_set_render_quality_options(const NcRenderQualityOptions* options);
 VSFCLONE_API NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options);
 VSFCLONE_API NcResultCode nc_set_pose_offsets(const NcPoseBoneOffset* offsets, uint32_t count);

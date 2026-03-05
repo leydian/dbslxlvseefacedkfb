@@ -1,14 +1,18 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using HostCore;
 using Microsoft.Win32;
@@ -18,6 +22,7 @@ namespace WpfHost;
 public partial class MainWindow : Window
 {
     private sealed record WebcamDeviceItem(string Key, string Label);
+    private sealed record ThumbnailJob(string AvatarPath, string ThumbnailPath, bool Force);
     private const string UiModeBeginner = "beginner";
     private const string UiModeAdvanced = "advanced";
     private readonly HostController _controller = new();
@@ -57,6 +62,10 @@ public partial class MainWindow : Window
     private DateTimeOffset _renderOnlyHintVisibleUntil = DateTimeOffset.MinValue;
     private static readonly TimeSpan RenderOnlyHintDuration = TimeSpan.FromSeconds(3.0);
     private const int WebcamProbeLimit = 10;
+    private readonly Queue<ThumbnailJob> _thumbnailJobs = new();
+    private readonly HashSet<string> _thumbnailPendingPaths = new(StringComparer.OrdinalIgnoreCase);
+    private bool _thumbnailWorkerRunning;
+    private bool _syncingRecentAvatarList;
 
     public MainWindow()
     {
@@ -89,6 +98,7 @@ public partial class MainWindow : Window
 
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         ApplySessionDefaultsToUi();
+        RefreshRecentAvatarList();
         RefreshValidationState();
         SyncRenderControlsFromState();
         SyncPoseControlsFromState();
@@ -217,6 +227,247 @@ public partial class MainWindow : Window
 
         RefreshValidationState();
         UpdateUiState();
+        var path = AvatarPathTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        {
+            _controller.RecordAvatarSelection(path);
+            EnqueueThumbnailGeneration(path, force: false);
+            RefreshRecentAvatarList();
+        }
+        else
+        {
+            UpdateAvatarPreview(path);
+        }
+    }
+
+    private void RecentAvatarList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingRecentAvatarList || RecentAvatarListBox.SelectedItem is not ListBoxItem item || item.Tag is not string path)
+        {
+            return;
+        }
+        AvatarPathTextBox.Text = path;
+    }
+
+    private void RetryAvatarPreview_Click(object sender, RoutedEventArgs e)
+    {
+        var path = AvatarPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return;
+        }
+
+        EnqueueThumbnailGeneration(path, force: true);
+    }
+
+    private void RefreshRecentAvatarList()
+    {
+        if (RecentAvatarListBox is null)
+        {
+            return;
+        }
+
+        var selectedPath = (RecentAvatarListBox.SelectedItem as ListBoxItem)?.Tag as string ?? AvatarPathTextBox.Text.Trim();
+        _syncingRecentAvatarList = true;
+        RecentAvatarListBox.Items.Clear();
+        foreach (var entry in _controller.GetRecentAvatars())
+        {
+            var status = entry.ThumbnailStatus switch
+            {
+                "ready" => "ready",
+                "pending" => "pending",
+                "failed" => "failed",
+                _ => "none",
+            };
+            var item = new ListBoxItem
+            {
+                Tag = entry.AvatarPath,
+                Content = $"{entry.DisplayName} [{status}]",
+                ToolTip = entry.AvatarPath,
+            };
+            RecentAvatarListBox.Items.Add(item);
+            if (string.Equals(entry.AvatarPath, selectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                RecentAvatarListBox.SelectedItem = item;
+            }
+        }
+        _syncingRecentAvatarList = false;
+        UpdateAvatarPreview(AvatarPathTextBox.Text.Trim());
+    }
+
+    private void UpdateAvatarPreview(string avatarPath)
+    {
+        if (AvatarPreviewImage is null || AvatarPreviewStatusText is null || RetryAvatarPreviewButton is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(avatarPath))
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = "선택된 파일 없음";
+            RetryAvatarPreviewButton.IsEnabled = false;
+            return;
+        }
+
+        var recent = _controller.GetRecentAvatars()
+            .FirstOrDefault(item => string.Equals(item.AvatarPath, avatarPath, StringComparison.OrdinalIgnoreCase));
+        if (recent is not null &&
+            string.Equals(recent.ThumbnailStatus, "ready", StringComparison.Ordinal) &&
+            File.Exists(recent.ThumbnailPath))
+        {
+            AvatarPreviewImage.Source = LoadPreviewBitmap(recent.ThumbnailPath);
+            AvatarPreviewStatusText.Text = $"미리보기 준비됨: {Path.GetFileName(avatarPath)}";
+        }
+        else if (recent is not null && string.Equals(recent.ThumbnailStatus, "pending", StringComparison.Ordinal))
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = $"미리보기 생성 중: {Path.GetFileName(avatarPath)}";
+        }
+        else if (recent is not null && string.Equals(recent.ThumbnailStatus, "failed", StringComparison.Ordinal))
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = $"미리보기 실패: {Path.GetFileName(avatarPath)}";
+        }
+        else
+        {
+            AvatarPreviewImage.Source = null;
+            AvatarPreviewStatusText.Text = $"미리보기 대기: {Path.GetFileName(avatarPath)}";
+        }
+
+        RetryAvatarPreviewButton.IsEnabled = File.Exists(avatarPath) && !_thumbnailWorkerRunning;
+    }
+
+    private static BitmapImage? LoadPreviewBitmap(string path)
+    {
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+            bitmap.UriSource = new Uri(path);
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void EnqueueThumbnailGeneration(string avatarPath, bool force)
+    {
+        var normalized = avatarPath.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || !File.Exists(normalized))
+        {
+            return;
+        }
+
+        var thumbnailPath = BuildThumbnailPath(normalized);
+        if (!force && File.Exists(thumbnailPath))
+        {
+            _controller.UpdateRecentAvatarThumbnail(normalized, thumbnailPath, "ready", string.Empty);
+            UpdateAvatarPreview(normalized);
+            return;
+        }
+
+        if (_thumbnailPendingPaths.Contains(normalized))
+        {
+            return;
+        }
+
+        _thumbnailPendingPaths.Add(normalized);
+        _thumbnailJobs.Enqueue(new ThumbnailJob(normalized, thumbnailPath, force));
+        _controller.UpdateRecentAvatarThumbnail(normalized, thumbnailPath, "pending", string.Empty);
+        UpdateAvatarPreview(normalized);
+        _ = ProcessThumbnailQueueAsync();
+    }
+
+    private async Task ProcessThumbnailQueueAsync()
+    {
+        if (_thumbnailWorkerRunning)
+        {
+            return;
+        }
+
+        _thumbnailWorkerRunning = true;
+        try
+        {
+            while (_thumbnailJobs.Count > 0)
+            {
+                var job = _thumbnailJobs.Dequeue();
+                var success = await RunThumbnailWorkerAsync(job);
+                _thumbnailPendingPaths.Remove(job.AvatarPath);
+                if (success && File.Exists(job.ThumbnailPath))
+                {
+                    _controller.UpdateRecentAvatarThumbnail(job.AvatarPath, job.ThumbnailPath, "ready", string.Empty);
+                }
+                else
+                {
+                    _controller.UpdateRecentAvatarThumbnail(job.AvatarPath, job.ThumbnailPath, "failed", "thumbnail-worker-failed");
+                }
+                RefreshRecentAvatarList();
+            }
+        }
+        finally
+        {
+            _thumbnailWorkerRunning = false;
+            UpdateAvatarPreview(AvatarPathTextBox.Text.Trim());
+        }
+    }
+
+    private async Task<bool> RunThumbnailWorkerAsync(ThumbnailJob job)
+    {
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo(exePath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("--thumbnail-worker");
+            psi.ArgumentList.Add("--avatar");
+            psi.ArgumentList.Add(job.AvatarPath);
+            psi.ArgumentList.Add("--output");
+            psi.ArgumentList.Add(job.ThumbnailPath);
+            psi.ArgumentList.Add("--width");
+            psi.ArgumentList.Add("256");
+            psi.ArgumentList.Add("--height");
+            psi.ArgumentList.Add("256");
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                return false;
+            }
+
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await process.WaitForExitAsync(timeout.Token);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string BuildThumbnailPath(string avatarPath)
+    {
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "VsfCloneHost",
+            "thumbnails");
+        Directory.CreateDirectory(root);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(avatarPath.ToLowerInvariant())));
+        return Path.Combine(root, $"{hash}.png");
     }
 
     private void BeginnerMode_Click(object sender, RoutedEventArgs e)
@@ -347,6 +598,14 @@ public partial class MainWindow : Window
                 $"Avatar load failed ({rc}). Check the selected file and try Load again.",
                 $"Load failed: {rc}\n\n{detail}");
             return;
+        }
+
+        var loadedPath = AvatarPathTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(loadedPath) && File.Exists(loadedPath))
+        {
+            _controller.RecordAvatarSelection(loadedPath);
+            EnqueueThumbnailGeneration(loadedPath, force: false);
+            RefreshRecentAvatarList();
         }
 
         SyncRenderControlsFromState();
@@ -1209,6 +1468,7 @@ public partial class MainWindow : Window
             _pendingRuntimeRefresh = true;
             _pendingAvatarRefresh = true;
             _pendingLogsRefresh = true;
+            RefreshRecentAvatarList();
         });
     }
 
@@ -1230,9 +1490,18 @@ public partial class MainWindow : Window
             RevealDiagnosticsForFailure(e.Source);
             _pendingLogsRefresh = true;
             var guide = _controller.GetLastErrorGuidance();
-            if (!string.IsNullOrWhiteSpace(guide))
+            var isBlockedHint = e.Source.EndsWith(".Blocked", StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(guide) && !isBlockedHint)
             {
                 ShowFailureHint(e.Source, guide);
+            }
+            else if (isBlockedHint)
+            {
+                // Avoid sticky beginner hints for transient "operation in progress" blocking.
+                if (_beginnerFailureHint.Contains("Current operation must finish", StringComparison.OrdinalIgnoreCase))
+                {
+                    ClearFailureHint();
+                }
             }
         });
     }
@@ -1304,6 +1573,8 @@ public partial class MainWindow : Window
         LoadButton.IsEnabled = uiState.LoadEnabled;
         UnloadButton.IsEnabled = uiState.UnloadEnabled;
         CancelLoadButton.IsEnabled = _isLoadRunning;
+        RecentAvatarListBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
+        RetryAvatarPreviewButton.IsEnabled = !operation.IsBusy && !_isLoadRunning && !_thumbnailWorkerRunning && File.Exists(AvatarPathTextBox.Text.Trim());
         StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;
@@ -1878,6 +2149,10 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(session.AvatarPath))
         {
             AvatarPathTextBox.Text = session.AvatarPath;
+            if (File.Exists(session.AvatarPath))
+            {
+                EnqueueThumbnailGeneration(session.AvatarPath, force: false);
+            }
         }
 
         SpoutChannelTextBox.Text = session.SpoutChannelName;
@@ -2075,6 +2350,12 @@ public partial class MainWindow : Window
         RevealDiagnosticsForFailure(string.IsNullOrWhiteSpace(_lastFailureSource) ? "LoadAvatar" : _lastFailureSource);
     }
 
+    private void DismissFailureHint_Click(object sender, RoutedEventArgs e)
+    {
+        ClearFailureHint();
+        UpdateUiState();
+    }
+
     private bool IsBeginnerMode()
     {
         return string.Equals(_uiMode, UiModeBeginner, StringComparison.Ordinal);
@@ -2091,6 +2372,7 @@ public partial class MainWindow : Window
     private void ClearFailureHint()
     {
         _beginnerFailureHint = string.Empty;
+        _lastFailureSource = string.Empty;
         BeginnerFailureHintText.Text = string.Empty;
         ApplyModeVisibility();
     }
