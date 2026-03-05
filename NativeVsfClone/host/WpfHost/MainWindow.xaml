@@ -181,6 +181,58 @@
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
+
+                <GroupBox Header="5) Platform Ops" Margin="0,8,0,0">
+                    <StackPanel Margin="8">
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="RunPreflightButton" Content="Run Preflight" Click="RunPreflight_Click" Margin="0,0,8,0" MinWidth="112"/>
+                            <Button x:Name="ExportDiagButton" Content="Export Diagnostics" Click="ExportDiag_Click" Margin="0,0,8,0" MinWidth="128"/>
+                            <Button x:Name="ExportMetricsButton" Content="Export Metrics" Click="ExportMetrics_Click" MinWidth="112"/>
+                        </WrapPanel>
+
+                        <TextBlock Text="Render Profiles" FontWeight="SemiBold"/>
+                        <WrapPanel Margin="0,4,0,8">
+                            <Button Content="Quality" Click="ProfileQuality_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button Content="Performance" Click="ProfilePerformance_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button Content="Stability" Click="ProfileStability_Click" MinWidth="92"/>
+                        </WrapPanel>
+
+                        <TextBlock Text="Sidecar Settings" FontWeight="SemiBold"/>
+                        <Grid Margin="0,4,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Mode" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Row="0" Grid.Column="1" x:Name="ParserModeComboBox">
+                                <ComboBoxItem Content="sidecar"/>
+                                <ComboBoxItem Content="inhouse"/>
+                                <ComboBoxItem Content="sidecar-strict"/>
+                            </ComboBox>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Path" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="SidecarPathTextBox" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Timeout" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" x:Name="SidecarTimeoutTextBox" Text="15000" Margin="0,8,0,0"/>
+                        </Grid>
+                        <WrapPanel Margin="0,0,0,8">
+                            <CheckBox x:Name="SidecarStrictCheckBox" Content="Strict Mode (no fallback)" Margin="0,0,12,0"/>
+                            <Button Content="Apply Sidecar" Click="ApplySidecar_Click" MinWidth="112"/>
+                        </WrapPanel>
+
+                        <TextBlock Text="Telemetry" FontWeight="SemiBold"/>
+                        <WrapPanel Margin="0,4,0,0">
+                            <CheckBox x:Name="TelemetryOptInCheckBox" Content="Opt-in" Margin="0,0,8,0"/>
+                            <CheckBox x:Name="TelemetryRedactCheckBox" Content="Redact Sensitive" IsChecked="True" Margin="0,0,8,0"/>
+                            <Button Content="Apply Telemetry" Click="ApplyTelemetry_Click" Margin="0,0,8,0" MinWidth="112"/>
+                            <Button Content="Export Telemetry" Click="ExportTelemetry_Click" MinWidth="120"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
             </StackPanel>
         </ScrollViewer>
 
@@ -215,6 +267,9 @@
                         <TextBox x:Name="LogsTextBox" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
+                <TabItem Header="Guides">
+                    <TextBox x:Name="GuidesTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                </TabItem>
             </TabControl>
 
             <Border Grid.Row="2" Padding="8" Background="#0F1720" BorderBrush="#2D3A48" BorderThickness="1" CornerRadius="4">
@@ -233,6 +288,8 @@
                     <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold"/>
                     <TextBlock Text="LastError: " Foreground="#A7B7C7"/>
                     <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360"/>
+                    <TextBlock Text="Track: " Foreground="#A7B7C7" Margin="12,0,0,0"/>
+                    <TextBlock x:Name="TrackStatusText" FontWeight="SemiBold" Width="300" TextTrimming="CharacterEllipsis"/>
                 </WrapPanel>
             </Border>
         </Grid>

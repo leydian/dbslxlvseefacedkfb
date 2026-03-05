@@ -15,6 +15,8 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [r01_r20_mvp_implementation_round_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_mvp_implementation_round_2026-03-05.md): detailed implementation rollup for R01-R20 MVP feature code across HostCore/WPF/tools with verification and coverage snapshot
+- [platform_persona_requirements_review_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/platform_persona_requirements_review_2026-03-05.md): platform-wide 20-item requirement review with 3 user personas + planner/developer cross-perspective scoring and immediate Top 5 priorities
 - [ui_host_runtime_integration_2026-03-02.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_host_runtime_integration_2026-03-02.md): UI host foundation + native render/output integration report
 - [ui_wpf_refresh_throttle_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ui_wpf_refresh_throttle_2026-03-05.md): WPF operation-flow relayout + 60Hz render / 10Hz UI refresh throttle update
 - [wpf_ui_smoke_and_perf_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md): WPF smoke/performance evidence with WPF-only publish/gate/baseline verification snapshot

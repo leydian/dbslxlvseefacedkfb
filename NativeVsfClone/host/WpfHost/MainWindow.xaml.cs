@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -59,10 +61,12 @@ public partial class MainWindow : Window
         _controller.ErrorRaised += Controller_ErrorRaised;
 
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
+        ApplySessionDefaultsToUi();
         RefreshValidationState();
         SyncRenderControlsFromState();
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
+        RefreshGuides();
         _uiReady = true;
         _uiRefreshTimer.Start();
     }
@@ -160,7 +164,7 @@ public partial class MainWindow : Window
         {
             CheckFileExists = true,
             CheckPathExists = true,
-            Filter = "Avatar Files (*.vrm;*.vxavatar;*.vsfavatar;*.vxa2)|*.vrm;*.vxavatar;*.vsfavatar;*.vxa2|All Files (*.*)|*.*",
+            Filter = "Avatar Files (*.vrm;*.vxavatar;*.vsfavatar;*.vxa2;*.xav2)|*.vrm;*.vxavatar;*.vsfavatar;*.vxa2;*.xav2|All Files (*.*)|*.*",
         };
 
         if (dialog.ShowDialog(this) == true)
@@ -180,7 +184,7 @@ public partial class MainWindow : Window
         UpdateUiState();
     }
 
-    private void Load_Click(object sender, RoutedEventArgs e)
+    private async void Load_Click(object sender, RoutedEventArgs e)
     {
         if (_controller.OperationState.IsBusy)
         {
@@ -199,7 +203,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        _ = _controller.LoadAvatar(AvatarPathTextBox.Text.Trim());
+        var guidance = _controller.BuildImportGuidance(AvatarPathTextBox.Text.Trim());
+        QuickStatusText.Text = guidance;
+        var rc = await _controller.LoadAvatarAsync(AvatarPathTextBox.Text.Trim(), 20000);
+        if (rc != NcResultCode.Ok)
+        {
+            MessageBox.Show(this, $"Load failed: {rc}", "Load Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void Unload_Click(object sender, RoutedEventArgs e)
@@ -316,6 +326,77 @@ public partial class MainWindow : Window
     private void CopyLogs_Click(object sender, RoutedEventArgs e)
     {
         Clipboard.SetText(LogsTextBox.Text);
+    }
+
+    private void RunPreflight_Click(object sender, RoutedEventArgs e)
+    {
+        var preflight = _controller.RunPreflight();
+        var sb = new StringBuilder();
+        sb.AppendLine($"Preflight: {(preflight.Passed ? "PASS" : "FAIL")}");
+        foreach (var c in preflight.Checks)
+        {
+            sb.AppendLine($"- {(c.Passed ? "PASS" : "FAIL")} {c.Name}: {c.Detail}");
+        }
+        MessageBox.Show(this, sb.ToString(), "Preflight Result", MessageBoxButton.OK, preflight.Passed ? MessageBoxImage.Information : MessageBoxImage.Warning);
+    }
+
+    private void ExportDiag_Click(object sender, RoutedEventArgs e)
+    {
+        var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "diagnostics");
+        var path = _controller.ExportDiagnosticsBundle(outputDir);
+        MessageBox.Show(this, $"Diagnostics bundle created:\n{path}", "Export Diagnostics", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void ExportMetrics_Click(object sender, RoutedEventArgs e)
+    {
+        var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "metrics");
+        var path = _controller.ExportRollingMetricsCsv(Path.Combine(outputDir, $"metrics_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.csv"));
+        MessageBox.Show(this, $"Metrics exported:\n{path}", "Export Metrics", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void ProfileQuality_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("quality");
+    }
+
+    private void ProfilePerformance_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("performance");
+    }
+
+    private void ProfileStability_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("stability");
+    }
+
+    private void ApplySidecar_Click(object sender, RoutedEventArgs e)
+    {
+        var mode = (ParserModeComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "sidecar";
+        if (!int.TryParse(SidecarTimeoutTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMs))
+        {
+            timeoutMs = 15000;
+            SidecarTimeoutTextBox.Text = "15000";
+        }
+
+        _controller.ConfigureSidecarSettings(new SidecarSettings(
+            ParserMode: mode,
+            SidecarPath: SidecarPathTextBox.Text.Trim(),
+            TimeoutMs: timeoutMs,
+            StrictMode: SidecarStrictCheckBox.IsChecked == true));
+    }
+
+    private void ApplyTelemetry_Click(object sender, RoutedEventArgs e)
+    {
+        _controller.SetTelemetryPolicy(
+            TelemetryOptInCheckBox.IsChecked == true,
+            TelemetryRedactCheckBox.IsChecked == true);
+    }
+
+    private void ExportTelemetry_Click(object sender, RoutedEventArgs e)
+    {
+        var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "telemetry");
+        var path = _controller.ExportTelemetry(Path.Combine(outputDir, $"telemetry_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.json"));
+        MessageBox.Show(this, $"Telemetry exported:\n{path}", "Export Telemetry", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void BroadcastMode_Changed(object sender, RoutedEventArgs e)
@@ -630,6 +711,15 @@ public partial class MainWindow : Window
         ResetRenderButton.IsEnabled = uiState.RenderControlsEnabled;
         PresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
         PresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        RunPreflightButton.IsEnabled = !operation.IsBusy;
+        ExportDiagButton.IsEnabled = !operation.IsBusy;
+        ExportMetricsButton.IsEnabled = !operation.IsBusy;
+        ParserModeComboBox.IsEnabled = !operation.IsBusy;
+        SidecarPathTextBox.IsEnabled = !operation.IsBusy;
+        SidecarTimeoutTextBox.IsEnabled = !operation.IsBusy;
+        SidecarStrictCheckBox.IsEnabled = !operation.IsBusy;
+        TelemetryOptInCheckBox.IsEnabled = !operation.IsBusy;
+        TelemetryRedactCheckBox.IsEnabled = !operation.IsBusy;
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -676,6 +766,7 @@ public partial class MainWindow : Window
 
         FrameStatusText.Text = $"{runtime.LastFrameMs:F2} ms";
         ErrorStatusText.Text = runtime.LastError;
+        TrackStatusText.Text = _controller.GetReleaseTrackStatus();
 
         var runtimeChanged = force || _pendingRuntimeRefresh || snapshot.SnapshotVersion != _lastRuntimeSnapshotVersion;
         if (runtimeChanged)
@@ -900,5 +991,33 @@ public partial class MainWindow : Window
             ShowDebugOverlay = DebugOverlayCheckBox.IsChecked == true,
         };
         return _controller.ApplyRenderUiState(state);
+    }
+
+    private void ApplySessionDefaultsToUi()
+    {
+        var session = _controller.SessionPersistence;
+        if (!string.IsNullOrWhiteSpace(session.AvatarPath))
+        {
+            AvatarPathTextBox.Text = session.AvatarPath;
+        }
+
+        SpoutChannelTextBox.Text = session.SpoutChannelName;
+        OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
+        OscPublishAddressTextBox.Text = session.OscPublishAddress;
+
+        SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
+        SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);
+        SidecarStrictCheckBox.IsChecked = session.Sidecar.StrictMode;
+        ParserModeComboBox.SelectedIndex = session.Sidecar.ParserMode switch
+        {
+            "inhouse" => 1,
+            "sidecar-strict" => 2,
+            _ => 0,
+        };
+    }
+
+    private void RefreshGuides()
+    {
+        GuidesTextBox.Text = _controller.GetQuickstartText() + Environment.NewLine + Environment.NewLine + _controller.GetCompatibilityText();
     }
 }

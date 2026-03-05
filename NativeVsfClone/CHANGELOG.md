@@ -2,6 +2,57 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - R01-R20 platform MVP feature implementation (HostCore/WPF/tools)
+
+### Summary
+
+Implemented the planned `R01-R20` requirement set as runnable MVP feature code focused on `HostCore`, `WpfHost`, and automation tools.
+
+This round added preflight/diagnostics/persistence/telemetry/profile/async-load capabilities to host runtime flow, exposed new operator controls in WPF, and introduced batch/release/version utility scripts.
+
+### Changed
+
+- HostCore feature expansion:
+  - `host/HostCore/HostController.cs` (partial conversion, operation guard integration, telemetry hook integration)
+  - `host/HostCore/HostController.MvpFeatures.cs` (new)
+  - `host/HostCore/PlatformFeatures.cs` (new)
+  - added:
+    - preflight summary model + execution (`RunPreflight`)
+    - user-facing error taxonomy/remediation mapping
+    - session persistence store/model
+    - diagnostics bundle export (`zip`)
+    - rolling frame-metric capture + CSV export
+    - sidecar configuration API + env-var propagation
+    - async load/timeout/cancel path
+    - release track status resolver (WPF/WinUI)
+    - telemetry opt-in/redaction/export controls
+    - operation-order state guard for invalid lifecycle transitions
+- WPF host UX expansion:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added:
+    - `Platform Ops` control group (preflight, diagnostics, metrics, profiles, sidecar, telemetry)
+    - `Guides` tab (quickstart + compatibility/fallback guidance)
+    - status-strip track indicator
+    - async load path wiring and `.xav2` file filter support
+- Tooling scripts added:
+  - `tools/avatar_batch_validate.ps1`
+  - `tools/release_gate_dashboard.ps1`
+  - `tools/version_contract_check.ps1`
+- Documentation updates:
+  - `docs/reports/r01_r20_mvp_implementation_round_2026-03-05.md` (new detailed report)
+  - `docs/INDEX.md` (report link update)
+
+### Verified
+
+- build:
+  - `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` PASS
+  - `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+- tools:
+  - `avatar_batch_validate.ps1` PASS
+  - `release_gate_dashboard.ps1` PASS
+  - `version_contract_check.ps1` PASS
+
 ## 2026-03-05 - VRM expression runtime morph application + SpringBone metadata diagnostics (phase 1)
 
 ### Summary

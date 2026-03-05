@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace HostCore;
 
-public sealed class HostController
+public sealed partial class HostController
 {
     private const int MaxLogEntries = 200;
 
@@ -54,6 +54,7 @@ public sealed class HostController
         }
         OperationState = new HostOperationState(false, string.Empty);
         LastSnapshot = BuildSnapshot();
+        InitializeMvpFeatures();
     }
 
     public HostSessionState SessionState { get; private set; }
@@ -174,12 +175,15 @@ public sealed class HostController
     {
         return ExecuteOperation("LoadAvatar", () =>
         {
+            var normalizedPath = path?.Trim() ?? string.Empty;
+            _sessionPersistence = _sessionPersistence with { AvatarPath = normalizedPath, LastUpdatedUtc = DateTimeOffset.UtcNow };
+            PersistSessionSnapshot();
             if (_sessionService.ActiveAvatarHandle.HasValue)
             {
                 TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
             }
 
-            var rc = _sessionService.LoadAvatar(path);
+            var rc = _sessionService.LoadAvatar(normalizedPath);
             TrackResult("LoadAvatar", rc);
             if (rc == NcResultCode.Ok)
             {
@@ -430,6 +434,7 @@ public sealed class HostController
         }
 
         ReconcileRuntimeOutputState();
+        RecordFrameMetricAndGuardrails();
         RefreshState();
         return rc;
     }
@@ -448,6 +453,7 @@ public sealed class HostController
             SessionState.RenderWidthPx,
             SessionState.RenderHeightPx);
         PublishDiagnostics();
+        PersistSessionSnapshot();
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -711,6 +717,7 @@ public sealed class HostController
 
     private void TrackResult(string source, NcResultCode rc)
     {
+        TrackTelemetryEvent(source, rc);
         if (rc == NcResultCode.Ok)
         {
             AddLog(new HostLogEntry(DateTimeOffset.UtcNow, source, "ok", rc), false);
@@ -718,7 +725,8 @@ public sealed class HostController
         }
 
         var detail = NativeCoreInterop.FormatLastError();
-        var entry = new HostLogEntry(DateTimeOffset.UtcNow, source, detail, rc);
+        var userFacing = BuildUserFacingError(source, rc, detail);
+        var entry = new HostLogEntry(DateTimeOffset.UtcNow, source, $"{userFacing.Title}: {userFacing.ActionHint} | {userFacing.TechnicalDetail}", rc);
         AddLog(entry, true);
     }
 
@@ -739,6 +747,12 @@ public sealed class HostController
 
     private NcResultCode ExecuteOperation(string operationName, Func<NcResultCode> action)
     {
+        if (!ValidateOperationAllowed(operationName, out var blockedRc))
+        {
+            TrackResult($"{operationName}.Blocked", blockedRc);
+            return blockedRc;
+        }
+
         SetOperationState(true, operationName);
         try
         {
@@ -773,7 +787,7 @@ public sealed class HostController
         }
 
         var extension = Path.GetExtension(trimmed).ToLowerInvariant();
-        if (extension is not ".vrm" and not ".vxavatar" and not ".vsfavatar" and not ".vxa2")
+        if (extension is not ".vrm" and not ".vxavatar" and not ".vsfavatar" and not ".vxa2" and not ".xav2")
         {
             error = "Unsupported avatar file extension.";
             return false;
