@@ -2,6 +2,55 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 render breakage guardrail update (static skinning default-off + typed texture diagnostics hardening)
+
+### Summary
+
+Applied a targeted stabilization pass for the XAV2/lilToon render-breakage line by disabling risky static skinning by default, strengthening typed-v2 texture reference resolution, and adding explicit unresolved-texture diagnostics across native and Unity runtime loader paths.
+
+### Changed
+
+- native render guardrail:
+  - `src/nativecore/native_core.cpp`
+  - static skinning application is now opt-in via:
+    - `VSFCLONE_XAV2_ENABLE_STATIC_SKINNING=1|true|yes|on`
+  - default path keeps mesh positions untouched to reduce deformation risk.
+  - adds warning when skin payload exists but static skinning is disabled:
+    - warning: `W_RENDER: XAV2_SKINNING_STATIC_DISABLED: ...`
+    - code: `XAV2_SKINNING_STATIC_DISABLED`
+- native typed texture resolution hardening:
+  - `src/nativecore/native_core.cpp`
+  - typed slot matching and texture payload lookup now use normalized keys (case-insensitive, slash-normalized).
+  - unresolved typed base texture now emits:
+    - warning: `W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: ...`
+    - code: `XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED`
+- alpha safety on mixed material paths:
+  - `src/nativecore/native_core.cpp`
+  - `feature_flags` alpha override applies only for `material_param_encoding=typed-v2`.
+  - legacy-json materials continue existing heuristic resolution.
+- native loader warning parity:
+  - `src/avatar/xav2_loader.cpp`
+  - added typed texture ref validation against manifest texture refs.
+  - emits `W_PAYLOAD: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: ...` for unresolved refs.
+- Unity runtime parity + test:
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - runtime loader now normalizes mesh/texture ref matching and emits typed unresolved texture warning.
+  - added test `TryLoad_TypedMaterialTextureRefMissing_Warns`.
+- docs:
+  - added `docs/reports/xav2_render_breakage_guardrail_update_2026-03-06.md`
+  - updated `docs/INDEX.md`
+
+### Verified
+
+- `cmake --build NativeVsfClone\build --config Release --target nativecore avatar_tool` PASS
+- `NativeVsfClone\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"` PASS
+  - `Load succeeded`
+  - `Format=XAV2`
+  - `Compat=full`
+  - `ParserStage=runtime-ready`
+  - `PrimaryError=NONE`
+
 ## 2026-03-06 - XAV2 typed-v2 material params (lilToon phase1) end-to-end wiring
 
 ### Summary

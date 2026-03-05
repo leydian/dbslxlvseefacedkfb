@@ -688,6 +688,31 @@ std::string NormalizeMeshKey(std::string s) {
     return s;
 }
 
+std::string NormalizeRefKey(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        if (c == '\\') {
+            return static_cast<char>('/');
+        }
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+bool ShouldApplyExperimentalStaticSkinning() {
+    static const bool enabled = []() {
+        const char* raw = std::getenv("VSFCLONE_XAV2_ENABLE_STATIC_SKINNING");
+        if (raw == nullptr) {
+            return false;
+        }
+        std::string token(raw);
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return token == "1" || token == "true" || token == "yes" || token == "on";
+    }();
+    return enabled;
+}
+
 struct SkinWeight4 {
     std::array<std::int32_t, 4U> bone_indices = {0, 0, 0, 0};
     std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -826,7 +851,9 @@ bool BuildGpuMeshForPayload(
     }
 
     if (skin_payload != nullptr) {
-        (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 20U, *skin_payload);
+        if (ShouldApplyExperimentalStaticSkinning()) {
+            (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 20U, *skin_payload);
+        }
     }
 
     D3D11_BUFFER_DESC vb_desc {};
@@ -908,6 +935,14 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
     }
     if (renderer->avatar_meshes.find(handle) != renderer->avatar_meshes.end()) {
         return true;
+    }
+    if (!avatar_pkg.skin_payloads.empty() && !ShouldApplyExperimentalStaticSkinning()) {
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            avatar_it->second.warnings.push_back(
+                "W_RENDER: XAV2_SKINNING_STATIC_DISABLED: skin payload detected; using original vertex positions.");
+            avatar_it->second.warning_codes.push_back("XAV2_SKINNING_STATIC_DISABLED");
+        }
     }
     std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
     skin_by_mesh.reserve(avatar_pkg.skin_payloads.size());
@@ -1311,7 +1346,9 @@ bool TryGetTypedTextureRef(
     const auto it = std::find_if(
         payload.typed_texture_params.begin(),
         payload.typed_texture_params.end(),
-        [&](const avatar::MaterialRenderPayload::TypedTextureParam& p) { return p.slot == slot; });
+        [&](const avatar::MaterialRenderPayload::TypedTextureParam& p) {
+            return NormalizeRefKey(p.slot) == NormalizeRefKey(slot);
+        });
     if (it == payload.typed_texture_params.end()) {
         return false;
     }
@@ -1321,11 +1358,13 @@ bool TryGetTypedTextureRef(
 
 std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
     std::string alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : ToUpperAscii(payload.alpha_mode);
-    if (payload.feature_flags & (1U << 1)) {
-        return "BLEND";
-    }
-    if (payload.feature_flags & (1U << 0)) {
-        return "MASK";
+    if (NormalizeRefKey(payload.material_param_encoding) == "typed-v2") {
+        if (payload.feature_flags & (1U << 1)) {
+            return "BLEND";
+        }
+        if (payload.feature_flags & (1U << 0)) {
+            return "MASK";
+        }
     }
     const std::string upper_json = ToUpperAscii(payload.shader_params_json);
     if (upper_json.find("_ALPHATEST_ON") != std::string::npos) {
@@ -1363,6 +1402,11 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
     }
     std::vector<GpuMaterialResource> materials;
     materials.reserve(std::max<std::size_t>(avatar_pkg.material_payloads.size(), 1U));
+    std::unordered_map<std::string, const avatar::TextureRenderPayload*> textures_by_key;
+    textures_by_key.reserve(avatar_pkg.texture_payloads.size());
+    for (const auto& tex : avatar_pkg.texture_payloads) {
+        textures_by_key[NormalizeRefKey(tex.name)] = &tex;
+    }
     for (const auto& payload : avatar_pkg.material_payloads) {
         GpuMaterialResource material {};
         material.alpha_mode = ResolveAlphaMode(payload);
@@ -1402,14 +1446,20 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         }
         material.emission_color = emission_color;
         std::string base_texture_ref = payload.base_color_texture_name;
-        (void)TryGetTypedTextureRef(payload, "base", &base_texture_ref);
+        const bool has_typed_base_ref = TryGetTypedTextureRef(payload, "base", &base_texture_ref);
         if (!base_texture_ref.empty()) {
-            const auto tex_it = std::find_if(
-                avatar_pkg.texture_payloads.begin(),
-                avatar_pkg.texture_payloads.end(),
-                [&](const avatar::TextureRenderPayload& t) { return t.name == base_texture_ref; });
-            if (tex_it != avatar_pkg.texture_payloads.end()) {
-                material.base_color_srv = CreateTextureSrvFromPayload(device, &(*tex_it));
+            const auto tex_it = textures_by_key.find(NormalizeRefKey(base_texture_ref));
+            if (tex_it != textures_by_key.end()) {
+                material.base_color_srv = CreateTextureSrvFromPayload(device, tex_it->second);
+            } else if (has_typed_base_ref) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                        << ", slot=base, ref=" << base_texture_ref;
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                }
             }
         }
         materials.push_back(std::move(material));

@@ -88,6 +88,25 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialTextureRefMissing_Warns()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true, unresolvedTypedTextureRef: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED")),
+                    Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_ManifestTruncated_Fails()
         {
             var bytes = BuildValidXav2Bytes();
@@ -248,7 +267,8 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool addUnknownSection = false,
             bool legacyMaterialFormat = false,
             bool missingTextureRef = false,
-            bool addTypedMaterialSection = false)
+            bool addTypedMaterialSection = false,
+            bool unresolvedTypedTextureRef = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -286,7 +306,12 @@ namespace VsfClone.Xav2.Runtime.Tests
             WriteSection(bw, 0x0012, BuildMaterialParamsSection("material_0", "{}"));
             if (addTypedMaterialSection)
             {
-                WriteSection(bw, 0x0015, BuildMaterialTypedParamsSection("material_0"));
+                WriteSection(
+                    bw,
+                    0x0015,
+                    BuildMaterialTypedParamsSection(
+                        "material_0",
+                        unresolvedTypedTextureRef ? "texture_missing_typed" : "texture_0"));
             }
 
             if (addUnknownSection)
@@ -360,7 +385,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             return ms.ToArray();
         }
 
-        private static byte[] BuildMaterialTypedParamsSection(string name)
+        private static byte[] BuildMaterialTypedParamsSection(string name, string baseTextureRef)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -381,7 +406,7 @@ namespace VsfClone.Xav2.Runtime.Tests
 
             bw.Write((ushort)1);
             WriteSizedString(bw, "base");
-            WriteSizedString(bw, "texture_0");
+            WriteSizedString(bw, baseTextureRef);
 
             return ms.ToArray();
         }

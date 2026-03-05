@@ -653,7 +653,7 @@ namespace VsfClone.Xav2.Runtime
             {
                 if (!string.IsNullOrWhiteSpace(mesh.Name))
                 {
-                    meshNameSet.Add(mesh.Name);
+                    meshNameSet.Add(NormalizeRefKey(mesh.Name));
                 }
             }
 
@@ -662,14 +662,14 @@ namespace VsfClone.Xav2.Runtime
             {
                 if (!string.IsNullOrWhiteSpace(texture.Name))
                 {
-                    textureNameSet.Add(texture.Name);
+                    textureNameSet.Add(NormalizeRefKey(texture.Name));
                 }
             }
 
             var missingMeshRef = false;
             foreach (var meshRef in payload.Manifest.meshRefs)
             {
-                if (!meshNameSet.Contains(meshRef))
+                if (!meshNameSet.Contains(NormalizeRefKey(meshRef)))
                 {
                     missingMeshRef = true;
                     if (!AddWarningOrFail(diagnostics, options, $"XAV2_ASSET_MISSING: meshRef='{meshRef}'"))
@@ -682,10 +682,39 @@ namespace VsfClone.Xav2.Runtime
             var missingTextureRef = false;
             foreach (var textureRef in payload.Manifest.textureRefs)
             {
-                if (!textureNameSet.Contains(textureRef))
+                if (!textureNameSet.Contains(NormalizeRefKey(textureRef)))
                 {
                     missingTextureRef = true;
                     if (!AddWarningOrFail(diagnostics, options, $"XAV2_ASSET_MISSING: textureRef='{textureRef}'"))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            foreach (var material in payload.Materials)
+            {
+                var hasTyped = string.Equals(material.MaterialParamEncoding, "typed-v2", StringComparison.OrdinalIgnoreCase) ||
+                               material.TypedTextureParams.Count > 0;
+                if (!hasTyped)
+                {
+                    continue;
+                }
+
+                foreach (var typedTexture in material.TypedTextureParams)
+                {
+                    if (string.IsNullOrWhiteSpace(typedTexture.TextureRef))
+                    {
+                        continue;
+                    }
+                    if (textureNameSet.Contains(NormalizeRefKey(typedTexture.TextureRef)))
+                    {
+                        continue;
+                    }
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material={material.Name}, slot={typedTexture.Slot}, ref={typedTexture.TextureRef}"))
                     {
                         return false;
                     }
@@ -707,6 +736,13 @@ namespace VsfClone.Xav2.Runtime
 
             diagnostics.IsPartial = missingMeshRef || missingTextureRef;
             return true;
+        }
+
+        private static string NormalizeRefKey(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? string.Empty
+                : value.Replace('\\', '/').Trim().ToLowerInvariant();
         }
 
         private static bool AddWarningOrFail(Xav2LoadDiagnostics diagnostics, Xav2LoadOptions options, string warning)

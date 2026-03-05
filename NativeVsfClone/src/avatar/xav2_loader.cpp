@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -930,6 +931,24 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             has_payload_gap = true;
         }
         pkg.texture_payloads.push_back(std::move(payload));
+    }
+
+    std::unordered_set<std::string> texture_ref_keys;
+    texture_ref_keys.reserve(texture_refs.size());
+    for (const auto& tex_ref : texture_refs) {
+        texture_ref_keys.insert(NormalizeRefKey(tex_ref));
+    }
+    for (const auto& material : pkg.material_payloads) {
+        for (const auto& typed_texture : material.typed_texture_params) {
+            const std::string key = NormalizeRefKey(typed_texture.texture_ref);
+            if (key.empty() || texture_ref_keys.find(key) != texture_ref_keys.end()) {
+                continue;
+            }
+            PushWarning(
+                &pkg,
+                "W_PAYLOAD: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" + material.name +
+                    ", slot=" + typed_texture.slot + ", ref=" + typed_texture.texture_ref);
+        }
     }
 
     if (pkg.format_section_count == 0U) {
