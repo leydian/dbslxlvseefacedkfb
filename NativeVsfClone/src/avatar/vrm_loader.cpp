@@ -819,17 +819,23 @@ bool TryBuildNodeTransformMatrix(const JsonValue& node, std::array<float, 16U>* 
     return true;
 }
 
-void ApplyPositionTransformToVertexBlob(
+bool ApplyPositionTransformToVertexBlob(
     std::vector<std::uint8_t>* vertex_blob,
     std::uint32_t vertex_stride,
     const std::array<float, 16U>& m) {
     if (vertex_blob == nullptr || vertex_blob->empty() || vertex_stride < 12U) {
-        return;
+        return false;
     }
     if ((vertex_blob->size() % vertex_stride) != 0U) {
-        return;
+        return false;
+    }
+    for (const auto v : m) {
+        if (!std::isfinite(v) || std::abs(v) > 1.0e6f) {
+            return false;
+        }
     }
     const std::size_t vertex_count = vertex_blob->size() / static_cast<std::size_t>(vertex_stride);
+    std::vector<std::uint8_t> transformed = *vertex_blob;
     for (std::size_t i = 0U; i < vertex_count; ++i) {
         const std::size_t base = i * static_cast<std::size_t>(vertex_stride);
         float x = 0.0f;
@@ -841,10 +847,16 @@ void ApplyPositionTransformToVertexBlob(
         const float tx = (m[0] * x) + (m[4] * y) + (m[8] * z) + m[12];
         const float ty = (m[1] * x) + (m[5] * y) + (m[9] * z) + m[13];
         const float tz = (m[2] * x) + (m[6] * y) + (m[10] * z) + m[14];
-        std::memcpy(vertex_blob->data() + base, &tx, sizeof(float));
-        std::memcpy(vertex_blob->data() + base + 4U, &ty, sizeof(float));
-        std::memcpy(vertex_blob->data() + base + 8U, &tz, sizeof(float));
+        if (!std::isfinite(tx) || !std::isfinite(ty) || !std::isfinite(tz) ||
+            std::abs(tx) > 1.0e6f || std::abs(ty) > 1.0e6f || std::abs(tz) > 1.0e6f) {
+            return false;
+        }
+        std::memcpy(transformed.data() + base, &tx, sizeof(float));
+        std::memcpy(transformed.data() + base + 4U, &ty, sizeof(float));
+        std::memcpy(transformed.data() + base + 8U, &tz, sizeof(float));
     }
+    *vertex_blob = std::move(transformed);
+    return true;
 }
 
 std::string DetectTextureFormat(const std::string& mime_type, const std::string& name_hint) {
@@ -3393,11 +3405,16 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 continue;
             }
             if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
-                ApplyPositionTransformToVertexBlob(
-                    &mesh_payload.vertex_blob,
-                    mesh_payload.vertex_stride,
-                    mesh_node_transforms[mesh_i]);
-                mesh_node_transform_applied[mesh_i] = true;
+                if (ApplyPositionTransformToVertexBlob(
+                        &mesh_payload.vertex_blob,
+                        mesh_payload.vertex_stride,
+                        mesh_node_transforms[mesh_i])) {
+                    mesh_node_transform_applied[mesh_i] = true;
+                } else {
+                    pkg.warnings.push_back(
+                        "W_NODE: VRM_NODE_TRANSFORM_INVALID: mesh=" + mesh_payload.name + ", action=skipped");
+                    pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_INVALID");
+                }
             }
 
             const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
