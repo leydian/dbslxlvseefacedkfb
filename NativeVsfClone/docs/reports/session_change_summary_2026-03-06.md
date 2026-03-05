@@ -208,3 +208,123 @@ Updated verification snapshot for this addendum:
 - `dotnet build host\\HostCore\\HostCore.csproj -c Release`: PASS
 - `dotnet build host\\WpfHost\\WpfHost.csproj -c Release`: PASS
 - `dotnet build host\\WinUiHost\\WinUiHost.csproj -c Release`: blocked by environment/toolchain-level WinUI XAML compiler failure (`XamlCompiler.exe` exit code 1)
+
+## Addendum: Hybrid Tracking + ARKit Weight Path (2026-03-06, later update)
+
+This addendum captures the subsequent implementation pass completed after the direct iFacialMocap path, focused on:
+
+- hybrid tracking source contract (`OSC iFacialMocap` + `Webcam ONNX` slot)
+- ARKit-class expression weight submission path into native runtime
+- head pose transform application in render world composition
+- WPF/WinUI tracking control-surface extension for source/model/device options
+
+### 1) HostCore tracking contract expansion
+
+Updated:
+
+- `host/HostCore/HostInterfaces.cs`
+- `host/HostCore/PlatformFeatures.cs`
+- `host/HostCore/HostController.cs`
+- `host/HostCore/HostController.MvpFeatures.cs`
+- `host/HostCore/NativeCoreInterop.cs`
+- `host/HostCore/TrackingInputService.cs`
+
+Key changes:
+
+- Added `TrackingSourceType` enum:
+  - `OscIfacial`
+  - `WebcamOnnx`
+- Expanded `TrackingStartOptions` with:
+  - `SourceType`
+  - `WebcamDeviceId`
+  - `OnnxModelPath`
+  - `InferenceFpsCap`
+- Expanded `TrackingDiagnostics` with:
+  - `SourceType`
+  - `SourceStatus`
+- Added `ITrackingInputService.TryGetLatestExpressionWeights(...)` for per-tick expression map pull.
+- Session persistence schema lifted to `Version=4` and `TrackingInputSettings` expanded with source + webcam/onnx config fields.
+- `HostController.Tick()` now attempts both:
+  - `nc_set_tracking_frame(...)`
+  - `nc_set_expression_weights(...)` with non-pose channels filtered from tracking cache.
+
+### 2) Tracking service runtime behavior
+
+Updated:
+
+- `host/HostCore/TrackingInputService.cs`
+
+Key changes:
+
+- Existing OSC UDP path remains active for iFacialMocap.
+- Added webcam source loop contract path (`WebcamLoopAsync`) and source-aware diagnostics.
+- Added expression snapshot cache to expose current expression weights to `HostController`.
+- Normalized non-pose channels into expression cache so ARKit-like keys can flow to native expression API.
+- Added source status diagnostics (`udp-listening`, `udp-receiving`, `webcam-placeholder`, parse/drop statuses).
+
+Current limitation:
+
+- Webcam ONNX path is integrated as a source slot and diagnostics path, but inference runtime is currently a placeholder loop (neutral frame cadence), not a full camera+model pipeline yet.
+
+### 3) Native C API and runtime extension
+
+Updated:
+
+- `include/vsfclone/nativecore/api.h`
+- `src/nativecore/native_core.cpp`
+
+Key changes:
+
+- Added public C struct:
+  - `NcExpressionWeight { char name[64]; float weight; }`
+- Added public C API:
+  - `nc_set_expression_weights(const NcExpressionWeight* weights, uint32_t count)`
+- Runtime application logic:
+  - normalizes keys
+  - applies by expression name and mapping kind
+  - keeps compatibility aliases for blink/jaw/smile-like channels
+  - updates expression summary diagnostics.
+- Render world composition now applies tracking head pose:
+  - quaternion rotation from `latest_tracking.head_rot_quat`
+  - head position translation from `latest_tracking.head_pos` with scale factor
+  - safe identity fallback when quaternion norm is invalid.
+
+### 4) WPF/WinUI operator surface updates
+
+Updated:
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+
+Key changes:
+
+- Tracking panel additions:
+  - source selector (`OSC` / `Webcam ONNX`)
+  - webcam device id
+  - ONNX model path
+  - inference FPS cap
+- Start Tracking handlers now persist/update extended tracking settings before start.
+- Tracking status text now includes:
+  - `source`
+  - `source_status`
+  - existing format/fps/age/stale/packet counters.
+
+### 5) Verification snapshot (latest)
+
+Executed:
+
+```powershell
+dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release
+dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release
+dotnet build NativeVsfClone\host\WinUiHost\WinUiHost.csproj -c Release
+cmake --build NativeVsfClone\build --config Release
+```
+
+Result:
+
+- `HostCore`: PASS
+- `WpfHost`: PASS
+- `WinUiHost`: blocked by existing environment/toolchain XAML compiler failure (`XamlCompiler.exe` exit code 1)
+- native build graph: `nativecore.dll` built successfully; full graph stopped at existing side target link issue (`vsfavatar_sidecar.exe`, `LNK1104`)
