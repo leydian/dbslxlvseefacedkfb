@@ -20,6 +20,7 @@ namespace VsfClone.Xav2.Editor
         private const ushort SectionMaterialTypedParams = 0x0015;
         private const ushort SectionSkeletonPosePayload = 0x0016;
         private const ushort SectionSkeletonRigPayload = 0x0017;
+        private const ushort SectionFlagPayloadCompressedLz4 = 0x0001;
 
         public static void Export(string outputPath, GameObject avatarRoot, Xav2ExportOptions options)
         {
@@ -53,42 +54,43 @@ namespace VsfClone.Xav2.Editor
             var manifestJson = JsonUtility.ToJson(payload.Manifest);
             var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
             bw.Write(Encoding.ASCII.GetBytes("XAV2"));
-            bw.Write((ushort)4);
+            var fileVersion = options.EnableCompression ? (ushort)5 : (ushort)4;
+            bw.Write(fileVersion);
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
             foreach (var mesh in payload.Meshes)
             {
-                WriteSection(bw, SectionMeshRenderPayload, BuildMeshPayload(mesh));
+                WriteSection(bw, SectionMeshRenderPayload, BuildMeshPayload(mesh), options);
             }
             foreach (var texture in payload.Textures)
             {
-                WriteSection(bw, SectionTextureBlob, BuildTexturePayload(texture));
+                WriteSection(bw, SectionTextureBlob, BuildTexturePayload(texture), options);
             }
             foreach (var material in payload.Materials)
             {
-                WriteSection(bw, SectionMaterialOverride, BuildMaterialPayload(material));
-                WriteSection(bw, SectionMaterialShaderParams, BuildMaterialParamsPayload(material));
+                WriteSection(bw, SectionMaterialOverride, BuildMaterialPayload(material), options);
+                WriteSection(bw, SectionMaterialShaderParams, BuildMaterialParamsPayload(material), options);
                 if (material.TypedFloatParams.Count > 0 || material.TypedColorParams.Count > 0 || material.TypedTextureParams.Count > 0)
                 {
-                    WriteSection(bw, SectionMaterialTypedParams, BuildMaterialTypedParamsPayload(material));
+                    WriteSection(bw, SectionMaterialTypedParams, BuildMaterialTypedParamsPayload(material), options);
                 }
             }
             foreach (var skin in payload.Skins)
             {
-                WriteSection(bw, SectionSkinPayload, BuildSkinPayload(skin));
+                WriteSection(bw, SectionSkinPayload, BuildSkinPayload(skin), options);
             }
             foreach (var skeleton in payload.Skeletons)
             {
-                WriteSection(bw, SectionSkeletonPosePayload, BuildSkeletonPayload(skeleton));
+                WriteSection(bw, SectionSkeletonPosePayload, BuildSkeletonPayload(skeleton), options);
             }
             foreach (var rig in payload.SkeletonRigs)
             {
-                WriteSection(bw, SectionSkeletonRigPayload, BuildSkeletonRigPayload(rig));
+                WriteSection(bw, SectionSkeletonRigPayload, BuildSkeletonRigPayload(rig), options);
             }
             foreach (var blendShape in payload.BlendShapes)
             {
-                WriteSection(bw, SectionBlendShapePayload, BuildBlendShapePayload(blendShape));
+                WriteSection(bw, SectionBlendShapePayload, BuildBlendShapePayload(blendShape), options);
             }
         }
 
@@ -472,12 +474,57 @@ namespace VsfClone.Xav2.Editor
             return ms.ToArray();
         }
 
-        private static void WriteSection(BinaryWriter bw, ushort type, byte[] payload)
+        private static void WriteSection(BinaryWriter bw, ushort type, byte[] payload, Xav2ExportOptions options)
         {
+            var flags = (ushort)0;
+            var sectionPayload = payload ?? Array.Empty<byte>();
+            if (ShouldCompressSection(type, sectionPayload, options))
+            {
+                var preferRatio = options.CompressionLevel == Xav2CompressionLevel.Balanced;
+                if (Xav2Lz4Codec.TryCompress(sectionPayload, out var compressed, preferRatio) &&
+                    compressed.Length + 4 < sectionPayload.Length)
+                {
+                    flags |= SectionFlagPayloadCompressedLz4;
+                    sectionPayload = BuildCompressedEnvelope(sectionPayload.Length, compressed);
+                }
+            }
+
             bw.Write(type);
-            bw.Write((ushort)0);
-            bw.Write((uint)payload.Length);
-            bw.Write(payload);
+            bw.Write(flags);
+            bw.Write((uint)sectionPayload.Length);
+            bw.Write(sectionPayload);
+        }
+
+        private static bool ShouldCompressSection(ushort sectionType, byte[] payload, Xav2ExportOptions options)
+        {
+            if (options == null || !options.EnableCompression || options.CompressionCodec != Xav2CompressionCodec.Lz4)
+            {
+                return false;
+            }
+
+            if (payload == null || payload.Length < 256)
+            {
+                return false;
+            }
+
+            return sectionType == SectionMeshRenderPayload ||
+                   sectionType == SectionTextureBlob ||
+                   sectionType == SectionSkinPayload ||
+                   sectionType == SectionBlendShapePayload;
+        }
+
+        private static byte[] BuildCompressedEnvelope(int uncompressedLength, byte[] compressed)
+        {
+            var envelope = new byte[4 + (compressed?.Length ?? 0)];
+            envelope[0] = (byte)(uncompressedLength & 0xFF);
+            envelope[1] = (byte)((uncompressedLength >> 8) & 0xFF);
+            envelope[2] = (byte)((uncompressedLength >> 16) & 0xFF);
+            envelope[3] = (byte)((uncompressedLength >> 24) & 0xFF);
+            if (compressed != null && compressed.Length > 0)
+            {
+                Buffer.BlockCopy(compressed, 0, envelope, 4, compressed.Length);
+            }
+            return envelope;
         }
 
         private static void WriteSizedString(BinaryWriter bw, string s)

@@ -8,6 +8,9 @@ param(
     [switch]$EnableSoak,
     [switch]$EnableSessionMigration,
     [switch]$EnableTrackingFuzz,
+    [switch]$EnableSampleProfileResolve,
+    [switch]$EnableHostE2E,
+    [switch]$EnableNuGetMirrorBootstrap,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
 )
 
@@ -101,6 +104,24 @@ if ($EnableTrackingFuzz) {
         -Command "powershell -ExecutionPolicy Bypass -File .\tools\tracking_parser_fuzz_gate.ps1"))
 }
 
+if ($EnableSampleProfileResolve) {
+    $results.Add((Invoke-Gate `
+        -Name "Sample profile resolve (fixed_set)" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\sample_profile_resolve.ps1 -Profile fixed_set"))
+}
+
+if ($EnableNuGetMirrorBootstrap) {
+    $results.Add((Invoke-Gate `
+        -Name "NuGet mirror bootstrap" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\nuget_mirror_bootstrap.ps1"))
+}
+
+if ($EnableHostE2E) {
+    $results.Add((Invoke-Gate `
+        -Name "Host E2E gate" `
+        -Command "powershell -ExecutionPolicy Bypass -File .\tools\host_e2e_gate.ps1 -SkipNativeBuild -NoRestore"))
+}
+
 $overallStatus = if ($results | Where-Object { $_.ExitCode -ne 0 }) { "FAIL" } else { "PASS" }
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("Quality Baseline Summary")
@@ -123,6 +144,9 @@ $lines.Add("- RenderPerf: build/reports/render_perf_gate_summary.txt")
 $lines.Add("- AvatarSoak: build/reports/avatar_load_soak_gate_summary.txt")
 $lines.Add("- SessionMigration: build/reports/session_state_migration_check_summary.txt")
 $lines.Add("- TrackingFuzz: build/reports/tracking_parser_fuzz_gate_summary.txt")
+$lines.Add("- SampleProfileResolve: build/reports/sample_profile_resolve_latest.txt")
+$lines.Add("- NuGetMirrorBootstrap: build/reports/nuget_mirror_bootstrap_summary.txt")
+$lines.Add("- HostE2E: build/reports/host_e2e_gate_summary.txt")
 
 $lines | Set-Content -Path $resolvedSummaryPath -Encoding UTF8
 Write-Host "[quality-baseline] Summary: $resolvedSummaryPath"

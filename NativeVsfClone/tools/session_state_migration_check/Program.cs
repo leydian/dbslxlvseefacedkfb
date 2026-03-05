@@ -58,19 +58,19 @@ try
 
     var storeV1 = new SessionStateStore(v1Path);
     var modelV1 = storeV1.Load();
-    AssertOrThrow(modelV1.Version >= 4, "v1 migration failed: Version not upgraded to >=4");
+    AssertOrThrow(modelV1.Version >= 5, "v1 migration failed: Version not upgraded to >=5");
     AssertOrThrow(modelV1.Tracking.ListenPort == 49983, "v1 migration failed: default tracking port mismatch");
     AssertOrThrow(modelV1.Tracking.StaleTimeoutMs == 500, "v1 migration failed: default stale timeout mismatch");
     AssertOrThrow(modelV1.Tracking.SourceType == TrackingSourceType.OscIfacial, "v1 migration failed: default source type mismatch");
     AssertOrThrow(modelV1.UiMode == "beginner", "v1 migration failed: default ui mode mismatch");
-    lines.Add("- case1_v1_to_v4: PASS");
+    lines.Add("- case1_v1_to_v5: PASS");
 
-    var invalidPath = Path.Combine(tmpRoot, "session_v4_invalid.json");
+    var invalidPath = Path.Combine(tmpRoot, "session_v5_invalid.json");
     File.WriteAllText(
         invalidPath,
         """
         {
-          "Version": 4,
+          "Version": 5,
           "AvatarPath": "",
           "SpoutChannelName": "X",
           "OscBindPort": 1,
@@ -86,8 +86,7 @@ try
             "StaleTimeoutMs": 1,
             "LastActive": false,
             "SourceType": 99,
-            "WebcamDeviceId": null,
-            "OnnxModelPath": null,
+            "CameraDeviceKey": null,
             "InferenceFpsCap": 9999
           },
           "LastProfileName": "quality",
@@ -105,13 +104,13 @@ try
     AssertOrThrow(modelInvalid.Tracking.InferenceFpsCap == 120, "normalize failed: fps cap clamp");
     AssertOrThrow(modelInvalid.UiMode == "beginner", "normalize failed: ui mode");
     AssertOrThrow(modelInvalid.LastUpdatedUtc != DateTimeOffset.MinValue, "normalize failed: last updated default");
-    lines.Add("- case2_invalid_v4_normalization: PASS");
+    lines.Add("- case2_invalid_v5_normalization: PASS");
 
     var roundtripPath = Path.Combine(tmpRoot, "session_roundtrip.json");
     var storeRoundtrip = new SessionStateStore(roundtripPath);
     storeRoundtrip.Save(modelInvalid);
     var loadedRoundtrip = storeRoundtrip.Load();
-    AssertOrThrow(loadedRoundtrip.Version >= 4, "roundtrip failed: version");
+    AssertOrThrow(loadedRoundtrip.Version >= 5, "roundtrip failed: version");
     AssertOrThrow(loadedRoundtrip.Tracking.ListenPort == 49983, "roundtrip failed: tracking port");
     AssertOrThrow(loadedRoundtrip.UiMode == "beginner", "roundtrip failed: ui mode");
     lines.Add("- case3_roundtrip: PASS");

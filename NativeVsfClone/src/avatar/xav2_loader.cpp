@@ -28,6 +28,8 @@ constexpr std::uint16_t kSectionSkinPayload = 0x0013U;
 constexpr std::uint16_t kSectionBlendShapePayload = 0x0014U;
 constexpr std::uint16_t kSectionMaterialTypedParams = 0x0015U;
 constexpr std::uint16_t kSectionSkeletonPosePayload = 0x0016U;
+constexpr std::uint16_t kSectionFlagPayloadCompressedLz4 = 0x0001U;
+constexpr std::uint16_t kSectionFlagKnownMask = kSectionFlagPayloadCompressedLz4;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -650,6 +652,95 @@ bool ParseMaterialTypedParamsSection(
     return cursor == end;
 }
 
+bool Lz4DecompressRawBounded(
+    const std::vector<std::uint8_t>& src,
+    std::size_t max_output_size,
+    std::vector<std::uint8_t>* dst) {
+    if (dst == nullptr) {
+        return false;
+    }
+    dst->clear();
+    dst->reserve(max_output_size);
+
+    std::size_t ip = 0U;
+    while (ip < src.size()) {
+        const std::uint8_t token = src[ip++];
+        std::size_t literal_len = static_cast<std::size_t>(token >> 4U);
+        if (literal_len == 15U) {
+            while (ip < src.size() && src[ip] == 255U) {
+                literal_len += 255U;
+                ++ip;
+            }
+            if (ip >= src.size()) {
+                return false;
+            }
+            literal_len += src[ip++];
+        }
+        if (ip + literal_len > src.size() || dst->size() + literal_len > max_output_size) {
+            return false;
+        }
+        dst->insert(
+            dst->end(),
+            src.begin() + static_cast<std::ptrdiff_t>(ip),
+            src.begin() + static_cast<std::ptrdiff_t>(ip + literal_len));
+        ip += literal_len;
+
+        if (ip >= src.size()) {
+            break;
+        }
+        if (ip + 2U > src.size()) {
+            return false;
+        }
+        const std::size_t offset = static_cast<std::size_t>(src[ip]) | (static_cast<std::size_t>(src[ip + 1U]) << 8U);
+        ip += 2U;
+        if (offset == 0U || offset > dst->size()) {
+            return false;
+        }
+
+        std::size_t match_len = static_cast<std::size_t>(token & 0x0FU) + 4U;
+        if ((token & 0x0FU) == 15U) {
+            while (ip < src.size() && src[ip] == 255U) {
+                match_len += 255U;
+                ++ip;
+            }
+            if (ip >= src.size()) {
+                return false;
+            }
+            match_len += src[ip++];
+        }
+        if (dst->size() + match_len > max_output_size) {
+            return false;
+        }
+
+        const std::size_t copy_from = dst->size() - offset;
+        for (std::size_t i = 0; i < match_len; ++i) {
+            dst->push_back((*dst)[copy_from + i]);
+        }
+    }
+
+    return dst->size() == max_output_size;
+}
+
+bool DecodeCompressedSectionPayload(
+    const std::vector<std::uint8_t>& bytes,
+    std::size_t payload_offset,
+    std::size_t payload_size,
+    std::vector<std::uint8_t>* out_decoded) {
+    if (out_decoded == nullptr || payload_size < 4U) {
+        return false;
+    }
+    const auto expected_size = ReadU32Le(bytes, payload_offset);
+    if (!expected_size) {
+        return false;
+    }
+    const std::size_t compressed_offset = payload_offset + 4U;
+    const std::size_t compressed_size = payload_size - 4U;
+    std::vector<std::uint8_t> compressed(
+        bytes.begin() + static_cast<std::ptrdiff_t>(compressed_offset),
+        bytes.begin() + static_cast<std::ptrdiff_t>(compressed_offset + compressed_size));
+    return Lz4DecompressRawBounded(compressed, static_cast<std::size_t>(*expected_size), out_decoded);
+}
+
 void AppendWarningCode(AvatarPackage* pkg, const std::string& warning) {
     if (pkg == nullptr) {
         return;
@@ -713,7 +804,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     }
     const auto version = ReadU16Le(bytes, 4U);
     const auto manifest_size = ReadU32Le(bytes, 6U);
-    if (!version || !manifest_size || (*version != 1U && *version != 2U && *version != 3U)) {
+    if (!version || !manifest_size || (*version != 1U && *version != 2U && *version != 3U && *version != 4U && *version != 5U)) {
         pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
         PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: unsupported version.");
         return core::Result<AvatarPackage>::Ok(pkg);
@@ -793,13 +884,32 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         }
 
         ++pkg.format_section_count;
-        if (*flags != 0U) {
+        std::vector<std::uint8_t> section_payload;
+        if ((*flags & kSectionFlagPayloadCompressedLz4) != 0U) {
+            if (format_version < 5U) {
+                pkg.primary_error_code = "XAV2_COMPRESSION_UNSUPPORTED_VERSION";
+                PushWarning(&pkg, "E_PARSE: XAV2_COMPRESSION_UNSUPPORTED_VERSION: compressed section requires version >= 5.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            if (!DecodeCompressedSectionPayload(bytes, payload_offset, payload_size, &section_payload)) {
+                pkg.primary_error_code = "XAV2_COMPRESSION_DECODE_FAILED";
+                PushWarning(&pkg, "E_PARSE: XAV2_COMPRESSION_DECODE_FAILED: LZ4 section decode failed.");
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+        } else {
+            section_payload.assign(
+                bytes.begin() + static_cast<std::ptrdiff_t>(payload_offset),
+                bytes.begin() + static_cast<std::ptrdiff_t>(section_end));
+        }
+
+        const auto unknown_flags = static_cast<std::uint16_t>(*flags & static_cast<std::uint16_t>(~kSectionFlagKnownMask));
+        if (unknown_flags != 0U) {
             PushWarning(&pkg, "W_PARSE: XAV2_SECTION_FLAGS_NONZERO: type=" + std::to_string(*type));
         }
 
         if (*type == kSectionMeshRenderPayload) {
             MeshRenderPayload mesh_payload;
-            if (!ParseMeshRenderPayloadSection(bytes, payload_offset, payload_size, &mesh_payload)) {
+            if (!ParseMeshRenderPayloadSection(section_payload, 0U, section_payload.size(), &mesh_payload)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid mesh render payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -809,7 +919,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         } else if (*type == kSectionMeshBlobLegacy || *type == kSectionTextureBlob) {
             std::string name;
             std::vector<std::uint8_t> blob;
-            if (!ParseBinaryPayloadSection(bytes, payload_offset, payload_size, &name, &blob)) {
+            if (!ParseBinaryPayloadSection(section_payload, 0U, section_payload.size(), &name, &blob)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid binary payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -822,7 +932,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionMaterialOverride) {
             MaterialRenderPayload material_payload;
-            if (!ParseMaterialOverrideSection(bytes, payload_offset, payload_size, &material_payload)) {
+            if (!ParseMaterialOverrideSection(section_payload, 0U, section_payload.size(), &material_payload)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid material section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -832,7 +942,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         } else if (*type == kSectionMaterialShaderParams) {
             std::string material_name;
             std::string params_json;
-            if (!ParseMaterialShaderParamsSection(bytes, payload_offset, payload_size, &material_name, &params_json)) {
+            if (!ParseMaterialShaderParamsSection(section_payload, 0U, section_payload.size(), &material_name, &params_json)) {
                 pkg.primary_error_code = "XAV2_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_SCHEMA_INVALID: invalid material shader params section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -841,7 +951,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionMaterialTypedParams) {
             MaterialRenderPayload typed_payload;
-            if (!ParseMaterialTypedParamsSection(bytes, payload_offset, payload_size, &typed_payload)) {
+            if (!ParseMaterialTypedParamsSection(section_payload, 0U, section_payload.size(), &typed_payload)) {
                 pkg.primary_error_code = "XAV2_MATERIAL_TYPED_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -856,7 +966,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionSkinPayload) {
             SkinRenderPayload skin_payload;
-            if (!ParseSkinPayloadSection(bytes, payload_offset, payload_size, &skin_payload)) {
+            if (!ParseSkinPayloadSection(section_payload, 0U, section_payload.size(), &skin_payload)) {
                 pkg.primary_error_code = "XAV2_SKIN_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_SKIN_SCHEMA_INVALID: invalid skin payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -865,7 +975,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionSkeletonPosePayload) {
             SkeletonRenderPayload skeleton_payload;
-            if (!ParseSkeletonPosePayloadSection(bytes, payload_offset, payload_size, &skeleton_payload)) {
+            if (!ParseSkeletonPosePayloadSection(section_payload, 0U, section_payload.size(), &skeleton_payload)) {
                 pkg.primary_error_code = "XAV2_SKELETON_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_SKELETON_SCHEMA_INVALID: invalid skeleton pose payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);
@@ -880,7 +990,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionBlendShapePayload) {
             BlendShapeRenderPayload blendshape_payload;
-            if (!ParseBlendShapePayloadSection(bytes, payload_offset, payload_size, &blendshape_payload)) {
+            if (!ParseBlendShapePayloadSection(section_payload, 0U, section_payload.size(), &blendshape_payload)) {
                 pkg.primary_error_code = "XAV2_BLENDSHAPE_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_BLENDSHAPE_SCHEMA_INVALID: invalid blendshape payload section.");
                 return core::Result<AvatarPackage>::Ok(pkg);

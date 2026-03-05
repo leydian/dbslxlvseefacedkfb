@@ -19,27 +19,27 @@ Status legend:
 
 2. WinUI local/CI (`windows-latest`, `windows-2022`) reproducibility matrix  
    Status: `IN_PROGRESS`  
-   Automation: `tools/winui_diag_matrix_summary.ps1`
+   Automation: `tools/winui_diag_matrix_summary.ps1`, `tools/winui_xaml_min_repro.ps1`
 
 3. `publish_hosts.ps1` WinUI failure classification granularity  
    Status: `DONE`  
    Automation: `tools/publish_hosts.ps1` (`failure_class`, `root_cause_hints`, `profiles`, `preflight_probe`)
 
 4. NuGet outage fallback strategy (cache/mirror)  
-   Status: `IN_PROGRESS`  
-   Current: probe + hint automation in publish diagnostics; mirror bootstrap policy pending
+   Status: `DONE`  
+   Automation: `tools/nuget_mirror_bootstrap.ps1` (local mirror source bootstrap)
 
 5. `vsfavatar_sidecar.exe` lock (`LNK1104`) recurrence prevention  
-   Status: `IN_PROGRESS`  
-   Current: fallback build path exists; sidecar target-specific lock handling pending
+   Status: `DONE`  
+   Automation: `tools/sidecar_lock_guard.ps1`
 
 6. WPF/WinUI shared E2E scenario automation  
-   Status: `IN_PROGRESS`  
-   Current: WPF smoke and publish automation exists; WinUI path blocked by toolchain
+   Status: `DONE`  
+   Automation: `tools/host_e2e_gate.ps1` (WPF-first + optional WinUI)
 
 7. Gate sample strategy split (fixed + large real-world set)  
-   Status: `IN_PROGRESS`  
-   Current: fixed-set automation complete; extended real-world set curation pending
+   Status: `DONE`  
+   Automation: `tools/sample_profiles/*`, `tools/sample_profile_resolve.ps1`
 
 8. VSFAvatar GateD pass-rate trend tracking  
    Status: `DONE`  
@@ -51,7 +51,7 @@ Status legend:
 
 10. Tracking threshold config externalization  
     Status: `IN_PROGRESS`  
-    Current: session persistence path exists; dedicated threshold config contract pending
+    Current: stale timeout/fps cap persistence exists; parse/drop threshold contract remains
 
 11. Tracking/expression native submit failures surfaced in UI  
     Status: `IN_PROGRESS`  
@@ -126,6 +126,21 @@ powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1 -Iter
 
 # 9) Render performance numeric gate (metrics csv required)
 powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1 -MetricsCsvPath ".\build\reports\metrics_latest.csv"
+
+# 10) NuGet mirror bootstrap
+powershell -ExecutionPolicy Bypass -File .\tools\nuget_mirror_bootstrap.ps1
+
+# 11) Sidecar lock guard
+powershell -ExecutionPolicy Bypass -File .\tools\sidecar_lock_guard.ps1
+
+# 12) Host end-to-end gate
+powershell -ExecutionPolicy Bypass -File .\tools\host_e2e_gate.ps1 -SkipNativeBuild -NoRestore
+
+# 13) WinUI minimal XAML repro
+powershell -ExecutionPolicy Bypass -File .\tools\winui_xaml_min_repro.ps1 -NoRestore
+
+# 14) Resolve sample profile
+powershell -ExecutionPolicy Bypass -File .\tools\sample_profile_resolve.ps1 -Profile fixed_set
 ```
 
 ## Acceptance for This Pass

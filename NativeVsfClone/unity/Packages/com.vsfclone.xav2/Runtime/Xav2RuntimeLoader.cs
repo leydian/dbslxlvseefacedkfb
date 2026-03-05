@@ -17,6 +17,8 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionMaterialTypedParams = 0x0015;
         private const ushort SectionSkeletonPosePayload = 0x0016;
         private const ushort SectionSkeletonRigPayload = 0x0017;
+        private const ushort SectionFlagPayloadCompressedLz4 = 0x0001;
+        private const ushort SectionFlagKnownMask = SectionFlagPayloadCompressedLz4;
 
         public static Xav2AvatarPayload Load(string path)
         {
@@ -70,7 +72,7 @@ namespace VsfClone.Xav2.Runtime
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, "XAV2 version field is truncated.");
             }
-            if (version != 1 && version != 2 && version != 3 && version != 4)
+            if (version != 1 && version != 2 && version != 3 && version != 4 && version != 5)
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, $"Unsupported XAV2 version: {version}");
             }
@@ -143,22 +145,53 @@ namespace VsfClone.Xav2.Runtime
                 var sectionOffset = cursor;
                 var sectionLength = (int)sectionSize;
                 cursor += sectionLength;
-                if (sectionFlags != 0)
+
+                byte[] sectionBytes = null;
+                if ((sectionFlags & SectionFlagPayloadCompressedLz4) != 0)
+                {
+                    if (version < 5)
+                    {
+                        return Fail(
+                            diagnostics,
+                            Xav2LoadErrorCode.SectionSchemaInvalid,
+                            $"Compressed section is not supported for XAV2 version {version}: type=0x{sectionType:X4}.");
+                    }
+
+                    if (!TryDecodeCompressedSection(
+                            bytes,
+                            sectionOffset,
+                            sectionLength,
+                            out sectionBytes,
+                            out var compressionError))
+                    {
+                        return Fail(
+                            diagnostics,
+                            Xav2LoadErrorCode.CompressionDecodeFailed,
+                            $"Compressed section decode failed for type 0x{sectionType:X4}: {compressionError}");
+                    }
+                }
+
+                var unknownFlags = (ushort)(sectionFlags & ~SectionFlagKnownMask);
+                if (unknownFlags != 0)
                 {
                     if (!AddWarningOrFail(
                             diagnostics,
                             options,
-                            $"XAV2_SECTION_FLAGS_NONZERO: type=0x{sectionType:X4}, flags={sectionFlags}"))
+                            $"XAV2_SECTION_FLAGS_NONZERO: type=0x{sectionType:X4}, flags={unknownFlags}"))
                     {
                         return false;
                     }
                 }
 
+                var parseBytes = sectionBytes ?? bytes;
+                var parseOffset = sectionBytes != null ? 0 : sectionOffset;
+                var parseLength = sectionBytes != null ? sectionBytes.Length : sectionLength;
+
                 if (!TryParseSection(
                         sectionType,
-                        bytes,
-                        sectionOffset,
-                        sectionLength,
+                        parseBytes,
+                        parseOffset,
+                        parseLength,
                         version,
                         payload,
                         materialsByName,
@@ -179,6 +212,43 @@ namespace VsfClone.Xav2.Runtime
                 return false;
             }
             diagnostics.ParserStage = "runtime-ready";
+            return true;
+        }
+
+        private static bool TryDecodeCompressedSection(
+            byte[] bytes,
+            int sectionOffset,
+            int sectionLength,
+            out byte[] decoded,
+            out string error)
+        {
+            decoded = Array.Empty<byte>();
+            error = string.Empty;
+            if (sectionLength < 4)
+            {
+                error = "compressed section envelope is truncated";
+                return false;
+            }
+
+            var expectedLength = BitConverter.ToInt32(bytes, sectionOffset);
+            if (expectedLength < 0)
+            {
+                error = $"invalid uncompressed size: {expectedLength}";
+                return false;
+            }
+
+            var payloadLength = sectionLength - 4;
+            var compressed = new byte[payloadLength];
+            if (payloadLength > 0)
+            {
+                Buffer.BlockCopy(bytes, sectionOffset + 4, compressed, 0, payloadLength);
+            }
+
+            if (!Xav2Lz4Codec.TryDecompress(compressed, expectedLength, out decoded))
+            {
+                error = $"LZ4 payload decode failed (compressed={payloadLength}, expected={expectedLength})";
+                return false;
+            }
             return true;
         }
 

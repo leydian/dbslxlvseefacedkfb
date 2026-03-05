@@ -95,7 +95,7 @@ namespace VsfClone.Xav2.Editor.Tests
             payload.Materials.Add(new Xav2MaterialPayload
             {
                 Name = "BodyMat",
-                ShaderName = "Standard",
+                ShaderName = "lilToon",
                 BaseColorTextureName = "BaseTex",
                 AlphaMode = "OPAQUE"
             });

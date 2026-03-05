@@ -52,9 +52,10 @@ public sealed record TrackingInputSettings(
     int StaleTimeoutMs,
     bool LastActive,
     TrackingSourceType SourceType,
-    string WebcamDeviceId,
-    string OnnxModelPath,
-    int InferenceFpsCap);
+    string CameraDeviceKey,
+    int InferenceFpsCap,
+    int ParseErrorWarnThreshold = 10,
+    int DroppedPacketWarnThreshold = 10);
 
 public sealed record SessionPersistenceModel(
     int Version,
@@ -69,13 +70,13 @@ public sealed record SessionPersistenceModel(
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 4,
+        Version: 5,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
         OscPublishAddress: "127.0.0.1:39540",
         Sidecar: new SidecarSettings("sidecar", string.Empty, 15000, false),
-        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30),
+        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10),
         LastProfileName: "quality",
         UiMode: "beginner",
         LastUpdatedUtc: DateTimeOffset.UtcNow);
@@ -158,13 +159,13 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 4,
+                    Version: 5,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
                     LastUpdatedUtc: legacy.LastUpdatedUtc));
@@ -196,7 +197,7 @@ public sealed class SessionStateStore
         var lastUpdated = model.LastUpdatedUtc == default ? DateTimeOffset.UtcNow : model.LastUpdatedUtc;
         return model with
         {
-            Version = Math.Max(4, model.Version),
+            Version = Math.Max(5, model.Version),
             Tracking = NormalizeTracking(model.Tracking),
             UiMode = mode,
             LastUpdatedUtc = lastUpdated,
@@ -207,7 +208,7 @@ public sealed class SessionStateStore
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
@@ -216,14 +217,17 @@ public sealed class SessionStateStore
             ? value.SourceType
             : TrackingSourceType.OscIfacial;
         var fpsCap = Math.Clamp(value.InferenceFpsCap <= 0 ? 30 : value.InferenceFpsCap, 5, 120);
+        var parseThreshold = Math.Clamp(value.ParseErrorWarnThreshold <= 0 ? 10 : value.ParseErrorWarnThreshold, 1, 10000);
+        var droppedThreshold = Math.Clamp(value.DroppedPacketWarnThreshold <= 0 ? 10 : value.DroppedPacketWarnThreshold, 1, 10000);
         return new TrackingInputSettings(
             port,
             stale,
             value.LastActive,
             sourceType,
-            value.WebcamDeviceId ?? string.Empty,
-            value.OnnxModelPath ?? string.Empty,
-            fpsCap);
+            value.CameraDeviceKey ?? string.Empty,
+            fpsCap,
+            parseThreshold,
+            droppedThreshold);
     }
 
     private static string NormalizeUiMode(string value)

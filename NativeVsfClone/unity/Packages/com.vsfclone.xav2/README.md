@@ -42,6 +42,13 @@ If a material in the export target set references a shader outside this list, ex
 - `Xav2LoadDiagnostics`
   - `ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`, `WarningCodes`
 
+## Export compression (v5)
+
+- `Xav2ExportOptions.EnableCompression` enables section-level payload compression.
+- Current codec: `LZ4` (`Xav2CompressionCodec.Lz4`).
+- Large sections are compressed opportunistically (`mesh`, `texture`, `skin`, `blendshape`) when size improves.
+- Compression-enabled exports are written as format `v5`; loader still supports `v1..v4`.
+
 Unknown section policy:
 
 - `Warn` (default): append warning (`XAV2_UNKNOWN_SECTION`) and continue

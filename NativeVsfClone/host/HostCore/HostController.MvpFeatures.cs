@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using OpenCvSharp;
 
 namespace HostCore;
 
@@ -376,13 +377,41 @@ public sealed partial class HostController
 
     public TrackingInputSettings GetTrackingInputSettings() => _sessionPersistence.Tracking;
 
+    public IReadOnlyList<WebcamDeviceOption> GetAvailableWebcamDevices(int maxProbe = 10)
+    {
+        var probeCount = Math.Clamp(maxProbe, 1, 32);
+        var list = new List<WebcamDeviceOption>(probeCount + 1)
+        {
+            new WebcamDeviceOption(string.Empty, "Default Camera", true),
+        };
+        for (var i = 0; i < probeCount; i++)
+        {
+            var key = i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var available = false;
+            try
+            {
+                using var cap = new VideoCapture(i);
+                available = cap.IsOpened();
+            }
+            catch
+            {
+                available = false;
+            }
+
+            list.Add(new WebcamDeviceOption(key, $"Camera {i}", available));
+        }
+
+        return list;
+    }
+
     public void ConfigureTrackingInputSettings(
         ushort listenPort,
         int staleTimeoutMs,
         TrackingSourceType? sourceType = null,
-        string? webcamDeviceId = null,
-        string? onnxModelPath = null,
-        int? inferenceFpsCap = null)
+        string? cameraDeviceKey = null,
+        int? inferenceFpsCap = null,
+        int? parseErrorWarnThreshold = null,
+        int? droppedPacketWarnThreshold = null)
     {
         var current = _sessionPersistence.Tracking;
         var normalized = new TrackingInputSettings(
@@ -390,9 +419,10 @@ public sealed partial class HostController
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
             current.LastActive,
             sourceType ?? current.SourceType,
-            webcamDeviceId ?? current.WebcamDeviceId,
-            onnxModelPath ?? current.OnnxModelPath,
-            Math.Clamp(inferenceFpsCap ?? current.InferenceFpsCap, 5, 120));
+            cameraDeviceKey ?? current.CameraDeviceKey,
+            Math.Clamp(inferenceFpsCap ?? current.InferenceFpsCap, 5, 120),
+            Math.Clamp(parseErrorWarnThreshold ?? current.ParseErrorWarnThreshold, 1, 10000),
+            Math.Clamp(droppedPacketWarnThreshold ?? current.DroppedPacketWarnThreshold, 1, 10000));
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -403,7 +433,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, fps_cap={normalized.InferenceFpsCap}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
                 NcResultCode.Ok),
             false);
     }
@@ -431,9 +461,10 @@ public sealed partial class HostController
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
             active,
             current.SourceType,
-            current.WebcamDeviceId,
-            current.OnnxModelPath,
-            current.InferenceFpsCap);
+            current.CameraDeviceKey,
+            current.InferenceFpsCap,
+            current.ParseErrorWarnThreshold,
+            current.DroppedPacketWarnThreshold);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,

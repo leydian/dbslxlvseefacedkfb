@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [avatar_render_recovery_bundle_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/avatar_render_recovery_bundle_2026-03-06.md): cumulative render recovery bundle for VRM/XAV2 visibility regressions, alpha-mode contract fixes, runtime tracking sanitization, deployment stabilization, and remaining known gaps
 - [webcam_onnx_tracking_implementation_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/webcam_onnx_tracking_implementation_2026-03-06.md): HostCore webcam ONNX path implementation (real capture/inference loop), fixed model schema validation, ARKit 52 blendshape mapping, and WPF/WinUI tracking diagnostics enrichment
 - [xav2_visibility_fallback_and_warning_gate_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_visibility_fallback_and_warning_gate_2026-03-06.md): XAV2 visibility hardening update covering v3 skeleton finite-check + fallback skinning path, full warning-code emission in avatar_tool, strict gate warning-set evaluation, and WPF avatar diagnostics warning visibility
 - [workspace_change_rollup_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/workspace_change_rollup_2026-03-06.md): consolidated workspace rollup for XAV2 v3 skeleton/lilToon rendering path, Unity importer workflow addition, host UI encoding stabilization, and release/build guardrail updates

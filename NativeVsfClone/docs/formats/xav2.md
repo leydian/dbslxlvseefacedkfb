@@ -1,4 +1,4 @@
-# XAV2 Format (Draft v1/v2/v3/v4)
+# XAV2 Format (Draft v1/v2/v3/v4/v5)
 
 XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transport.
 
@@ -6,10 +6,10 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 
 - `.xav2`
 
-## Binary Layout (v1/v2/v3/v4)
+## Binary Layout (v1/v2/v3/v4/v5)
 
 1. `magic[4]`: ASCII `XAV2`
-2. `version[2]`: little-endian unsigned integer (`1|2|3|4`)
+2. `version[2]`: little-endian unsigned integer (`1|2|3|4|5`)
 3. `manifest_size[4]`: little-endian unsigned integer
 4. `manifest_json[manifest_size]`: UTF-8 JSON
 5. `asset_sections[...]`: zero or more TLV entries
@@ -34,13 +34,21 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 ## TLV Section Header
 
 1. `type[2]`
-2. `flags[2]` (currently `0` expected)
+2. `flags[2]`
 3. `size[4]`
 4. `payload[size]`
 
 If section payload crosses file boundary, loader returns `XAV2_SECTION_TRUNCATED`.
 
-## Section Types (v1/v2/v3/v4)
+### Section Flags
+
+- `0x0001`: payload is LZ4-compressed envelope (`v5+`)
+  - payload layout:
+    - `uncompressed_size[4]` (`uint32`, little-endian)
+    - `compressed_lz4[...]`
+- unknown flag bits are reserved; loader records `XAV2_SECTION_FLAGS_NONZERO` warning.
+
+## Section Types (v1/v2/v3/v4/v5)
 
 - `0x0001` Legacy mesh blob
 - `0x0002` Texture blob

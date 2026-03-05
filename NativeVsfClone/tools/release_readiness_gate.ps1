@@ -4,6 +4,9 @@ param(
     [switch]$SkipNativeBuild,
     [switch]$IncludeWinUi,
     [switch]$NoRestore,
+    [switch]$EnableHostE2E,
+    [switch]$EnableWinUiMinRepro,
+    [switch]$EnableNuGetMirrorBootstrap,
     [switch]$SkipVersionContractCheck,
     [switch]$SkipQualityBaseline,
     [string]$SummaryPath = ".\build\reports\release_readiness_gate_summary.txt"
@@ -80,6 +83,39 @@ try {
     $results.Add((Invoke-Step -Name "Release gate dashboard refresh" -Action {
         & powershell -ExecutionPolicy Bypass -File .\tools\release_gate_dashboard.ps1
     }))
+
+    if ($EnableNuGetMirrorBootstrap) {
+        $results.Add((Invoke-Step -Name "NuGet mirror bootstrap" -Action {
+            & powershell -ExecutionPolicy Bypass -File .\tools\nuget_mirror_bootstrap.ps1
+        }))
+    }
+
+    if ($EnableHostE2E) {
+        $results.Add((Invoke-Step -Name "Host E2E gate" -Action {
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\host_e2e_gate.ps1",
+                "-Configuration", $Configuration,
+                "-RuntimeIdentifier", $RuntimeIdentifier
+            )
+            if ($IncludeWinUi) { $args += "-IncludeWinUi" }
+            if ($SkipNativeBuild) { $args += "-SkipNativeBuild" }
+            if ($NoRestore) { $args += "-NoRestore" }
+            & powershell @args
+        }))
+    }
+
+    if ($EnableWinUiMinRepro -and $IncludeWinUi) {
+        $results.Add((Invoke-Step -Name "WinUI XAML minimal repro" -Action {
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\winui_xaml_min_repro.ps1",
+                "-Configuration", $Configuration
+            )
+            if ($NoRestore) { $args += "-NoRestore" }
+            & powershell @args
+        }))
+    }
 }
 finally {
     Pop-Location
@@ -94,6 +130,9 @@ $lines.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $lines.Add("IncludeWinUi: $IncludeWinUi")
 $lines.Add("NoRestore: $NoRestore")
 $lines.Add("SkipNativeBuild: $SkipNativeBuild")
+$lines.Add("EnableHostE2E: $EnableHostE2E")
+$lines.Add("EnableWinUiMinRepro: $EnableWinUiMinRepro")
+$lines.Add("EnableNuGetMirrorBootstrap: $EnableNuGetMirrorBootstrap")
 $lines.Add("DurationSec: $durationSec")
 $lines.Add("")
 $lines.Add("Steps:")
@@ -106,6 +145,9 @@ $lines.Add("- build/reports/quality_baseline_summary.txt")
 $lines.Add("- build/reports/host_publish_latest.txt")
 $lines.Add("- build/reports/release_gate_dashboard.txt")
 $lines.Add("- build/reports/release_gate_dashboard.json")
+$lines.Add("- build/reports/host_e2e_gate_summary.txt")
+$lines.Add("- build/reports/winui_xaml_min_repro_summary.txt")
+$lines.Add("- build/reports/nuget_mirror_bootstrap_summary.txt")
 
 $lines | Set-Content -Path $resolvedSummaryPath -Encoding UTF8
 Write-Host "[release-readiness] Summary: $resolvedSummaryPath"

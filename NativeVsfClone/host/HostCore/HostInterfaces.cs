@@ -40,16 +40,22 @@ public interface IRenderPresetStore
 public enum TrackingSourceType
 {
     OscIfacial = 0,
-    WebcamOnnx = 1,
+    WebcamMediapipe = 1,
 }
 
 public sealed record TrackingStartOptions(
     ushort ListenPort,
     int StaleTimeoutMs,
     TrackingSourceType SourceType,
-    string WebcamDeviceId,
-    string OnnxModelPath,
-    int InferenceFpsCap);
+    string CameraDeviceKey,
+    int InferenceFpsCap,
+    int ParseErrorWarnThreshold = 10,
+    int DroppedPacketWarnThreshold = 10);
+
+public sealed record WebcamDeviceOption(
+    string DeviceKey,
+    string DisplayName,
+    bool IsAvailable);
 
 public sealed record TrackingDiagnostics(
     bool IsActive,

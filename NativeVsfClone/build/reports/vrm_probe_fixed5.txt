@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-05T21:53:15
+Generated: 2026-03-06T01:42:53
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -13,9 +13,9 @@ Load succeeded
   Compat: full
   ParserStage: runtime-ready
   PrimaryError: NONE
-  Meshes: 26
+  Meshes: 50
   Materials: 15
-  MeshPayloads: 26
+  MeshPayloads: 50
   MaterialPayloads: 15
   TexturePayloads: 11
   ExpressionCount: 3
@@ -24,7 +24,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 18
+  Warnings: 19
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -32,8 +32,8 @@ Load succeeded
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 2
-  LastMissingFeature: MToon advanced parameter binding
+  MissingFeatures: 1
+  LastMissingFeature: SpringBone runtime simulation
 
 ---- Kikyo_FT Variant.vrm
 Load succeeded
@@ -43,9 +43,9 @@ Load succeeded
   Compat: full
   ParserStage: runtime-ready
   PrimaryError: NONE
-  Meshes: 22
+  Meshes: 29
   Materials: 18
-  MeshPayloads: 22
+  MeshPayloads: 29
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 3
@@ -54,7 +54,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 21
+  Warnings: 22
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -62,8 +62,8 @@ Load succeeded
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 2
-  LastMissingFeature: MToon advanced parameter binding
+  MissingFeatures: 1
+  LastMissingFeature: SpringBone runtime simulation
 
 ---- Kikyo_FT Variant111.vrm
 Load succeeded
@@ -73,9 +73,9 @@ Load succeeded
   Compat: full
   ParserStage: runtime-ready
   PrimaryError: NONE
-  Meshes: 22
+  Meshes: 29
   Materials: 18
-  MeshPayloads: 22
+  MeshPayloads: 29
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 17
@@ -84,7 +84,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 21
+  Warnings: 22
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -92,8 +92,8 @@ Load succeeded
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 2
-  LastMissingFeature: MToon advanced parameter binding
+  MissingFeatures: 1
+  LastMissingFeature: SpringBone runtime simulation
 
 ---- Kikyo_FT Variant112.vrm
 Load succeeded
@@ -103,9 +103,9 @@ Load succeeded
   Compat: full
   ParserStage: runtime-ready
   PrimaryError: NONE
-  Meshes: 21
+  Meshes: 28
   Materials: 18
-  MeshPayloads: 21
+  MeshPayloads: 28
   MaterialPayloads: 18
   TexturePayloads: 22
   ExpressionCount: 18
@@ -114,7 +114,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 21
+  Warnings: 22
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -122,8 +122,8 @@ Load succeeded
   SpringBoneJoints: 26
   SpringBoneColliders: 4
   SpringBoneColliderGroups: 2
-  MissingFeatures: 2
-  LastMissingFeature: MToon advanced parameter binding
+  MissingFeatures: 1
+  LastMissingFeature: SpringBone runtime simulation
 
 ---- NewOnYou.vrm
 Load succeeded
@@ -133,9 +133,9 @@ Load succeeded
   Compat: full
   ParserStage: runtime-ready
   PrimaryError: NONE
-  Meshes: 20
+  Meshes: 30
   Materials: 12
-  MeshPayloads: 20
+  MeshPayloads: 30
   MaterialPayloads: 12
   TexturePayloads: 9
   ExpressionCount: 18
@@ -144,7 +144,7 @@ Load succeeded
   FormatSections: 0
   FormatDecodedSections: 0
   FormatUnknownSections: 0
-  Warnings: 15
+  Warnings: 16
   WarningCodes: 0
   LastWarning: W_STAGE: runtime-ready
   SpringBonePresent: true
@@ -152,6 +152,6 @@ Load succeeded
   SpringBoneJoints: 5
   SpringBoneColliders: 57
   SpringBoneColliderGroups: 50
-  MissingFeatures: 2
-  LastMissingFeature: MToon advanced parameter binding
+  MissingFeatures: 1
+  LastMissingFeature: SpringBone runtime simulation
 

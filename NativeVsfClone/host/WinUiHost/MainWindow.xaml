@@ -215,21 +215,25 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Column="0" Text="Listen Port" VerticalAlignment="Center"/>
                         <TextBox Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Source" VerticalAlignment="Center" Margin="0,8,0,0"/>
                         <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
                             <x:String>OSC (iFacialMocap)</x:String>
-                            <x:String>Webcam (ONNX)</x:String>
+                            <x:String>Webcam (MediaPipe)</x:String>
                         </ComboBox>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Webcam Id" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="TrackingWebcamDeviceTextBox" Margin="0,8,0,0"/>
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="ONNX Path" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingOnnxModelPathTextBox" Margin="0,8,0,0"/>
-                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Infer FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Webcam" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                        <Grid Grid.Row="2" Grid.Column="1" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" x:Name="TrackingWebcamDeviceComboBox"/>
+                            <Button Grid.Column="1" x:Name="RefreshTrackingWebcamButton" Content="새로고침" Click="RefreshTrackingWebcam_Click" Margin="8,0,0,0" MinWidth="70"/>
+                        </Grid>
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Infer FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                        <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
                     </Grid>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
                         <Button x:Name="StartTrackingButton" Content="트래킹 시작" Click="StartTracking_Click" MinWidth="110"/>

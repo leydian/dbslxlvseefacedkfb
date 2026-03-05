@@ -10,6 +10,9 @@ Follow-up implementation pass for the 20-item release board focused on previousl
 - avatar load soak gate
 - session schema migration regression check
 - diagnostics bundle enrichment with repro/environment payloads
+- NuGet mirror bootstrap and sidecar lock guard
+- host end-to-end gate and WinUI minimal repro wrapper
+- sample profile split (`fixed_set` / `real_large_set`)
 
 ## Implemented
 
@@ -74,6 +77,17 @@ Follow-up implementation pass for the 20-item release board focused on previousl
   - `-EnableSoak`
   - `-EnableSessionMigration`
   - `-EnableTrackingFuzz`
+
+8) Remaining automation closure
+
+- added `tools/nuget_mirror_bootstrap.ps1`
+- added `tools/sidecar_lock_guard.ps1`
+- added `tools/host_e2e_gate.ps1`
+- added `tools/winui_xaml_min_repro.ps1`
+- added sample profiles:
+  - `tools/sample_profiles/fixed_set.txt`
+  - `tools/sample_profiles/real_large_set.txt`
+  - `tools/sample_profile_resolve.ps1`
 
 ## Verification Snapshot
 

@@ -298,9 +298,10 @@ public sealed partial class HostController
                 listenPort == 0 ? (ushort)49983 : listenPort,
                 staleTimeoutMs,
                 trackingSettings.SourceType,
-                trackingSettings.WebcamDeviceId,
-                trackingSettings.OnnxModelPath,
-                trackingSettings.InferenceFpsCap);
+                trackingSettings.CameraDeviceKey,
+                trackingSettings.InferenceFpsCap,
+                trackingSettings.ParseErrorWarnThreshold,
+                trackingSettings.DroppedPacketWarnThreshold);
             var rc = _trackingInputService.Start(options);
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
             if (rc == NcResultCode.Ok)
@@ -484,7 +485,24 @@ public sealed partial class HostController
             var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref trackingFrame);
             if (trackingRc != NcResultCode.Ok)
             {
+                _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = $"NC_SET_TRACKING_FRAME_{trackingRc}" };
                 TrackResult("SetTrackingFrame", trackingRc);
+            }
+            else if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
+                     _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_TRACKING_FRAME_", StringComparison.Ordinal))
+            {
+                _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
+            }
+        }
+        else
+        {
+            // Keep render visibility stable when tracking input is absent.
+            var neutralFrame = BuildNeutralTrackingFrame();
+            var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref neutralFrame);
+            if (trackingRc != NcResultCode.Ok)
+            {
+                _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = $"NC_SET_TRACKING_FRAME_{trackingRc}" };
+                TrackResult("SetTrackingFrameNeutral", trackingRc);
             }
         }
         if (_trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
@@ -503,7 +521,13 @@ public sealed partial class HostController
                 var exprRc = NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
                 if (exprRc != NcResultCode.Ok)
                 {
+                    _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = $"NC_SET_EXPRESSION_WEIGHTS_{exprRc}" };
                     TrackResult("SetExpressionWeights", exprRc);
+                }
+                else if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
+                         _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_EXPRESSION_WEIGHTS_", StringComparison.Ordinal))
+                {
+                    _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
                 }
             }
         }
@@ -829,6 +853,29 @@ public sealed partial class HostController
                key.Equals("headposx", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("headposy", StringComparison.OrdinalIgnoreCase) ||
                key.Equals("headposz", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static NcTrackingFrame BuildNeutralTrackingFrame()
+    {
+        return new NcTrackingFrame
+        {
+            HeadPosX = 0.0f,
+            HeadPosY = 0.0f,
+            HeadPosZ = 0.0f,
+            HeadRotX = 0.0f,
+            HeadRotY = 0.0f,
+            HeadRotZ = 0.0f,
+            HeadRotW = 1.0f,
+            EyeGazeLX = 0.0f,
+            EyeGazeLY = 0.0f,
+            EyeGazeLZ = 0.0f,
+            EyeGazeRX = 0.0f,
+            EyeGazeRY = 0.0f,
+            EyeGazeRZ = 0.0f,
+            BlinkL = 0.0f,
+            BlinkR = 0.0f,
+            MouthOpen = 0.0f,
+        };
     }
 
     private void TrackResult(string source, NcResultCode rc)

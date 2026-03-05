@@ -20,7 +20,7 @@ var maxDurationSec = int.Parse(GetArg(args, "--max-seconds", "8"));
 var summaryPath = GetArg(args, "--summary", Path.Combine("build", "reports", "tracking_parser_fuzz_gate_summary.txt"));
 
 var service = new TrackingInputService();
-var startRc = service.Start(new TrackingStartOptions(listenPort, 500, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30));
+var startRc = service.Start(new TrackingStartOptions(listenPort, 500, TrackingSourceType.OscIfacial, string.Empty, 30));
 if (startRc != NcResultCode.Ok)
 {
     throw new InvalidOperationException($"TrackingInputService.Start failed: {startRc}");

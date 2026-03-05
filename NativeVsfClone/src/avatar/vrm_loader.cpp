@@ -7,6 +7,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -358,6 +359,25 @@ bool TryGetIndex(const JsonValue& root, const std::string& key, std::size_t* out
     return true;
 }
 
+bool TryGetNumberArray(const JsonValue& root, const std::string& key, std::size_t expected_count, std::vector<float>* out) {
+    if (out == nullptr) {
+        return false;
+    }
+    const auto* v = FindKey(root, key);
+    if (v == nullptr || v->type != JsonValue::Type::Array || v->array_value.size() < expected_count) {
+        return false;
+    }
+    out->clear();
+    out->reserve(expected_count);
+    for (std::size_t i = 0U; i < expected_count; ++i) {
+        if (v->array_value[i].type != JsonValue::Type::Number) {
+            return false;
+        }
+        out->push_back(static_cast<float>(v->array_value[i].number_value));
+    }
+    return true;
+}
+
 std::string DetectTextureFormat(const std::string& mime_type, const std::string& name_hint) {
     const auto mime = ToLower(mime_type);
     if (mime == "image/png") {
@@ -691,9 +711,20 @@ struct MaterialInfo {
     std::string name;
     std::string shader_name = "MToon (minimal)";
     std::string base_color_texture_name;
+    std::string normal_texture_name;
+    std::string emission_texture_name;
+    std::string rim_texture_name;
     bool double_sided = false;
     std::string alpha_mode = "OPAQUE";
     float alpha_cutoff = 0.5f;
+    std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 4U> rim_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    float bump_scale = 0.0f;
+    float rim_power = 2.0f;
+    float rim_lighting_mix = 0.0f;
+    bool has_mtoon_binding = false;
 };
 
 void AddExpressionIfMissing(std::vector<ExpressionState>* out,
@@ -1225,6 +1256,26 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     std::vector<MaterialInfo> parsed_materials;
     std::uint32_t missing_texture_refs = 0U;
     std::uint32_t unsupported_materials = 0U;
+    auto resolve_texture_name = [&](std::size_t texture_index, std::string* out_name, const std::string& context) -> bool {
+        if (out_name == nullptr) {
+            return false;
+        }
+        if (texture_index >= texture_to_image.size()) {
+            ++missing_texture_refs;
+            pkg.warnings.push_back(
+                "W_PAYLOAD: VRM_TEXTURE_MISSING: " + context + " texture index out of range");
+            return false;
+        }
+        const auto image_index = texture_to_image[texture_index];
+        if (image_index >= image_table.size() || !image_table[image_index].valid) {
+            ++missing_texture_refs;
+            pkg.warnings.push_back(
+                "W_PAYLOAD: VRM_TEXTURE_MISSING: " + context + " texture source missing");
+            return false;
+        }
+        *out_name = image_table[image_index].name;
+        return true;
+    };
     if (materials_v != nullptr && materials_v->type == JsonValue::Type::Array) {
         parsed_materials.reserve(materials_v->array_value.size());
         for (std::size_t i = 0U; i < materials_v->array_value.size(); ++i) {
@@ -1246,25 +1297,85 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
             const auto* pbr = FindKey(material, "pbrMetallicRoughness");
             if (pbr != nullptr && pbr->type == JsonValue::Type::Object) {
+                std::vector<float> base_color_factor;
+                if (TryGetNumberArray(*pbr, "baseColorFactor", 4U, &base_color_factor)) {
+                    info.base_color = {
+                        base_color_factor[0],
+                        base_color_factor[1],
+                        base_color_factor[2],
+                        base_color_factor[3]};
+                    info.has_mtoon_binding = true;
+                }
                 const auto* tex_obj = FindKey(*pbr, "baseColorTexture");
                 if (tex_obj != nullptr && tex_obj->type == JsonValue::Type::Object) {
                     std::size_t texture_index = std::numeric_limits<std::size_t>::max();
                     if (TryGetIndex(*tex_obj, "index", &texture_index)) {
-                        if (texture_index < texture_to_image.size()) {
-                            const auto image_index = texture_to_image[texture_index];
-                            if (image_index < image_table.size() && image_table[image_index].valid) {
-                                info.base_color_texture_name = image_table[image_index].name;
-                            } else {
-                                ++missing_texture_refs;
-                                pkg.warnings.push_back(
-                                    "W_PAYLOAD: VRM_TEXTURE_MISSING: baseColorTexture source missing for material '" +
-                                    info.name + "'");
-                            }
-                        } else {
-                            ++missing_texture_refs;
-                            pkg.warnings.push_back(
-                                "W_PAYLOAD: VRM_TEXTURE_MISSING: baseColorTexture index out of range for material '" +
-                                info.name + "'");
+                        if (resolve_texture_name(texture_index, &info.base_color_texture_name, "baseColorTexture for material '" + info.name + "'")) {
+                            info.has_mtoon_binding = true;
+                        }
+                    }
+                }
+            }
+
+            const auto* normal_tex = FindKey(material, "normalTexture");
+            if (normal_tex != nullptr && normal_tex->type == JsonValue::Type::Object) {
+                std::size_t texture_index = std::numeric_limits<std::size_t>::max();
+                if (TryGetIndex(*normal_tex, "index", &texture_index)) {
+                    if (resolve_texture_name(texture_index, &info.normal_texture_name, "normalTexture for material '" + info.name + "'")) {
+                        info.has_mtoon_binding = true;
+                    }
+                }
+                double normal_scale = static_cast<double>(info.bump_scale);
+                if (TryGetNumber(*normal_tex, "scale", &normal_scale)) {
+                    info.bump_scale = static_cast<float>(normal_scale);
+                    info.has_mtoon_binding = true;
+                }
+            }
+
+            std::vector<float> emissive_factor;
+            if (TryGetNumberArray(material, "emissiveFactor", 3U, &emissive_factor)) {
+                info.emission_color = {emissive_factor[0], emissive_factor[1], emissive_factor[2], 1.0f};
+                info.has_mtoon_binding = true;
+            }
+            const auto* emissive_tex = FindKey(material, "emissiveTexture");
+            if (emissive_tex != nullptr && emissive_tex->type == JsonValue::Type::Object) {
+                std::size_t texture_index = std::numeric_limits<std::size_t>::max();
+                if (TryGetIndex(*emissive_tex, "index", &texture_index)) {
+                    if (resolve_texture_name(texture_index, &info.emission_texture_name, "emissiveTexture for material '" + info.name + "'")) {
+                        info.has_mtoon_binding = true;
+                    }
+                }
+            }
+
+            const auto* extensions = FindKey(material, "extensions");
+            if (extensions != nullptr && extensions->type == JsonValue::Type::Object) {
+                const auto* mtoon = FindKey(*extensions, "VRMC_materials_mtoon");
+                if (mtoon != nullptr && mtoon->type == JsonValue::Type::Object) {
+                    std::vector<float> shade_color_factor;
+                    if (TryGetNumberArray(*mtoon, "shadeColorFactor", 3U, &shade_color_factor)) {
+                        info.shade_color = {shade_color_factor[0], shade_color_factor[1], shade_color_factor[2], 1.0f};
+                        info.has_mtoon_binding = true;
+                    }
+                    std::vector<float> rim_color_factor;
+                    if (TryGetNumberArray(*mtoon, "rimColorFactor", 3U, &rim_color_factor)) {
+                        info.rim_color = {rim_color_factor[0], rim_color_factor[1], rim_color_factor[2], 1.0f};
+                        info.has_mtoon_binding = true;
+                    }
+                    double rim_power = static_cast<double>(info.rim_power);
+                    if (TryGetNumber(*mtoon, "rimFresnelPowerFactor", &rim_power)) {
+                        info.rim_power = static_cast<float>(rim_power);
+                        info.has_mtoon_binding = true;
+                    }
+                    double rim_mix = static_cast<double>(info.rim_lighting_mix);
+                    if (TryGetNumber(*mtoon, "rimLightingMixFactor", &rim_mix)) {
+                        info.rim_lighting_mix = static_cast<float>(rim_mix);
+                        info.has_mtoon_binding = true;
+                    }
+                    const auto* shade_mul_tex = FindKey(*mtoon, "shadeMultiplyTexture");
+                    if (shade_mul_tex != nullptr && shade_mul_tex->type == JsonValue::Type::Object) {
+                        std::size_t texture_index = std::numeric_limits<std::size_t>::max();
+                        if (TryGetIndex(*shade_mul_tex, "index", &texture_index)) {
+                            (void)resolve_texture_name(texture_index, &info.rim_texture_name, "shadeMultiplyTexture for material '" + info.name + "'");
                         }
                     }
                 }
@@ -1293,6 +1404,47 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         material_payload.alpha_mode = m.alpha_mode;
         material_payload.alpha_cutoff = m.alpha_cutoff;
         material_payload.double_sided = m.double_sided;
+        std::ostringstream shader_params;
+        shader_params << std::fixed << std::setprecision(6);
+        shader_params << "_BaseColor=(" << m.base_color[0] << "," << m.base_color[1] << "," << m.base_color[2] << "," << m.base_color[3] << ")";
+        shader_params << ",_ShadeColor=(" << m.shade_color[0] << "," << m.shade_color[1] << "," << m.shade_color[2] << "," << m.shade_color[3] << ")";
+        shader_params << ",_EmissionColor=(" << m.emission_color[0] << "," << m.emission_color[1] << "," << m.emission_color[2] << "," << m.emission_color[3] << ")";
+        shader_params << ",_RimColor=(" << m.rim_color[0] << "," << m.rim_color[1] << "," << m.rim_color[2] << "," << m.rim_color[3] << ")";
+        const auto alpha_mode = ToLower(m.alpha_mode);
+        if (alpha_mode == "mask") {
+            shader_params << ",_Cutoff=" << m.alpha_cutoff;
+        }
+        shader_params << ",_BumpScale=" << m.bump_scale;
+        shader_params << ",_RimFresnelPower=" << m.rim_power;
+        shader_params << ",_RimLightingMix=" << m.rim_lighting_mix;
+        if (alpha_mode == "mask") {
+            shader_params << ",_AlphaClip=1";
+        } else if (alpha_mode == "blend") {
+            shader_params << ",_Surface=1,_Mode=2,_ALPHABLEND_ON=1";
+        }
+        material_payload.shader_params_json = shader_params.str();
+        material_payload.typed_color_params.push_back({"_BaseColor", {m.base_color[0], m.base_color[1], m.base_color[2], m.base_color[3]}});
+        material_payload.typed_color_params.push_back({"_ShadeColor", {m.shade_color[0], m.shade_color[1], m.shade_color[2], m.shade_color[3]}});
+        material_payload.typed_color_params.push_back({"_EmissionColor", {m.emission_color[0], m.emission_color[1], m.emission_color[2], m.emission_color[3]}});
+        material_payload.typed_color_params.push_back({"_RimColor", {m.rim_color[0], m.rim_color[1], m.rim_color[2], m.rim_color[3]}});
+        if (alpha_mode == "mask") {
+            material_payload.typed_float_params.push_back({"_Cutoff", m.alpha_cutoff});
+        }
+        material_payload.typed_float_params.push_back({"_BumpScale", m.bump_scale});
+        material_payload.typed_float_params.push_back({"_RimFresnelPower", m.rim_power});
+        material_payload.typed_float_params.push_back({"_RimLightingMix", m.rim_lighting_mix});
+        if (!m.base_color_texture_name.empty()) {
+            material_payload.typed_texture_params.push_back({"base", m.base_color_texture_name});
+        }
+        if (!m.normal_texture_name.empty()) {
+            material_payload.typed_texture_params.push_back({"normal", m.normal_texture_name});
+        }
+        if (!m.emission_texture_name.empty()) {
+            material_payload.typed_texture_params.push_back({"emission", m.emission_texture_name});
+        }
+        if (!m.rim_texture_name.empty()) {
+            material_payload.typed_texture_params.push_back({"rim", m.rim_texture_name});
+        }
         pkg.material_payloads.push_back(std::move(material_payload));
         std::ostringstream material_diag;
         material_diag << "W_MATERIAL: " << m.name
@@ -1315,76 +1467,10 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         if (prims_v == nullptr || prims_v->type != JsonValue::Type::Array || prims_v->array_value.empty()) {
             continue;
         }
-        const auto& prim = prims_v->array_value.front();
-        if (prim.type != JsonValue::Type::Object) {
-            continue;
-        }
-        const auto* attrs_v = FindKey(prim, "attributes");
-        if (attrs_v == nullptr || attrs_v->type != JsonValue::Type::Object) {
-            continue;
-        }
-        const auto* pos_v = FindKey(*attrs_v, "POSITION");
-        if (pos_v == nullptr || pos_v->type != JsonValue::Type::Number) {
-            continue;
-        }
-        const std::size_t pos_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(pos_v->number_value));
-
-        MeshRenderPayload mesh_payload;
         std::string mesh_name;
         if (!TryGetString(mesh, "name", &mesh_name)) {
             mesh_name = "Mesh" + std::to_string(mesh_i);
         }
-        mesh_payload.name = mesh_name;
-        mesh_payload.vertex_stride = 12U;
-        std::uint32_t vtx_count = 0U;
-        std::string read_error;
-        if (!ExtractPositions(bin_chunk.bytes, accessors, views, pos_accessor, &mesh_payload.vertex_blob, &vtx_count, &read_error)) {
-            pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: " + read_error);
-            continue;
-        }
-
-        const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
-        if (uv0_v != nullptr && uv0_v->type == JsonValue::Type::Number) {
-            const std::size_t uv_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(uv0_v->number_value));
-            std::vector<std::array<float, 2U>> uvs;
-            if (ExtractTexcoord0(bin_chunk.bytes, accessors, views, uv_accessor, &uvs, &read_error) &&
-                uvs.size() == static_cast<std::size_t>(vtx_count)) {
-                std::vector<std::uint8_t> interleaved;
-                interleaved.reserve(static_cast<std::size_t>(vtx_count) * 20U);
-                const auto* pos_bytes = mesh_payload.vertex_blob.data();
-                for (std::uint32_t i = 0U; i < vtx_count; ++i) {
-                    const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
-                    interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
-                    const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uvs[i].data());
-                    interleaved.insert(interleaved.end(), uv_bytes, uv_bytes + 8U);
-                }
-                mesh_payload.vertex_blob = std::move(interleaved);
-                mesh_payload.vertex_stride = 20U;
-            } else {
-                pkg.warnings.push_back("W_PAYLOAD: VRM_TEXCOORD0_READ_FAILED: " + read_error);
-            }
-        }
-
-        std::size_t idx_accessor = std::numeric_limits<std::size_t>::max();
-        if (TryGetIndex(prim, "indices", &idx_accessor)) {
-            if (!ExtractIndices(bin_chunk.bytes, accessors, views, idx_accessor, &mesh_payload.indices, &read_error)) {
-                pkg.warnings.push_back("W_PAYLOAD: VRM_INDEX_READ_FAILED: " + read_error);
-                mesh_payload.indices.clear();
-            }
-        }
-        std::size_t material_index = std::numeric_limits<std::size_t>::max();
-        if (TryGetIndex(prim, "material", &material_index)) {
-            mesh_payload.material_index = static_cast<std::int32_t>(material_index);
-        }
-
-        if (mesh_payload.indices.empty()) {
-            mesh_payload.indices.reserve(vtx_count);
-            for (std::uint32_t i = 0U; i < vtx_count; ++i) {
-                mesh_payload.indices.push_back(i);
-            }
-        }
-
-        const auto* targets_v = FindKey(prim, "targets");
         std::vector<std::string> target_names;
         const auto* extras_v = FindKey(mesh, "extras");
         if (extras_v != nullptr && extras_v->type == JsonValue::Type::Object) {
@@ -1412,49 +1498,131 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 }
             }
         }
-        BlendShapeRenderPayload blendshape_payload;
-        blendshape_payload.mesh_name = mesh_name;
-        if (targets_v != nullptr && targets_v->type == JsonValue::Type::Array) {
-            for (std::size_t target_i = 0U; target_i < targets_v->array_value.size(); ++target_i) {
-                const auto& target = targets_v->array_value[target_i];
-                if (target.type != JsonValue::Type::Object) {
-                    continue;
-                }
-                const auto* pos_acc = FindKey(target, "POSITION");
-                if (pos_acc == nullptr || pos_acc->type != JsonValue::Type::Number) {
-                    continue;
-                }
-                const std::size_t pos_accessor =
-                    static_cast<std::size_t>(static_cast<std::uint32_t>(pos_acc->number_value));
-                BlendShapeFramePayload frame;
-                frame.name = "target_" + std::to_string(target_i);
-                if (target_i < target_names.size() && !target_names[target_i].empty()) {
-                    frame.name = target_names[target_i];
-                }
-                if (target_i < target_default_weights.size()) {
-                    frame.weight = target_default_weights[target_i];
-                }
-                if (!ExtractPositionDeltas(
-                        bin_chunk.bytes, accessors, views, pos_accessor, &frame.delta_vertices, vtx_count, &read_error)) {
-                    pkg.warnings.push_back("W_PAYLOAD: VRM_BLENDSHAPE_READ_FAILED: " + read_error);
-                    continue;
-                }
-                blendshape_payload.frames.push_back(std::move(frame));
-            }
-        }
-        if (!blendshape_payload.frames.empty()) {
-            std::vector<std::string> frame_names;
-            frame_names.reserve(blendshape_payload.frames.size());
-            for (const auto& frame : blendshape_payload.frames) {
-                frame_names.push_back(frame.name);
-            }
-            mesh_frame_names[mesh_name] = std::move(frame_names);
-            pkg.blendshape_payloads.push_back(std::move(blendshape_payload));
-        }
 
-        pkg.mesh_payloads.push_back(std::move(mesh_payload));
-        pkg.meshes.push_back(MeshAssetSummary{mesh_name, vtx_count, static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size())});
-        ++mesh_added;
+        for (std::size_t prim_i = 0U; prim_i < prims_v->array_value.size(); ++prim_i) {
+            const auto& prim = prims_v->array_value[prim_i];
+            if (prim.type != JsonValue::Type::Object) {
+                continue;
+            }
+            const auto* attrs_v = FindKey(prim, "attributes");
+            if (attrs_v == nullptr || attrs_v->type != JsonValue::Type::Object) {
+                continue;
+            }
+            const auto* pos_v = FindKey(*attrs_v, "POSITION");
+            if (pos_v == nullptr || pos_v->type != JsonValue::Type::Number) {
+                continue;
+            }
+            const std::size_t pos_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(pos_v->number_value));
+            const bool multi_primitive = prims_v->array_value.size() > 1U;
+
+            MeshRenderPayload mesh_payload;
+            mesh_payload.name = multi_primitive
+                ? (mesh_name + "#p" + std::to_string(prim_i))
+                : mesh_name;
+            mesh_payload.vertex_stride = 12U;
+            std::uint32_t vtx_count = 0U;
+            std::string read_error;
+            if (!ExtractPositions(bin_chunk.bytes, accessors, views, pos_accessor, &mesh_payload.vertex_blob, &vtx_count, &read_error)) {
+                pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
+                continue;
+            }
+
+            const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
+            if (uv0_v != nullptr && uv0_v->type == JsonValue::Type::Number) {
+                const std::size_t uv_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(uv0_v->number_value));
+                std::vector<std::array<float, 2U>> uvs;
+                if (ExtractTexcoord0(bin_chunk.bytes, accessors, views, uv_accessor, &uvs, &read_error) &&
+                    uvs.size() == static_cast<std::size_t>(vtx_count)) {
+                    std::vector<std::uint8_t> interleaved;
+                    interleaved.reserve(static_cast<std::size_t>(vtx_count) * 20U);
+                    const auto* pos_bytes = mesh_payload.vertex_blob.data();
+                    for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                        const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
+                        interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
+                        const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uvs[i].data());
+                        interleaved.insert(interleaved.end(), uv_bytes, uv_bytes + 8U);
+                    }
+                    mesh_payload.vertex_blob = std::move(interleaved);
+                    mesh_payload.vertex_stride = 20U;
+                } else {
+                    pkg.warnings.push_back("W_PAYLOAD: VRM_TEXCOORD0_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
+                }
+            }
+
+            std::size_t idx_accessor = std::numeric_limits<std::size_t>::max();
+            if (TryGetIndex(prim, "indices", &idx_accessor)) {
+                if (!ExtractIndices(bin_chunk.bytes, accessors, views, idx_accessor, &mesh_payload.indices, &read_error)) {
+                    pkg.warnings.push_back("W_PAYLOAD: VRM_INDEX_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
+                    mesh_payload.indices.clear();
+                }
+            }
+            std::size_t material_index = std::numeric_limits<std::size_t>::max();
+            if (TryGetIndex(prim, "material", &material_index)) {
+                mesh_payload.material_index = static_cast<std::int32_t>(material_index);
+            }
+
+            if (mesh_payload.indices.empty()) {
+                mesh_payload.indices.reserve(vtx_count);
+                for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                    mesh_payload.indices.push_back(i);
+                }
+            }
+
+            const auto* targets_v = FindKey(prim, "targets");
+            if (prim_i == 0U && targets_v != nullptr && targets_v->type == JsonValue::Type::Array) {
+                BlendShapeRenderPayload blendshape_payload;
+                blendshape_payload.mesh_name = mesh_name;
+                for (std::size_t target_i = 0U; target_i < targets_v->array_value.size(); ++target_i) {
+                    const auto& target = targets_v->array_value[target_i];
+                    if (target.type != JsonValue::Type::Object) {
+                        continue;
+                    }
+                    const auto* pos_acc = FindKey(target, "POSITION");
+                    if (pos_acc == nullptr || pos_acc->type != JsonValue::Type::Number) {
+                        continue;
+                    }
+                    const std::size_t target_pos_accessor =
+                        static_cast<std::size_t>(static_cast<std::uint32_t>(pos_acc->number_value));
+                    BlendShapeFramePayload frame;
+                    frame.name = "target_" + std::to_string(target_i);
+                    if (target_i < target_names.size() && !target_names[target_i].empty()) {
+                        frame.name = target_names[target_i];
+                    }
+                    if (target_i < target_default_weights.size()) {
+                        frame.weight = target_default_weights[target_i];
+                    }
+                    if (!ExtractPositionDeltas(
+                            bin_chunk.bytes,
+                            accessors,
+                            views,
+                            target_pos_accessor,
+                            &frame.delta_vertices,
+                            vtx_count,
+                            &read_error)) {
+                        pkg.warnings.push_back("W_PAYLOAD: VRM_BLENDSHAPE_READ_FAILED: mesh=" + mesh_name + ", detail=" + read_error);
+                        continue;
+                    }
+                    blendshape_payload.frames.push_back(std::move(frame));
+                }
+                if (!blendshape_payload.frames.empty()) {
+                    std::vector<std::string> frame_names;
+                    frame_names.reserve(blendshape_payload.frames.size());
+                    for (const auto& frame : blendshape_payload.frames) {
+                        frame_names.push_back(frame.name);
+                    }
+                    mesh_frame_names[mesh_name] = std::move(frame_names);
+                    pkg.blendshape_payloads.push_back(std::move(blendshape_payload));
+                }
+            }
+
+            pkg.mesh_payloads.push_back(std::move(mesh_payload));
+            pkg.meshes.push_back(
+                MeshAssetSummary{
+                    pkg.mesh_payloads.back().name,
+                    vtx_count,
+                    static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size())});
+            ++mesh_added;
+        }
     }
 
     pkg.parser_stage = "payload";
@@ -1525,7 +1693,18 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     } else {
         pkg.missing_features.push_back("SpringBone metadata");
     }
-    pkg.missing_features.push_back("MToon advanced parameter binding");
+    bool has_mtoon_binding = false;
+    for (const auto& m : parsed_materials) {
+        if (m.has_mtoon_binding) {
+            has_mtoon_binding = true;
+            break;
+        }
+    }
+    if (!has_mtoon_binding) {
+        pkg.missing_features.push_back("MToon advanced parameter binding");
+    } else {
+        pkg.warnings.push_back("W_MTOON: applied core material parameter binding");
+    }
 
     pkg.parser_stage = "runtime-ready";
     if (pkg.compat_level != AvatarCompatLevel::Partial) {

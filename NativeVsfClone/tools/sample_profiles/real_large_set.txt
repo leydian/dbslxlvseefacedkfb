@@ -1,0 +1,3 @@
+*.vsfavatar
+*.vrm
+*.xav2

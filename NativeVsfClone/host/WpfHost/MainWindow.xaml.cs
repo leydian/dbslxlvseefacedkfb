@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,6 +16,7 @@ namespace WpfHost;
 
 public partial class MainWindow : Window
 {
+    private sealed record WebcamDeviceItem(string Key, string Label);
     private const string UiModeBeginner = "beginner";
     private const string UiModeAdvanced = "advanced";
     private readonly HostController _controller = new();
@@ -71,6 +73,7 @@ public partial class MainWindow : Window
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
         ApplySessionDefaultsToUi();
         RefreshValidationState();
+        RefreshTrackingWebcamDevices();
         SyncRenderControlsFromState();
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
@@ -413,16 +416,17 @@ public partial class MainWindow : Window
         inferenceFpsCap = Math.Clamp(inferenceFpsCap, 5, 120);
 
         var sourceType = TrackingSourceComboBox.SelectedIndex == 1
-            ? TrackingSourceType.WebcamOnnx
+            ? TrackingSourceType.WebcamMediapipe
             : TrackingSourceType.OscIfacial;
 
         var current = _controller.GetTrackingInputSettings();
+        var cameraKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key
+            ?? current.CameraDeviceKey;
         _controller.ConfigureTrackingInputSettings(
             listenPort,
             current.StaleTimeoutMs,
             sourceType,
-            TrackingWebcamDeviceTextBox.Text.Trim(),
-            TrackingOnnxModelPathTextBox.Text.Trim(),
+            cameraKey,
             inferenceFpsCap);
 
         var rc = _controller.StartTracking(
@@ -456,6 +460,33 @@ public partial class MainWindow : Window
         if (rc != NcResultCode.Ok)
         {
             MessageBox.Show(this, "리센터는 활성 트래킹 입력이 필요합니다. (Recenter requires active tracking input.)", "트래킹 (Tracking)", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+    private void RefreshTrackingWebcam_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key;
+        RefreshTrackingWebcamDevices(selectedKey);
+    }
+
+    private void RefreshTrackingWebcamDevices(string? preferredKey = null)
+    {
+        var devices = _controller.GetAvailableWebcamDevices();
+        var items = devices
+            .Select(d => new WebcamDeviceItem(
+                d.DeviceKey,
+                d.IsAvailable
+                    ? $"{d.DisplayName} ({(string.IsNullOrWhiteSpace(d.DeviceKey) ? "default" : d.DeviceKey)})"
+                    : $"{d.DisplayName} ({d.DeviceKey}) - unavailable"))
+            .ToList();
+        TrackingWebcamDeviceComboBox.ItemsSource = items;
+        TrackingWebcamDeviceComboBox.DisplayMemberPath = nameof(WebcamDeviceItem.Label);
+        var target = preferredKey ?? _controller.GetTrackingInputSettings().CameraDeviceKey;
+        var selected = items.FirstOrDefault(x => string.Equals(x.Key, target, StringComparison.OrdinalIgnoreCase))
+            ?? items.FirstOrDefault();
+        if (selected is not null)
+        {
+            TrackingWebcamDeviceComboBox.SelectedItem = selected;
         }
     }
 
@@ -943,12 +974,12 @@ public partial class MainWindow : Window
         RecenterTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive && !tracking.IsStale;
         TrackingPortTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingSourceComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
-        TrackingWebcamDeviceTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
-        TrackingOnnxModelPathTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingWebcamDeviceComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        RefreshTrackingWebcamButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} schema_ok={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} err={tracking.LastErrorCode}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} err={tracking.LastErrorCode}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -1057,7 +1088,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, schema_ok={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1265,10 +1296,9 @@ public partial class MainWindow : Window
         OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
         OscPublishAddressTextBox.Text = session.OscPublishAddress;
         TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
-        TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType == TrackingSourceType.WebcamOnnx ? 1 : 0;
-        TrackingWebcamDeviceTextBox.Text = session.Tracking.WebcamDeviceId;
-        TrackingOnnxModelPathTextBox.Text = session.Tracking.OnnxModelPath;
+        TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType == TrackingSourceType.WebcamMediapipe ? 1 : 0;
         TrackingInferenceFpsTextBox.Text = session.Tracking.InferenceFpsCap.ToString(CultureInfo.InvariantCulture);
+        RefreshTrackingWebcamDevices(session.Tracking.CameraDeviceKey);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
         SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);
@@ -1397,4 +1427,5 @@ public partial class MainWindow : Window
         MessageBox.Show(this, message, "조치 필요 (Action Required)", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 }
+
 

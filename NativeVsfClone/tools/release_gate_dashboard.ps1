@@ -107,6 +107,17 @@ $rows += [PSCustomObject]@{
     source_file = $hostReport
 }
 
+$unityValidationSummary = Join-Path $ReportDir "unity_xav2_validation_summary.txt"
+$unityStatus = Get-KeyValueFromFile -Path $unityValidationSummary -Prefix "overall_status="
+if ([string]::IsNullOrWhiteSpace($unityStatus)) {
+    $unityStatus = if (Test-Path $unityValidationSummary) { "UNKNOWN" } else { "NOT_RUN" }
+}
+$rows += [PSCustomObject]@{
+    track = "Unity XAV2 Validate"
+    status_line = $unityStatus
+    source_file = $unityValidationSummary
+}
+
 $avatarRows = @($rows | Where-Object { $_.track -in @("VSFAvatar", "VRM", "VXAvatar") })
 $avatarAllPass = $true
 foreach ($r in $avatarRows) {

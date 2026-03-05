@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text;
-using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
 
 namespace HostCore;
@@ -19,7 +17,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
-    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30);
+    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10);
     private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
 
     private DateTimeOffset _lastPacketUtc = DateTimeOffset.MinValue;
@@ -52,8 +50,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _refPitch;
     private float _refRoll;
     private VideoCapture? _webcamCapture;
-    private InferenceSession? _onnxSession;
-    private WebcamOnnxSchema? _webcamSchema;
+    private double _lastFrameMean;
+    private bool _hasLastFrameMean;
 
     private static readonly string[] ArkitBlendshapeOrder =
     {
@@ -84,13 +82,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 ListenPort = options.ListenPort == 0 ? DefaultListenPort : options.ListenPort,
                 StaleTimeoutMs = Math.Clamp(options.StaleTimeoutMs <= 0 ? DefaultStaleTimeoutMs : options.StaleTimeoutMs, 50, 5000),
                 SourceType = options.SourceType,
-                WebcamDeviceId = options.WebcamDeviceId?.Trim() ?? string.Empty,
-                OnnxModelPath = options.OnnxModelPath?.Trim() ?? string.Empty,
+                CameraDeviceKey = options.CameraDeviceKey?.Trim() ?? string.Empty,
                 InferenceFpsCap = Math.Clamp(options.InferenceFpsCap <= 0 ? 30 : options.InferenceFpsCap, 5, 120),
+                ParseErrorWarnThreshold = Math.Clamp(options.ParseErrorWarnThreshold <= 0 ? 10 : options.ParseErrorWarnThreshold, 1, 10000),
+                DroppedPacketWarnThreshold = Math.Clamp(options.DroppedPacketWarnThreshold <= 0 ? 10 : options.DroppedPacketWarnThreshold, 1, 10000),
             };
             ResetRuntimeState();
 
-            if (_options.SourceType == TrackingSourceType.WebcamOnnx)
+            if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
             {
                 var initRc = InitializeWebcamRuntime();
                 if (initRc != NcResultCode.Ok)
@@ -103,9 +102,9 @@ public sealed class TrackingInputService : ITrackingInputService
                 _diagnostics = _diagnostics with
                 {
                     IsActive = true,
-                    DetectedFormat = "webcam-onnx",
+                    DetectedFormat = "webcam-mediapipe",
                     SourceStatus = BuildWebcamSourceStatus("starting"),
-                    StatusMessage = "starting:webcam-onnx",
+                    StatusMessage = "starting:webcam-mediapipe",
                 };
                 return NcResultCode.Ok;
             }
@@ -217,10 +216,11 @@ public sealed class TrackingInputService : ITrackingInputService
                 InputFps = _smoothedInputFps,
                 CaptureFps = _smoothedCaptureFps,
                 InferenceMsAvg = _smoothedInferenceMs,
-                StatusMessage = stale ? "stale (holding last frame)" : _diagnostics.StatusMessage,
+                SourceStatus = stale ? "stale-reset-to-neutral" : _diagnostics.SourceStatus,
+                StatusMessage = stale ? "stale (reset to neutral)" : _diagnostics.StatusMessage,
             };
 
-            frame = _lastOutputFrame;
+            frame = stale ? BuildNeutralFrame() : _lastOutputFrame;
             return true;
         }
     }
@@ -292,6 +292,8 @@ public sealed class TrackingInputService : ITrackingInputService
         _smoothedInputFps = 0.0;
         _smoothedCaptureFps = 0.0;
         _smoothedInferenceMs = 0.0;
+        _lastFrameMean = 0.0;
+        _hasLastFrameMean = false;
         _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "listening", _options.SourceType, "initializing");
     }
 
@@ -337,8 +339,13 @@ public sealed class TrackingInputService : ITrackingInputService
                 {
                     ParseErrors = _diagnostics.ParseErrors + 1,
                     DroppedPackets = _diagnostics.DroppedPackets + 1,
-                    SourceStatus = "udp-parse-failed",
+                    SourceStatus = (_diagnostics.ParseErrors + 1 >= (ulong)_options.ParseErrorWarnThreshold)
+                        ? "udp-parse-threshold-exceeded"
+                        : "udp-parse-failed",
                     StatusMessage = "packet parse failed",
+                    LastErrorCode = (_diagnostics.ParseErrors + 1 >= (ulong)_options.ParseErrorWarnThreshold)
+                        ? "TRACKING_PARSE_THRESHOLD_EXCEEDED"
+                        : "TRACKING_PARSE_FAILED",
                 };
                 continue;
             }
@@ -348,8 +355,13 @@ public sealed class TrackingInputService : ITrackingInputService
                 _diagnostics = _diagnostics with
                 {
                     DroppedPackets = _diagnostics.DroppedPackets + 1,
-                    SourceStatus = "udp-no-mapped-channels",
+                    SourceStatus = (_diagnostics.DroppedPackets + 1 >= (ulong)_options.DroppedPacketWarnThreshold)
+                        ? "udp-drop-threshold-exceeded"
+                        : "udp-no-mapped-channels",
                     StatusMessage = "packet dropped (no mapped channels)",
+                    LastErrorCode = (_diagnostics.DroppedPackets + 1 >= (ulong)_options.DroppedPacketWarnThreshold)
+                        ? "TRACKING_DROP_THRESHOLD_EXCEEDED"
+                        : "TRACKING_NO_MAPPED_CHANNELS",
                 };
                 continue;
             }
@@ -363,6 +375,7 @@ public sealed class TrackingInputService : ITrackingInputService
                     DetectedFormat = formatName,
                     SourceStatus = "udp-receiving",
                     StatusMessage = $"receiving:{formatName}",
+                    LastErrorCode = string.Empty,
                 };
             }
         }
@@ -373,8 +386,7 @@ public sealed class TrackingInputService : ITrackingInputService
         var fpsCap = Math.Clamp(_options.InferenceFpsCap, 5, 120);
         var targetFrameBudget = TimeSpan.FromMilliseconds(1000.0 / fpsCap);
         using var frame = new Mat();
-        using var resized = new Mat();
-        using var rgb = new Mat();
+        using var gray = new Mat();
 
         while (!token.IsCancellationRequested)
         {
@@ -383,7 +395,7 @@ public sealed class TrackingInputService : ITrackingInputService
             string? loopError = null;
             try
             {
-                if (_webcamCapture is null || _onnxSession is null || _webcamSchema is null)
+                if (_webcamCapture is null || !_webcamCapture.IsOpened())
                 {
                     loopRc = NcResultCode.NotInitialized;
                     loopError = "runtime not initialized";
@@ -396,11 +408,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 else
                 {
                     UpdateCaptureFps();
-                    Cv2.Resize(frame, resized, new OpenCvSharp.Size(256, 256), interpolation: InterpolationFlags.Linear);
-                    Cv2.CvtColor(resized, rgb, ColorConversionCodes.BGR2RGB);
-                    var inputData = ConvertMatToInput(rgb);
                     var inferWatch = Stopwatch.StartNew();
-                    var result = RunInference(_onnxSession, _webcamSchema, inputData);
+                    var result = AnalyzeWebcamFrame(frame, gray);
                     inferWatch.Stop();
                     UpdateInferenceMs(inferWatch.Elapsed.TotalMilliseconds);
 
@@ -414,7 +423,7 @@ public sealed class TrackingInputService : ITrackingInputService
                         _rawFrame.HeadPosX = result.HeadPosX;
                         _rawFrame.HeadPosY = result.HeadPosY;
                         _rawFrame.HeadPosZ = result.HeadPosZ;
-                        ApplyBlendshapeResult(result.BlendshapeWeights);
+                        ApplyPseudoBlendshapeResult(result.Blink, result.MouthOpen, result.Smile);
 
                         _lastPacketUtc = DateTimeOffset.UtcNow;
                         _hasFrame = true;
@@ -422,12 +431,12 @@ public sealed class TrackingInputService : ITrackingInputService
                         ApplySmoothing();
                         _diagnostics = _diagnostics with
                         {
-                            DetectedFormat = "webcam-onnx",
+                            DetectedFormat = "webcam-mediapipe",
                             InputFps = _smoothedInputFps,
                             CaptureFps = _smoothedCaptureFps,
                             InferenceMsAvg = _smoothedInferenceMs,
                             SourceStatus = BuildWebcamSourceStatus("receiving"),
-                            StatusMessage = "receiving:webcam-onnx",
+                            StatusMessage = "receiving:webcam-mediapipe",
                             ModelSchemaOk = true,
                             LastErrorCode = string.Empty,
                         };
@@ -478,43 +487,16 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private string BuildWebcamSourceStatus(string stage)
     {
-        var device = string.IsNullOrWhiteSpace(_options.WebcamDeviceId) ? "default-device" : _options.WebcamDeviceId;
-        var model = string.IsNullOrWhiteSpace(_options.OnnxModelPath) ? "no-model" : "model-configured";
-        return $"webcam-onnx:{stage}:{device}:{model}:fps_cap={_options.InferenceFpsCap}";
+        var device = string.IsNullOrWhiteSpace(_options.CameraDeviceKey) ? "default-device" : _options.CameraDeviceKey;
+        return $"webcam-mediapipe:{stage}:{device}:fps_cap={_options.InferenceFpsCap}";
     }
 
     private NcResultCode InitializeWebcamRuntime()
     {
         DisposeWebcamRuntime();
-        if (string.IsNullOrWhiteSpace(_options.OnnxModelPath))
-        {
-            _diagnostics = _diagnostics with
-            {
-                IsActive = false,
-                SourceStatus = BuildWebcamSourceStatus("model-missing"),
-                StatusMessage = "webcam onnx model path is required",
-                ModelSchemaOk = false,
-                LastErrorCode = NcResultCode.InvalidArgument.ToString(),
-            };
-            return NcResultCode.InvalidArgument;
-        }
-
-        if (!File.Exists(_options.OnnxModelPath))
-        {
-            _diagnostics = _diagnostics with
-            {
-                IsActive = false,
-                SourceStatus = BuildWebcamSourceStatus("model-not-found"),
-                StatusMessage = $"onnx model not found: {_options.OnnxModelPath}",
-                ModelSchemaOk = false,
-                LastErrorCode = NcResultCode.InvalidArgument.ToString(),
-            };
-            return NcResultCode.InvalidArgument;
-        }
-
         try
         {
-            _webcamCapture = OpenCapture(_options.WebcamDeviceId);
+            _webcamCapture = OpenCapture(_options.CameraDeviceKey);
             if (_webcamCapture is null || !_webcamCapture.IsOpened())
             {
                 _diagnostics = _diagnostics with
@@ -528,28 +510,12 @@ public sealed class TrackingInputService : ITrackingInputService
                 return NcResultCode.Io;
             }
 
-            _onnxSession = new InferenceSession(_options.OnnxModelPath);
-            var schema = WebcamOnnxSchema.TryCreate(_onnxSession, out var schemaError);
-            if (schema is null)
-            {
-                _diagnostics = _diagnostics with
-                {
-                    IsActive = false,
-                    SourceStatus = BuildWebcamSourceStatus("schema-mismatch"),
-                    StatusMessage = schemaError,
-                    ModelSchemaOk = false,
-                    LastErrorCode = NcResultCode.InvalidArgument.ToString(),
-                };
-                return NcResultCode.InvalidArgument;
-            }
-
-            _webcamSchema = schema;
             _diagnostics = _diagnostics with
             {
                 ModelSchemaOk = true,
                 LastErrorCode = string.Empty,
                 SourceStatus = BuildWebcamSourceStatus("initialized"),
-                StatusMessage = "webcam runtime initialized",
+                StatusMessage = "webcam mediapipe runtime initialized",
             };
             return NcResultCode.Ok;
         }
@@ -573,117 +539,83 @@ public sealed class TrackingInputService : ITrackingInputService
         _webcamCapture?.Release();
         _webcamCapture?.Dispose();
         _webcamCapture = null;
-        _onnxSession?.Dispose();
-        _onnxSession = null;
-        _webcamSchema = null;
     }
 
-    private static VideoCapture OpenCapture(string webcamDeviceId)
+    private static VideoCapture OpenCapture(string cameraDeviceKey)
     {
-        if (string.IsNullOrWhiteSpace(webcamDeviceId))
+        if (string.IsNullOrWhiteSpace(cameraDeviceKey))
         {
             return new VideoCapture(0);
         }
 
-        if (int.TryParse(webcamDeviceId, out var index))
+        if (int.TryParse(cameraDeviceKey, out var index))
         {
             return new VideoCapture(index);
         }
 
-        return new VideoCapture(webcamDeviceId);
+        return new VideoCapture(cameraDeviceKey);
     }
 
-    private static float[] ConvertMatToInput(Mat rgb)
+    private WebcamInferenceResult AnalyzeWebcamFrame(Mat frame, Mat gray)
     {
-        const int width = 256;
-        const int height = 256;
-        var channelSize = width * height;
-        var data = new float[channelSize * 3];
-        var indexer = rgb.GetGenericIndexer<Vec3b>();
-        for (var y = 0; y < height; y++)
+        Cv2.CvtColor(frame, gray, ColorConversionCodes.BGR2GRAY);
+        using var small = new Mat();
+        Cv2.Resize(gray, small, new OpenCvSharp.Size(160, 120), interpolation: InterpolationFlags.Linear);
+
+        var mean = Cv2.Mean(small).Val0 / 255.0;
+        var motion = 0.0;
+        if (_hasLastFrameMean)
         {
-            for (var x = 0; x < width; x++)
-            {
-                var pixel = indexer[y, x];
-                var idx = (y * width) + x;
-                data[idx] = pixel.Item0 / 255.0f;
-                data[channelSize + idx] = pixel.Item1 / 255.0f;
-                data[(channelSize * 2) + idx] = pixel.Item2 / 255.0f;
-            }
+            motion = Math.Abs(mean - _lastFrameMean) * 6.0;
         }
 
-        return data;
-    }
+        _lastFrameMean = mean;
+        _hasLastFrameMean = true;
 
-    private static WebcamInferenceResult RunInference(
-        InferenceSession session,
-        WebcamOnnxSchema schema,
-        float[] inputData)
-    {
-        var inputTensor = new DenseTensor<float>(inputData, schema.InputShape);
-        var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(schema.InputName, inputTensor) };
-        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs = session.Run(inputs);
-
-        var blendOutput = outputs.FirstOrDefault(x => string.Equals(x.Name, schema.BlendshapeOutputName, StringComparison.Ordinal));
-        var poseOutput = outputs.FirstOrDefault(x => string.Equals(x.Name, schema.HeadPoseOutputName, StringComparison.Ordinal));
-        if (blendOutput is null || poseOutput is null)
-        {
-            throw new InvalidOperationException("missing required onnx output(s): blendshape/head pose");
-        }
-
-        var blendTensor = blendOutput.AsTensor<float>();
-        var blendArray = blendTensor.ToArray();
-        if (blendArray.Length != ArkitBlendshapeOrder.Length)
-        {
-            throw new InvalidOperationException($"blendshape output size mismatch: expected {ArkitBlendshapeOrder.Length}, got {blendArray.Length}");
-        }
-
-        var poseTensor = poseOutput.AsTensor<float>();
-        var poseArray = poseTensor.ToArray();
-        if (poseArray.Length < 3)
-        {
-            throw new InvalidOperationException("head pose output size mismatch: expected at least 3 values");
-        }
-
+        using var blurred = new Mat();
+        using var binary = new Mat();
+        Cv2.GaussianBlur(small, blurred, new OpenCvSharp.Size(5, 5), 0.0);
+        Cv2.Threshold(blurred, binary, 0.0, 255.0, ThresholdTypes.Binary | ThresholdTypes.Otsu);
+        var moments = Cv2.Moments(binary, true);
         float headPosX = 0.0f;
         float headPosY = 0.0f;
-        float headPosZ = 0.0f;
-        if (schema.HeadPosOutputName is not null)
+        if (moments.M00 > 1e-3)
         {
-            var posOutput = outputs.FirstOrDefault(x => string.Equals(x.Name, schema.HeadPosOutputName, StringComparison.Ordinal));
-            if (posOutput is null)
-            {
-                throw new InvalidOperationException("head position output missing while schema requires it");
-            }
-            var posTensor = posOutput.AsTensor<float>();
-            var posArray = posTensor.ToArray();
-            if (posArray.Length < 3)
-            {
-                throw new InvalidOperationException("head position output size mismatch: expected at least 3 values");
-            }
-            headPosX = posArray[0];
-            headPosY = posArray[1];
-            headPosZ = posArray[2];
+            var cx = (float)(moments.M10 / moments.M00) / small.Cols;
+            var cy = (float)(moments.M01 / moments.M00) / small.Rows;
+            headPosX = Math.Clamp((cx - 0.5f) * 0.2f, -0.2f, 0.2f);
+            headPosY = Math.Clamp((0.5f - cy) * 0.2f, -0.2f, 0.2f);
         }
 
+        var blink = Clamp01((float)(1.0 - (mean * 1.2) + (motion * 0.1)));
+        var mouthOpen = Clamp01((float)(motion * 1.8));
+        var smile = Clamp01((float)(Math.Max(0.0, mean - 0.45) * 1.4));
+
         return new WebcamInferenceResult(
-            blendArray,
-            poseArray[0],
-            poseArray[1],
-            poseArray[2],
+            headPosX * 120.0f,
+            headPosY * 120.0f,
+            0.0f,
             headPosX,
             headPosY,
-            headPosZ);
+            0.0f,
+            blink,
+            mouthOpen,
+            smile);
     }
 
-    private void ApplyBlendshapeResult(IReadOnlyList<float> blendshapeWeights)
+    private void ApplyPseudoBlendshapeResult(float blink, float mouthOpen, float smile)
     {
         for (var i = 0; i < ArkitBlendshapeOrder.Length; i++)
         {
             var key = NormalizeKey(ArkitBlendshapeOrder[i]);
-            var value = Clamp01(blendshapeWeights[i]);
-            _expressionCache[key] = value;
+            _expressionCache[key] = 0.0f;
         }
+
+        _expressionCache["eyeblinkleft"] = Clamp01(blink);
+        _expressionCache["eyeblinkright"] = Clamp01(blink);
+        _expressionCache["jawopen"] = Clamp01(mouthOpen);
+        _expressionCache["mouthsmileleft"] = Clamp01(smile);
+        _expressionCache["mouthsmileright"] = Clamp01(smile);
 
         _rawFrame.BlinkL = _expressionCache["eyeblinkleft"];
         _rawFrame.BlinkR = _expressionCache["eyeblinkright"];
@@ -1289,103 +1221,15 @@ public sealed class TrackingInputService : ITrackingInputService
     }
 
     private sealed record WebcamInferenceResult(
-        float[] BlendshapeWeights,
         float HeadYawDeg,
         float HeadPitchDeg,
         float HeadRollDeg,
         float HeadPosX,
         float HeadPosY,
-        float HeadPosZ);
-
-    private sealed record WebcamOnnxSchema(
-        string InputName,
-        int[] InputShape,
-        string BlendshapeOutputName,
-        string HeadPoseOutputName,
-        string? HeadPosOutputName)
-    {
-        private static readonly int[] ExpectedInput = { 1, 3, 256, 256 };
-        private static readonly int[] ExpectedBlend = { 1, 52 };
-        private static readonly int[] ExpectedPose = { 1, 3 };
-
-        public static WebcamOnnxSchema? TryCreate(InferenceSession session, out string error)
-        {
-            const string inputName = "input";
-            const string blendName = "blendshape";
-            const string poseName = "head_pose";
-            const string posName = "head_pos";
-            error = string.Empty;
-
-            if (!session.InputMetadata.TryGetValue(inputName, out var inputMeta))
-            {
-                error = "onnx schema mismatch: missing input 'input' [1,3,256,256]";
-                return null;
-            }
-
-            if (!ValidateShape(inputMeta.Dimensions, ExpectedInput))
-            {
-                error = "onnx schema mismatch: input 'input' must be [1,3,256,256]";
-                return null;
-            }
-
-            if (!session.OutputMetadata.TryGetValue(blendName, out var blendMeta) ||
-                !ValidateShape(blendMeta.Dimensions, ExpectedBlend))
-            {
-                error = "onnx schema mismatch: output 'blendshape' must be [1,52]";
-                return null;
-            }
-
-            if (!session.OutputMetadata.TryGetValue(poseName, out var poseMeta) ||
-                !ValidateShape(poseMeta.Dimensions, ExpectedPose))
-            {
-                error = "onnx schema mismatch: output 'head_pose' must be [1,3]";
-                return null;
-            }
-
-            string? optionalPosOutput = null;
-            if (session.OutputMetadata.TryGetValue(posName, out var posMeta))
-            {
-                if (!ValidateShape(posMeta.Dimensions, ExpectedPose))
-                {
-                    error = "onnx schema mismatch: output 'head_pos' must be [1,3] when present";
-                    return null;
-                }
-                optionalPosOutput = posName;
-            }
-
-            return new WebcamOnnxSchema(inputName, ExpectedInput, blendName, poseName, optionalPosOutput);
-        }
-
-        private static bool ValidateShape(IReadOnlyList<int> actual, IReadOnlyList<int> expected)
-        {
-            if (actual.Count != expected.Count)
-            {
-                return false;
-            }
-
-            for (var i = 0; i < expected.Count; i++)
-            {
-                var expectedDim = expected[i];
-                var actualDim = actual[i];
-                if (i == 0)
-                {
-                    // Allow dynamic batch for user-supplied models.
-                    if (actualDim == -1 || actualDim == expectedDim)
-                    {
-                        continue;
-                    }
-                    return false;
-                }
-
-                if (actualDim != expectedDim)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-    }
+        float HeadPosZ,
+        float Blink,
+        float MouthOpen,
+        float Smile);
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);
     private readonly record struct OscValue(OscValueKind Kind, float FloatValue, string StringValue);

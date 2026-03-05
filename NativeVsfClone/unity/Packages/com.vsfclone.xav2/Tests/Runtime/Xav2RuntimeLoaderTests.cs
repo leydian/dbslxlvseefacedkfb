@@ -49,7 +49,7 @@ namespace VsfClone.Xav2.Runtime.Tests
         public void TryLoad_UnsupportedVersion_Fails()
         {
             var bytes = BuildValidXav2Bytes();
-            bytes[4] = 0x05;
+            bytes[4] = 0x06;
             bytes[5] = 0x00;
             var path = WriteTempFile(bytes);
             try
@@ -122,6 +122,52 @@ namespace VsfClone.Xav2.Runtime.Tests
                     diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED")),
                     Is.False);
                 Assert.That(diagnostics.WarningCodes, Does.Not.Contain("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialUnsupportedShaderFamily_Warns()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "unsupported-family"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY")),
+                    Is.True);
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialMissingBaseColor_Strict_Fails()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedIncludeBaseColor: false));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { StrictValidation = true });
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.StrictValidationFailed));
+                Assert.That(diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_MISSING_REQUIRED_PARAM")), Is.True);
             }
             finally
             {
@@ -238,6 +284,43 @@ namespace VsfClone.Xav2.Runtime.Tests
                 var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
                 Assert.That(ok, Is.False);
                 Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.ManifestTruncated));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_CompressedMeshSection_V5_Parses()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(formatVersion: 5, compressMeshSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(payload.Meshes.Count, Is.EqualTo(1));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_CompressedMeshSectionCorrupt_FailsDecode()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    formatVersion: 5,
+                    compressMeshSection: true,
+                    corruptCompressedSection: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.CompressionDecodeFailed));
             }
             finally
             {
@@ -388,12 +471,16 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool unresolvedTypedTextureRef = false,
             string textureRefName = "texture_0",
             string typedBaseTextureRefOverride = null,
+            string typedShaderFamilyOverride = null,
+            bool typedIncludeBaseColor = true,
             bool addSkinSection = false,
             bool addSkeletonSection = false,
             bool addRigSection = false,
             ushort formatVersion = 3,
             bool rigDuplicateBoneName = false,
-            bool rigCycle = false)
+            bool rigCycle = false,
+            bool compressMeshSection = false,
+            bool corruptCompressedSection = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -420,7 +507,26 @@ namespace VsfClone.Xav2.Runtime.Tests
             bw.Write((uint)manifestBytes.Length);
             bw.Write(manifestBytes);
 
-            WriteSection(bw, 0x0011, BuildMeshSection("mesh_0", 0, new byte[48], new uint[] { 0, 1, 2 }));
+            var meshPayload = BuildMeshSection("mesh_0", 0, new byte[48], new uint[] { 0, 1, 2 });
+            if (compressMeshSection)
+            {
+                if (!Xav2Lz4Codec.TryCompress(meshPayload, out var compressed, preferRatio: true))
+                {
+                    throw new InvalidOperationException("failed to build compressed test payload");
+                }
+                var expectedLength = meshPayload.Length + (corruptCompressedSection ? 13 : 0);
+                var envelope = new byte[compressed.Length + 4];
+                envelope[0] = (byte)(expectedLength & 0xFF);
+                envelope[1] = (byte)((expectedLength >> 8) & 0xFF);
+                envelope[2] = (byte)((expectedLength >> 16) & 0xFF);
+                envelope[3] = (byte)((expectedLength >> 24) & 0xFF);
+                Buffer.BlockCopy(compressed, 0, envelope, 4, compressed.Length);
+                WriteSection(bw, 0x0011, envelope, 0x0001);
+            }
+            else
+            {
+                WriteSection(bw, 0x0011, meshPayload);
+            }
             WriteSection(bw, 0x0002, BuildTextureSection(textureRefName, new byte[] { 1, 2, 3, 4 }));
             WriteSection(
                 bw,
@@ -436,6 +542,8 @@ namespace VsfClone.Xav2.Runtime.Tests
                     0x0015,
                     BuildMaterialTypedParamsSection(
                         "material_0",
+                        typedShaderFamilyOverride ?? "liltoon",
+                        typedIncludeBaseColor,
                         unresolvedTypedTextureRef
                             ? "texture_missing_typed"
                             : (typedBaseTextureRefOverride ?? textureRefName)));
@@ -524,24 +632,31 @@ namespace VsfClone.Xav2.Runtime.Tests
             return ms.ToArray();
         }
 
-        private static byte[] BuildMaterialTypedParamsSection(string name, string baseTextureRef)
+        private static byte[] BuildMaterialTypedParamsSection(
+            string name,
+            string shaderFamily,
+            bool includeBaseColor,
+            string baseTextureRef)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
             WriteSizedString(bw, name);
-            WriteSizedString(bw, "liltoon");
+            WriteSizedString(bw, shaderFamily);
             bw.Write((uint)0x00000021); // cutout + shade
 
             bw.Write((ushort)1);
             WriteSizedString(bw, "_Cutoff");
             bw.Write(0.5f);
 
-            bw.Write((ushort)1);
-            WriteSizedString(bw, "_BaseColor");
-            bw.Write(1.0f);
-            bw.Write(1.0f);
-            bw.Write(1.0f);
-            bw.Write(1.0f);
+            bw.Write((ushort)(includeBaseColor ? 1 : 0));
+            if (includeBaseColor)
+            {
+                WriteSizedString(bw, "_BaseColor");
+                bw.Write(1.0f);
+                bw.Write(1.0f);
+                bw.Write(1.0f);
+                bw.Write(1.0f);
+            }
 
             bw.Write((ushort)1);
             WriteSizedString(bw, "base");
@@ -611,10 +726,10 @@ namespace VsfClone.Xav2.Runtime.Tests
             Array.Copy(raw, 0, bytes, offset, 4);
         }
 
-        private static void WriteSection(BinaryWriter bw, ushort type, byte[] payload)
+        private static void WriteSection(BinaryWriter bw, ushort type, byte[] payload, ushort flags = 0)
         {
             bw.Write(type);
-            bw.Write((ushort)0);
+            bw.Write(flags);
             bw.Write((uint)payload.Length);
             bw.Write(payload);
         }

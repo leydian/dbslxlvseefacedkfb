@@ -15,6 +15,7 @@ namespace VsfClone.Xav2.Runtime
         SectionHeaderTruncated,
         SectionTruncated,
         SectionSchemaInvalid,
+        CompressionDecodeFailed,
         UnknownSectionNotAllowed,
         StrictValidationFailed
     }

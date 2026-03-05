@@ -751,6 +751,60 @@ bool ShouldApplyExperimentalStaticSkinning() {
     return enabled;
 }
 
+void SanitizeTrackingFrame(NcTrackingFrame* frame) {
+    if (frame == nullptr) {
+        return;
+    }
+    auto clamp_finite = [](float value, float min_v, float max_v, float fallback) {
+        if (!std::isfinite(value)) {
+            return fallback;
+        }
+        return std::max(min_v, std::min(max_v, value));
+    };
+    frame->head_pos[0] = clamp_finite(frame->head_pos[0], -2.5f, 2.5f, 0.0f);
+    frame->head_pos[1] = clamp_finite(frame->head_pos[1], -2.5f, 2.5f, 0.0f);
+    frame->head_pos[2] = clamp_finite(frame->head_pos[2], -2.5f, 2.5f, 0.0f);
+
+    float qx = frame->head_rot_quat[0];
+    float qy = frame->head_rot_quat[1];
+    float qz = frame->head_rot_quat[2];
+    float qw = frame->head_rot_quat[3];
+    if (!std::isfinite(qx) || !std::isfinite(qy) || !std::isfinite(qz) || !std::isfinite(qw)) {
+        qx = 0.0f;
+        qy = 0.0f;
+        qz = 0.0f;
+        qw = 1.0f;
+    } else {
+        const float qlen = std::sqrt((qx * qx) + (qy * qy) + (qz * qz) + (qw * qw));
+        if (qlen <= 1e-6f || !std::isfinite(qlen)) {
+            qx = 0.0f;
+            qy = 0.0f;
+            qz = 0.0f;
+            qw = 1.0f;
+        } else {
+            const float inv = 1.0f / qlen;
+            qx *= inv;
+            qy *= inv;
+            qz *= inv;
+            qw *= inv;
+        }
+    }
+    frame->head_rot_quat[0] = qx;
+    frame->head_rot_quat[1] = qy;
+    frame->head_rot_quat[2] = qz;
+    frame->head_rot_quat[3] = qw;
+
+    frame->eye_gaze_l[0] = clamp_finite(frame->eye_gaze_l[0], -1.0f, 1.0f, 0.0f);
+    frame->eye_gaze_l[1] = clamp_finite(frame->eye_gaze_l[1], -1.0f, 1.0f, 0.0f);
+    frame->eye_gaze_l[2] = clamp_finite(frame->eye_gaze_l[2], -1.0f, 1.0f, 0.0f);
+    frame->eye_gaze_r[0] = clamp_finite(frame->eye_gaze_r[0], -1.0f, 1.0f, 0.0f);
+    frame->eye_gaze_r[1] = clamp_finite(frame->eye_gaze_r[1], -1.0f, 1.0f, 0.0f);
+    frame->eye_gaze_r[2] = clamp_finite(frame->eye_gaze_r[2], -1.0f, 1.0f, 0.0f);
+    frame->blink_l = clamp_finite(frame->blink_l, 0.0f, 1.0f, 0.0f);
+    frame->blink_r = clamp_finite(frame->blink_r, 0.0f, 1.0f, 0.0f);
+    frame->mouth_open = clamp_finite(frame->mouth_open, 0.0f, 1.0f, 0.0f);
+}
+
 struct SkinWeight4 {
     std::array<std::int32_t, 4U> bone_indices = {0, 0, 0, 0};
     std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -1576,7 +1630,9 @@ std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
     if (TryExtractShaderParamFloat(payload.shader_params_json, "_UseAlphaClipping", &value) && value > 0.5f) {
         return "MASK";
     }
-    if (TryExtractShaderParamFloat(payload.shader_params_json, "_Cutoff", &value) && value > 0.001f) {
+    if (TryExtractShaderParamFloat(payload.shader_params_json, "_Cutoff", &value) &&
+        value > 0.001f &&
+        alpha_mode != "OPAQUE") {
         return "MASK";
     }
     if (TryExtractShaderParamFloat(payload.shader_params_json, "_Surface", &value) && value >= 1.0f) {
@@ -2101,6 +2157,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         });
         const bool is_mask = (alpha_mode == "MASK");
         const bool is_blend = (alpha_mode == "BLEND") || (item.material != nullptr && item.material->base_color[3] < 0.999f);
+        const bool force_no_cull_for_xav2 = (item.pkg != nullptr && item.pkg->source_type == AvatarSourceType::Xav2);
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (is_blend) {
             device_ctx->OMSetBlendState(renderer.blend_alpha, blend_factor, 0xFFFFFFFFU);
@@ -2109,7 +2166,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);
         }
-        device_ctx->RSSetState(double_sided ? renderer.raster_cull_none : renderer.raster_cull_back);
+        device_ctx->RSSetState((double_sided || force_no_cull_for_xav2) ? renderer.raster_cull_none : renderer.raster_cull_back);
 
         const UINT stride = item.mesh->vertex_stride;
         const UINT offset = 0U;
@@ -2450,7 +2507,9 @@ NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame) {
         vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "tracking", "frame must not be null", true);
         return NC_ERROR_INVALID_ARGUMENT;
     }
-    vsfclone::nativecore::g_state.latest_tracking = *frame;
+    NcTrackingFrame sanitized = *frame;
+    vsfclone::nativecore::SanitizeTrackingFrame(&sanitized);
+    vsfclone::nativecore::g_state.latest_tracking = sanitized;
     const float blink_avg = std::max(0.0f, std::min(1.0f, (frame->blink_l + frame->blink_r) * 0.5f));
     const float mouth_open = std::max(0.0f, std::min(1.0f, frame->mouth_open));
     for (auto& [handle, pkg] : vsfclone::nativecore::g_state.avatars) {

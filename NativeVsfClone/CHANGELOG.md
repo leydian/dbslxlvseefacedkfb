@@ -2,6 +2,82 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Avatar render recovery bundle (VRM/XAV2 visibility, alpha contract, runtime diagnostics, redeploy stabilization)
+
+### Summary
+
+Completed an end-to-end recovery pass for "avatar not visible / visible-but-broken" regressions observed in both `.xav2` and `.vrm` paths, then validated with WPF runtime smoke checks and redeployed `nativecore.dll`.
+
+### Changed
+
+- runtime tracking safety and neutral fallback:
+  - `host/HostCore/TrackingInputService.cs`
+  - `host/HostCore/HostController.cs`
+  - `src/nativecore/native_core.cpp`
+  - stale/no-frame tracking paths now submit neutral data and clamp invalid tracking payloads before native apply.
+- XAV2 visibility/culling and diagnostics quality:
+  - `src/nativecore/native_core.cpp`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `tools/avatar_tool.cpp`
+  - `tools/xav2_render_regression_gate.ps1`
+  - enforced no-cull fallback for XAV2 preview path, fixed warning-code extraction/reporting, and hardened regression gate against partial warning sampling.
+- VRM mesh extraction completeness:
+  - `src/avatar/vrm_loader.cpp`
+  - fixed primitive extraction from "first primitive only" to "all primitives", restoring missing mesh payloads/draw calls for multi-primitive meshes.
+- VRM material binding uplift (core MToon-compatible subset):
+  - `src/avatar/vrm_loader.cpp`
+  - added structured parameter emission for base/shade/emission/rim colors, normal/emission/rim texture refs, bump/rim floats, and alpha hints.
+- alpha contract correction (critical):
+  - `src/avatar/vrm_loader.cpp`
+  - `src/nativecore/native_core.cpp`
+  - `_Cutoff` is now emitted only for `MASK` materials; alpha-mode resolve no longer downgrades `OPAQUE` to `MASK` solely by cutoff presence.
+  - this resolves clothing/opacity corruption where opaque materials were incorrectly clipped.
+- release/deploy scripts and execution-board follow-ups:
+  - `tools/release_gate_dashboard.ps1`
+  - `tools/release_readiness_gate.ps1`
+  - `tools/run_quality_baseline.ps1`
+  - `tools/host_e2e_gate.ps1`
+  - `tools/nuget_mirror_bootstrap.ps1`
+  - `tools/sample_profile_resolve.ps1`
+  - `tools/sidecar_lock_guard.ps1`
+  - `tools/winui_xaml_min_repro.ps1`
+  - `tools/session_state_migration_check/Program.cs`
+  - `tools/tracking_parser_fuzz_gate/Program.cs`
+  - expanded automation for fail-fast gating, diagnostics trend/fuzz/migration checks, and reproducible host publish diagnostics.
+- Unity XAV2 SDK/runtime alignment:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2ExportOptions.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2Lz4Codec.cs`
+  - `unity/Packages/com.vsfclone.xav2/Tests/Editor/Xav2ImporterTests.cs`
+  - `unity/Packages/com.vsfclone.xav2/Tests/Editor/Xav2ExporterTests.cs`
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - synchronized typed-v2/validation behavior and test coverage with native loader expectations.
+- host UX/feature integration updates:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/PlatformFeatures.cs`
+  - `host/HostCore/HostCore.csproj`
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `host/WpfHost/MainWindow.xaml`
+  - diagnostics/export and host wiring updated to match new gate/report pipeline.
+- documentation/report updates:
+  - `docs/formats/xav2.md`
+  - `docs/reports/release_execution_board_20_2026-03-06.md`
+  - `docs/reports/release_execution_followup_2026-03-06.md`
+  - `docs/reports/avatar_render_recovery_bundle_2026-03-06.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone\\build --config Release --target nativecore` PASS
+- `dist\\wpf\\nativecore.dll` refreshed from latest Release build.
+- `dist\\wpf\\WpfHost.exe` smoke launch PASS (process starts and stays alive).
+- runtime avatar inspection after fixes:
+  - previously invisible avatar became render-visible with restored mesh payload count.
+  - remaining diagnostics narrowed to non-blocking feature gaps (for example, SpringBone simulation not yet implemented), separating visibility regressions from optional runtime features.
+
 ## 2026-03-06 - Release execution follow-up (trend/perf/soak/migration/fuzz + diagnostics bundle enrichment)
 
 ### Summary
@@ -16,6 +92,14 @@ Implemented follow-up automation for the 20-item execution board by adding GateD
   - `tools/avatar_load_soak_gate.ps1`
   - `tools/session_state_migration_check.ps1`
   - `tools/tracking_parser_fuzz_gate.ps1`
+  - `tools/nuget_mirror_bootstrap.ps1`
+  - `tools/sidecar_lock_guard.ps1`
+  - `tools/host_e2e_gate.ps1`
+  - `tools/winui_xaml_min_repro.ps1`
+  - `tools/sample_profile_resolve.ps1`
+- sample profile split:
+  - `tools/sample_profiles/fixed_set.txt`
+  - `tools/sample_profiles/real_large_set.txt`
 - new checker helper projects:
   - `tools/session_state_migration_check/` (dotnet-run migration checker)
   - `tools/tracking_parser_fuzz_gate/` (dotnet-run fuzz checker)
