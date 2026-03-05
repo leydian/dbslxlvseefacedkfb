@@ -45,6 +45,9 @@ public sealed partial class HostController
 
     public string GetUiMode() => _sessionPersistence.UiMode;
 
+    public (string activeSection, string themeMode, bool diagnosticsPinned) GetUiWorkspaceState()
+        => (_sessionPersistence.UiActiveSection, _sessionPersistence.UiThemeMode, _sessionPersistence.UiDiagnosticsPinned);
+
     public void SetUiMode(string uiMode)
     {
         var normalized = string.Equals(uiMode?.Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
@@ -62,6 +65,27 @@ public sealed partial class HostController
         };
         PersistSessionSnapshot();
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "UiMode", $"mode={normalized}", NcResultCode.Ok), false);
+    }
+
+    public void SetUiWorkspaceState(string activeSection, string themeMode, bool diagnosticsPinned)
+    {
+        var normalizedSection = NormalizeUiSection(activeSection);
+        var normalizedTheme = NormalizeThemeMode(themeMode);
+        if (string.Equals(_sessionPersistence.UiActiveSection, normalizedSection, StringComparison.Ordinal) &&
+            string.Equals(_sessionPersistence.UiThemeMode, normalizedTheme, StringComparison.Ordinal) &&
+            _sessionPersistence.UiDiagnosticsPinned == diagnosticsPinned)
+        {
+            return;
+        }
+
+        _sessionPersistence = _sessionPersistence with
+        {
+            UiActiveSection = normalizedSection,
+            UiThemeMode = normalizedTheme,
+            UiDiagnosticsPinned = diagnosticsPinned,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
     }
 
     public void InitializeMvpFeatures()
@@ -1245,6 +1269,28 @@ public sealed partial class HostController
         {
             // Best-effort persistence only.
         }
+    }
+
+    private static string NormalizeUiSection(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "getting_started" => "getting_started",
+            "session_avatar" => "session_avatar",
+            "render" => "render",
+            "outputs" => "outputs",
+            "tracking" => "tracking",
+            "platform_ops" => "platform_ops",
+            _ => "getting_started",
+        };
+    }
+
+    private static string NormalizeThemeMode(string? value)
+    {
+        return string.Equals(value?.Trim(), "dark", StringComparison.OrdinalIgnoreCase)
+            ? "dark"
+            : "light";
     }
 
     private void ApplySidecarEnvironment(SidecarSettings settings)

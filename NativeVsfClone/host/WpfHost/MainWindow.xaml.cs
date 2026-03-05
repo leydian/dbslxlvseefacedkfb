@@ -76,6 +76,27 @@ public partial class MainWindow : Window
     private bool _diagnosticsPinnedVisible;
     private bool _isDarkTheme;
 
+    private static string ToPersistSectionKey(UiSection section) => section switch
+    {
+        UiSection.GettingStarted => "getting_started",
+        UiSection.SessionAvatar => "session_avatar",
+        UiSection.Render => "render",
+        UiSection.Outputs => "outputs",
+        UiSection.Tracking => "tracking",
+        UiSection.PlatformOps => "platform_ops",
+        _ => "getting_started",
+    };
+
+    private static UiSection ParseSectionKey(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "session_avatar" => UiSection.SessionAvatar,
+        "render" => UiSection.Render,
+        "outputs" => UiSection.Outputs,
+        "tracking" => UiSection.Tracking,
+        "platform_ops" => UiSection.PlatformOps,
+        _ => UiSection.GettingStarted,
+    };
+
     public MainWindow()
     {
         InitializeComponent();
@@ -432,6 +453,7 @@ public partial class MainWindow : Window
         _isDarkTheme = !_isDarkTheme;
         ApplyThemeResources();
         ApplyNavRailState();
+        PersistUiWorkspaceState();
     }
 
     private void NavGettingStarted_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.GettingStarted);
@@ -449,6 +471,7 @@ public partial class MainWindow : Window
             _diagnosticsForcedVisible = false;
         }
         ApplyModeVisibility();
+        PersistUiWorkspaceState();
     }
 
     private void RenderOnlyToggle_Click(object sender, RoutedEventArgs e)
@@ -458,13 +481,104 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.F11)
+        if (TryHandleNavRailKeyboard(e) || TryHandleGlobalShortcut(e))
         {
+            e.Handled = true;
             return;
         }
 
-        SetRenderOnlyMode(!_isRenderOnlyMode);
-        e.Handled = true;
+        if (e.Key == Key.F11)
+        {
+            SetRenderOnlyMode(!_isRenderOnlyMode);
+            e.Handled = true;
+        }
+    }
+
+    private bool TryHandleGlobalShortcut(KeyEventArgs e)
+    {
+        var modifiers = Keyboard.Modifiers;
+        if (modifiers != ModifierKeys.Control)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.D1:
+            case Key.NumPad1:
+                ActivateSection(UiSection.GettingStarted);
+                return true;
+            case Key.D2:
+            case Key.NumPad2:
+                ActivateSection(UiSection.SessionAvatar);
+                return true;
+            case Key.D3:
+            case Key.NumPad3:
+                ActivateSection(UiSection.Render);
+                return true;
+            case Key.D4:
+            case Key.NumPad4:
+                ActivateSection(UiSection.Outputs);
+                return true;
+            case Key.D5:
+            case Key.NumPad5:
+                ActivateSection(UiSection.Tracking);
+                return true;
+            case Key.D6:
+            case Key.NumPad6:
+                ActivateSection(UiSection.PlatformOps);
+                return true;
+            case Key.D:
+                ToggleDiagnosticsPanel_Click(this, new RoutedEventArgs());
+                return true;
+            case Key.T:
+                ThemeToggle_Click(this, new RoutedEventArgs());
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private bool TryHandleNavRailKeyboard(KeyEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source)
+        {
+            return false;
+        }
+
+        var navButtons = GetNavButtons().Where(button => button.IsEnabled && button.Visibility == Visibility.Visible).ToList();
+        if (navButtons.Count == 0)
+        {
+            return false;
+        }
+
+        var focusedButton = navButtons.FirstOrDefault(button => button.IsKeyboardFocusWithin || ReferenceEquals(button, source));
+        if (focusedButton is null)
+        {
+            return false;
+        }
+
+        var index = navButtons.IndexOf(focusedButton);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Up:
+                navButtons[(index - 1 + navButtons.Count) % navButtons.Count].Focus();
+                return true;
+            case Key.Down:
+                navButtons[(index + 1) % navButtons.Count].Focus();
+                return true;
+            case Key.Enter:
+            case Key.Space:
+                focusedButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void PrimaryAction_Click(object sender, RoutedEventArgs e)
@@ -2342,7 +2456,11 @@ public partial class MainWindow : Window
         _uiMode = string.Equals(session.UiMode, UiModeAdvanced, StringComparison.OrdinalIgnoreCase)
             ? UiModeAdvanced
             : UiModeBeginner;
-        _diagnosticsForcedVisible = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        _activeSection = ParseSectionKey(session.UiActiveSection);
+        _isDarkTheme = string.Equals(session.UiThemeMode, "dark", StringComparison.OrdinalIgnoreCase);
+        _diagnosticsPinnedVisible = session.UiDiagnosticsPinned;
+        _diagnosticsForcedVisible = false;
+        ApplyThemeResources();
         if (!string.IsNullOrWhiteSpace(session.AvatarPath))
         {
             AvatarPathTextBox.Text = session.AvatarPath;
@@ -2397,6 +2515,7 @@ public partial class MainWindow : Window
         AutoQualityRecoveryThresholdTextBox.Text = aq.RecoveryFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
         AutoQualityRecoveryConsecutiveTextBox.Text = aq.RecoveryConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
         ApplyModeVisibility();
+        FocusPrimaryControlForSection(_activeSection);
     }
 
     private void RefreshGuides()
@@ -2422,6 +2541,10 @@ public partial class MainWindow : Window
 
         ApplyModeVisibility();
         UpdateUiState();
+        if (persist)
+        {
+            PersistUiWorkspaceState();
+        }
     }
 
     private void SetRenderOnlyMode(bool enabled)
@@ -2469,6 +2592,8 @@ public partial class MainWindow : Window
         ApplySectionVisibility();
         ApplyNavRailState();
         AnimateSectionTransition();
+        FocusPrimaryControlForSection(section);
+        PersistUiWorkspaceState();
     }
 
     private void ApplyThemeResources()
@@ -2604,6 +2729,46 @@ public partial class MainWindow : Window
         ToggleDiagnosticsButton.Content = _diagnosticsPinnedVisible ? "Diagnostics: Open" : "Diagnostics: Closed";
     }
 
+    private IEnumerable<Button> GetNavButtons()
+    {
+        yield return NavGettingStartedButton;
+        yield return NavSessionAvatarButton;
+        yield return NavRenderButton;
+        yield return NavOutputsButton;
+        yield return NavTrackingButton;
+        yield return NavOpsButton;
+        yield return ToggleDiagnosticsButton;
+    }
+
+    private void FocusPrimaryControlForSection(UiSection section)
+    {
+        Control? target = section switch
+        {
+            UiSection.GettingStarted => PrimaryActionButton,
+            UiSection.SessionAvatar => AvatarPathTextBox,
+            UiSection.Render => FramingSlider,
+            UiSection.Outputs => SpoutChannelTextBox,
+            UiSection.Tracking => TrackingPortTextBox,
+            UiSection.PlatformOps => RunPreflightButton,
+            _ => null,
+        };
+
+        if (target is null || target.Visibility != Visibility.Visible || !target.IsEnabled)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(new Action(() => target.Focus()), DispatcherPriority.Input);
+    }
+
+    private void PersistUiWorkspaceState()
+    {
+        _controller.SetUiWorkspaceState(
+            ToPersistSectionKey(_activeSection),
+            _isDarkTheme ? "dark" : "light",
+            _diagnosticsPinnedVisible);
+    }
+
     private void AnimateSectionTransition()
     {
         if (_controller.OperationState.IsBusy)
@@ -2657,6 +2822,7 @@ public partial class MainWindow : Window
         if (!advanced && _activeSection != UiSection.GettingStarted)
         {
             _activeSection = UiSection.GettingStarted;
+            FocusPrimaryControlForSection(_activeSection);
         }
 
         ApplySectionVisibility();

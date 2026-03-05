@@ -101,6 +101,7 @@ Report list for this week.
 - [2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md](./2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md)
 - [2026-03-06_wpf_light_glass_editorial_ui_refresh.md](./2026-03-06_wpf_light_glass_editorial_ui_refresh.md)
 - [2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md](./2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md)
+- [2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md](./2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md)
 - [2026-03-06_wpf_render_only_mode_toggle.md](./2026-03-06_wpf_render_only_mode_toggle.md)
 - [2026-03-06_wpf_render_drag_capture_stabilization.md](./2026-03-06_wpf_render_drag_capture_stabilization.md)
 - [2026-03-06_wpf_runtime_path_guard_and_dist_alignment.md](./2026-03-06_wpf_runtime_path_guard_and_dist_alignment.md)

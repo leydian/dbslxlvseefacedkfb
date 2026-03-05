@@ -12,6 +12,15 @@
             <Setter Property="Padding" Value="10,6"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
             <Setter Property="MinWidth" Value="124"/>
+            <Style.Triggers>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Color.Primary}"/>
+                    <Setter Property="BorderThickness" Value="2"/>
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.95"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
     </Window.Resources>
     <Grid Margin="14">
@@ -38,14 +47,14 @@
                 <StackPanel>
                     <TextBlock Text="WORKSPACE" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
                     <TextBlock Text="Host Control" Margin="0,4,0,12" FontSize="18" FontWeight="SemiBold"/>
-                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="Getting Started" Click="NavGettingStarted_Click"/>
-                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="Session / Avatar" Click="NavSessionAvatar_Click"/>
-                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="Render" Click="NavRender_Click"/>
-                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="Outputs" Click="NavOutputs_Click"/>
-                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="Tracking" Click="NavTracking_Click"/>
-                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="Platform Ops" Click="NavPlatformOps_Click"/>
+                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="Getting Started" Click="NavGettingStarted_Click" ToolTip="Ctrl+1"/>
+                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="Session / Avatar" Click="NavSessionAvatar_Click" ToolTip="Ctrl+2"/>
+                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="Render" Click="NavRender_Click" ToolTip="Ctrl+3"/>
+                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="Outputs" Click="NavOutputs_Click" ToolTip="Ctrl+4"/>
+                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="Tracking" Click="NavTracking_Click" ToolTip="Ctrl+5"/>
+                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="Platform Ops" Click="NavPlatformOps_Click" ToolTip="Ctrl+6"/>
                     <Separator Margin="0,4,0,8"/>
-                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="Diagnostics Panel" Click="ToggleDiagnosticsPanel_Click"/>
+                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="Diagnostics Panel" Click="ToggleDiagnosticsPanel_Click" ToolTip="Ctrl+D"/>
                 </StackPanel>
             </Border>
 
@@ -60,7 +69,7 @@
                             <Button x:Name="BeginnerModeButton" Content="초급 모드 (Beginner)" Click="BeginnerMode_Click" Margin="0,0,8,0" MinWidth="170"/>
                             <Button x:Name="AdvancedModeButton" Content="고급 모드 (Advanced)" Click="AdvancedMode_Click" MinWidth="170"/>
                             <Button x:Name="RenderOnlyToggleButton" Content="렌더 전용 모드 (F11)" Click="RenderOnlyToggle_Click" Margin="8,0,0,0" MinWidth="170"/>
-                            <Button x:Name="ThemeToggleButton" Content="Dark Theme" Click="ThemeToggle_Click" Margin="8,0,0,0" MinWidth="120"/>
+                            <Button x:Name="ThemeToggleButton" Content="Dark Theme" Click="ThemeToggle_Click" Margin="8,0,0,0" MinWidth="120" ToolTip="Ctrl+T"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>

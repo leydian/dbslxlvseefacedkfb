@@ -80,10 +80,13 @@ public sealed record SessionPersistenceModel(
     IReadOnlyList<RecentAvatarEntry> RecentAvatars,
     string? LastProfileName,
     string UiMode,
+    string UiActiveSection,
+    string UiThemeMode,
+    bool UiDiagnosticsPinned,
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 7,
+        Version: 8,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
@@ -93,6 +96,9 @@ public sealed record SessionPersistenceModel(
         RecentAvatars: Array.Empty<RecentAvatarEntry>(),
         LastProfileName: "quality",
         UiMode: "beginner",
+        UiActiveSection: "getting_started",
+        UiThemeMode: "light",
+        UiDiagnosticsPinned: false,
         LastUpdatedUtc: DateTimeOffset.UtcNow);
 }
 
@@ -177,7 +183,7 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 7,
+                    Version: 8,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
@@ -187,6 +193,9 @@ public sealed class SessionStateStore
                     RecentAvatars: Array.Empty<RecentAvatarEntry>(),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
+                    UiActiveSection: "getting_started",
+                    UiThemeMode: "light",
+                    UiDiagnosticsPinned: false,
                     LastUpdatedUtc: legacy.LastUpdatedUtc));
             }
         }
@@ -216,10 +225,12 @@ public sealed class SessionStateStore
         var lastUpdated = model.LastUpdatedUtc == default ? DateTimeOffset.UtcNow : model.LastUpdatedUtc;
         return model with
         {
-            Version = Math.Max(7, model.Version),
+            Version = Math.Max(8, model.Version),
             Tracking = NormalizeTracking(model.Tracking),
             RecentAvatars = NormalizeRecentAvatars(model.RecentAvatars),
             UiMode = mode,
+            UiActiveSection = NormalizeUiActiveSection(model.UiActiveSection),
+            UiThemeMode = NormalizeUiThemeMode(model.UiThemeMode),
             LastUpdatedUtc = lastUpdated,
         };
     }
@@ -269,6 +280,28 @@ public sealed class SessionStateStore
         return string.Equals(value?.Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
             ? "advanced"
             : "beginner";
+    }
+
+    private static string NormalizeUiActiveSection(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "getting_started" => "getting_started",
+            "session_avatar" => "session_avatar",
+            "render" => "render",
+            "outputs" => "outputs",
+            "tracking" => "tracking",
+            "platform_ops" => "platform_ops",
+            _ => "getting_started",
+        };
+    }
+
+    private static string NormalizeUiThemeMode(string? value)
+    {
+        return string.Equals(value?.Trim(), "dark", StringComparison.OrdinalIgnoreCase)
+            ? "dark"
+            : "light";
     }
 
     private static IReadOnlyList<RecentAvatarEntry> NormalizeRecentAvatars(IReadOnlyList<RecentAvatarEntry>? values)

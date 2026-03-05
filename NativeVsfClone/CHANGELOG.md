@@ -2,6 +2,47 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF UI v3 refinement (shortcuts + focus routing + workspace persistence)
+
+### Summary
+
+Extended the WPF operator UI with productivity-oriented controls and continuity behavior by adding keyboard shortcuts, rail keyboard navigation, section-aware focus routing, and HostCore-backed workspace state restore (section/theme/diagnostics pin). This iteration builds directly on v2 without changing runtime contracts.
+
+### Changed
+
+- HostCore session persistence expansion:
+  - `host/HostCore/PlatformFeatures.cs`
+  - `SessionPersistenceModel` upgraded to version `8` with:
+    - `UiActiveSection`
+    - `UiThemeMode`
+    - `UiDiagnosticsPinned`
+  - normalization and legacy fallback path updated with safe defaults.
+- HostCore UI workspace persistence API:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added:
+    - `GetUiWorkspaceState()`
+    - `SetUiWorkspaceState(activeSection, themeMode, diagnosticsPinned)`
+  - integrated with existing session snapshot persistence.
+- WPF keyboard/accessibility/flow polish:
+  - `host/WpfHost/MainWindow.xaml`
+  - nav button focus-ring trigger style, shortcut tooltips on key controls.
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added core shortcuts (`Ctrl+1..6`, `Ctrl+D`, `Ctrl+T`).
+  - added rail keyboard traversal (`Up/Down/Enter/Space`).
+  - added section-primary focus routing after section switch and startup restore.
+  - startup now restores section/theme/diagnostics pin from HostCore session state.
+  - UI workspace state is persisted on section/theme/diagnostics changes.
+- Documentation:
+  - `docs/reports/wpf_ui_v3_shortcuts_focus_persistence_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
 ## 2026-03-06 - WPF UI v2 refinement (navigation + dual theme + diagnostics collapse policy)
 
 ### Summary
