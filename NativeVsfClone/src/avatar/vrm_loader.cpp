@@ -795,6 +795,26 @@ bool TextureHasAlphaCapability(const std::string& format, const std::vector<std:
     return false;
 }
 
+bool MaterialNameSuggestsBlend(const std::string& material_name) {
+    const auto lower = ToLower(material_name);
+    static const std::array<std::string, 9U> kBlendHintTokens = {
+        "hologram",
+        "effect",
+        "glass",
+        "transparent",
+        "trans",
+        "alpha",
+        "ghost",
+        "clear",
+        "fx"};
+    for (const auto& token : kBlendHintTokens) {
+        if (lower.find(token) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::uint32_t ReadU32Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
     return static_cast<std::uint32_t>(bytes[offset]) |
            (static_cast<std::uint32_t>(bytes[offset + 1]) << 8U) |
@@ -2603,11 +2623,18 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     &info.alpha_source,
                     &info.alpha_cutoff);
             }
-            if (info.alpha_mode == "OPAQUE" &&
-                info.alpha_source == "default.opaque" &&
-                info.base_color_texture_alpha_capable) {
+            const bool opaque_from_contract =
+                info.alpha_mode == "OPAQUE" &&
+                (info.alpha_source == "default.opaque" || info.alpha_source == "gltf.alphaMode");
+            const bool fallback_texture_signal = info.base_color_texture_alpha_capable;
+            const bool fallback_name_signal = MaterialNameSuggestsBlend(info.name);
+            if (opaque_from_contract && (fallback_texture_signal || fallback_name_signal)) {
                 info.alpha_mode = "BLEND";
-                info.alpha_source = "fallback.texture-alpha";
+                if (fallback_texture_signal) {
+                    info.alpha_source = "fallback.texture-alpha";
+                } else {
+                    info.alpha_source = "fallback.material-name";
+                }
             }
             parsed_materials.push_back(std::move(info));
         }
