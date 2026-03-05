@@ -44,3 +44,4 @@
 - Newly added: review `2026-03-06_arkit52_quality_refinement_hybrid_fallback.md` for strict-first hybrid fallback routing, ARKit quality scoring, per-group calibration tuning, and fallback warning telemetry.
 - Newly added: review `2026-03-06_xav2_full_parity_contract_enforcement.md` for strict lilToon/Poiyomi parity contract enforcement, typed-v3 canonical migration policy, and hard-fail diagnostics behavior.
 - Newly added: review `2026-03-06_xav2_poiyomi_typed_material_parity_extension.md` for Poiyomi advanced typed-v3 extraction uplift, feature-flag parity alignment, and runtime typed parse regression coverage.
+- Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.

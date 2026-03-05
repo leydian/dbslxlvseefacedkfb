@@ -756,18 +756,14 @@ public sealed partial class HostController
             _renderTickSuppressedByLoad = false;
         }
 
+        var nativeSubmitErrorCode = string.Empty;
         if (_trackingInputService.TryGetLatestFrame(out var trackingFrame))
         {
             var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref trackingFrame);
             if (trackingRc != NcResultCode.Ok)
             {
-                _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = $"NC_SET_TRACKING_FRAME_{trackingRc}" };
+                nativeSubmitErrorCode = $"NC_SET_TRACKING_FRAME_{trackingRc}";
                 TrackResult("SetTrackingFrame", trackingRc);
-            }
-            else if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
-                     _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_TRACKING_FRAME_", StringComparison.Ordinal))
-            {
-                _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
             }
         }
         else
@@ -777,7 +773,7 @@ public sealed partial class HostController
             var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref neutralFrame);
             if (trackingRc != NcResultCode.Ok)
             {
-                _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = $"NC_SET_TRACKING_FRAME_{trackingRc}" };
+                nativeSubmitErrorCode = $"NC_SET_TRACKING_FRAME_{trackingRc}";
                 TrackResult("SetTrackingFrameNeutral", trackingRc);
             }
         }
@@ -798,17 +794,21 @@ public sealed partial class HostController
                 var exprRc = NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
                 if (exprRc != NcResultCode.Ok)
                 {
-                    _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = $"NC_SET_EXPRESSION_WEIGHTS_{exprRc}" };
+                    nativeSubmitErrorCode = $"NC_SET_EXPRESSION_WEIGHTS_{exprRc}";
                     TrackResult("SetExpressionWeights", exprRc);
-                }
-                else if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
-                         _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_EXPRESSION_WEIGHTS_", StringComparison.Ordinal))
-                {
-                    _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
                 }
             }
         }
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+        if (!string.IsNullOrWhiteSpace(nativeSubmitErrorCode))
+        {
+            _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = nativeSubmitErrorCode };
+        }
+        else if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
+                 _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_", StringComparison.Ordinal))
+        {
+            _trackingDiagnostics = _trackingDiagnostics with { LastErrorCode = string.Empty };
+        }
         if (arkit52Summary is not null)
         {
             _trackingDiagnostics = _trackingDiagnostics with

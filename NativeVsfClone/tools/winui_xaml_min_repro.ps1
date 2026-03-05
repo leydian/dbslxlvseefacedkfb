@@ -49,16 +49,30 @@ try {
 }
 
 $failureClass = "NONE"
+$failureHints = [System.Collections.Generic.List[string]]::new()
 if ($exitCode -ne 0) {
     $failureClass = "UNKNOWN"
     if (Select-String -Path $resolvedDiag -Pattern "WMC9999" -SimpleMatch -Quiet) {
         $failureClass = "TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED"
+        $failureHints.Add("WMC9999 detected in diagnostic log.")
+    } elseif (Select-String -Path $resolvedDiag -Pattern "Windows SDK version 10.0.19041.0 was not found" -SimpleMatch -Quiet) {
+        $failureClass = "TOOLCHAIN_WINDOWS_SDK_INCOMPLETE"
+        $failureHints.Add("Required Windows SDK 10.0.19041.0 not found.")
+    } elseif (Select-String -Path $resolvedDiag -Pattern "Windows.winmd" -SimpleMatch -Quiet) {
+        $failureClass = "TOOLCHAIN_WINDOWS_SDK_INCOMPLETE"
+        $failureHints.Add("Windows.winmd resolution failure detected.")
+    } elseif (Select-String -Path $resolvedDiag -Pattern "Microsoft.WindowsAppSDK" -SimpleMatch -Quiet) {
+        $failureClass = "WINDOWSAPPSDK_RESTORE_INCOMPLETE"
+        $failureHints.Add("WindowsAppSDK package resolution issue detected.")
     } elseif (Select-String -Path $resolvedDiag -Pattern "NU1301" -SimpleMatch -Quiet) {
         $failureClass = "NUGET_SOURCE_UNREACHABLE"
+        $failureHints.Add("NU1301 detected (NuGet source unreachable).")
     } elseif (Select-String -Path $resolvedDiag -Pattern "NU1101" -SimpleMatch -Quiet) {
         $failureClass = "NUGET_PACKAGE_RESOLUTION_FAIL"
+        $failureHints.Add("NU1101 detected (package not found).")
     } elseif (Select-String -Path $resolvedDiag -Pattern "XamlCompiler.exe" -SimpleMatch -Quiet) {
         $failureClass = "XAML_COMPILER_EXEC_FAIL"
+        $failureHints.Add("XamlCompiler.exe execution path detected.")
     }
 }
 
@@ -70,6 +84,7 @@ $lines.Add("Configuration: $Configuration")
 $lines.Add("NoRestore: $NoRestore")
 $lines.Add("ExitCode: $exitCode")
 $lines.Add("FailureClass: $failureClass")
+$lines.Add("FailureHints: $(if ($failureHints.Count -eq 0) { '<none>' } else { $failureHints -join ' | ' })")
 $lines.Add("DiagLog: $resolvedDiag")
 $lines.Add("Binlog: $resolvedBinlog")
 $lines | Set-Content -Path $resolvedSummary -Encoding UTF8

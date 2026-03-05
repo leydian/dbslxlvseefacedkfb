@@ -859,6 +859,18 @@ public partial class MainWindow : Window
             TrackingInferenceFpsTextBox.Text = "30";
         }
         inferenceFpsCap = Math.Clamp(inferenceFpsCap, 5, 120);
+        if (!int.TryParse(TrackingParseWarnThresholdTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parseWarnThreshold))
+        {
+            parseWarnThreshold = 10;
+            TrackingParseWarnThresholdTextBox.Text = "10";
+        }
+        parseWarnThreshold = Math.Clamp(parseWarnThreshold, 1, 10000);
+        if (!int.TryParse(TrackingDropWarnThresholdTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var dropWarnThreshold))
+        {
+            dropWarnThreshold = 10;
+            TrackingDropWarnThresholdTextBox.Text = "10";
+        }
+        dropWarnThreshold = Math.Clamp(dropWarnThreshold, 1, 10000);
 
         var sourceType = TrackingSourceComboBox.SelectedIndex == 1
             ? TrackingSourceType.WebcamMediapipe
@@ -891,6 +903,8 @@ public partial class MainWindow : Window
             sourceType,
             cameraKey,
             inferenceFpsCap,
+            parseWarnThreshold,
+            dropWarnThreshold,
             sourceLockMode: sourceLockMode,
             latencyProfile: latencyProfile,
             poseFilterProfile: poseFilterProfile,
@@ -1021,6 +1035,11 @@ public partial class MainWindow : Window
     private void CopyLogs_Click(object sender, RoutedEventArgs e)
     {
         Clipboard.SetText(LogsTextBox.Text);
+    }
+
+    private void CopyRuntime_Click(object sender, RoutedEventArgs e)
+    {
+        Clipboard.SetText(RuntimeDiagnosticsTextBox.Text);
     }
 
     private void RunPreflight_Click(object sender, RoutedEventArgs e)
@@ -1843,13 +1862,17 @@ public partial class MainWindow : Window
         TrackingWebcamDeviceComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         RefreshTrackingWebcamButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingInferenceFpsTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingParseWarnThresholdTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingDropWarnThresholdTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingSourceLockComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingLatencyProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseFilterProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseDeadbandSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}";
+        var trackingSettings = _controller.GetTrackingInputSettings();
+        var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -2476,6 +2499,8 @@ public partial class MainWindow : Window
         TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
         TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType == TrackingSourceType.WebcamMediapipe ? 1 : 0;
         TrackingInferenceFpsTextBox.Text = session.Tracking.InferenceFpsCap.ToString(CultureInfo.InvariantCulture);
+        TrackingParseWarnThresholdTextBox.Text = session.Tracking.ParseErrorWarnThreshold.ToString(CultureInfo.InvariantCulture);
+        TrackingDropWarnThresholdTextBox.Text = session.Tracking.DroppedPacketWarnThreshold.ToString(CultureInfo.InvariantCulture);
         TrackingSourceLockComboBox.SelectedIndex = session.Tracking.SourceLockMode switch
         {
             TrackingSourceLockMode.IfacialLocked => 1,
@@ -2516,6 +2541,27 @@ public partial class MainWindow : Window
         AutoQualityRecoveryConsecutiveTextBox.Text = aq.RecoveryConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
         ApplyModeVisibility();
         FocusPrimaryControlForSection(_activeSection);
+    }
+
+    private static string BuildTrackingErrorHint(string lastErrorCode)
+    {
+        if (string.IsNullOrWhiteSpace(lastErrorCode))
+        {
+            return string.Empty;
+        }
+
+        return lastErrorCode switch
+        {
+            "TRACKING_PARSE_THRESHOLD_EXCEEDED" => " hint=parse errors exceeded threshold",
+            "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
+            "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
+            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid",
+            "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
+            "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
+            _ when lastErrorCode.StartsWith("NC_SET_TRACKING_FRAME_", StringComparison.Ordinal) => " hint=native tracking submit failed",
+            _ when lastErrorCode.StartsWith("NC_SET_EXPRESSION_WEIGHTS_", StringComparison.Ordinal) => " hint=native expression submit failed",
+            _ => string.Empty,
+        };
     }
 
     private void RefreshGuides()
@@ -2606,9 +2652,17 @@ public partial class MainWindow : Window
 
         static void SetBrush(string key, string colorHex)
         {
+            var color = (Color)ColorConverter.ConvertFromString(colorHex)!;
             if (Application.Current.Resources[key] is SolidColorBrush brush)
             {
-                brush.Color = (Color)ColorConverter.ConvertFromString(colorHex)!;
+                if (!brush.IsFrozen)
+                {
+                    brush.Color = color;
+                }
+                else
+                {
+                    Application.Current.Resources[key] = new SolidColorBrush(color);
+                }
             }
         }
 

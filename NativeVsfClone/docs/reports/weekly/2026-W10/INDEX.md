@@ -82,6 +82,7 @@ Report list for this week.
 - [2026-03-06_spout2_full_interop_scaffold.md](./2026-03-06_spout2_full_interop_scaffold.md)
 - [2026-03-06_tracking_latency_lock_followup.md](./2026-03-06_tracking_latency_lock_followup.md)
 - [2026-03-06_tracking_render_followup.md](./2026-03-06_tracking_render_followup.md)
+- [2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md](./2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md)
 - [2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md](./2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_refinement.md](./2026-03-06_vrm_springbone_mtoon_runtime_refinement.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_uplift.md](./2026-03-06_vrm_springbone_mtoon_runtime_uplift.md)

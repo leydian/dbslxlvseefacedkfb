@@ -50,12 +50,12 @@ Status legend:
    Automation: `tools/tracking_parser_fuzz_gate.ps1`
 
 10. Tracking threshold config externalization  
-    Status: `IN_PROGRESS`  
-    Current: parse/drop warn thresholds now persisted and normalized in `TrackingInputSettings`; UI exposure and tuning UX remain
+    Status: `DONE`  
+    Current: parse/drop warn thresholds are now persisted, normalized, and exposed in WPF/WinUI tracking UI (`parse_warn`, `drop_warn`) with start-time config wiring
 
 11. Tracking/expression native submit failures surfaced in UI  
-    Status: `IN_PROGRESS`  
-    Current: `TrackingDiagnostics.LastErrorCode` now records native submit failures (`NC_SET_TRACKING_FRAME_*`, `NC_SET_EXPRESSION_WEIGHTS_*`); final UI binding/polish remains
+    Status: `DONE`  
+    Current: native submit failures are preserved through tick diagnostics (`NC_SET_TRACKING_FRAME_*`, `NC_SET_EXPRESSION_WEIGHTS_*`) and surfaced with host-side hint text in WPF/WinUI status rows
 
 12. Webcam ONNX source from placeholder to real inference  
     Status: `TODO`
@@ -70,7 +70,7 @@ Status legend:
 
 15. Cross-layer error code contract unification (doc/code/UI)  
     Status: `IN_PROGRESS`  
-    Current: major avatar gates aligned; final host UI wording/code mapping remains
+    Current: host UI now maps major tracking/native error codes to actionable hint text; remaining work is full docs/contract sweep across non-tracking domains
 
 16. `.xav2` typed-v2 negative/edge validation expansion  
     Status: `IN_PROGRESS`  

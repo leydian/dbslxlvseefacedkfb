@@ -446,6 +446,8 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Listen Port" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
@@ -461,26 +463,30 @@
                             </DockPanel>
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Infer FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Source Lock" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="4" Grid.Column="1" x:Name="TrackingSourceLockComboBox" Margin="0,8,0,0">
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Parse Warn" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingParseWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Drop Warn" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBox Grid.Row="5" Grid.Column="1" x:Name="TrackingDropWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Source Lock" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <ComboBox Grid.Row="6" Grid.Column="1" x:Name="TrackingSourceLockComboBox" Margin="0,8,0,0">
                                 <ComboBoxItem Content="Auto"/>
                                 <ComboBoxItem Content="iFacial Locked"/>
                                 <ComboBoxItem Content="Webcam Locked"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Latency" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="5" Grid.Column="1" x:Name="TrackingLatencyProfileComboBox" Margin="0,8,0,0">
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Latency" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <ComboBox Grid.Row="7" Grid.Column="1" x:Name="TrackingLatencyProfileComboBox" Margin="0,8,0,0">
                                 <ComboBoxItem Content="Low Latency"/>
                                 <ComboBoxItem Content="Balanced"/>
                                 <ComboBoxItem Content="Stable"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Pose Filter" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="6" Grid.Column="1" x:Name="TrackingPoseFilterProfileComboBox" Margin="0,8,0,0" SelectionChanged="TrackingPoseFilterProfile_SelectionChanged">
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Pose Filter" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <ComboBox Grid.Row="8" Grid.Column="1" x:Name="TrackingPoseFilterProfileComboBox" Margin="0,8,0,0" SelectionChanged="TrackingPoseFilterProfile_SelectionChanged">
                                 <ComboBoxItem Content="Reactive"/>
                                 <ComboBoxItem Content="Balanced"/>
                                 <ComboBoxItem Content="Stable"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Deadband" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <DockPanel Grid.Row="7" Grid.Column="1" Margin="0,8,0,0">
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Deadband" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,8,0,0">
                                 <TextBlock x:Name="TrackingPoseDeadbandValueText" Text="0.90°" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                                 <Slider x:Name="TrackingPoseDeadbandSlider" Minimum="0.0" Maximum="3.0" Value="0.9" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="TrackingPoseDeadbandSlider_ValueChanged"/>
                             </DockPanel>
@@ -608,7 +614,10 @@
 
             <TabControl x:Name="DiagnosticsTabControl" Grid.Row="1" Margin="0,8,0,8" SelectionChanged="DiagnosticsTabControl_SelectionChanged">
                 <TabItem Header="런타임 (Runtime)">
-                    <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                    <DockPanel>
+                        <Button Content="런타임 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyRuntime_Click"/>
+                        <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                    </DockPanel>
                 </TabItem>
                 <TabItem Header="아바타 (Avatar)">
                     <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>

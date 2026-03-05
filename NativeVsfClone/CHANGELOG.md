@@ -2,6 +2,47 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking threshold UX completion + native submit error surfacing + WinUI repro hints
+
+### Summary
+
+Completed host-side tracking operability hardening by wiring parse/drop warn thresholds into both WPF and WinUI control surfaces, preserving native tracking/expression submit failures through tick diagnostics, and refining WinUI minimal repro failure classification output with explicit hints.
+
+### Changed
+
+- HostCore diagnostics preservation:
+  - `host/HostCore/HostController.cs`
+  - ensured same-tick native submit errors are not overwritten by service snapshot refresh.
+  - covered native error surfaces:
+    - `NC_SET_TRACKING_FRAME_*`
+    - `NC_SET_EXPRESSION_WEIGHTS_*`
+- WPF tracking UX completion:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `Parse Warn` / `Drop Warn` inputs, clamp/normalize on start, and persisted-default restore.
+  - status text now includes configured thresholds (`parse_warn`, `drop_warn`) and actionable hint mapping from error codes.
+- WinUI tracking UX completion:
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - added same threshold controls + start wiring + persisted restore + status threshold display/hints.
+- WinUI repro classifier refinement:
+  - `tools/winui_xaml_min_repro.ps1`
+  - added `FailureHints` summary output and expanded classification signals (Windows SDK / WindowsAppSDK / NuGet / XAML compiler paths).
+- Release board status sync:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_board_20.md`
+  - item 10 and 11 moved to `DONE`, item 15 wording narrowed to remaining doc/contract sweep.
+- Report indexing:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release --no-restore`: FAIL (`NU1301`, `api.nuget.org:443` reachability in current environment)
+- `powershell -ExecutionPolicy Bypass -File tools/winui_xaml_min_repro.ps1 -NoRestore`: FAIL (classified summary emitted with `FailureClass=WINDOWSAPPSDK_RESTORE_INCOMPLETE`)
+
 ## 2026-03-06 - XAV2 poiyomi typed material parity extension (unity/runtime tests)
 
 ### Summary
