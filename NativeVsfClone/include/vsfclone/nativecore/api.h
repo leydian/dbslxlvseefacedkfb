@@ -134,6 +134,12 @@ typedef enum NcCameraMode {
     NC_CAMERA_MODE_MANUAL = 2
 } NcCameraMode;
 
+typedef enum NcRenderQualityProfile {
+    NC_RENDER_QUALITY_DEFAULT = 0,
+    NC_RENDER_QUALITY_BALANCED = 1,
+    NC_RENDER_QUALITY_ULTRA_PARITY = 2
+} NcRenderQualityProfile;
+
 typedef struct NcRenderQualityOptions {
     NcCameraMode camera_mode;
     float framing_target;
@@ -141,6 +147,7 @@ typedef struct NcRenderQualityOptions {
     float yaw_deg;
     float fov_deg;
     float background_rgba[4];
+    uint32_t quality_profile;
     uint32_t show_debug_overlay;
 } NcRenderQualityOptions;
 
@@ -186,6 +193,10 @@ typedef struct NcRuntimeStats {
     uint32_t spout_active;
     uint32_t osc_active;
     float last_frame_ms;
+    float gpu_frame_ms;
+    float cpu_frame_ms;
+    float material_resolve_ms;
+    uint32_t pass_count;
 } NcRuntimeStats;
 
 typedef enum NcSpoutBackendKind {

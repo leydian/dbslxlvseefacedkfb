@@ -309,10 +309,11 @@ public sealed partial class HostController
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("timestamp_utc,frame_ms,render_ready_avatar_count,spout_active,osc_active");
+        sb.AppendLine("timestamp_utc,frame_ms,gpu_frame_ms,cpu_frame_ms,material_resolve_ms,pass_count,render_ready_avatar_count,spout_active,osc_active");
         foreach (var item in _rollingMetrics)
         {
-            sb.AppendLine($"{item.TimestampUtc:O},{item.FrameMs:F3},{item.RenderReadyAvatarCount},{item.SpoutActive},{item.OscActive}");
+            sb.AppendLine(
+                $"{item.TimestampUtc:O},{item.FrameMs:F3},{item.GpuFrameMs:F3},{item.CpuFrameMs:F3},{item.MaterialResolveMs:F3},{item.PassCount},{item.RenderReadyAvatarCount},{item.SpoutActive},{item.OscActive}");
         }
 
         File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
@@ -365,6 +366,7 @@ public sealed partial class HostController
         {
             "performance" => current with { BroadcastMode = true, CameraMode = RenderCameraMode.AutoFitBust, FramingTarget = 0.70f, Headroom = 0.08f, FovDeg = 32.0f, ShowDebugOverlay = false },
             "stability" => current with { BroadcastMode = true, CameraMode = RenderCameraMode.AutoFitBust, FramingTarget = 0.74f, Headroom = 0.12f, FovDeg = 35.0f, ShowDebugOverlay = false },
+            "ultra-parity" => current with { BroadcastMode = true, CameraMode = RenderCameraMode.AutoFitBust, FramingTarget = 0.78f, Headroom = 0.10f, FovDeg = 42.0f, ShowDebugOverlay = false },
             _ => current with { BroadcastMode = true, CameraMode = RenderCameraMode.AutoFitBust, FramingTarget = 0.80f, Headroom = 0.10f, FovDeg = 40.0f, ShowDebugOverlay = false },
         };
 
@@ -629,6 +631,10 @@ public sealed partial class HostController
         _rollingMetrics.Enqueue(new FrameMetric(
             DateTimeOffset.UtcNow,
             stats.LastFrameMs,
+            stats.GpuFrameMs,
+            stats.CpuFrameMs,
+            stats.MaterialResolveMs,
+            stats.PassCount,
             stats.RenderReadyAvatarCount,
             stats.SpoutActive != 0U,
             stats.OscActive != 0U));

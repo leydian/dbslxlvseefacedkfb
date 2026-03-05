@@ -2,7 +2,7 @@ param(
     [string]$MetricsCsvPath = "",
     [string]$MetricsDir = ".\build\reports",
     [string]$SummaryPath = ".\build\reports\render_perf_gate_summary.txt",
-    [ValidateSet("realtime-stable", "legacy", "aggressive")]
+    [ValidateSet("realtime-stable", "legacy", "aggressive", "ultra-parity")]
     [string]$Profile = "realtime-stable",
     [double]$MaxP95FrameMs = 20.0,
     [double]$MaxP99FrameMs = 28.0,
@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 
 $profileDefaults = switch ($Profile) {
     "aggressive" { @{ MaxP95FrameMs = 16.7; MaxP99FrameMs = 24.0; MaxFrameDropRatio = 0.01 } }
+    "ultra-parity" { @{ MaxP95FrameMs = 16.7; MaxP99FrameMs = 20.0; MaxFrameDropRatio = 0.01 } }
     "legacy" { @{ MaxP95FrameMs = 33.0; MaxP99FrameMs = 50.0; MaxFrameDropRatio = 0.05 } }
     default { @{ MaxP95FrameMs = 20.0; MaxP99FrameMs = 28.0; MaxFrameDropRatio = 0.02 } }
 }

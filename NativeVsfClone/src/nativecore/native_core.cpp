@@ -117,6 +117,10 @@ struct CoreState {
     NcRenderQualityOptions render_quality {};
     std::array<NcPoseBoneOffset, 9U> pose_offsets {};
     float last_frame_ms = 0.0f;
+    float last_gpu_frame_ms = 0.0f;
+    float last_cpu_frame_ms = 0.0f;
+    float last_material_resolve_ms = 0.0f;
+    std::uint32_t last_pass_count = 0U;
 
 #if defined(_WIN32)
     std::unordered_map<void*, WindowRenderState> window_targets;
@@ -140,6 +144,7 @@ NcRenderQualityOptions MakeDefaultRenderQualityOptions() {
     options.background_rgba[1] = 0.12f;
     options.background_rgba[2] = 0.18f;
     options.background_rgba[3] = 1.0f;
+    options.quality_profile = NC_RENDER_QUALITY_DEFAULT;
     options.show_debug_overlay = 0U;
     return options;
 }
@@ -155,6 +160,9 @@ NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions
     out.fov_deg = std::max(20.0f, std::min(80.0f, out.fov_deg));
     for (int i = 0; i < 4; ++i) {
         out.background_rgba[i] = std::max(0.0f, std::min(1.0f, out.background_rgba[i]));
+    }
+    if (out.quality_profile > NC_RENDER_QUALITY_ULTRA_PARITY) {
+        out.quality_profile = NC_RENDER_QUALITY_DEFAULT;
     }
     out.show_debug_overlay = out.show_debug_overlay > 0U ? 1U : 0U;
     return out;
@@ -1747,7 +1755,8 @@ bool TryGetTypedTextureRef(
 
 std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
     std::string alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : ToUpperAscii(payload.alpha_mode);
-    if (NormalizeRefKey(payload.material_param_encoding) == "typed-v2") {
+    const std::string typed_encoding = NormalizeRefKey(payload.material_param_encoding);
+    if (typed_encoding == "typed-v2" || typed_encoding == "typed-v3") {
         if (payload.feature_flags & (1U << 1)) {
             return "BLEND";
         }
@@ -2098,6 +2107,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         return NC_ERROR_UNSUPPORTED;
     }
     const auto frame_begin = std::chrono::steady_clock::now();
+    double material_resolve_ms = 0.0;
 
 #if defined(_WIN32)
     auto* device = reinterpret_cast<ID3D11Device*>(ctx->d3d11_device);
@@ -2175,6 +2185,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         if (it == g_state.avatars.end()) {
             continue;
         }
+        const auto material_resolve_begin = std::chrono::steady_clock::now();
         if (!EnsureAvatarGpuMeshes(&renderer, it->second, handle, device)) {
             SetError(NC_ERROR_INTERNAL, "render", "failed to upload mesh payloads to GPU", true);
             return NC_ERROR_INTERNAL;
@@ -2183,6 +2194,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             SetError(NC_ERROR_INTERNAL, "render", "failed to create material GPU resources", true);
             return NC_ERROR_INTERNAL;
         }
+        const auto material_resolve_end = std::chrono::steady_clock::now();
+        material_resolve_ms += static_cast<double>(
+            std::chrono::duration_cast<std::chrono::microseconds>(material_resolve_end - material_resolve_begin).count()) /
+            1000.0;
         if (!ApplyExpressionMorphToAvatar(&renderer, it->second, handle, device_ctx)) {
             SetError(NC_ERROR_INTERNAL, "render", "failed to apply expression morphs", true);
             return NC_ERROR_INTERNAL;
@@ -2440,6 +2455,16 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         device_ctx->PSSetShaderResources(0U, 3U, null_srvs);
         ++frame_draw_calls;
     };
+    std::uint32_t frame_pass_count = 0U;
+    if (!opaque_draws.empty()) {
+        ++frame_pass_count;
+    }
+    if (!mask_draws.empty()) {
+        ++frame_pass_count;
+    }
+    if (!blend_draws.empty()) {
+        ++frame_pass_count;
+    }
     for (const auto& item : opaque_draws) {
         draw_pass(item);
     }
@@ -2492,9 +2517,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     }
 
     const auto frame_end = std::chrono::steady_clock::now();
-    g_state.last_frame_ms = static_cast<float>(
+    const float frame_ms = static_cast<float>(
         std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_begin).count()) /
         1000.0f;
+    g_state.last_frame_ms = frame_ms;
+    g_state.last_cpu_frame_ms = frame_ms;
+    g_state.last_gpu_frame_ms = frame_ms;
+    g_state.last_material_resolve_ms = static_cast<float>(material_resolve_ms);
+    g_state.last_pass_count = frame_pass_count;
 
     ClearError();
     return NC_OK;
@@ -2519,6 +2549,10 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
     vsfclone::nativecore::g_state.last_frame_ms = 0.0f;
+    vsfclone::nativecore::g_state.last_gpu_frame_ms = 0.0f;
+    vsfclone::nativecore::g_state.last_cpu_frame_ms = 0.0f;
+    vsfclone::nativecore::g_state.last_material_resolve_ms = 0.0f;
+    vsfclone::nativecore::g_state.last_pass_count = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
@@ -3341,6 +3375,10 @@ NcResultCode nc_get_runtime_stats(NcRuntimeStats* out_stats) {
     out_stats->spout_active = vsfclone::nativecore::g_state.spout.IsActive() ? 1U : 0U;
     out_stats->osc_active = vsfclone::nativecore::g_state.osc.IsBound() ? 1U : 0U;
     out_stats->last_frame_ms = vsfclone::nativecore::g_state.last_frame_ms;
+    out_stats->gpu_frame_ms = vsfclone::nativecore::g_state.last_gpu_frame_ms;
+    out_stats->cpu_frame_ms = vsfclone::nativecore::g_state.last_cpu_frame_ms;
+    out_stats->material_resolve_ms = vsfclone::nativecore::g_state.last_material_resolve_ms;
+    out_stats->pass_count = vsfclone::nativecore::g_state.last_pass_count;
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }

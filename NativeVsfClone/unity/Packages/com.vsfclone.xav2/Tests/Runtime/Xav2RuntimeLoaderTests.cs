@@ -75,10 +75,32 @@ namespace VsfClone.Xav2.Runtime.Tests
                 Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
                 Assert.That(payload.Materials.Count, Is.EqualTo(1));
                 var material = payload.Materials[0];
-                Assert.That(material.MaterialParamEncoding, Is.EqualTo("typed-v2"));
+                Assert.That(material.MaterialParamEncoding, Is.EqualTo("typed-v3"));
+                Assert.That(material.TypedSchemaVersion, Is.EqualTo(3));
                 Assert.That(material.ShaderFamily, Is.EqualTo("liltoon"));
                 Assert.That(material.TypedFloatParams.Exists(p => p.Id == "_Cutoff"), Is.True);
                 Assert.That(material.TypedColorParams.Exists(p => p.Id == "_BaseColor"), Is.True);
+                Assert.That(material.TypedTextureParams.Exists(p => p.Slot == "base"), Is.True);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialParamsV2_LegacyShape_Parses()
+        {
+            var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true, typedSchemaVersion: 2));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(payload.Materials.Count, Is.EqualTo(1));
+                var material = payload.Materials[0];
+                Assert.That(material.MaterialParamEncoding, Is.EqualTo("typed-v2"));
+                Assert.That(material.TypedSchemaVersion, Is.EqualTo(2));
                 Assert.That(material.TypedTextureParams.Exists(p => p.Slot == "base"), Is.True);
             }
             finally
@@ -520,7 +542,8 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool rigCycle = false,
             bool compressMeshSection = false,
             bool corruptCompressedSection = false,
-            bool truncateCompressedEnvelope = false)
+            bool truncateCompressedEnvelope = false,
+            ushort typedSchemaVersion = 3)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -588,6 +611,7 @@ namespace VsfClone.Xav2.Runtime.Tests
                         "material_0",
                         typedShaderFamilyOverride ?? "liltoon",
                         typedIncludeBaseColor,
+                        typedSchemaVersion,
                         unresolvedTypedTextureRef
                             ? "texture_missing_typed"
                             : (typedBaseTextureRefOverride ?? textureRefName)));
@@ -680,6 +704,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             string name,
             string shaderFamily,
             bool includeBaseColor,
+            ushort schemaVersion,
             string baseTextureRef)
         {
             using var ms = new MemoryStream();
@@ -687,6 +712,10 @@ namespace VsfClone.Xav2.Runtime.Tests
             WriteSizedString(bw, name);
             WriteSizedString(bw, shaderFamily);
             bw.Write((uint)0x00000021); // cutout + shade
+            if (schemaVersion >= 3)
+            {
+                bw.Write(schemaVersion);
+            }
 
             bw.Write((ushort)1);
             WriteSizedString(bw, "_Cutoff");

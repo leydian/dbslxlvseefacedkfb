@@ -91,6 +91,7 @@ struct MaterialRenderPayload {
     std::string shader_variant = "default";
     std::string shader_family = "legacy";
     std::string material_param_encoding = "legacy-json";
+    std::uint16_t typed_schema_version = 0;
     std::uint32_t feature_flags = 0;
     std::string base_color_texture_name;
     std::string shader_params_json = "{}";

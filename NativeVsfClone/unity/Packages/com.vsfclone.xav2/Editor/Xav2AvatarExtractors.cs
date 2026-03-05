@@ -322,13 +322,17 @@ namespace VsfClone.Xav2.Editor
                 ShaderName = shaderName,
                 ShaderVariant = shaderVariant,
                 ShaderFamily = shaderFamily,
-                MaterialParamEncoding = shaderFamily == "liltoon" ? "typed-v2" : "legacy-json",
+                MaterialParamEncoding = shaderFamily == "liltoon" ? "typed-v3" : "legacy-json",
                 BaseColorTextureName = baseTextureName,
                 AlphaMode = ResolveAlphaMode(material),
                 AlphaCutoff = ResolveAlphaCutoff(material),
                 DoubleSided = material.HasProperty("_Cull") && Mathf.Approximately(material.GetFloat("_Cull"), 0.0f),
                 ShaderParamsJson = BuildShaderParamsJson(material)
             };
+            if (shaderFamily == "liltoon")
+            {
+                item.TypedSchemaVersion = 3;
+            }
             if (item.AlphaMode == "MASK")
             {
                 item.FeatureFlags |= FeatureCutout;

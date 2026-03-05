@@ -150,11 +150,12 @@ namespace VsfClone.Xav2.Editor
             payload.Manifest.hasBlendShapes = payload.BlendShapes.Count > 0;
             payload.Manifest.strictShaderSet = new List<string>(options.StrictShaderSet ?? new List<string>());
             payload.Manifest.materialParamEncoding =
-                payload.Materials.Exists(m => m.MaterialParamEncoding == "typed-v2" ||
+                payload.Materials.Exists(m => m.MaterialParamEncoding == "typed-v3" ||
+                                              m.MaterialParamEncoding == "typed-v2" ||
                                               m.TypedFloatParams.Count > 0 ||
                                               m.TypedColorParams.Count > 0 ||
                                               m.TypedTextureParams.Count > 0)
-                    ? "typed-v2"
+                    ? "typed-v3"
                     : "legacy-json";
         }
 
@@ -374,6 +375,11 @@ namespace VsfClone.Xav2.Editor
             WriteSizedString(bw, material.Name);
             WriteSizedString(bw, string.IsNullOrWhiteSpace(material.ShaderFamily) ? "legacy" : material.ShaderFamily);
             bw.Write(material.FeatureFlags);
+            var schemaVersion = material.TypedSchemaVersion == 0 ? (ushort)3 : material.TypedSchemaVersion;
+            if (schemaVersion >= 3)
+            {
+                bw.Write(schemaVersion);
+            }
 
             bw.Write((ushort)material.TypedFloatParams.Count);
             foreach (var p in material.TypedFloatParams)

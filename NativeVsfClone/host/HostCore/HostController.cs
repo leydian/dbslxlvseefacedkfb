@@ -388,6 +388,7 @@ public sealed partial class HostController
             _renderOptions.FovDeg = Clamp(current.FovDeg, 20.0f, 70.0f);
             _renderOptions.ShowDebugOverlay = current.ShowDebugOverlay ? 1U : 0U;
             ApplyBackgroundPreset(ref _renderOptions, current.BackgroundPreset);
+            ApplySelectedQualityProfile(ref _renderOptions);
             RenderState = current with { BroadcastMode = enabled };
             var rc = ApplyRenderOptionsInternal("SetBroadcastMode");
             RefreshState();
@@ -401,6 +402,7 @@ public sealed partial class HostController
         {
             var normalized = NormalizeRenderState(state);
             _renderOptions = ToNativeOptions(normalized);
+            ApplySelectedQualityProfile(ref _renderOptions);
             RenderState = normalized;
             var rc = ApplyRenderOptionsInternal("ApplyRenderUiState");
             RefreshState();
@@ -891,6 +893,19 @@ public sealed partial class HostController
         };
         ApplyBackgroundPreset(ref options, state.BackgroundPreset);
         return options;
+    }
+
+    private void ApplySelectedQualityProfile(ref NcRenderQualityOptions options)
+    {
+        var profile = _sessionPersistence.LastProfileName?.Trim().ToLowerInvariant();
+        options.QualityProfile = profile switch
+        {
+            "ultra-parity" => (uint)NcRenderQualityProfile.UltraParity,
+            "quality" => (uint)NcRenderQualityProfile.Balanced,
+            "stability" => (uint)NcRenderQualityProfile.Balanced,
+            "performance" => (uint)NcRenderQualityProfile.Balanced,
+            _ => (uint)NcRenderQualityProfile.Default,
+        };
     }
 
     private static NcCameraMode ToNativeCameraMode(RenderCameraMode mode)

@@ -89,6 +89,10 @@ public sealed record SessionPersistenceModel(
 public sealed record FrameMetric(
     DateTimeOffset TimestampUtc,
     float FrameMs,
+    float GpuFrameMs,
+    float CpuFrameMs,
+    float MaterialResolveMs,
+    uint PassCount,
     uint RenderReadyAvatarCount,
     bool SpoutActive,
     bool OscActive);

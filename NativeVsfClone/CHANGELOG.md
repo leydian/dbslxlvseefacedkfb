@@ -2,6 +2,54 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 typed-v3 + UltraParity foundation (native/unity/host/gate)
+
+### Summary
+
+Implemented the foundation layer for high-fidelity XAV2 rendering progression by introducing typed-v3 material schema support (with typed-v2 fallback), extending runtime render metrics contracts, wiring an `ultra-parity` quality profile path, and tightening gate/documentation alignment.
+
+### Changed
+
+- typed material schema uplift (`0x0015`):
+  - `include/vsfclone/avatar/avatar_package.h`
+  - `src/avatar/xav2_loader.cpp`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - added `typed_schema_version` and `typed-v3` parse/export path while keeping `typed-v2` compatibility fallback.
+- native runtime API/stats expansion:
+  - `include/vsfclone/nativecore/api.h`
+  - `src/nativecore/native_core.cpp`
+  - added `NcRenderQualityProfile` (`DEFAULT|BALANCED|ULTRA_PARITY`) and extended `NcRuntimeStats` with:
+    - `gpu_frame_ms`
+    - `cpu_frame_ms`
+    - `material_resolve_ms`
+    - `pass_count`
+- host interop/profile/diagnostics wiring:
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/DiagnosticsModel.cs`
+  - `host/HostCore/PlatformFeatures.cs`
+  - added `ultra-parity` profile mapping and propagated new runtime metrics into diagnostics + rolling CSV export.
+- gates/docs updates:
+  - `tools/render_perf_gate.ps1` (`ultra-parity` profile thresholds)
+  - `tools/xav2_render_regression_gate.ps1` (snapshot parity requirement option + shader parity warning handling)
+  - `docs/formats/xav2.md` (`typed-v2/v3` layout wording)
+  - `docs/reports/xav2_typed_v3_ultra_parity_foundation_2026-03-06.md`
+  - `docs/INDEX.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone\build --config Release --target nativecore avatar_tool` PASS
+- `NativeVsfClone\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"` PASS
+  - `Format=XAV2`, `Compat=full`, `ParserStage=runtime-ready`, `PrimaryError=NONE`
+- `dotnet build host/HostCore/HostCore.csproj -c Release` PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release` PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release` restore PASS, compile FAIL in current environment (`MSB3073`, WinUI `XamlCompiler.exe`)
+- `tools/xav2_render_regression_gate.ps1 -FailOnRenderWarnings` run completed; current local sample set (`SampleCount=1`) does not satisfy gate minimum sample policy.
+
 ## 2026-03-06 - XAV2 10/10 gate hardening baseline (sample-count + warning-zero + manifest checks)
 
 ### Summary

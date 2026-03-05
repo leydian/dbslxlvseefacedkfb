@@ -16,6 +16,7 @@ Entry point for `NativeVsfClone` documentation.
 ## Recent Reports
 
 - [TEMPLATE.md](./reports/TEMPLATE.md)
+- [xav2_typed_v3_ultra_parity_foundation_2026-03-06.md](./reports/xav2_typed_v3_ultra_parity_foundation_2026-03-06.md)
 - [tracking_latency_lock_followup_2026-03-06.md](./reports/tracking_latency_lock_followup_2026-03-06.md)
 - [xav2_warning_contract_gate_upgrade_2026-03-06.md](./reports/xav2_warning_contract_gate_upgrade_2026-03-06.md)
 - [xav2_10of10_gate_execution_2026-03-06.md](./reports/xav2_10of10_gate_execution_2026-03-06.md)
@@ -124,6 +125,7 @@ Entry point for `NativeVsfClone` documentation.
 - [xav2_skinning_stabilization_and_v2_path_2026-03-06.md](./reports/xav2_skinning_stabilization_and_v2_path_2026-03-06.md)
 - [xav2_tryload_test_and_deterministic_gate_2026-03-03.md](./reports/xav2_tryload_test_and_deterministic_gate_2026-03-03.md)
 - [xav2_typed_material_v2_liltoon_phase1_2026-03-06.md](./reports/xav2_typed_material_v2_liltoon_phase1_2026-03-06.md)
+- [xav2_typed_v3_ultra_parity_foundation_2026-03-06.md](./reports/xav2_typed_v3_ultra_parity_foundation_2026-03-06.md)
 - [xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md](./reports/xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md)
 - [xav2_10of10_gate_execution_2026-03-06.md](./reports/xav2_10of10_gate_execution_2026-03-06.md)
 - [xav2_warning_contract_gate_upgrade_2026-03-06.md](./reports/xav2_warning_contract_gate_upgrade_2026-03-06.md)

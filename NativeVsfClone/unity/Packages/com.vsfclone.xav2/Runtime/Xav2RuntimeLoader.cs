@@ -278,7 +278,14 @@ namespace VsfClone.Xav2.Runtime
                 case SectionBlendShapePayload:
                     return TryParseBlendShape(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionMaterialTypedParams:
-                    return TryParseMaterialTypedParams(bytes, sectionOffset, sectionLength, materialsByName, diagnostics, options);
+                    return TryParseMaterialTypedParams(
+                        bytes,
+                        sectionOffset,
+                        sectionLength,
+                        materialsByName,
+                        diagnostics,
+                        options,
+                        string.Equals(payload.Manifest.materialParamEncoding, "typed-v3", StringComparison.OrdinalIgnoreCase));
                 case SectionSkeletonPosePayload:
                     return TryParseSkeletonPose(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionSkeletonRigPayload:
@@ -501,7 +508,8 @@ namespace VsfClone.Xav2.Runtime
             int sectionLength,
             Dictionary<string, Xav2MaterialPayload> materialsByName,
             Xav2LoadDiagnostics diagnostics,
-            Xav2LoadOptions options)
+            Xav2LoadOptions options,
+            bool preferTypedV3)
         {
             using var ms = new MemoryStream(bytes, sectionOffset, sectionLength, false);
             using var br = new BinaryReader(ms, Encoding.UTF8);
@@ -521,59 +529,63 @@ namespace VsfClone.Xav2.Runtime
             }
 
             material.ShaderFamily = string.IsNullOrWhiteSpace(shaderFamily) ? "legacy" : shaderFamily;
-            material.MaterialParamEncoding = "typed-v2";
             material.FeatureFlags = featureFlags;
             material.TypedFloatParams.Clear();
             material.TypedColorParams.Clear();
             material.TypedTextureParams.Clear();
 
-            for (var i = 0; i < floatCount; i++)
+            var schemaVersion = (ushort)2;
+            var parsed = false;
+
+            var parseStart = ms.Position;
+            if (preferTypedV3 && floatCount >= 3U)
             {
-                if (!TryReadSizedString(br, out var id) || !TryReadSingle(br, out var value))
+                var schemaProbePos = ms.Position;
+                if (TryReadUInt16(br, out var schemaFloatCount))
                 {
-                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed float param.");
+                    if (TryParseTypedMaterialBody(br, schemaFloatCount, material) && ms.Position == ms.Length)
+                    {
+                        schemaVersion = floatCount;
+                        parsed = true;
+                    }
                 }
-                material.TypedFloatParams.Add(new Xav2TypedFloatParam { Id = id, Value = value });
+                if (!parsed)
+                {
+                    ms.Position = schemaProbePos;
+                    material.TypedFloatParams.Clear();
+                    material.TypedColorParams.Clear();
+                    material.TypedTextureParams.Clear();
+                }
             }
 
-            if (!TryReadUInt16(br, out var colorCount))
+            if (!parsed)
             {
-                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed color count.");
-            }
-            for (var i = 0; i < colorCount; i++)
-            {
-                if (!TryReadSizedString(br, out var id) ||
-                    !TryReadSingle(br, out var r) ||
-                    !TryReadSingle(br, out var g) ||
-                    !TryReadSingle(br, out var b) ||
-                    !TryReadSingle(br, out var a))
+                ms.Position = parseStart;
+                if (!TryParseTypedMaterialBody(br, floatCount, material) || ms.Position != ms.Length)
                 {
-                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed color param.");
+                    if (!preferTypedV3 && floatCount >= 3U)
+                    {
+                        ms.Position = parseStart;
+                        material.TypedFloatParams.Clear();
+                        material.TypedColorParams.Clear();
+                        material.TypedTextureParams.Clear();
+                        if (TryReadUInt16(br, out var schemaFloatCount) &&
+                            TryParseTypedMaterialBody(br, schemaFloatCount, material) &&
+                            ms.Position == ms.Length)
+                        {
+                            schemaVersion = floatCount;
+                            parsed = true;
+                        }
+                    }
+                    if (!parsed)
+                    {
+                        return AddWarningOrFail(diagnostics, options, $"XAV2_MATERIAL_TYPED_SCHEMA_INVALID: material={name}");
+                    }
                 }
-                material.TypedColorParams.Add(new Xav2TypedColorParam { Id = id, R = r, G = g, B = b, A = a });
             }
 
-            if (!TryReadUInt16(br, out var textureCount))
-            {
-                return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed texture count.");
-            }
-            for (var i = 0; i < textureCount; i++)
-            {
-                if (!TryReadSizedString(br, out var slot) || !TryReadSizedString(br, out var textureRef))
-                {
-                    return Fail(diagnostics, Xav2LoadErrorCode.SectionSchemaInvalid, "Invalid XAV2 material typed texture param.");
-                }
-                material.TypedTextureParams.Add(new Xav2TypedTextureParam
-                {
-                    Slot = slot,
-                    TextureRef = textureRef
-                });
-            }
-
-            if (ms.Position != ms.Length)
-            {
-                return AddWarningOrFail(diagnostics, options, $"XAV2_MATERIAL_TYPED_SCHEMA_INVALID: material={name}");
-            }
+            material.TypedSchemaVersion = schemaVersion;
+            material.MaterialParamEncoding = schemaVersion >= 3 ? $"typed-v{schemaVersion}" : "typed-v2";
 
             if (string.Equals(material.ShaderFamily, "liltoon", StringComparison.OrdinalIgnoreCase))
             {
@@ -594,6 +606,54 @@ namespace VsfClone.Xav2.Runtime
                 {
                     return false;
                 }
+            }
+
+            return true;
+        }
+
+        private static bool TryParseTypedMaterialBody(BinaryReader br, ushort floatCount, Xav2MaterialPayload material)
+        {
+            for (var i = 0; i < floatCount; i++)
+            {
+                if (!TryReadSizedString(br, out var id) || !TryReadSingle(br, out var value))
+                {
+                    return false;
+                }
+                material.TypedFloatParams.Add(new Xav2TypedFloatParam { Id = id, Value = value });
+            }
+
+            if (!TryReadUInt16(br, out var colorCount))
+            {
+                return false;
+            }
+            for (var i = 0; i < colorCount; i++)
+            {
+                if (!TryReadSizedString(br, out var id) ||
+                    !TryReadSingle(br, out var r) ||
+                    !TryReadSingle(br, out var g) ||
+                    !TryReadSingle(br, out var b) ||
+                    !TryReadSingle(br, out var a))
+                {
+                    return false;
+                }
+                material.TypedColorParams.Add(new Xav2TypedColorParam { Id = id, R = r, G = g, B = b, A = a });
+            }
+
+            if (!TryReadUInt16(br, out var textureCount))
+            {
+                return false;
+            }
+            for (var i = 0; i < textureCount; i++)
+            {
+                if (!TryReadSizedString(br, out var slot) || !TryReadSizedString(br, out var textureRef))
+                {
+                    return false;
+                }
+                material.TypedTextureParams.Add(new Xav2TypedTextureParam
+                {
+                    Slot = slot,
+                    TextureRef = textureRef
+                });
             }
 
             return true;
@@ -954,7 +1014,7 @@ namespace VsfClone.Xav2.Runtime
 
             foreach (var material in payload.Materials)
             {
-                var hasTyped = string.Equals(material.MaterialParamEncoding, "typed-v2", StringComparison.OrdinalIgnoreCase) ||
+                var hasTyped = material.MaterialParamEncoding.StartsWith("typed-v", StringComparison.OrdinalIgnoreCase) ||
                                material.TypedTextureParams.Count > 0;
                 if (!hasTyped)
                 {

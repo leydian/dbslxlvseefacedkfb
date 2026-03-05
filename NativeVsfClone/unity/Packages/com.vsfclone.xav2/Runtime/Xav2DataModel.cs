@@ -142,6 +142,7 @@ namespace VsfClone.Xav2.Runtime
         public string ShaderVariant = "default";
         public string ShaderFamily = "legacy";
         public string MaterialParamEncoding = "legacy-json";
+        public ushort TypedSchemaVersion;
         public uint FeatureFlags;
         public string BaseColorTextureName = string.Empty;
         public string AlphaMode = "OPAQUE";
