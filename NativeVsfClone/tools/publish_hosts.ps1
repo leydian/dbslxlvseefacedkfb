@@ -14,6 +14,7 @@ param(
     [bool]$WpfLaunchSmokeFailOnError = $false,
     [int]$WpfLaunchSmokeDurationSeconds = 6,
     [string]$WpfLaunchSmokeReportPath = ".\build\reports\wpf_launch_smoke_latest.txt",
+    [bool]$WpfPublishSingleFile = $false,
     [int]$WinUiRestoreRetryCount = 1,
     [int]$NuGetProbeTimeoutSeconds = 8
 )
@@ -387,6 +388,7 @@ $log.Add("RunWpfLaunchSmoke: $RunWpfLaunchSmoke")
 $log.Add("WpfLaunchSmokeFailOnError: $WpfLaunchSmokeFailOnError")
 $log.Add("WpfLaunchSmokeDurationSeconds: $WpfLaunchSmokeDurationSeconds")
 $log.Add("WpfLaunchSmokeReportPath: $resolvedWpfLaunchSmokeReportPath")
+$log.Add("WpfPublishSingleFile: $WpfPublishSingleFile")
 $log.Add("WinUiRestoreRetryCount: $WinUiRestoreRetryCount")
 $log.Add("NuGetProbeTimeoutSeconds: $NuGetProbeTimeoutSeconds")
 
@@ -1055,7 +1057,7 @@ try {
         "-c", $Configuration,
         "-r", $RuntimeIdentifier,
         "--self-contained", "true",
-        "/p:PublishSingleFile=true",
+        "/p:PublishSingleFile=$($WpfPublishSingleFile.ToString().ToLowerInvariant())",
         "/p:PublishTrimmed=false",
         "-o", $wpfDist
     )

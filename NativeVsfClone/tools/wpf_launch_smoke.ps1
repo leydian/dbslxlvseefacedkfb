@@ -90,6 +90,7 @@ $lines.Add("ExitCode: $exitCode")
 
 $startTime = $runStart.AddSeconds(-2)
 try {
+    $crashDetected = $false
     $events = Get-WinEvent -FilterHashtable @{
         LogName = "Application"
         StartTime = $startTime
@@ -109,6 +110,9 @@ try {
             }
             $eventMessages.Add($msg)
             $lines.Add(" - [$($event.TimeCreated.ToString("o"))] id=$($event.Id) provider=$($event.ProviderName) $msg")
+            if ($event.Id -in @(1026, 1000)) {
+                $crashDetected = $true
+            }
         }
 
         $dependencyHints = [System.Collections.Generic.HashSet[string]]::new()
@@ -131,6 +135,15 @@ try {
     } else {
         $lines.Add("EventLog: no related entries found since smoke run start.")
         $lines.Add("DependencyHints: unavailable (no matching event log records).")
+    }
+    if ($crashDetected) {
+        $status = "FAIL"
+        if ($exitCode -eq 0) {
+            $exitCode = -2
+        }
+        $lines.Add("CrashDetected: true")
+    } else {
+        $lines.Add("CrashDetected: false")
     }
 } catch {
     $lines.Add("EventLog: query failed ($($_.Exception.Message))")

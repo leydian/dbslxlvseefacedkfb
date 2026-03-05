@@ -109,6 +109,7 @@ Domain-level report navigation hub.
 - [2026-03-05_workspace_change_rollup.md](./weekly/2026-W10/2026-03-05_workspace_change_rollup.md)
 
 ## wpf
+- [2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md](./weekly/2026-W10/2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md)
 - [2026-03-06_wpf_render_drag_capture_stabilization.md](./weekly/2026-W10/2026-03-06_wpf_render_drag_capture_stabilization.md)
 - [2026-03-05_wpf_operational_reliability_loop_and_output_sync.md](./weekly/2026-W10/2026-03-05_wpf_operational_reliability_loop_and_output_sync.md)
 - [2026-03-05_wpf_ui_smoke_and_perf.md](./weekly/2026-W10/2026-03-05_wpf_ui_smoke_and_perf.md)

@@ -87,6 +87,7 @@ Report list for this week.
 - [2026-03-06_workspace_change_rollup.md](./2026-03-06_workspace_change_rollup.md)
 - [2026-03-06_workspace_interim_full_change_summary.md](./2026-03-06_workspace_interim_full_change_summary.md)
 - [2026-03-06_wpf_render_drag_capture_stabilization.md](./2026-03-06_wpf_render_drag_capture_stabilization.md)
+- [2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md](./2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md)
 - [2026-03-06_xav2_10of10_gate_execution.md](./2026-03-06_xav2_10of10_gate_execution.md)
 - [2026-03-06_xav2_import_rig_accuracy_hardening_followup.md](./2026-03-06_xav2_import_rig_accuracy_hardening_followup.md)
 - [2026-03-06_xav2_import_v4_rig_hardening.md](./2026-03-06_xav2_import_v4_rig_hardening.md)
