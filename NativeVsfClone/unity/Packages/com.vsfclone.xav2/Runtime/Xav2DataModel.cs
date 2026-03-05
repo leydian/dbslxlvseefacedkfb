@@ -17,7 +17,8 @@ namespace VsfClone.Xav2.Runtime
         SectionSchemaInvalid,
         CompressionDecodeFailed,
         UnknownSectionNotAllowed,
-        StrictValidationFailed
+        StrictValidationFailed,
+        ParityContractViolation
     }
 
     public enum Xav2UnknownSectionPolicy
@@ -39,6 +40,10 @@ namespace VsfClone.Xav2.Runtime
         public string ErrorMessage = string.Empty;
         public string ParserStage = "header";
         public bool IsPartial;
+        public bool MigrationApplied;
+        public int SourceFormatVersion;
+        public string SourceMaterialParamEncoding = "legacy-json";
+        public bool CriticalParityViolation;
         public List<string> Warnings = new List<string>();
         public List<string> WarningCodes = new List<string>();
     }

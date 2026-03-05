@@ -118,10 +118,11 @@ namespace VsfClone.Xav2.Runtime.Tests
                 var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
                 Assert.That(ok, Is.True);
                 Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(diagnostics.MigrationApplied, Is.True);
                 Assert.That(payload.Materials.Count, Is.EqualTo(1));
                 var material = payload.Materials[0];
-                Assert.That(material.MaterialParamEncoding, Is.EqualTo("typed-v2"));
-                Assert.That(material.TypedSchemaVersion, Is.EqualTo(2));
+                Assert.That(material.MaterialParamEncoding, Is.EqualTo("typed-v3"));
+                Assert.That(material.TypedSchemaVersion, Is.EqualTo(3));
                 Assert.That(material.TypedTextureParams.Exists(p => p.Slot == "base"), Is.True);
             }
             finally
@@ -195,7 +196,7 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
-        public void TryLoad_TypedMaterialUnsupportedShaderFamily_Warns()
+        public void TryLoad_TypedMaterialUnsupportedShaderFamily_Fails()
         {
             var path = WriteTempFile(
                 BuildValidXav2Bytes(
@@ -204,12 +205,9 @@ namespace VsfClone.Xav2.Runtime.Tests
             try
             {
                 var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
-                Assert.That(ok, Is.True);
-                Assert.That(
-                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY")),
-                    Is.True);
-                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY"));
-                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_FALLBACK_APPLIED"));
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.ParityContractViolation));
+                Assert.That(diagnostics.CriticalParityViolation, Is.True);
             }
             finally
             {
@@ -461,8 +459,10 @@ namespace VsfClone.Xav2.Runtime.Tests
                 var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
                 Assert.That(ok, Is.True);
                 Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(diagnostics.MigrationApplied, Is.True);
                 Assert.That(payload.Materials.Count, Is.EqualTo(1));
                 Assert.That(payload.Materials[0].ShaderVariant, Is.EqualTo("default"));
+                Assert.That(payload.Materials[0].MaterialParamEncoding, Is.EqualTo("typed-v3"));
             }
             finally
             {

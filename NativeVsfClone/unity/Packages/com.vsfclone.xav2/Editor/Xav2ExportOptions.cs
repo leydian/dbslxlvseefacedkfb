@@ -21,9 +21,7 @@ namespace VsfClone.Xav2.Editor
         public List<string> StrictShaderSet = new List<string>()
         {
             "lilToon",
-            "Poiyomi",
-            "potatoon",
-            "realtoon"
+            "Poiyomi"
         };
         public bool EnableCompression;
         public Xav2CompressionCodec CompressionCodec = Xav2CompressionCodec.Lz4;

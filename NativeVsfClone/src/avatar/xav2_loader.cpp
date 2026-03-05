@@ -66,6 +66,22 @@ bool IsSupportedShaderFamily(const std::string& raw) {
            key == "realtoon";
 }
 
+bool IsParityShaderFamily(const std::string& raw) {
+    const std::string key = NormalizeShaderFamily(raw);
+    return key == "liltoon" || key == "poiyomi";
+}
+
+std::string InferShaderFamilyFromShaderName(const std::string& shader_name) {
+    const std::string key = NormalizeRefKey(shader_name);
+    if (key.find("liltoon") != std::string::npos) {
+        return "liltoon";
+    }
+    if (key.find("poiyomi") != std::string::npos) {
+        return "poiyomi";
+    }
+    return "legacy";
+}
+
 HumanoidBoneId ToHumanoidBoneId(const std::string& bone_name_raw) {
     std::string key;
     key.reserve(bone_name_raw.size());
@@ -1163,6 +1179,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     }
 
     AvatarPackage pkg;
+    // Keep loader orientation-neutral; preview yaw compensation is applied in native runtime only.
     pkg.source_type = AvatarSourceType::Xav2;
     pkg.compat_level = AvatarCompatLevel::Failed;
     pkg.parser_stage = "parse";
@@ -1499,17 +1516,54 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             payload.typed_float_params = typed_it->second.typed_float_params;
             payload.typed_color_params = typed_it->second.typed_color_params;
             payload.typed_texture_params = typed_it->second.typed_texture_params;
-            if (payload.shader_family != "legacy") {
-                const auto has_base_color = std::any_of(
-                    payload.typed_color_params.begin(),
-                    payload.typed_color_params.end(),
-                    [](const MaterialRenderPayload::TypedColorParam& p) { return p.id == "_BaseColor"; });
-                if (!has_base_color) {
-                    PushWarning(
-                        &pkg,
-                        "W_PAYLOAD: XAV2_MATERIAL_TYPED_MISSING_REQUIRED_PARAM: material=" + payload.name +
-                            ", id=_BaseColor");
-                }
+        }
+
+        payload.shader_family = NormalizeShaderFamily(payload.shader_family);
+        if (payload.shader_family == "legacy") {
+            payload.shader_family = InferShaderFamilyFromShaderName(payload.shader_name);
+        }
+        if (!IsParityShaderFamily(payload.shader_family)) {
+            pkg.primary_error_code = "XAV2_MATERIAL_SHADER_FAMILY_NOT_ALLOWED";
+            PushWarning(
+                &pkg,
+                "E_PAYLOAD: XAV2_MATERIAL_SHADER_FAMILY_NOT_ALLOWED: material=" + payload.name +
+                    ", family=" + payload.shader_family);
+            return core::Result<AvatarPackage>::Ok(pkg);
+        }
+
+        const bool has_typed =
+            payload.material_param_encoding.rfind("typed-v", 0U) == 0U ||
+            !payload.typed_float_params.empty() ||
+            !payload.typed_color_params.empty() ||
+            !payload.typed_texture_params.empty();
+        if (!has_typed || payload.material_param_encoding != "typed-v3" || payload.typed_schema_version < 3U) {
+            payload.material_param_encoding = "typed-v3";
+            payload.typed_schema_version = 3U;
+        }
+
+        const bool has_base_color = std::any_of(
+            payload.typed_color_params.begin(),
+            payload.typed_color_params.end(),
+            [](const MaterialRenderPayload::TypedColorParam& p) { return p.id == "_BaseColor"; });
+        if (!has_base_color) {
+            MaterialRenderPayload::TypedColorParam base_color;
+            base_color.id = "_BaseColor";
+            base_color.rgba[0] = 1.0f;
+            base_color.rgba[1] = 1.0f;
+            base_color.rgba[2] = 1.0f;
+            base_color.rgba[3] = 1.0f;
+            payload.typed_color_params.push_back(base_color);
+        }
+        if (!payload.base_color_texture_name.empty()) {
+            const bool has_base_tex = std::any_of(
+                payload.typed_texture_params.begin(),
+                payload.typed_texture_params.end(),
+                [](const MaterialRenderPayload::TypedTextureParam& p) { return p.slot == "base"; });
+            if (!has_base_tex) {
+                MaterialRenderPayload::TypedTextureParam base_tex;
+                base_tex.slot = "base";
+                base_tex.texture_ref = payload.base_color_texture_name;
+                payload.typed_texture_params.push_back(std::move(base_tex));
             }
         }
         pkg.material_payloads.push_back(std::move(payload));
@@ -1550,10 +1604,12 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             if (key.empty() || texture_ref_keys.find(key) != texture_ref_keys.end()) {
                 continue;
             }
+            pkg.primary_error_code = "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
             PushWarning(
                 &pkg,
-                "W_PAYLOAD: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" + material.name +
+                "E_PAYLOAD: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" + material.name +
                     ", slot=" + typed_texture.slot + ", ref=" + typed_texture.texture_ref);
+            return core::Result<AvatarPackage>::Ok(pkg);
         }
     }
 

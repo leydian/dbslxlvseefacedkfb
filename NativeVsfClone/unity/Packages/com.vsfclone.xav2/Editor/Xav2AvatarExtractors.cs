@@ -738,14 +738,14 @@ namespace VsfClone.Xav2.Editor
                 ShaderName = shaderName,
                 ShaderVariant = shaderVariant,
                 ShaderFamily = shaderFamily,
-                MaterialParamEncoding = shaderFamily == "liltoon" ? "typed-v3" : "legacy-json",
+                MaterialParamEncoding = (shaderFamily == "liltoon" || shaderFamily == "poiyomi") ? "typed-v3" : "legacy-json",
                 BaseColorTextureName = baseTextureName,
                 AlphaMode = ResolveAlphaMode(material),
                 AlphaCutoff = ResolveAlphaCutoff(material),
                 DoubleSided = material.HasProperty("_Cull") && Mathf.Approximately(material.GetFloat("_Cull"), 0.0f),
                 ShaderParamsJson = BuildShaderParamsJson(material)
             };
-            if (shaderFamily == "liltoon")
+            if (shaderFamily == "liltoon" || shaderFamily == "poiyomi")
             {
                 item.TypedSchemaVersion = 3;
             }
@@ -808,6 +808,12 @@ namespace VsfClone.Xav2.Editor
                     item.FeatureFlags |= FeatureMatCap;
                 }
             }
+            else if (shaderFamily == "poiyomi")
+            {
+                AddTypedColor(item, material, "_BaseColor", "_BaseColor", "_Color");
+                AddTypedFloat(item, material, "_Cutoff", "_Cutoff");
+                AddTypedTexture(item, "base", baseTextureName);
+            }
             payload.Materials.Add(item);
             payload.Manifest.materialRefs.Add(item.Name);
             var index = payload.Materials.Count - 1;
@@ -840,6 +846,8 @@ namespace VsfClone.Xav2.Editor
         {
             return string.Equals(shaderVariant, "lilToon", StringComparison.OrdinalIgnoreCase)
                 ? "liltoon"
+                : string.Equals(shaderVariant, "Poiyomi", StringComparison.OrdinalIgnoreCase)
+                    ? "poiyomi"
                 : "legacy";
         }
 

@@ -12,10 +12,14 @@ Unity package for XAV2 export/runtime parsing.
 
 - `lilToon`
 - `Poiyomi`
-- `potatoon`
-- `realtoon`
 
-If a material in the export target set references a shader outside this list, exporter fails by default.
+If a material in the export target set references a shader outside this list, export/load fails by default.
+
+Runtime load policy:
+
+- legacy/typed-v2 material payloads are auto-migrated to canonical `typed-v3`
+- unsupported shader families fail with parity-contract error
+- unresolved typed texture references fail with parity-contract error
 
 ## Editor entry
 

@@ -2,6 +2,50 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 full parity contract enforcement (Unity/native loader policy)
+
+### Summary
+
+Hardened XAV2 material-loading policy toward full parity operation by enforcing a strict shader-family contract (`liltoon`/`poiyomi`), canonicalizing material payloads to `typed-v3` during load, and promoting fallback-prone unresolved typed texture conditions from warning-only behavior to load-failure behavior.
+
+### Changed
+
+- Unity runtime diagnostics and policy:
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - added `ParityContractViolation` error code.
+  - expanded diagnostics with migration/parity state:
+    - `MigrationApplied`
+    - `SourceFormatVersion`
+    - `SourceMaterialParamEncoding`
+    - `CriticalParityViolation`
+  - added canonicalization stage to force material contract:
+    - shader family normalized/inferred, parity families only (`liltoon`/`poiyomi`)
+    - legacy/typed-v2 payloads auto-migrated to canonical `typed-v3`
+    - required `_BaseColor` typed field ensured
+  - unresolved typed texture refs now hard-fail with parity violation.
+- Unity extractor/export defaults:
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2ExportOptions.cs`
+  - Poiyomi family now emits typed-v3 baseline and strict default shader set reduced to lilToon/Poiyomi.
+- Native loader parity alignment:
+  - `src/avatar/xav2_loader.cpp`
+  - added parity-family-only guard and shader-family inference from shader name.
+  - canonicalized material encoding to `typed-v3` with minimal required typed payload defaults.
+  - unresolved typed texture refs now surface as primary load error.
+- Runtime tests and docs:
+  - `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - `unity/Packages/com.vsfclone.xav2/README.md`
+  - updated expectations from warning-based fallback to strict parity failure/migration behavior.
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_xav2_full_parity_contract_enforcement.md`
+    - index/summary entries updated.
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore avatar_tool`: PASS
+- `NativeVsfClone/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"`: PASS (loader now reports strict parity failure for non-allowed shader family as intended)
+
 ## 2026-03-06 - WPF UI v3 refinement (shortcuts + focus routing + workspace persistence)
 
 ### Summary

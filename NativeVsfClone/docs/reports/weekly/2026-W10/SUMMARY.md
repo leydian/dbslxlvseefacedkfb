@@ -42,3 +42,4 @@
 - Newly added: review `2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md` for HostCore-backed workspace restore, core keyboard shortcuts, nav keyboard traversal, and section-focused primary control routing.
 - Newly added: review `2026-03-06_arkit52_strict_full_support_pipeline.md` for strict ARKit52 channel binding policy, host/native coverage diagnostics, and non-fatal missing-channel warning behavior.
 - Newly added: review `2026-03-06_arkit52_quality_refinement_hybrid_fallback.md` for strict-first hybrid fallback routing, ARKit quality scoring, per-group calibration tuning, and fallback warning telemetry.
+- Newly added: review `2026-03-06_xav2_full_parity_contract_enforcement.md` for strict lilToon/Poiyomi parity contract enforcement, typed-v3 canonical migration policy, and hard-fail diagnostics behavior.

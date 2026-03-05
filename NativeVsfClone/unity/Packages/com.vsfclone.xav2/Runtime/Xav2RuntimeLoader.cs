@@ -79,6 +79,7 @@ namespace VsfClone.Xav2.Runtime
             {
                 return Fail(diagnostics, Xav2LoadErrorCode.UnsupportedVersion, $"Unsupported XAV2 version: {version}");
             }
+            diagnostics.SourceFormatVersion = version;
 
             if (!TryReadUInt32(bytes, ref cursor, out var manifestSize))
             {
@@ -104,6 +105,7 @@ namespace VsfClone.Xav2.Runtime
             }
             payload.Manifest = manifest;
             NormalizeManifest(manifest);
+            diagnostics.SourceMaterialParamEncoding = manifest.materialParamEncoding ?? "legacy-json";
             if (string.IsNullOrWhiteSpace(manifest.avatarId) ||
                 manifest.meshRefs.Count == 0 ||
                 manifest.materialRefs.Count == 0 ||
@@ -208,6 +210,11 @@ namespace VsfClone.Xav2.Runtime
             foreach (var mat in materialsByName.Values)
             {
                 payload.Materials.Add(mat);
+            }
+
+            if (!CanonicalizeMaterialPayloads(payload, diagnostics))
+            {
+                return false;
             }
 
             if (!EvaluatePartialCompatibility(payload, diagnostics, options, version))
@@ -1114,6 +1121,74 @@ namespace VsfClone.Xav2.Runtime
             }
         }
 
+        private static bool CanonicalizeMaterialPayloads(Xav2AvatarPayload payload, Xav2LoadDiagnostics diagnostics)
+        {
+            if (payload == null)
+            {
+                return true;
+            }
+
+            foreach (var material in payload.Materials)
+            {
+                material.ShaderFamily = NormalizeShaderFamily(material.ShaderFamily);
+                if (string.Equals(material.ShaderFamily, "legacy", StringComparison.OrdinalIgnoreCase))
+                {
+                    material.ShaderFamily = InferShaderFamilyFromShaderName(material.ShaderName);
+                }
+
+                if (!IsParityShaderFamily(material.ShaderFamily))
+                {
+                    diagnostics.CriticalParityViolation = true;
+                    return Fail(
+                        diagnostics,
+                        Xav2LoadErrorCode.ParityContractViolation,
+                        $"Parity contract violation: unsupported shader family '{material.ShaderFamily}' for material '{material.Name}'.");
+                }
+
+                var hasTyped = HasTypedMaterialPayload(material);
+                if (!hasTyped || !string.Equals(material.MaterialParamEncoding, "typed-v3", StringComparison.OrdinalIgnoreCase))
+                {
+                    diagnostics.MigrationApplied = true;
+                    material.MaterialParamEncoding = "typed-v3";
+                    material.TypedSchemaVersion = 3;
+
+                    if (!material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)))
+                    {
+                        material.TypedColorParams.Add(new Xav2TypedColorParam
+                        {
+                            Id = "_BaseColor",
+                            R = 1.0f,
+                            G = 1.0f,
+                            B = 1.0f,
+                            A = 1.0f
+                        });
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(material.BaseColorTextureName) &&
+                        !material.TypedTextureParams.Exists(p => string.Equals(p.Slot, "base", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        material.TypedTextureParams.Add(new Xav2TypedTextureParam
+                        {
+                            Slot = "base",
+                            TextureRef = material.BaseColorTextureName
+                        });
+                    }
+                }
+
+                if (!material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)))
+                {
+                    diagnostics.CriticalParityViolation = true;
+                    return Fail(
+                        diagnostics,
+                        Xav2LoadErrorCode.ParityContractViolation,
+                        $"Parity contract violation: missing required typed param _BaseColor for material '{material.Name}'.");
+                }
+            }
+
+            payload.Manifest.materialParamEncoding = "typed-v3";
+            return true;
+        }
+
         private static bool EvaluatePartialCompatibility(
             Xav2AvatarPayload payload,
             Xav2LoadDiagnostics diagnostics,
@@ -1166,22 +1241,20 @@ namespace VsfClone.Xav2.Runtime
 
             foreach (var material in payload.Materials)
             {
-                var hasTyped = material.MaterialParamEncoding.StartsWith("typed-v", StringComparison.OrdinalIgnoreCase) ||
-                               material.TypedTextureParams.Count > 0;
+                var hasTyped = HasTypedMaterialPayload(material);
+                if (!hasTyped)
+                {
+                    diagnostics.CriticalParityViolation = true;
+                    return Fail(
+                        diagnostics,
+                        Xav2LoadErrorCode.ParityContractViolation,
+                        $"Parity contract violation: typed material payload missing for material '{material.Name}'.");
+                }
+
                 var fallbackReasons = new List<string>();
                 if (!IsCanonicalAlphaMode(material.AlphaMode))
                 {
                     fallbackReasons.Add("alpha_mode_defaulted");
-                }
-                if (hasTyped && !IsSupportedShaderFamily(material.ShaderFamily))
-                {
-                    fallbackReasons.Add("unsupported_shader_family");
-                }
-                if (hasTyped &&
-                    !material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)) &&
-                    !ContainsAny(material.ShaderParamsJson, "\"_BaseColor\"", "\"_Color\""))
-                {
-                    fallbackReasons.Add("base_color_defaulted");
                 }
                 if (fallbackReasons.Count > 0)
                 {
@@ -1193,11 +1266,6 @@ namespace VsfClone.Xav2.Runtime
                         return false;
                     }
                 }
-                if (!hasTyped)
-                {
-                    continue;
-                }
-
                 foreach (var typedTexture in material.TypedTextureParams)
                 {
                     if (string.IsNullOrWhiteSpace(typedTexture.TextureRef))
@@ -1208,13 +1276,11 @@ namespace VsfClone.Xav2.Runtime
                     {
                         continue;
                     }
-                    if (!AddWarningOrFail(
-                            diagnostics,
-                            options,
-                            $"XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material={material.Name}, slot={typedTexture.Slot}, ref={typedTexture.TextureRef}"))
-                    {
-                        return false;
-                    }
+                    diagnostics.CriticalParityViolation = true;
+                    return Fail(
+                        diagnostics,
+                        Xav2LoadErrorCode.ParityContractViolation,
+                        $"Parity contract violation: unresolved typed texture ref for material '{material.Name}', slot '{typedTexture.Slot}', ref '{typedTexture.TextureRef}'.");
                 }
             }
 
@@ -1391,6 +1457,43 @@ namespace VsfClone.Xav2.Runtime
         {
             var key = NormalizeRefKey(value);
             return string.IsNullOrWhiteSpace(key) ? "legacy" : key;
+        }
+
+        private static string InferShaderFamilyFromShaderName(string shaderName)
+        {
+            var key = NormalizeRefKey(shaderName);
+            if (key.Contains("liltoon"))
+            {
+                return "liltoon";
+            }
+            if (key.Contains("poiyomi"))
+            {
+                return "poiyomi";
+            }
+            return "legacy";
+        }
+
+        private static bool HasTypedMaterialPayload(Xav2MaterialPayload material)
+        {
+            if (material == null)
+            {
+                return false;
+            }
+
+            if (material.MaterialParamEncoding.StartsWith("typed-v", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return material.TypedFloatParams.Count > 0 ||
+                   material.TypedColorParams.Count > 0 ||
+                   material.TypedTextureParams.Count > 0;
+        }
+
+        private static bool IsParityShaderFamily(string value)
+        {
+            var key = NormalizeShaderFamily(value);
+            return key == "liltoon" || key == "poiyomi";
         }
 
         private static bool IsSupportedShaderFamily(string value)
