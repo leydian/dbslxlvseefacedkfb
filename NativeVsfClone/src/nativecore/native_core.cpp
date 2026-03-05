@@ -550,6 +550,57 @@ float PreviewYawRadiansForAvatarSource(AvatarSourceType source_type) {
     return static_cast<float>(PreviewYawDegreesForAvatarSource(source_type)) * (kPi / 180.0f);
 }
 
+bool HasWarningCode(const AvatarPackage& pkg, const char* code) {
+    if (code == nullptr || *code == '\0') {
+        return false;
+    }
+    std::string needle(code);
+    std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    for (const auto& item : pkg.warning_codes) {
+        std::string lowered = item;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (lowered == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int PreviewYawDegreesForAvatarPackage(const AvatarPackage& pkg, const char** reason_out) {
+    if (reason_out != nullptr) {
+        *reason_out = "default";
+    }
+    const int base = PreviewYawDegreesForAvatarSource(pkg.source_type);
+    if (pkg.source_type != AvatarSourceType::Vrm) {
+        return base;
+    }
+    if (HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_FALLBACK") ||
+        HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_BYPASS") ||
+        HasWarningCode(pkg, "VRM_NODE_TRANSFORM_CONFLICT") ||
+        HasWarningCode(pkg, "VRM_MESH_MULTI_NODE_REF")) {
+        if (reason_out != nullptr) {
+            *reason_out = "vrm_auto_fallback_180";
+        }
+        return 180;
+    }
+    if (HasWarningCode(pkg, "VRM_NODE_TRANSFORM_APPLIED") && !pkg.skin_payloads.empty()) {
+        if (reason_out != nullptr) {
+            *reason_out = "vrm_node_transform_applied_180";
+        }
+        return 180;
+    }
+    return base;
+}
+
+float PreviewYawRadiansForAvatarPackage(const AvatarPackage& pkg, const char** reason_out) {
+    constexpr float kPi = 3.14159265358979323846f;
+    return static_cast<float>(PreviewYawDegreesForAvatarPackage(pkg, reason_out)) * (kPi / 180.0f);
+}
+
 NcCompatLevel ToCompatLevel(AvatarCompatLevel compat_level) {
     switch (compat_level) {
         case AvatarCompatLevel::Full:
@@ -666,9 +717,12 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
             BuildMaterialDiagSummary(pkg.material_diagnostics.back()));
     }
     {
+        const char* yaw_reason = "default";
+        const int applied_preview_yaw = PreviewYawDegreesForAvatarPackage(pkg, &yaw_reason);
         std::ostringstream pass_summary;
         pass_summary << "format=" << AvatarSourceTypeName(pkg.source_type)
-                     << ", applied_preview_yaw_deg=" << PreviewYawDegreesForAvatarSource(pkg.source_type)
+                     << ", applied_preview_yaw_deg=" << applied_preview_yaw
+                     << ", preview_yaw_reason=" << yaw_reason
                      << ", opaque=" << mode_counts.opaque
                      << ", mask=" << mode_counts.mask
                      << ", blend=" << mode_counts.blend;
@@ -1908,29 +1962,11 @@ NcPoseBoneOffset SanitizePoseOffset(const NcPoseBoneOffset& src) {
         }
         return std::max(min_v, std::min(max_v, value));
     };
-    float pitch_min = -45.0f;
-    float pitch_max = 45.0f;
-    switch (static_cast<NcPoseBoneId>(out.bone_id)) {
-        case NC_POSE_BONE_LEFT_UPPER_ARM:
-        case NC_POSE_BONE_RIGHT_UPPER_ARM:
-        case NC_POSE_BONE_LEFT_LOWER_ARM:
-        case NC_POSE_BONE_RIGHT_LOWER_ARM:
-            pitch_min = -90.0f;
-            pitch_max = 90.0f;
-            break;
-        case NC_POSE_BONE_LEFT_SHOULDER:
-        case NC_POSE_BONE_RIGHT_SHOULDER:
-        case NC_POSE_BONE_LEFT_HAND:
-        case NC_POSE_BONE_RIGHT_HAND:
-            pitch_min = -60.0f;
-            pitch_max = 60.0f;
-            break;
-        default:
-            break;
-    }
+    float pitch_min = -180.0f;
+    float pitch_max = 180.0f;
     out.pitch_deg = clamp_finite(out.pitch_deg, pitch_min, pitch_max);
     out.yaw_deg = clamp_finite(out.yaw_deg, -180.0f, 180.0f);
-    out.roll_deg = clamp_finite(out.roll_deg, -45.0f, 45.0f);
+    out.roll_deg = clamp_finite(out.roll_deg, -180.0f, 180.0f);
     return out;
 }
 
@@ -4035,6 +4071,20 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             : sorted_extents[sorted_extents.size() / 2U];
         const float extent_threshold = std::max(0.5f, median_extent * 20.0f);
         const float draw_extent_threshold = std::max(2.5f, median_extent * 6.0f);
+        const float bounds_cluster_distance_threshold = std::max(2.2f, median_extent * 3.0f);
+        std::vector<std::uint8_t> preview_bounds_excluded(mesh_it->second.size(), 0U);
+        if (it->second.source_type == AvatarSourceType::Xav2) {
+            for (const auto& sample : extent_samples) {
+                const auto& m = mesh_it->second[sample.index];
+                if (!std::isfinite(m.center.x) || !std::isfinite(m.center.y) || !std::isfinite(m.center.z)) {
+                    preview_bounds_excluded[sample.index] = 1U;
+                    continue;
+                }
+                if (std::abs(m.center.x) > 1000.0f || std::abs(m.center.y) > 1000.0f || std::abs(m.center.z) > 1000.0f) {
+                    preview_bounds_excluded[sample.index] = 1U;
+                }
+            }
+        }
         std::vector<float> center_x_samples;
         std::vector<float> center_y_samples;
         std::vector<float> center_z_samples;
@@ -4043,6 +4093,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         center_z_samples.reserve(extent_samples.size());
         for (const auto& sample : extent_samples) {
             if (sample.extent > extent_threshold) {
+                continue;
+            }
+            if (preview_bounds_excluded[sample.index] != 0U) {
                 continue;
             }
             const auto& m = mesh_it->second[sample.index];
@@ -4066,7 +4119,38 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cluster_cx = pick_median(&center_x_samples);
         const float cluster_cy = pick_median(&center_y_samples);
         const float cluster_cz = pick_median(&center_z_samples);
+        const bool has_cluster_center = !center_x_samples.empty();
         const float draw_cluster_distance_threshold = std::max(1.8f, median_extent * 2.5f);
+        if (it->second.source_type == AvatarSourceType::Xav2 && !center_x_samples.empty()) {
+            for (const auto& sample : extent_samples) {
+                if (preview_bounds_excluded[sample.index] != 0U) {
+                    continue;
+                }
+                if (sample.extent > extent_threshold) {
+                    continue;
+                }
+                const auto& m = mesh_it->second[sample.index];
+                const float ccx = m.center.x - cluster_cx;
+                const float ccy = m.center.y - cluster_cy;
+                const float ccz = m.center.z - cluster_cz;
+                const float cluster_dist = std::sqrt((ccx * ccx) + (ccy * ccy) + (ccz * ccz));
+                if (std::isfinite(cluster_dist) && cluster_dist > bounds_cluster_distance_threshold) {
+                    preview_bounds_excluded[sample.index] = 1U;
+                }
+            }
+        }
+        std::vector<std::string> excluded_mesh_names;
+        excluded_mesh_names.reserve(4U);
+        std::size_t excluded_bounds_mesh_count = 0U;
+        for (std::size_t i = 0U; i < preview_bounds_excluded.size(); ++i) {
+            if (preview_bounds_excluded[i] == 0U) {
+                continue;
+            }
+            ++excluded_bounds_mesh_count;
+            if (excluded_mesh_names.size() < 4U) {
+                excluded_mesh_names.push_back(mesh_it->second[i].mesh_name);
+            }
+        }
 
         DirectX::XMFLOAT3 avatar_bmin = {
             std::numeric_limits<float>::max(),
@@ -4081,6 +4165,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             if (sample.extent > extent_threshold) {
                 continue;
             }
+            if (preview_bounds_excluded[sample.index] != 0U) {
+                continue;
+            }
             const auto& m = mesh_it->second[sample.index];
             avatar_bmin.x = std::min(avatar_bmin.x, m.bounds_min.x);
             avatar_bmin.y = std::min(avatar_bmin.y, m.bounds_min.y);
@@ -4089,6 +4176,21 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             avatar_bmax.y = std::max(avatar_bmax.y, m.bounds_max.y);
             avatar_bmax.z = std::max(avatar_bmax.z, m.bounds_max.z);
             ++included_bounds_mesh_count;
+        }
+        if (included_bounds_mesh_count == 0U) {
+            for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
+                if (preview_bounds_excluded[mesh_index] != 0U) {
+                    continue;
+                }
+                const auto& m = mesh_it->second[mesh_index];
+                avatar_bmin.x = std::min(avatar_bmin.x, m.bounds_min.x);
+                avatar_bmin.y = std::min(avatar_bmin.y, m.bounds_min.y);
+                avatar_bmin.z = std::min(avatar_bmin.z, m.bounds_min.z);
+                avatar_bmax.x = std::max(avatar_bmax.x, m.bounds_max.x);
+                avatar_bmax.y = std::max(avatar_bmax.y, m.bounds_max.y);
+                avatar_bmax.z = std::max(avatar_bmax.z, m.bounds_max.z);
+                ++included_bounds_mesh_count;
+            }
         }
         if (included_bounds_mesh_count == 0U) {
             for (const auto& m : mesh_it->second) {
@@ -4114,6 +4216,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             std::size_t near_count = 0U;
             for (const auto& sample : extent_samples) {
                 if (sample.extent > extent_threshold) {
+                    continue;
+                }
+                if (preview_bounds_excluded[sample.index] != 0U) {
                     continue;
                 }
                 const auto& m = mesh_it->second[sample.index];
@@ -4168,7 +4273,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         // Host UI currently operates in single-avatar mode, and slot offsets
         // can push the visible avatar out of frame after reload/recovery paths.
         const float x_offset = 0.0f;
-        const float preview_yaw = PreviewYawRadiansForAvatarSource(it->second.source_type);
+        const float preview_yaw_override = PreviewYawRadiansForAvatarPackage(it->second, nullptr);
         {
             std::ostringstream preview_debug;
             preview_debug << "extent=(" << extent_x << "/" << extent_y << "/" << extent_z
@@ -4176,7 +4281,18 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                           << ", center=(" << cx << "/" << cy << "/" << cz << ")"
                           << ", bounds_meshes=" << included_bounds_mesh_count
                           << "/" << mesh_it->second.size()
-                          << ", near_origin=" << (near_origin_bounds_used ? "1" : "0");
+                          << ", bounds_excluded=" << excluded_bounds_mesh_count
+                          << ", near_origin=" << (near_origin_bounds_used ? "1" : "0")
+                          << ", preview_yaw_deg=" << PreviewYawDegreesForAvatarPackage(it->second, nullptr);
+            if (!excluded_mesh_names.empty()) {
+                preview_debug << ", excluded_names=";
+                for (std::size_t i = 0U; i < excluded_mesh_names.size(); ++i) {
+                    if (i > 0U) {
+                        preview_debug << "|";
+                    }
+                    preview_debug << excluded_mesh_names[i];
+                }
+            }
             g_state.avatar_preview_debug[handle] = preview_debug.str();
         }
         const auto raw_head_rot = DirectX::XMVectorSet(
@@ -4201,7 +4317,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             g_state.latest_tracking.head_pos[2] * kHeadPosScale);
         const auto world =
             DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *
-            DirectX::XMMatrixRotationY(preview_yaw) *
+            DirectX::XMMatrixRotationY(preview_yaw_override) *
             composed_head_rot *
             DirectX::XMMatrixScaling(fit_scale, fit_scale, fit_scale) *
             head_pos *
@@ -4209,9 +4325,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ++avatar_slot;
         std::uint32_t material_index_oob_count = 0U;
         std::uint32_t mesh_extent_outlier_skipped_count = 0U;
+        std::uint32_t bounds_outlier_excluded_count = 0U;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
             if (it->second.source_type == AvatarSourceType::Xav2) {
+                if (mesh_index < preview_bounds_excluded.size() && preview_bounds_excluded[mesh_index] != 0U) {
+                    ++bounds_outlier_excluded_count;
+                    continue;
+                }
                 const float ex = std::max(mesh.bounds_max.x - mesh.bounds_min.x, 0.0f);
                 const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
                 const float ez = std::max(mesh.bounds_max.z - mesh.bounds_min.z, 0.0f);
@@ -4224,16 +4345,18 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 const float dcy = mesh.center.y - cy;
                 const float dcz = mesh.center.z - cz;
                 const float center_dist = std::sqrt((dcx * dcx) + (dcy * dcy) + (dcz * dcz));
-                if (std::isfinite(center_dist) && center_dist > draw_center_distance_threshold) {
-                    ++mesh_extent_outlier_skipped_count;
-                    continue;
-                }
-                if (!center_x_samples.empty()) {
+                if (has_cluster_center) {
                     const float ccx = mesh.center.x - cluster_cx;
                     const float ccy = mesh.center.y - cluster_cy;
                     const float ccz = mesh.center.z - cluster_cz;
                     const float cluster_dist = std::sqrt((ccx * ccx) + (ccy * ccy) + (ccz * ccz));
+                    // Prefer cluster-based gating to avoid a single excluded bounds mesh
+                    // pulling preview center and cascading draw skips.
                     if (std::isfinite(cluster_dist) && cluster_dist > draw_cluster_distance_threshold) {
+                        ++mesh_extent_outlier_skipped_count;
+                        continue;
+                    }
+                    if (std::isfinite(center_dist) && center_dist > draw_center_distance_threshold * 2.5f) {
                         ++mesh_extent_outlier_skipped_count;
                         continue;
                     }
@@ -4297,6 +4420,23 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 std::ostringstream warning;
                 warning << "W_RENDER: XAV2_MESH_EXTENT_OUTLIER_SKIPPED: meshes=" << mesh_extent_outlier_skipped_count;
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_MESH_EXTENT_OUTLIER_SKIPPED");
+            }
+        }
+        if (bounds_outlier_excluded_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_BOUNDS_OUTLIER_EXCLUDED: meshes=" << bounds_outlier_excluded_count;
+                if (!excluded_mesh_names.empty()) {
+                    warning << ", names=";
+                    for (std::size_t i = 0U; i < excluded_mesh_names.size(); ++i) {
+                        if (i > 0U) {
+                            warning << "|";
+                        }
+                        warning << excluded_mesh_names[i];
+                    }
+                }
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_BOUNDS_OUTLIER_EXCLUDED");
             }
         }
     }

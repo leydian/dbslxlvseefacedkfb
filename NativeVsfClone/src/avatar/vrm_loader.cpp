@@ -3322,8 +3322,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     std::uint32_t skinned_primitive_count = 0U;
     std::uint32_t skinned_payload_emitted = 0U;
     std::uint32_t skinned_payload_failed = 0U;
-    std::vector<bool> mesh_node_transform_skin_bypass;
-    mesh_node_transform_skin_bypass.assign(meshes_v->array_value.size(), false);
+    std::vector<bool> mesh_node_transform_applied;
+    mesh_node_transform_applied.assign(meshes_v->array_value.size(), false);
     for (std::size_t mesh_i = 0U; mesh_i < meshes_v->array_value.size(); ++mesh_i) {
         const auto& mesh = meshes_v->array_value[mesh_i];
         if (mesh.type != JsonValue::Type::Object) {
@@ -3393,15 +3393,11 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 continue;
             }
             if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
-                const bool is_skinned_mesh = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
-                if (is_skinned_mesh) {
-                    mesh_node_transform_skin_bypass[mesh_i] = true;
-                } else {
-                    ApplyPositionTransformToVertexBlob(
-                        &mesh_payload.vertex_blob,
-                        mesh_payload.vertex_stride,
-                        mesh_node_transforms[mesh_i]);
-                }
+                ApplyPositionTransformToVertexBlob(
+                    &mesh_payload.vertex_blob,
+                    mesh_payload.vertex_stride,
+                    mesh_node_transforms[mesh_i]);
+                mesh_node_transform_applied[mesh_i] = true;
             }
 
             const auto* uv0_v = FindKey(*attrs_v, "TEXCOORD_0");
@@ -3479,17 +3475,20 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                             SkeletonRenderPayload skeleton_payload;
                             skeleton_payload.mesh_name = mesh_payload.name;
                             skeleton_payload.bone_matrices_16xn.reserve(skin_defs[skin_index].joints.size() * 16U);
+                            const bool has_node_transform_applied =
+                                mesh_i < mesh_node_transform_applied.size() && mesh_node_transform_applied[mesh_i];
                             std::array<float, 16U> mesh_global_for_skin = MakeIdentityMatrix4x4();
-                            if (mesh_i < mesh_node_transforms.size() &&
+                            std::array<float, 16U> mesh_inv_for_skin = MakeIdentityMatrix4x4();
+                            if (!has_node_transform_applied &&
+                                mesh_i < mesh_node_transforms.size() &&
                                 mesh_i < mesh_node_transform_conflict.size() &&
                                 !mesh_node_transform_conflict[mesh_i]) {
                                 mesh_global_for_skin = mesh_node_transforms[mesh_i];
-                            }
-                            std::array<float, 16U> mesh_inv_for_skin = MakeIdentityMatrix4x4();
-                            if (!TryInvertMatrix4x4(mesh_global_for_skin, &mesh_inv_for_skin)) {
-                                mesh_inv_for_skin = MakeIdentityMatrix4x4();
-                                pkg.warnings.push_back(
-                                    "W_SKIN: VRM_MESH_GLOBAL_INVERSE_FAILED: mesh=" + mesh_payload.name);
+                                if (!TryInvertMatrix4x4(mesh_global_for_skin, &mesh_inv_for_skin)) {
+                                    mesh_inv_for_skin = MakeIdentityMatrix4x4();
+                                    pkg.warnings.push_back(
+                                        "W_SKIN: VRM_MESH_GLOBAL_INVERSE_FAILED: mesh=" + mesh_payload.name);
+                                }
                             }
                             for (const auto joint_index : skin_defs[skin_index].joints) {
                                 std::array<float, 16U> bone_m = MakeIdentityMatrix4x4();
@@ -3497,9 +3496,10 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                                     static_cast<std::size_t>(joint_index) < node_global_transforms.size()) {
                                     bone_m = node_global_transforms[static_cast<std::size_t>(joint_index)];
                                 }
-                                // Convert joint global pose into mesh space so skinning uses
-                                // a consistent space with inverseBind matrices.
-                                bone_m = MulMatrix4x4(mesh_inv_for_skin, bone_m);
+                                if (!has_node_transform_applied) {
+                                    // Fallback path for conflict/no-transform cases keeps mesh-space conversion.
+                                    bone_m = MulMatrix4x4(mesh_inv_for_skin, bone_m);
+                                }
                                 skeleton_payload.bone_matrices_16xn.insert(
                                     skeleton_payload.bone_matrices_16xn.end(),
                                     bone_m.begin(),
@@ -3636,16 +3636,15 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
     pkg.parser_stage = "payload";
     std::uint32_t transformed_mesh_count = 0U;
-    for (std::size_t i = 0U; i < mesh_has_node_transform.size(); ++i) {
-        if (mesh_has_node_transform[i] && !(i < mesh_has_skin.size() && mesh_has_skin[i])) {
+    for (std::size_t i = 0U; i < mesh_node_transform_applied.size(); ++i) {
+        if (mesh_node_transform_applied[i]) {
             ++transformed_mesh_count;
         }
     }
     if (transformed_mesh_count > 0U) {
         std::string sample_applied_mesh = "unknown";
-        for (std::size_t mesh_i = 0U; mesh_i < mesh_has_node_transform.size(); ++mesh_i) {
-            if (mesh_has_node_transform[mesh_i] &&
-                !(mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i]) &&
+        for (std::size_t mesh_i = 0U; mesh_i < mesh_node_transform_applied.size(); ++mesh_i) {
+            if (mesh_node_transform_applied[mesh_i] &&
                 mesh_i < mesh_names_by_index.size()) {
                 sample_applied_mesh = mesh_names_by_index[mesh_i];
                 break;
@@ -3655,23 +3654,6 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count) +
             ", sampleMesh=" + sample_applied_mesh);
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
-    }
-    std::uint32_t node_transform_skin_bypass_count = 0U;
-    std::string sample_skin_bypass_mesh = "unknown";
-    for (std::size_t mesh_i = 0U; mesh_i < mesh_node_transform_skin_bypass.size(); ++mesh_i) {
-        if (!mesh_node_transform_skin_bypass[mesh_i]) {
-            continue;
-        }
-        ++node_transform_skin_bypass_count;
-        if (sample_skin_bypass_mesh == "unknown" && mesh_i < mesh_names_by_index.size()) {
-            sample_skin_bypass_mesh = mesh_names_by_index[mesh_i];
-        }
-    }
-    if (node_transform_skin_bypass_count > 0U) {
-        pkg.warnings.push_back(
-            "W_NODE: VRM_NODE_TRANSFORM_SKIN_BYPASS: meshes=" + std::to_string(node_transform_skin_bypass_count) +
-            ", sampleMesh=" + sample_skin_bypass_mesh);
-        pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIN_BYPASS");
     }
     pkg.warnings.push_back("W_NODE: VRM_NODE_TRANSFORM_BASIS: global");
     if (skinned_primitive_count > 0U) {
@@ -3683,7 +3665,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             }
             if (mesh_i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[mesh_i]) {
                 ++skinned_transform_conflict_mesh_count;
-            } else if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
+            } else if (mesh_i < mesh_node_transform_applied.size() && mesh_node_transform_applied[mesh_i]) {
                 ++skinned_transform_injected_mesh_count;
             }
         }
@@ -3696,7 +3678,13 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             std::to_string(skinned_transform_injected_mesh_count) +
             ", conflictMeshes=" + std::to_string(skinned_transform_conflict_mesh_count));
         pkg.warnings.push_back("W_SKIN: VRM_SKIN_SPACE: mesh");
-        pkg.warnings.push_back("W_SKIN: VRM_SKINNING_CONVENTION: meshJoint*inverseBind");
+        pkg.warnings.push_back("W_SKIN: VRM_SKINNING_CONVENTION: globalJoint*inverseBind");
+        if (skinned_transform_conflict_mesh_count > 0U) {
+            pkg.warnings.push_back(
+                "W_NODE: VRM_NODE_TRANSFORM_SKIN_FALLBACK: meshes=" +
+                std::to_string(skinned_transform_conflict_mesh_count));
+            pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIN_FALLBACK");
+        }
         if (skinned_payload_failed > 0U) {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
         }
