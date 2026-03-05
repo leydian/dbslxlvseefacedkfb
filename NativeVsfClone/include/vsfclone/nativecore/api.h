@@ -106,6 +106,11 @@ typedef struct NcTrackingFrame {
     float mouth_open;
 } NcTrackingFrame;
 
+typedef struct NcExpressionWeight {
+    char name[64];
+    float weight;
+} NcExpressionWeight;
+
 typedef struct NcRenderContext {
     void* hwnd;
     void* d3d11_device;
@@ -175,6 +180,7 @@ VSFCLONE_API NcResultCode nc_get_expression_infos(NcAvatarHandle handle, NcExpre
 VSFCLONE_API NcResultCode nc_get_springbone_info(NcAvatarHandle handle, NcSpringBoneInfo* out_info);
 
 VSFCLONE_API NcResultCode nc_set_tracking_frame(const NcTrackingFrame* frame);
+VSFCLONE_API NcResultCode nc_set_expression_weights(const NcExpressionWeight* weights, uint32_t count);
 VSFCLONE_API NcResultCode nc_create_render_resources(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_destroy_render_resources(NcAvatarHandle handle);
 VSFCLONE_API NcResultCode nc_render_frame(const NcRenderContext* ctx);

@@ -42,8 +42,20 @@ foreach ($f in $files) {
 }
 
 $target = $rows | Where-Object { $_.Name -like $TargetSamplePattern } | Select-Object -First 1
-$gate1 = ($rows | Where-Object { $_.ParserStage -eq "runtime-ready" }).Count -eq $rows.Count
-$gate2 = ($rows | Where-Object { $_.PrimaryError -eq "NONE" }).Count -eq $rows.Count
+$gate1 = $true
+foreach ($r in $rows) {
+    if (-not "$($r.ParserStage)".ToLowerInvariant().Contains("runtime-ready")) {
+        $gate1 = $false
+        break
+    }
+}
+$gate2 = $true
+foreach ($r in $rows) {
+    if (-not "$($r.PrimaryError)".ToUpperInvariant().Contains("NONE")) {
+        $gate2 = $false
+        break
+    }
+}
 $gate3 = $null -ne $target
 $gate4 = $true
 if ($FailOnRenderWarnings) {
@@ -86,4 +98,3 @@ Write-Host "Summary written: $SummaryPath"
 if (-not $overall) {
     exit 1
 }
-

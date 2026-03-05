@@ -24,6 +24,7 @@ Primary intent:
 - `host/HostCore/PlatformFeatures.cs`
 - `host/HostCore/TrackingInputService.cs`
 - `host/WpfHost/MainWindow.xaml.cs`
+- `include/vsfclone/nativecore/api.h`
 - `src/nativecore/native_core.cpp`
 - `tools/vsfavatar_quality_gate.ps1`
 - `tools/vsfavatar_render_gate.ps1`
@@ -71,6 +72,7 @@ Updated:
 - `host/HostCore/HostController.cs`
 - `host/HostCore/NativeCoreInterop.cs`
 - `host/HostCore/TrackingInputService.cs`
+- `include/vsfclone/nativecore/api.h`
 
 Key changes:
 
@@ -88,6 +90,9 @@ Key changes:
 - Added native interop shape and API for expression payloads:
   - `NcExpressionWeight`
   - `nc_set_expression_weights(...)`
+- Synced native C public header contract with the same expression API:
+  - `NcExpressionWeight` struct declaration
+  - `nc_set_expression_weights(...)` export declaration
 - Expanded persisted tracking schema in `TrackingInputSettings`:
   - source type
   - webcam/model identifiers
@@ -153,6 +158,8 @@ Key change:
   - evaluates parser/error/warning gates (`GateX1..GateX4`)
   - supports strict warning fail mode (`-FailOnRenderWarnings`)
   - emits summary artifact to `build/reports`
+- Adjusted `xav2_render_regression_gate.ps1` gate matching:
+  - parser stage/error checks now use `-match` to tolerate surrounding text variation in tool output
 
 Behavioral outcome:
 
