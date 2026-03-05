@@ -2,7 +2,9 @@ param(
     [string]$SampleDir = ".",
     [string]$AvatarToolPath = ".\build\Release\avatar_tool.exe",
     [string]$SummaryPath = ".\build\reports\xav2_render_regression_gate_summary.txt",
+    [string]$JsonSummaryPath = ".\build\reports\xav2_render_regression_gate_summary.json",
     [string]$TargetSamplePattern = "*11-3.xav2",
+    [int]$MinSampleCount = 1,
     [switch]$FailOnRenderWarnings,
     [string]$UnitySnapshotDir = "",
     [string]$NativeSnapshotDir = "",
@@ -68,7 +70,16 @@ foreach ($f in $files) {
         PrimaryError = ""
         WarningCount = 0
         WarningCodes = @()
+        WarningMeta = @()
         LastWarningCode = ""
+        LastWarningSeverity = ""
+        LastWarningCategory = ""
+        LastWarningCritical = $false
+        CriticalWarningCount = 0
+        WarningInfoCount = 0
+        WarningWarnCount = 0
+        WarningErrorCount = 0
+        FailureReason = ""
     }
     foreach ($line in $out) {
         if ($line -match '^\s*Compat:\s*(.+)$') { $row.Compat = $matches[1].Trim() }
@@ -76,11 +87,46 @@ foreach ($f in $files) {
         elseif ($line -match '^\s*PrimaryError:\s*(.+)$') { $row.PrimaryError = $matches[1].Trim() }
         elseif ($line -match '^\s*WarningCodes:\s*(\d+)$') { $row.WarningCount = [int]$matches[1] }
         elseif ($line -match '^\s*WarningCode\[\d+\]:\s*(.+)$') { $row.WarningCodes += $matches[1].Trim() }
+        elseif ($line -match '^\s*WarningCodeMeta\[\d+\]:\s*severity=([^,]+),\s*category=([^,]+),\s*critical=(true|false)\s*$') {
+            $row.WarningMeta += [PSCustomObject]@{
+                Severity = $matches[1].Trim().ToLowerInvariant()
+                Category = $matches[2].Trim().ToLowerInvariant()
+                Critical = ($matches[3].Trim().ToLowerInvariant() -eq "true")
+            }
+        }
         elseif ($line -match '^\s*LastWarningCode:\s*(.+)$') { $row.LastWarningCode = $matches[1].Trim() }
+        elseif ($line -match '^\s*LastWarningSeverity:\s*(.+)$') { $row.LastWarningSeverity = $matches[1].Trim().ToLowerInvariant() }
+        elseif ($line -match '^\s*LastWarningCategory:\s*(.+)$') { $row.LastWarningCategory = $matches[1].Trim().ToLowerInvariant() }
+        elseif ($line -match '^\s*LastWarningCritical:\s*(true|false)\s*$') { $row.LastWarningCritical = ($matches[1].Trim().ToLowerInvariant() -eq "true") }
+        elseif ($line -match '^\s*CriticalWarningCount:\s*(\d+)$') { $row.CriticalWarningCount = [int]$matches[1] }
+        elseif ($line -match '^\s*WarningInfoCount:\s*(\d+)$') { $row.WarningInfoCount = [int]$matches[1] }
+        elseif ($line -match '^\s*WarningWarnCount:\s*(\d+)$') { $row.WarningWarnCount = [int]$matches[1] }
+        elseif ($line -match '^\s*WarningErrorCount:\s*(\d+)$') { $row.WarningErrorCount = [int]$matches[1] }
+    }
+    if ($row.WarningMeta.Count -eq 0 -and $row.WarningCodes.Count -gt 0) {
+        foreach ($code in $row.WarningCodes) {
+            $isCritical = $code -in @(
+                "XAV2_SKINNING_STATIC_DISABLED",
+                "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED",
+                "XAV3_SKELETON_PAYLOAD_MISSING",
+                "XAV3_SKELETON_MESH_BIND_MISMATCH",
+                "XAV3_SKINNING_MATRIX_INVALID",
+                "XAV2_UNKNOWN_SECTION_NOT_ALLOWED"
+            )
+            $row.WarningMeta += [PSCustomObject]@{
+                Severity = "warn"
+                Category = "render"
+                Critical = $isCritical
+            }
+            if ($isCritical) {
+                $row.CriticalWarningCount++
+            }
+        }
     }
     $rows += [PSCustomObject]$row
 }
 
+$gate0 = $rows.Count -ge $MinSampleCount
 $target = $rows | Where-Object { $_.Name -like $TargetSamplePattern } | Select-Object -First 1
 $gate1 = $true
 foreach ($r in $rows) {
@@ -99,23 +145,12 @@ foreach ($r in $rows) {
 $gate3 = $null -ne $target
 $gate4 = $true
 if ($FailOnRenderWarnings) {
-    $criticalWarningCodes = @(
-        "XAV2_SKINNING_STATIC_DISABLED",
-        "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED",
-        "XAV3_SKELETON_PAYLOAD_MISSING",
-        "XAV3_SKELETON_MESH_BIND_MISMATCH",
-        "XAV3_SKINNING_MATRIX_INVALID"
-    )
     foreach ($r in $rows) {
-        $hasCriticalWarning = $false
-        foreach ($code in $r.WarningCodes) {
-            if ($criticalWarningCodes -contains $code) {
-                $hasCriticalWarning = $true
-                break
-            }
-        }
-        if ($hasCriticalWarning) {
+        if ($r.CriticalWarningCount -gt 0) {
             $gate4 = $false
+            if ([string]::IsNullOrWhiteSpace($r.FailureReason)) {
+                $r.FailureReason = "critical-warning-present"
+            }
             break
         }
     }
@@ -164,7 +199,19 @@ if (-not $FailOnSnapshotMismatch) {
     $gate5 = $true
 }
 
-$overall = $gate1 -and $gate2 -and $gate3 -and $gate4 -and $gate5
+foreach ($r in $rows) {
+    if ([string]::IsNullOrWhiteSpace($r.FailureReason) -and -not "$($r.ParserStage)".ToLowerInvariant().Contains("runtime-ready")) {
+        $r.FailureReason = "parser-stage-not-runtime-ready"
+    }
+    if ([string]::IsNullOrWhiteSpace($r.FailureReason) -and -not "$($r.PrimaryError)".ToUpperInvariant().Contains("NONE")) {
+        $r.FailureReason = "primary-error-not-none"
+    }
+    if ([string]::IsNullOrWhiteSpace($r.FailureReason)) {
+        $r.FailureReason = "none"
+    }
+}
+
+$overall = $gate0 -and $gate1 -and $gate2 -and $gate3 -and $gate4 -and $gate5
 
 $summary = @()
 $summary += "XAV2 Render Regression Gate Summary"
@@ -173,6 +220,7 @@ $summary += "SampleDir: $(Resolve-Path $SampleDir)"
 $summary += "SampleCount: $($rows.Count)"
 $summary += ""
 $summary += "Gate Results"
+$summary += "- GateX0 (minimum sample count >= $MinSampleCount): $(if($gate0){'PASS'}else{'FAIL'})"
 $summary += "- GateX1 (all parser stage runtime-ready): $(if($gate1){'PASS'}else{'FAIL'})"
 $summary += "- GateX2 (all primary error NONE): $(if($gate2){'PASS'}else{'FAIL'})"
 $summary += "- GateX3 (target sample present): $(if($gate3){'PASS'}else{'FAIL'})"
@@ -184,7 +232,7 @@ $summary += ""
 $summary += "Rows"
 foreach ($r in $rows) {
     $codes = if ($r.WarningCodes.Count -gt 0) { ($r.WarningCodes -join ",") } else { "none" }
-    $summary += "- $($r.Name): compat=$($r.Compat), stage=$($r.ParserStage), error=$($r.PrimaryError), warning_codes=$codes, last_warning_code=$($r.LastWarningCode)"
+    $summary += "- $($r.Name): compat=$($r.Compat), stage=$($r.ParserStage), error=$($r.PrimaryError), warning_codes=$codes, severity_counts=info:$($r.WarningInfoCount)|warn:$($r.WarningWarnCount)|error:$($r.WarningErrorCount), critical=$($r.CriticalWarningCount), last_warning_code=$($r.LastWarningCode), last_warning_severity=$($r.LastWarningSeverity), last_warning_category=$($r.LastWarningCategory), failure_reason=$($r.FailureReason)"
 }
 if ($snapshotRows.Count -gt 0) {
     $summary += ""
@@ -200,6 +248,46 @@ if (-not (Test-Path $summaryDir)) {
 }
 $summary | Set-Content -Path $SummaryPath -Encoding UTF8
 Write-Host "Summary written: $SummaryPath"
+
+$jsonRows = @()
+foreach ($r in $rows) {
+    $jsonRows += [ordered]@{
+        name = $r.Name
+        compat = $r.Compat
+        parser_stage = $r.ParserStage
+        primary_error = $r.PrimaryError
+        warning_codes = @($r.WarningCodes)
+        warning_info_count = $r.WarningInfoCount
+        warning_warn_count = $r.WarningWarnCount
+        warning_error_count = $r.WarningErrorCount
+        critical_warning_count = $r.CriticalWarningCount
+        last_warning_code = $r.LastWarningCode
+        last_warning_severity = $r.LastWarningSeverity
+        last_warning_category = $r.LastWarningCategory
+        failure_reason = $r.FailureReason
+    }
+}
+$jsonSummary = [ordered]@{
+    generated = (Get-Date -Format s)
+    sample_dir = (Resolve-Path $SampleDir).Path
+    sample_count = $rows.Count
+    gates = [ordered]@{
+        gate_x0_min_sample_count = $gate0
+        gate_x1_runtime_ready = $gate1
+        gate_x2_primary_none = $gate2
+        gate_x3_target_present = $gate3
+        gate_x4_no_critical_warnings = $gate4
+        gate_x5_snapshot_diff = $gate5
+        overall = $overall
+    }
+    rows = $jsonRows
+}
+$jsonDir = Split-Path -Parent $JsonSummaryPath
+if (-not (Test-Path $jsonDir)) {
+    New-Item -ItemType Directory -Path $jsonDir | Out-Null
+}
+($jsonSummary | ConvertTo-Json -Depth 6) | Set-Content -Path $JsonSummaryPath -Encoding UTF8
+Write-Host "JSON summary written: $JsonSummaryPath"
 
 if (-not $overall) {
     exit 1

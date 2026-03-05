@@ -188,3 +188,15 @@ Notes:
   - `Fail`: load terminates with primary error `XAV2_UNKNOWN_SECTION_NOT_ALLOWED`.
 - Loader diagnostics include both raw `warnings[]` and normalized `warning_codes[]`.
 - Missing referenced payloads produce `XAV2_ASSET_MISSING` and `Compat: partial`.
+- Warning-code contract (tooling/host):
+  - `W_STAGE`: severity=`info`, category=`stage`
+  - `W_LAYOUT|W_OFFSET|W_RECON_SUMMARY`: severity=`info`, category=`layout`
+  - `W_*` (other): severity=`warn`, category=`payload`
+  - `XAV2_*|XAV3_*|XAV4_*`: severity=`warn`, category=`render`
+  - critical render codes:
+    - `XAV2_SKINNING_STATIC_DISABLED`
+    - `XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED`
+    - `XAV3_SKELETON_PAYLOAD_MISSING`
+    - `XAV3_SKELETON_MESH_BIND_MISMATCH`
+    - `XAV3_SKINNING_MATRIX_INVALID`
+    - `XAV2_UNKNOWN_SECTION_NOT_ALLOWED`

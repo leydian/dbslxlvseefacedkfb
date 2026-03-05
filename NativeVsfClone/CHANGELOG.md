@@ -2,6 +2,52 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 warning contract and regression gate upgrade
+
+### Summary
+
+Upgraded XAV2 warning quality governance by formalizing warning-code contract mapping and strengthening render regression gate decision logic with structured diagnostics output.
+
+### Changed
+
+- XAV2 regression gate enhancements:
+  - `tools/xav2_render_regression_gate.ps1`
+  - added `GateX0` minimum sample-count check (`-MinSampleCount`)
+  - parses structured warning metadata (`WarningCodeMeta[n]`) with fallback for legacy output
+  - GateX4 now evaluates critical warning presence via per-row `CriticalWarningCount`
+  - added per-row `failure_reason` classification
+  - expanded summary rows with severity counts and last warning severity/category
+  - added JSON summary artifact output (`-JsonSummaryPath`)
+- XAV2 warning contract docs sync:
+  - `docs/formats/xav2.md`
+  - documented severity/category mapping and critical warning-code list for tooling/host parity
+- implementation report:
+  - `docs/reports/xav2_warning_contract_gate_upgrade_2026-03-06.md`
+
+### Verification
+
+Executed in this environment:
+
+```powershell
+cmake --build NativeVsfClone\build --config Release --target avatar_tool
+cmake --build NativeVsfClone\build --config Release --target nativecore
+NativeVsfClone\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"
+powershell -ExecutionPolicy Bypass -File NativeVsfClone\tools\xav2_render_regression_gate.ps1 `
+  -SampleDir D:\dbslxlvseefacedkfb `
+  -AvatarToolPath D:\dbslxlvseefacedkfb\NativeVsfClone\build\Release\avatar_tool.exe `
+  -SummaryPath D:\dbslxlvseefacedkfb\build\reports\xav2_render_regression_gate_summary.txt `
+  -JsonSummaryPath D:\dbslxlvseefacedkfb\build\reports\xav2_render_regression_gate_summary.json `
+  -FailOnRenderWarnings
+```
+
+Result:
+
+- build targets: PASS
+- XAV2 regression gate: PASS
+- artifacts generated:
+  - `build/reports/xav2_render_regression_gate_summary.txt`
+  - `build/reports/xav2_render_regression_gate_summary.json`
+
 ## 2026-03-06 - Tracking latency/lock hardening follow-up
 
 ### Summary

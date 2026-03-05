@@ -17,6 +17,7 @@ Entry point for `NativeVsfClone` documentation.
 
 - [TEMPLATE.md](./reports/TEMPLATE.md)
 - [tracking_latency_lock_followup_2026-03-06.md](./reports/tracking_latency_lock_followup_2026-03-06.md)
+- [xav2_warning_contract_gate_upgrade_2026-03-06.md](./reports/xav2_warning_contract_gate_upgrade_2026-03-06.md)
 - [host_pose_tracking_refinement_execution_2026-03-06.md](./reports/host_pose_tracking_refinement_execution_2026-03-06.md)
 - [wpf_render_drag_capture_stabilization_2026-03-06.md](./reports/wpf_render_drag_capture_stabilization_2026-03-06.md)
 - [tracking_render_followup_2026-03-06.md](./reports/tracking_render_followup_2026-03-06.md)
@@ -123,6 +124,7 @@ Entry point for `NativeVsfClone` documentation.
 - [xav2_tryload_test_and_deterministic_gate_2026-03-03.md](./reports/xav2_tryload_test_and_deterministic_gate_2026-03-03.md)
 - [xav2_typed_material_v2_liltoon_phase1_2026-03-06.md](./reports/xav2_typed_material_v2_liltoon_phase1_2026-03-06.md)
 - [xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md](./reports/xav2_unity_2021_3_18f1_support_and_gate_2026-03-05.md)
+- [xav2_warning_contract_gate_upgrade_2026-03-06.md](./reports/xav2_warning_contract_gate_upgrade_2026-03-06.md)
 - [xav2_unknown_section_policy_diagnostics_2026-03-03.md](./reports/xav2_unknown_section_policy_diagnostics_2026-03-03.md)
 - [xav2_visibility_fallback_and_warning_gate_2026-03-06.md](./reports/xav2_visibility_fallback_and_warning_gate_2026-03-06.md)
 
