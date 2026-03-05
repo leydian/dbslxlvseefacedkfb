@@ -79,6 +79,7 @@ Report list for this week.
 - [2026-03-06_tracking_latency_lock_followup.md](./2026-03-06_tracking_latency_lock_followup.md)
 - [2026-03-06_tracking_render_followup.md](./2026-03-06_tracking_render_followup.md)
 - [2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md](./2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md)
+- [2026-03-06_vrm_texture_alpha_fallback_recovery.md](./2026-03-06_vrm_texture_alpha_fallback_recovery.md)
 - [2026-03-06_vsfavatar_error_contract_and_target_gate_update.md](./2026-03-06_vsfavatar_error_contract_and_target_gate_update.md)
 - [2026-03-06_vsfavatar_sidecar_v5_contract_and_gate_wiring.md](./2026-03-06_vsfavatar_sidecar_v5_contract_and_gate_wiring.md)
 - [2026-03-06_webcam_mediapipe_runtime_integration.md](./2026-03-06_webcam_mediapipe_runtime_integration.md)

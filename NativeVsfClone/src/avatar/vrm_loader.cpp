@@ -723,6 +723,78 @@ std::string DetectTextureFormat(const std::string& mime_type, const std::string&
     return "binary";
 }
 
+std::uint32_t ReadU32Be(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
+    return (static_cast<std::uint32_t>(bytes[offset]) << 24U) |
+           (static_cast<std::uint32_t>(bytes[offset + 1U]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[offset + 2U]) << 8U) |
+           static_cast<std::uint32_t>(bytes[offset + 3U]);
+}
+
+bool BytesStartWith(const std::vector<std::uint8_t>& bytes, std::initializer_list<std::uint8_t> prefix) {
+    if (bytes.size() < prefix.size()) {
+        return false;
+    }
+    std::size_t index = 0U;
+    for (const auto value : prefix) {
+        if (bytes[index] != value) {
+            return false;
+        }
+        ++index;
+    }
+    return true;
+}
+
+bool IsPngWithAlphaCapability(const std::vector<std::uint8_t>& bytes) {
+    if (!BytesStartWith(bytes, {0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU})) {
+        return false;
+    }
+    if (bytes.size() < 33U) {
+        return false;
+    }
+    const auto ihdr_len = ReadU32Be(bytes, 8U);
+    if (ihdr_len < 13U || !BytesStartWith(
+                              std::vector<std::uint8_t>(bytes.begin() + 12U, bytes.begin() + 16U),
+                              {0x49U, 0x48U, 0x44U, 0x52U})) {
+        return false;
+    }
+    // PNG color type 4(gray+alpha) / 6(RGBA) always carry alpha.
+    const std::uint8_t color_type = bytes[25U];
+    if (color_type == 4U || color_type == 6U) {
+        return true;
+    }
+    // Indexed/truecolor PNG can carry transparency via tRNS.
+    std::size_t cursor = 8U;
+    while (cursor + 8U <= bytes.size()) {
+        const auto chunk_len = ReadU32Be(bytes, cursor);
+        if (cursor + 12U + static_cast<std::size_t>(chunk_len) > bytes.size()) {
+            return false;
+        }
+        const auto type_offset = cursor + 4U;
+        if (bytes[type_offset] == 0x74U &&
+            bytes[type_offset + 1U] == 0x52U &&
+            bytes[type_offset + 2U] == 0x4EU &&
+            bytes[type_offset + 3U] == 0x53U) {
+            return true;
+        }
+        if (bytes[type_offset] == 0x49U &&
+            bytes[type_offset + 1U] == 0x45U &&
+            bytes[type_offset + 2U] == 0x4EU &&
+            bytes[type_offset + 3U] == 0x44U) {
+            break;
+        }
+        cursor += 12U + static_cast<std::size_t>(chunk_len);
+    }
+    return false;
+}
+
+bool TextureHasAlphaCapability(const std::string& format, const std::vector<std::uint8_t>& bytes) {
+    const auto lower = ToLower(format);
+    if (lower == "png") {
+        return IsPngWithAlphaCapability(bytes);
+    }
+    return false;
+}
+
 std::uint32_t ReadU32Le(const std::vector<std::uint8_t>& bytes, std::size_t offset) {
     return static_cast<std::uint32_t>(bytes[offset]) |
            (static_cast<std::uint32_t>(bytes[offset + 1]) << 8U) |
@@ -1531,6 +1603,7 @@ struct MaterialInfo {
     std::string normal_texture_name;
     std::string emission_texture_name;
     std::string rim_texture_name;
+    bool base_color_texture_alpha_capable = false;
     bool double_sided = false;
     std::string alpha_mode = "OPAQUE";
     std::string alpha_source = "default.opaque";
@@ -2258,6 +2331,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         std::string name;
         std::vector<std::uint8_t> bytes;
         std::string format;
+        bool alpha_capable = false;
         bool valid = false;
     };
     std::vector<TextureRef> image_table;
@@ -2286,6 +2360,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     "W_PAYLOAD: VRM_TEXTURE_MISSING: failed to read image '" + image_name + "': " + texture_err);
                 continue;
             }
+            image_table[i].alpha_capable = TextureHasAlphaCapability(image_table[i].format, image_table[i].bytes);
             image_table[i].valid = true;
         }
     }
@@ -2352,6 +2427,21 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         *out_name = image_table[image_index].name;
         return true;
     };
+    auto try_resolve_texture_alpha_capable = [&](std::size_t texture_index, bool* out_alpha_capable) -> bool {
+        if (out_alpha_capable == nullptr) {
+            return false;
+        }
+        *out_alpha_capable = false;
+        if (texture_index >= texture_to_image.size()) {
+            return false;
+        }
+        const auto image_index = texture_to_image[texture_index];
+        if (image_index >= image_table.size() || !image_table[image_index].valid) {
+            return false;
+        }
+        *out_alpha_capable = image_table[image_index].alpha_capable;
+        return true;
+    };
     if (materials_v != nullptr && materials_v->type == JsonValue::Type::Array) {
         parsed_materials.reserve(materials_v->array_value.size());
         for (std::size_t i = 0U; i < materials_v->array_value.size(); ++i) {
@@ -2402,6 +2492,10 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     if (TryGetIndex(*tex_obj, "index", &texture_index)) {
                         if (resolve_texture_name(texture_index, &info.base_color_texture_name, "baseColorTexture for material '" + info.name + "'")) {
                             info.has_mtoon_binding = true;
+                            bool alpha_capable = false;
+                            if (try_resolve_texture_alpha_capable(texture_index, &alpha_capable)) {
+                                info.base_color_texture_alpha_capable = alpha_capable;
+                            }
                         }
                     }
                 }
@@ -2508,6 +2602,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     &info.alpha_mode,
                     &info.alpha_source,
                     &info.alpha_cutoff);
+            }
+            if (info.alpha_mode == "OPAQUE" &&
+                info.alpha_source == "default.opaque" &&
+                info.base_color_texture_alpha_capable) {
+                info.alpha_mode = "BLEND";
+                info.alpha_source = "fallback.texture-alpha";
             }
             parsed_materials.push_back(std::move(info));
         }
