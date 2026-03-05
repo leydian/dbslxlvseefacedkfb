@@ -10,12 +10,13 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private readonly object _sync = new();
     private readonly Dictionary<string, float> _expressionCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, float> _expressionSnapshot = new(StringComparer.OrdinalIgnoreCase);
 
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
-    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs);
-    private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped");
+    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, string.Empty, 30);
+    private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
 
     private DateTimeOffset _lastPacketUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastFpsSampleUtc = DateTimeOffset.MinValue;
@@ -47,7 +48,7 @@ public sealed class TrackingInputService : ITrackingInputService
     {
         lock (_sync)
         {
-            if (_udpClient is not null)
+            if (_receiveTask is not null)
             {
                 return NcResultCode.Ok;
             }
@@ -56,34 +57,53 @@ public sealed class TrackingInputService : ITrackingInputService
             {
                 ListenPort = options.ListenPort == 0 ? DefaultListenPort : options.ListenPort,
                 StaleTimeoutMs = Math.Clamp(options.StaleTimeoutMs <= 0 ? DefaultStaleTimeoutMs : options.StaleTimeoutMs, 50, 5000),
+                SourceType = options.SourceType,
+                WebcamDeviceId = options.WebcamDeviceId?.Trim() ?? string.Empty,
+                OnnxModelPath = options.OnnxModelPath?.Trim() ?? string.Empty,
+                InferenceFpsCap = Math.Clamp(options.InferenceFpsCap <= 0 ? 30 : options.InferenceFpsCap, 5, 120),
             };
             ResetRuntimeState();
+
+            if (_options.SourceType == TrackingSourceType.WebcamOnnx)
+            {
+                _cts = new CancellationTokenSource();
+                _receiveTask = Task.Run(() => WebcamLoopAsync(_cts.Token));
+                _diagnostics = _diagnostics with
+                {
+                    IsActive = true,
+                    DetectedFormat = "webcam-onnx",
+                    SourceStatus = BuildWebcamSourceStatus(),
+                    StatusMessage = "starting:webcam-onnx",
+                };
+                return NcResultCode.Ok;
+            }
 
             try
             {
                 _udpClient = new UdpClient(_options.ListenPort);
-                _cts = new CancellationTokenSource();
-                _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
-                _diagnostics = _diagnostics with
-                {
-                    IsActive = true,
-                    StatusMessage = $"listening:{_options.ListenPort}",
-                };
-                return NcResultCode.Ok;
             }
             catch (Exception ex)
             {
                 _diagnostics = _diagnostics with
                 {
                     IsActive = false,
+                    SourceType = _options.SourceType,
+                    SourceStatus = $"bind-failed:{ex.Message}",
                     StatusMessage = $"bind failed: {ex.Message}",
                 };
-                _udpClient = null;
-                _cts?.Dispose();
-                _cts = null;
-                _receiveTask = null;
                 return NcResultCode.Io;
             }
+
+            _cts = new CancellationTokenSource();
+            _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+            _diagnostics = _diagnostics with
+            {
+                IsActive = true,
+                SourceType = TrackingSourceType.OscIfacial,
+                SourceStatus = $"udp-listening:{_options.ListenPort}",
+                StatusMessage = $"listening:{_options.ListenPort}",
+            };
+            return NcResultCode.Ok;
         }
     }
 
@@ -111,6 +131,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 IsActive = false,
                 LastPacketAgeMs = int.MaxValue,
                 IsStale = true,
+                SourceStatus = "stopped",
                 StatusMessage = "stopped",
             };
             return NcResultCode.Ok;
@@ -169,6 +190,21 @@ public sealed class TrackingInputService : ITrackingInputService
         }
     }
 
+    public bool TryGetLatestExpressionWeights(out IReadOnlyDictionary<string, float> weights)
+    {
+        lock (_sync)
+        {
+            if (_expressionSnapshot.Count == 0)
+            {
+                weights = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+                return false;
+            }
+
+            weights = new Dictionary<string, float>(_expressionSnapshot, StringComparer.OrdinalIgnoreCase);
+            return true;
+        }
+    }
+
     public TrackingDiagnostics GetDiagnostics()
     {
         lock (_sync)
@@ -182,6 +218,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 LastPacketAgeMs = ageMs,
                 IsStale = stale,
                 InputFps = _smoothedInputFps,
+                SourceType = _options.SourceType,
             };
             return _diagnostics;
         }
@@ -190,6 +227,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private void ResetRuntimeState()
     {
         _expressionCache.Clear();
+        _expressionSnapshot.Clear();
         _rawFrame = BuildNeutralFrame();
         _smoothedFrame = BuildNeutralFrame();
         _lastOutputFrame = BuildNeutralFrame();
@@ -213,7 +251,7 @@ public sealed class TrackingInputService : ITrackingInputService
         _lastFpsSampleUtc = DateTimeOffset.MinValue;
         _fpsSampleCount = 0;
         _smoothedInputFps = 0.0;
-        _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "listening");
+        _diagnostics = new TrackingDiagnostics(true, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "listening", _options.SourceType, "initializing");
     }
 
     private async Task ReceiveLoopAsync(CancellationToken token)
@@ -254,24 +292,26 @@ public sealed class TrackingInputService : ITrackingInputService
 
                 if (!TryParsePacket(result.Buffer, out var updates, out var formatName))
                 {
-                    _diagnostics = _diagnostics with
-                    {
-                        ParseErrors = _diagnostics.ParseErrors + 1,
-                        DroppedPackets = _diagnostics.DroppedPackets + 1,
-                        StatusMessage = "packet parse failed",
-                    };
-                    continue;
-                }
+                _diagnostics = _diagnostics with
+                {
+                    ParseErrors = _diagnostics.ParseErrors + 1,
+                    DroppedPackets = _diagnostics.DroppedPackets + 1,
+                    SourceStatus = "udp-parse-failed",
+                    StatusMessage = "packet parse failed",
+                };
+                continue;
+            }
 
                 if (!ApplyUpdates(updates))
                 {
-                    _diagnostics = _diagnostics with
-                    {
-                        DroppedPackets = _diagnostics.DroppedPackets + 1,
-                        StatusMessage = "packet dropped (no mapped channels)",
-                    };
-                    continue;
-                }
+                _diagnostics = _diagnostics with
+                {
+                    DroppedPackets = _diagnostics.DroppedPackets + 1,
+                    SourceStatus = "udp-no-mapped-channels",
+                    StatusMessage = "packet dropped (no mapped channels)",
+                };
+                continue;
+            }
 
                 _lastPacketUtc = DateTimeOffset.UtcNow;
                 _hasFrame = true;
@@ -280,10 +320,62 @@ public sealed class TrackingInputService : ITrackingInputService
                 _diagnostics = _diagnostics with
                 {
                     DetectedFormat = formatName,
+                    SourceStatus = "udp-receiving",
                     StatusMessage = $"receiving:{formatName}",
                 };
             }
         }
+    }
+
+    private async Task WebcamLoopAsync(CancellationToken token)
+    {
+        // ONNX-backed webcam inference is staged behind this source contract.
+        // Keep the tracking service alive with neutral frames so host/runtime paths are exercised.
+        var fps = Math.Clamp(_options.InferenceFpsCap, 5, 120);
+        var delay = TimeSpan.FromMilliseconds(1000.0 / fps);
+        while (!token.IsCancellationRequested)
+        {
+            lock (_sync)
+            {
+                _rawFrame = BuildNeutralFrame();
+                _rawHeadYaw = 0.0f;
+                _rawHeadPitch = 0.0f;
+                _rawHeadRoll = 0.0f;
+                _hasHeadYpr = true;
+
+                _expressionCache["eyeblinkleft"] = _rawFrame.BlinkL;
+                _expressionCache["eyeblinkright"] = _rawFrame.BlinkR;
+                _expressionCache["jawopen"] = _rawFrame.MouthOpen;
+                SnapshotExpressionWeights();
+
+                _lastPacketUtc = DateTimeOffset.UtcNow;
+                _hasFrame = true;
+                UpdateInputFps();
+                ApplySmoothing();
+                _diagnostics = _diagnostics with
+                {
+                    DetectedFormat = "webcam-onnx",
+                    SourceStatus = BuildWebcamSourceStatus(),
+                    StatusMessage = "receiving:webcam-placeholder",
+                };
+            }
+
+            try
+            {
+                await Task.Delay(delay, token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    private string BuildWebcamSourceStatus()
+    {
+        var device = string.IsNullOrWhiteSpace(_options.WebcamDeviceId) ? "default-device" : _options.WebcamDeviceId;
+        var model = string.IsNullOrWhiteSpace(_options.OnnxModelPath) ? "no-model" : "model-configured";
+        return $"webcam-placeholder:{device}:{model}:fps_cap={_options.InferenceFpsCap}";
     }
 
     private bool TryParsePacket(byte[] packet, out List<KeyValuePair<string, float>> updates, out string formatName)
@@ -591,7 +683,20 @@ public sealed class TrackingInputService : ITrackingInputService
             }
         }
 
+        if (mapped)
+        {
+            SnapshotExpressionWeights();
+        }
         return mapped;
+    }
+
+    private void SnapshotExpressionWeights()
+    {
+        _expressionSnapshot.Clear();
+        foreach (var pair in _expressionCache)
+        {
+            _expressionSnapshot[pair.Key] = Clamp01(pair.Value);
+        }
     }
 
     private bool ApplyMappedValue(string key, float value)
@@ -641,7 +746,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 _rawFrame.HeadPosZ = value;
                 return true;
             default:
-                return false;
+                _expressionCache[normalized] = Clamp01(value);
+                return true;
         }
     }
 

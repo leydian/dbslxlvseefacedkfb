@@ -29,16 +29,19 @@ if ($UseFixedSet) {
 }
 
 $lines = Get-Content -Path $ReportPath
-$sampleCount = @($lines | Where-Object { $_ -match '^----\s+.+\.vsfavatar$' }).Count
-if ($sampleCount -eq 0) {
-    throw "no sample headers parsed from report: $ReportPath"
-}
 
 $sampleRows = @()
 $currentSample = $null
 for ($i = 0; $i -lt $lines.Count; $i++) {
     $line = $lines[$i]
     if ($line -match '^----\s+(.+\.vsfavatar)$') {
+        $j = $i + 1
+        while ($j -lt $lines.Count -and [string]::IsNullOrWhiteSpace($lines[$j])) {
+            $j++
+        }
+        if ($j -ge $lines.Count -or (($lines[$j] -notlike 'Load *') -and ($lines[$j] -notlike '  Sidecar*'))) {
+            continue
+        }
         if ($null -ne $currentSample) {
             $sampleRows += $currentSample
         }
@@ -68,6 +71,10 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
 }
 if ($null -ne $currentSample) {
     $sampleRows += $currentSample
+}
+$sampleCount = $sampleRows.Count
+if ($sampleCount -eq 0) {
+    throw "no sample headers parsed from report: $ReportPath"
 }
 
 $renderableMatches = @($lines | Where-Object { $_ -match '^\s+MeshPayloads:\s*([1-9]\d*)\s*$' })

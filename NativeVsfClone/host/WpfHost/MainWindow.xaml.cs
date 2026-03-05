@@ -41,6 +41,8 @@ public partial class MainWindow : Window
     private bool _uiReady;
     private string _uiMode = UiModeBeginner;
     private bool _diagnosticsForcedVisible;
+    private string _beginnerFailureHint = string.Empty;
+    private string _lastFailureSource = string.Empty;
 
     public MainWindow()
     {
@@ -219,8 +221,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        var importPlan = _controller.BuildImportPlan(AvatarPathTextBox.Text.Trim());
-        QuickStatusText.Text = $"{importPlan.Guidance} Fallback: {importPlan.Fallback}";
         if (!int.TryParse(LoadTimeoutTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMs))
         {
             timeoutMs = 20000;
@@ -244,8 +244,14 @@ public partial class MainWindow : Window
                     ? technical
                     : $"{guidance}\n\n{technical}";
             }
-            MessageBox.Show(this, $"Load failed: {rc}\n\n{detail}", "Load Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ReportUserFailure(
+                "LoadAvatar",
+                $"Avatar load failed ({rc}). Check the selected file and try Load again.",
+                $"Load failed: {rc}\n\n{detail}");
+            return;
         }
+
+        ClearFailureHint();
     }
 
     private void CancelLoad_Click(object sender, RoutedEventArgs e)
@@ -297,8 +303,14 @@ public partial class MainWindow : Window
         if (rc != NcResultCode.Ok)
         {
             RevealDiagnosticsForFailure("StartSpout");
-            MessageBox.Show(this, $"Spout 시작 실패: {rc}", "출력 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ReportUserFailure(
+                "StartSpout",
+                $"Spout output failed to start ({rc}). Check channel name and retry.",
+                $"Spout start failed: {rc}");
+            return;
         }
+
+        ClearFailureHint();
     }
 
     private void StopSpout_Click(object sender, RoutedEventArgs e)
@@ -356,8 +368,14 @@ public partial class MainWindow : Window
         if (rc != NcResultCode.Ok)
         {
             RevealDiagnosticsForFailure("StartOsc");
-            MessageBox.Show(this, $"OSC 시작 실패: {rc}", "출력 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ReportUserFailure(
+                "StartOsc",
+                $"OSC output failed to start ({rc}). Check port/address and retry.",
+                $"OSC start failed: {rc}");
+            return;
         }
+
+        ClearFailureHint();
     }
 
     private void StopOsc_Click(object sender, RoutedEventArgs e)
@@ -444,8 +462,8 @@ public partial class MainWindow : Window
 
         var failed = preflight.Checks.Where(x => !x.Passed).ToList();
         PreflightHintText.Text = failed.Count == 0
-            ? "사전 점검이 통과되었습니다. 초기화 -> 불러오기 -> 출력 시작 순서로 진행하세요."
-            : "사전 점검 실패 항목: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
+            ? "Preflight passed. Continue in this order: Initialize -> Load -> Start output."
+            : "Preflight failed items: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
         if (failed.Count > 0)
         {
             RevealDiagnosticsForFailure("Preflight");
@@ -801,7 +819,7 @@ public partial class MainWindow : Window
             var guide = _controller.GetLastErrorGuidance();
             if (!string.IsNullOrWhiteSpace(guide))
             {
-                QuickStatusText.Text = guide;
+                ShowFailureHint(e.Source, guide);
             }
         });
     }
@@ -864,6 +882,7 @@ public partial class MainWindow : Window
             _controller.RenderState,
             CameraModeComboBox.SelectedIndex == 2);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
+        var nextAction = HostUiPolicy.BuildNextActionHint(session, outputs, operation, _validationState);
         var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
@@ -915,6 +934,7 @@ public partial class MainWindow : Window
         OutputStatusText.Text = statusText.OutputText;
         BusyStatusText.Text = statusText.BusyText;
         QuickStatusText.Text = statusText.QuickStatusText;
+        QuickNextActionText.Text = $"{nextAction.Title}: {nextAction.Instruction}";
 
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
@@ -1248,6 +1268,7 @@ public partial class MainWindow : Window
     private void ApplyModeVisibility()
     {
         var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        var beginner = !advanced;
         BeginnerModeButton.IsEnabled = !advanced;
         AdvancedModeButton.IsEnabled = advanced ? false : true;
         BeginnerModeButton.FontWeight = advanced ? FontWeights.Normal : FontWeights.SemiBold;
@@ -1261,10 +1282,15 @@ public partial class MainWindow : Window
         var showDiagnostics = advanced || _diagnosticsForcedVisible;
         DiagnosticsRow.Height = showDiagnostics ? new GridLength(260.0) : new GridLength(0.0);
         DiagnosticsTabControl.Visibility = showDiagnostics ? Visibility.Visible : Visibility.Collapsed;
+        BeginnerFailureHintPanel.Visibility = beginner && !string.IsNullOrWhiteSpace(_beginnerFailureHint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        OpenDiagnosticsFromHintButton.Visibility = beginner ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RevealDiagnosticsForFailure(string source)
     {
+        _lastFailureSource = source;
         _diagnosticsForcedVisible = true;
         var tabIndex = 2;
         if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
@@ -1289,4 +1315,37 @@ public partial class MainWindow : Window
         _pendingAvatarRefresh = true;
         _pendingLogsRefresh = true;
     }
+
+    private void OpenDiagnosticsFromHint_Click(object sender, RoutedEventArgs e)
+    {
+        RevealDiagnosticsForFailure(string.IsNullOrWhiteSpace(_lastFailureSource) ? "LoadAvatar" : _lastFailureSource);
+    }
+
+    private bool IsBeginnerMode()
+    {
+        return string.Equals(_uiMode, UiModeBeginner, StringComparison.Ordinal);
+    }
+
+    private void ShowFailureHint(string source, string message)
+    {
+        _lastFailureSource = source;
+        _beginnerFailureHint = message;
+        BeginnerFailureHintText.Text = message;
+        ApplyModeVisibility();
+    }
+
+    private void ClearFailureHint()
+    {
+        _beginnerFailureHint = string.Empty;
+        BeginnerFailureHintText.Text = string.Empty;
+        ApplyModeVisibility();
+    }
+
+    private void ReportUserFailure(string source, string beginnerMessage, string advancedMessage)
+    {
+        ShowFailureHint(source, beginnerMessage);
+        var message = IsBeginnerMode() ? beginnerMessage : advancedMessage;
+        MessageBox.Show(this, message, "Action Required", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
 }
+

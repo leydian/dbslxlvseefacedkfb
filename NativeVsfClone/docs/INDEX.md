@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [consumer_wpf_flow_and_tracking_schema_update_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/consumer_wpf_flow_and_tracking_schema_update_2026-03-06.md): consolidated 2026-03-06 update for consumer-focused WPF next-action/failure UX, HostCore tracking schema contract extension, native renderer skin/material robustness changes, and VSFAvatar quality-gate field-rule adjustment
 - [xav2_render_breakage_guardrail_update_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_render_breakage_guardrail_update_2026-03-06.md): XAV2 render-breakage guardrail update with static-skinning default-off policy, typed texture ref normalization, unresolved texture diagnostics, and Unity/native warning parity
 - [ifacialmocap_direct_tracking_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/ifacialmocap_direct_tracking_2026-03-06.md): direct iFacialMocap OSC ingestion path, HostCore tracking diagnostics/state integration, and WPF/WinUI tracking control-surface parity update
 - [session_change_summary_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/session_change_summary_2026-03-06.md): consolidated 2026-03-06 workspace rollup for WPF consumer-mode UX restructuring, HostCore session/guide updates, tracking input service/interface plumbing, and VSFAvatar gate script expansion

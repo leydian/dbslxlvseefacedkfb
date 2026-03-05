@@ -103,6 +103,9 @@ function Require-Field {
         [hashtable]$Sample,
         [string]$Field
     )
+    if ($Field -eq "SidecarSerializedBestPath") {
+        return $Sample.ContainsKey($Field)
+    }
     return $Sample.ContainsKey($Field) -and -not [string]::IsNullOrWhiteSpace($Sample[$Field])
 }
 

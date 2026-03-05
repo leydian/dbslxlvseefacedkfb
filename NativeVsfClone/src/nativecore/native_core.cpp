@@ -72,9 +72,15 @@ struct GpuMaterialResource {
     std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    std::array<float, 4U> rim_color = {0.0f, 0.0f, 0.0f, 1.0f};
     float shade_mix = 0.0f;
     float emission_strength = 0.0f;
+    float normal_strength = 0.0f;
+    float rim_strength = 0.0f;
+    float rim_power = 2.0f;
     ID3D11ShaderResourceView* base_color_srv = nullptr;
+    ID3D11ShaderResourceView* normal_srv = nullptr;
+    ID3D11ShaderResourceView* rim_srv = nullptr;
 };
 
 struct RendererResources {
@@ -320,14 +326,26 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
         material->base_color_srv->Release();
         material->base_color_srv = nullptr;
     }
+    if (material->normal_srv != nullptr) {
+        material->normal_srv->Release();
+        material->normal_srv = nullptr;
+    }
+    if (material->rim_srv != nullptr) {
+        material->rim_srv->Release();
+        material->rim_srv = nullptr;
+    }
     material->alpha_mode = "OPAQUE";
     material->alpha_cutoff = 0.5f;
     material->double_sided = false;
     material->base_color = {1.0f, 1.0f, 1.0f, 1.0f};
     material->shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
     material->emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    material->rim_color = {0.0f, 0.0f, 0.0f, 1.0f};
     material->shade_mix = 0.0f;
     material->emission_strength = 0.0f;
+    material->normal_strength = 0.0f;
+    material->rim_strength = 0.0f;
+    material->rim_power = 2.0f;
 }
 
 void ResetRendererResources(RendererResources* renderer) {
@@ -468,18 +486,18 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 base_color;\n"
         "  float4 shade_color;\n"
         "  float4 emission_color;\n"
+        "  float4 rim_color;\n"
         "  float4 liltoon_mix;\n"
-        "  float alpha_cutoff;\n"
-        "  float alpha_mode_mask;\n"
-        "  float has_texture;\n"
-        "  float use_texture_alpha;\n"
+        "  float4 liltoon_params;\n"
+        "  float4 alpha_misc;\n"
         "};\n"
-        "struct VSIn { float3 pos : POSITION; float2 uv : TEXCOORD0; };\n"
-        "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
+        "struct VSIn { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
+        "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
         "VSOut main(VSIn i) {\n"
         "  VSOut o;\n"
         "  o.pos = mul(float4(i.pos, 1.0), world_view_proj);\n"
         "  o.color = base_color;\n"
+        "  o.nrm = normalize(i.nrm);\n"
         "  o.uv = i.uv;\n"
         "  return o;\n"
         "}\n";
@@ -489,16 +507,30 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 base_color;\n"
         "  float4 shade_color;\n"
         "  float4 emission_color;\n"
+        "  float4 rim_color;\n"
         "  float4 liltoon_mix;\n"
-        "  float alpha_cutoff;\n"
-        "  float alpha_mode_mask;\n"
-        "  float has_texture;\n"
-        "  float use_texture_alpha;\n"
+        "  float4 liltoon_params;\n"
+        "  float4 alpha_misc;\n"
         "};\n"
         "Texture2D tex0 : register(t0);\n"
+        "Texture2D tex1 : register(t1);\n"
+        "Texture2D tex2 : register(t2);\n"
         "SamplerState samp0 : register(s0);\n"
-        "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float2 uv : TEXCOORD0) : SV_TARGET {\n"
+        "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float3 nrm : NORMAL, float2 uv : TEXCOORD0) : SV_TARGET {\n"
+        "  float alpha_cutoff = alpha_misc.x;\n"
+        "  float alpha_mode_mask = alpha_misc.y;\n"
+        "  float has_texture = alpha_misc.z;\n"
+        "  float use_texture_alpha = alpha_misc.w;\n"
+        "  float use_normal_tex = liltoon_params.y;\n"
+        "  float use_rim_tex = liltoon_params.z;\n"
         "  float4 out_color = color;\n"
+        "  float3 normal = normalize(nrm);\n"
+        "  if (use_normal_tex > 0.5) {\n"
+        "    float3 ntex = tex1.Sample(samp0, uv).xyz * 2.0 - 1.0;\n"
+        "    normal = normalize(float3(normal.xy + ntex.xy * saturate(liltoon_mix.z), max(0.15, normal.z * abs(ntex.z))));\n"
+        "  }\n"
+        "  float3 light_dir = normalize(float3(0.35, 0.45, 0.82));\n"
+        "  float lit = lerp(0.6, 1.0, saturate(dot(normal, light_dir)));\n"
         "  if (has_texture > 0.5) {\n"
         "    float4 texel = tex0.Sample(samp0, uv);\n"
         "    out_color.rgb *= texel.rgb;\n"
@@ -506,8 +538,14 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "      out_color.a *= texel.a;\n"
         "    }\n"
         "  }\n"
+        "  out_color.rgb *= lit;\n"
         "  out_color.rgb = lerp(out_color.rgb, out_color.rgb * shade_color.rgb, saturate(liltoon_mix.x));\n"
         "  out_color.rgb += emission_color.rgb * saturate(liltoon_mix.y);\n"
+        "  float rim = pow(saturate(1.0 - normal.z), max(0.1, liltoon_params.x)) * saturate(liltoon_mix.w);\n"
+        "  if (use_rim_tex > 0.5) {\n"
+        "    rim *= tex2.Sample(samp0, uv).a;\n"
+        "  }\n"
+        "  out_color.rgb += rim_color.rgb * rim;\n"
         "  if (alpha_mode_mask > 0.5 && out_color.a < alpha_cutoff) {\n"
         "    clip(-1.0);\n"
         "  }\n"
@@ -580,11 +618,12 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
 
     const D3D11_INPUT_ELEMENT_DESC input_desc[] = {
         {"POSITION", 0U, DXGI_FORMAT_R32G32B32_FLOAT, 0U, 0U, D3D11_INPUT_PER_VERTEX_DATA, 0U},
-        {"TEXCOORD", 0U, DXGI_FORMAT_R32G32_FLOAT, 0U, 12U, D3D11_INPUT_PER_VERTEX_DATA, 0U},
+        {"NORMAL", 0U, DXGI_FORMAT_R32G32B32_FLOAT, 0U, 12U, D3D11_INPUT_PER_VERTEX_DATA, 0U},
+        {"TEXCOORD", 0U, DXGI_FORMAT_R32G32_FLOAT, 0U, 24U, D3D11_INPUT_PER_VERTEX_DATA, 0U},
     };
     hr = device->CreateInputLayout(
         input_desc,
-        2U,
+        3U,
         vs_blob->GetBufferPointer(),
         vs_blob->GetBufferSize(),
         &renderer->input_layout);
@@ -599,11 +638,10 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         float base_color[4];
         float shade_color[4];
         float emission_color[4];
+        float rim_color[4];
         float liltoon_mix[4];
-        float alpha_cutoff;
-        float alpha_mode_mask;
-        float has_texture;
-        float use_texture_alpha;
+        float liltoon_params[4];
+        float alpha_misc[4];
     };
     D3D11_BUFFER_DESC cb_desc {};
     cb_desc.ByteWidth = static_cast<UINT>(sizeof(SceneConstants));
@@ -718,6 +756,12 @@ struct SkinWeight4 {
     std::array<float, 4U> weights = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
+struct SkinQualityCheck {
+    bool valid = false;
+    std::string code;
+    std::string detail;
+};
+
 bool DecodeSkinWeights(
     const std::vector<std::uint8_t>& skin_weight_blob,
     std::uint32_t vertex_count,
@@ -742,6 +786,61 @@ bool DecodeSkinWeights(
         }
     }
     return true;
+}
+
+SkinQualityCheck ValidateSkinPayload(
+    const avatar::MeshRenderPayload& mesh_payload,
+    const avatar::SkinRenderPayload& skin_payload) {
+    SkinQualityCheck out {};
+    const std::uint32_t src_stride = mesh_payload.vertex_stride >= 12U ? mesh_payload.vertex_stride : 12U;
+    if (mesh_payload.vertex_blob.empty() || (mesh_payload.vertex_blob.size() % src_stride) != 0U) {
+        out.code = "XAV2_SKIN_MESH_VERTEX_LAYOUT_INVALID";
+        out.detail = "mesh vertex blob/stride is invalid";
+        return out;
+    }
+    if ((skin_payload.bind_poses_16xn.size() % 16U) != 0U || skin_payload.bind_poses_16xn.empty()) {
+        out.code = "XAV2_SKIN_BINDPOSE_INVALID";
+        out.detail = "bind pose array must be a non-empty multiple of 16";
+        return out;
+    }
+    const std::uint32_t vertex_count = static_cast<std::uint32_t>(mesh_payload.vertex_blob.size() / src_stride);
+    constexpr std::size_t kBytesPerVertex = 32U;
+    if (skin_payload.skin_weight_blob.size() != static_cast<std::size_t>(vertex_count) * kBytesPerVertex) {
+        out.code = "XAV2_SKIN_WEIGHT_BLOB_SIZE_MISMATCH";
+        out.detail = "skin weight blob size does not match vertex count";
+        return out;
+    }
+    std::vector<SkinWeight4> decoded_weights;
+    if (!DecodeSkinWeights(skin_payload.skin_weight_blob, vertex_count, &decoded_weights)) {
+        out.code = "XAV2_SKIN_WEIGHT_BLOB_DECODE_FAILED";
+        out.detail = "skin weight blob decode failed";
+        return out;
+    }
+    const std::size_t bind_pose_count = skin_payload.bind_poses_16xn.size() / 16U;
+    for (std::uint32_t vi = 0U; vi < vertex_count; ++vi) {
+        float sum = 0.0f;
+        const auto& sw = decoded_weights[vi];
+        for (std::size_t wi = 0U; wi < 4U; ++wi) {
+            const auto bone_index = sw.bone_indices[wi];
+            const float w = sw.weights[wi];
+            if (w <= 0.0f) {
+                continue;
+            }
+            if (bone_index < 0 || static_cast<std::size_t>(bone_index) >= bind_pose_count) {
+                out.code = "XAV2_SKIN_BONE_INDEX_OOB";
+                out.detail = "bone index is out of bind-pose range";
+                return out;
+            }
+            sum += w;
+        }
+        if (sum > 0.0f && std::abs(sum - 1.0f) > 0.2f) {
+            out.code = "XAV2_SKIN_WEIGHT_SUM_INVALID";
+            out.detail = "per-vertex skin weight sum deviates from 1.0";
+            return out;
+        }
+    }
+    out.valid = true;
+    return out;
 }
 
 bool ApplyStaticSkinningToVertexBlob(
@@ -832,12 +931,19 @@ bool BuildGpuMeshForPayload(
     const std::uint32_t index_count = static_cast<std::uint32_t>(payload.indices.size());
 
     std::vector<std::uint8_t> gpu_vertex_blob;
-    gpu_vertex_blob.reserve(static_cast<std::size_t>(vertex_count) * 20U);
+    gpu_vertex_blob.reserve(static_cast<std::size_t>(vertex_count) * 32U);
     const auto* src = payload.vertex_blob.data();
     const std::uint32_t uv_offset = (src_stride >= 32U) ? 24U : 12U;
     for (std::uint32_t i = 0U; i < vertex_count; ++i) {
         const std::size_t base = static_cast<std::size_t>(i) * src_stride;
         gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base, src + base + 12U);
+        if (src_stride >= 24U) {
+            gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base + 12U, src + base + 24U);
+        } else {
+            const std::array<float, 3U> nrm_up = {0.0f, 1.0f, 0.0f};
+            const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(nrm_up.data());
+            gpu_vertex_blob.insert(gpu_vertex_blob.end(), nrm_bytes, nrm_bytes + 12U);
+        }
         if (src_stride >= (uv_offset + 8U)) {
             gpu_vertex_blob.insert(
                 gpu_vertex_blob.end(),
@@ -852,7 +958,7 @@ bool BuildGpuMeshForPayload(
 
     if (skin_payload != nullptr) {
         if (ShouldApplyExperimentalStaticSkinning()) {
-            (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 20U, *skin_payload);
+            (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload);
         }
     }
 
@@ -892,7 +998,7 @@ bool BuildGpuMeshForPayload(
         -std::numeric_limits<float>::max()};
     const auto* bytes = gpu_vertex_blob.data();
     for (std::uint32_t i = 0U; i < vertex_count; ++i) {
-        const std::size_t base = static_cast<std::size_t>(i) * 20U;
+        const std::size_t base = static_cast<std::size_t>(i) * 32U;
         float px = 0.0f;
         float py = 0.0f;
         float pz = 0.0f;
@@ -920,7 +1026,7 @@ bool BuildGpuMeshForPayload(
     out_mesh->index_count = index_count;
     out_mesh->material_index = payload.material_index;
     out_mesh->center = center;
-    out_mesh->vertex_stride = 20U;
+    out_mesh->vertex_stride = 32U;
     out_mesh->bounds_min = bmin;
     out_mesh->bounds_max = bmax;
     out_mesh->mesh_name = payload.name;
@@ -957,7 +1063,18 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         const avatar::SkinRenderPayload* skin_payload = nullptr;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
         if (skin_it != skin_by_mesh.end()) {
-            skin_payload = skin_it->second;
+            const auto check = ValidateSkinPayload(payload, *skin_it->second);
+            if (check.valid) {
+                skin_payload = skin_it->second;
+            } else {
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    std::ostringstream warning;
+                    warning << "W_RENDER: " << check.code << ": mesh=" << payload.name << ", detail=" << check.detail;
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back(check.code);
+                }
+            }
         }
         if (!BuildGpuMeshForPayload(payload, skin_payload, device, &mesh)) {
             for (auto& created : meshes) {
@@ -1445,6 +1562,35 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                 : 0.0f;
         }
         material.emission_color = emission_color;
+
+        std::array<float, 4U> rim_color = {0.0f, 0.0f, 0.0f, 1.0f};
+        if (TryGetTypedColorParam(payload, "_RimColor", &rim_color) ||
+            TryExtractShaderParamColor(payload.shader_params_json, "_RimColor", &rim_color)) {
+            for (float& c : rim_color) {
+                c = std::max(0.0f, std::min(1.0f, c));
+            }
+            material.rim_strength = std::max(rim_color[0], std::max(rim_color[1], rim_color[2])) > 0.001f ? 1.0f : 0.0f;
+        }
+        material.rim_color = rim_color;
+
+        float rim_power = 2.0f;
+        if (TryGetTypedFloatParam(payload, "_RimFresnelPower", &rim_power) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_RimFresnelPower", &rim_power)) {
+            material.rim_power = std::max(0.1f, std::min(12.0f, rim_power));
+        }
+
+        float rim_mix = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_RimLightingMix", &rim_mix) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_RimLightingMix", &rim_mix)) {
+            material.rim_strength = std::max(material.rim_strength, std::max(0.0f, std::min(1.0f, rim_mix)));
+        }
+
+        float bump_scale = 0.0f;
+        if (TryGetTypedFloatParam(payload, "_BumpScale", &bump_scale) ||
+            TryExtractShaderParamFloat(payload.shader_params_json, "_BumpScale", &bump_scale)) {
+            material.normal_strength = std::max(0.0f, std::min(1.0f, bump_scale));
+        }
+
         std::string base_texture_ref = payload.base_color_texture_name;
         const bool has_typed_base_ref = TryGetTypedTextureRef(payload, "base", &base_texture_ref);
         if (!base_texture_ref.empty()) {
@@ -1455,6 +1601,46 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                 std::ostringstream warning;
                 warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
                         << ", slot=base, ref=" << base_texture_ref;
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                }
+            }
+        }
+
+        std::string normal_texture_ref;
+        const bool has_typed_normal_ref = TryGetTypedTextureRef(payload, "normal", &normal_texture_ref);
+        if (!normal_texture_ref.empty()) {
+            const auto tex_it = textures_by_key.find(NormalizeRefKey(normal_texture_ref));
+            if (tex_it != textures_by_key.end()) {
+                material.normal_srv = CreateTextureSrvFromPayload(device, tex_it->second);
+                if (material.normal_strength < 0.01f) {
+                    material.normal_strength = 0.35f;
+                }
+            } else if (has_typed_normal_ref) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                        << ", slot=normal, ref=" << normal_texture_ref;
+                auto avatar_it = g_state.avatars.find(handle);
+                if (avatar_it != g_state.avatars.end()) {
+                    avatar_it->second.warnings.push_back(warning.str());
+                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                }
+            }
+        }
+
+        std::string rim_texture_ref;
+        const bool has_typed_rim_ref = TryGetTypedTextureRef(payload, "rim", &rim_texture_ref);
+        if (!rim_texture_ref.empty()) {
+            const auto tex_it = textures_by_key.find(NormalizeRefKey(rim_texture_ref));
+            if (tex_it != textures_by_key.end()) {
+                material.rim_srv = CreateTextureSrvFromPayload(device, tex_it->second);
+                material.rim_strength = std::max(0.35f, material.rim_strength);
+            } else if (has_typed_rim_ref) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                        << ", slot=rim, ref=" << rim_texture_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -1787,11 +1973,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float base_color[4];
         float shade_color[4];
         float emission_color[4];
+        float rim_color[4];
         float liltoon_mix[4];
-        float alpha_cutoff;
-        float alpha_mode_mask;
-        float has_texture;
-        float use_texture_alpha;
+        float liltoon_params[4];
+        float alpha_misc[4];
     };
     auto draw_pass = [&](const DrawItem& item) {
         if (item.mesh == nullptr || item.mesh->vertex_buffer == nullptr || item.mesh->index_buffer == nullptr || item.pkg == nullptr) {
@@ -1800,14 +1985,18 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::string alpha_mode = "OPAQUE";
         float alpha_cutoff = 0.5f;
         bool double_sided = false;
-        ID3D11ShaderResourceView* srv = nullptr;
+        ID3D11ShaderResourceView* base_srv = nullptr;
+        ID3D11ShaderResourceView* normal_srv = nullptr;
+        ID3D11ShaderResourceView* rim_srv = nullptr;
         if (item.material != nullptr) {
             if (!item.material->alpha_mode.empty()) {
                 alpha_mode = item.material->alpha_mode;
             }
             alpha_cutoff = item.material->alpha_cutoff;
             double_sided = item.material->double_sided;
-            srv = item.material->base_color_srv;
+            base_srv = item.material->base_color_srv;
+            normal_srv = item.material->normal_srv;
+            rim_srv = item.material->rim_srv;
         }
         std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
             return static_cast<char>(std::toupper(c));
@@ -1829,12 +2018,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         device_ctx->IASetVertexBuffers(0U, 1U, &item.mesh->vertex_buffer, &stride, &offset);
         device_ctx->IASetIndexBuffer(item.mesh->index_buffer, DXGI_FORMAT_R32_UINT, 0U);
         device_ctx->PSSetSamplers(0U, 1U, &renderer.linear_sampler);
-        if (srv != nullptr) {
-            device_ctx->PSSetShaderResources(0U, 1U, &srv);
-        } else {
-            ID3D11ShaderResourceView* null_srv = nullptr;
-            device_ctx->PSSetShaderResources(0U, 1U, &null_srv);
-        }
+        ID3D11ShaderResourceView* srvs[3] = {base_srv, normal_srv, rim_srv};
+        device_ctx->PSSetShaderResources(0U, 3U, srvs);
 
         const auto world_view_proj = item.world * view * proj;
         const auto world_view_proj_t = DirectX::XMMatrixTranspose(world_view_proj);
@@ -1855,10 +2040,18 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.emission_color[1] = item.material->emission_color[1];
             cb.emission_color[2] = item.material->emission_color[2];
             cb.emission_color[3] = item.material->emission_color[3];
+            cb.rim_color[0] = item.material->rim_color[0];
+            cb.rim_color[1] = item.material->rim_color[1];
+            cb.rim_color[2] = item.material->rim_color[2];
+            cb.rim_color[3] = item.material->rim_color[3];
             cb.liltoon_mix[0] = item.material->shade_mix;
             cb.liltoon_mix[1] = item.material->emission_strength;
-            cb.liltoon_mix[2] = 0.0f;
-            cb.liltoon_mix[3] = 0.0f;
+            cb.liltoon_mix[2] = item.material->normal_strength;
+            cb.liltoon_mix[3] = item.material->rim_strength;
+            cb.liltoon_params[0] = item.material->rim_power;
+            cb.liltoon_params[1] = normal_srv != nullptr ? 1.0f : 0.0f;
+            cb.liltoon_params[2] = rim_srv != nullptr ? 1.0f : 0.0f;
+            cb.liltoon_params[3] = 0.0f;
         } else {
             cb.base_color[0] = 1.0f;
             cb.base_color[1] = 1.0f;
@@ -1872,15 +2065,23 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.emission_color[1] = 0.0f;
             cb.emission_color[2] = 0.0f;
             cb.emission_color[3] = 1.0f;
+            cb.rim_color[0] = 0.0f;
+            cb.rim_color[1] = 0.0f;
+            cb.rim_color[2] = 0.0f;
+            cb.rim_color[3] = 1.0f;
             cb.liltoon_mix[0] = 0.0f;
             cb.liltoon_mix[1] = 0.0f;
             cb.liltoon_mix[2] = 0.0f;
             cb.liltoon_mix[3] = 0.0f;
+            cb.liltoon_params[0] = 2.0f;
+            cb.liltoon_params[1] = 0.0f;
+            cb.liltoon_params[2] = 0.0f;
+            cb.liltoon_params[3] = 0.0f;
         }
-        cb.alpha_cutoff = is_mask ? alpha_cutoff : 0.0f;
-        cb.alpha_mode_mask = is_mask ? 1.0f : 0.0f;
-        cb.has_texture = srv != nullptr ? 1.0f : 0.0f;
-        cb.use_texture_alpha = (is_mask || is_blend) ? 1.0f : 0.0f;
+        cb.alpha_misc[0] = is_mask ? alpha_cutoff : 0.0f;
+        cb.alpha_misc[1] = is_mask ? 1.0f : 0.0f;
+        cb.alpha_misc[2] = base_srv != nullptr ? 1.0f : 0.0f;
+        cb.alpha_misc[3] = (is_mask || is_blend) ? 1.0f : 0.0f;
 
         D3D11_MAPPED_SUBRESOURCE mapped {};
         if (SUCCEEDED(device_ctx->Map(renderer.constant_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
@@ -1888,8 +2089,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->Unmap(renderer.constant_buffer, 0U);
         }
         device_ctx->DrawIndexed(item.mesh->index_count, 0U, 0);
-        ID3D11ShaderResourceView* null_srv = nullptr;
-        device_ctx->PSSetShaderResources(0U, 1U, &null_srv);
+        ID3D11ShaderResourceView* null_srvs[3] = {nullptr, nullptr, nullptr};
+        device_ctx->PSSetShaderResources(0U, 3U, null_srvs);
         ++frame_draw_calls;
     };
     for (const auto& item : opaque_draws) {

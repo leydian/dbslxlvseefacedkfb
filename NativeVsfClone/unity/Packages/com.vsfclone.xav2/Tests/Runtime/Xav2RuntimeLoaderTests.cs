@@ -107,6 +107,29 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialTextureRef_NormalizedMatch_DoesNotWarn()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    textureRefName: "FaceTex@Assets/Avatars/Face.png",
+                    typedBaseTextureRefOverride: "facetex@assets\\avatars\\face.png"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(
+                    diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED")),
+                    Is.False);
+                Assert.That(diagnostics.WarningCodes, Does.Not.Contain("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_ManifestTruncated_Fails()
         {
             var bytes = BuildValidXav2Bytes();
@@ -268,7 +291,9 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool legacyMaterialFormat = false,
             bool missingTextureRef = false,
             bool addTypedMaterialSection = false,
-            bool unresolvedTypedTextureRef = false)
+            bool unresolvedTypedTextureRef = false,
+            string textureRefName = "texture_0",
+            string typedBaseTextureRefOverride = null)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -282,8 +307,8 @@ namespace VsfClone.Xav2.Runtime.Tests
                 "\"meshRefs\":[\"mesh_0\"]," +
                 "\"materialRefs\":[\"material_0\"]," +
                 (missingTextureRef
-                    ? "\"textureRefs\":[\"texture_0\",\"texture_missing\"],"
-                    : "\"textureRefs\":[\"texture_0\"],") +
+                    ? $"\"textureRefs\":[\"{textureRefName}\",\"texture_missing\"],"
+                    : $"\"textureRefs\":[\"{textureRefName}\"],") +
                 "\"strictShaderSet\":[]," +
                 "\"hasSkinning\":false," +
                 "\"hasBlendShapes\":false" +
@@ -296,13 +321,13 @@ namespace VsfClone.Xav2.Runtime.Tests
             bw.Write(manifestBytes);
 
             WriteSection(bw, 0x0011, BuildMeshSection("mesh_0", 0, new byte[48], new uint[] { 0, 1, 2 }));
-            WriteSection(bw, 0x0002, BuildTextureSection("texture_0", new byte[] { 1, 2, 3, 4 }));
+            WriteSection(bw, 0x0002, BuildTextureSection(textureRefName, new byte[] { 1, 2, 3, 4 }));
             WriteSection(
                 bw,
                 0x0003,
                 legacyMaterialFormat
-                    ? BuildMaterialSectionLegacy("material_0", "lilToon", "texture_0")
-                    : BuildMaterialSectionV1("material_0", "lilToon", "default", "texture_0"));
+                    ? BuildMaterialSectionLegacy("material_0", "lilToon", textureRefName)
+                    : BuildMaterialSectionV1("material_0", "lilToon", "default", textureRefName));
             WriteSection(bw, 0x0012, BuildMaterialParamsSection("material_0", "{}"));
             if (addTypedMaterialSection)
             {
@@ -311,7 +336,9 @@ namespace VsfClone.Xav2.Runtime.Tests
                     0x0015,
                     BuildMaterialTypedParamsSection(
                         "material_0",
-                        unresolvedTypedTextureRef ? "texture_missing_typed" : "texture_0"));
+                        unresolvedTypedTextureRef
+                            ? "texture_missing_typed"
+                            : (typedBaseTextureRefOverride ?? textureRefName)));
             }
 
             if (addUnknownSection)

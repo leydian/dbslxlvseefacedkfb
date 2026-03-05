@@ -124,6 +124,14 @@ public struct NcTrackingFrame
     public float MouthOpen;
 }
 
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct NcExpressionWeight
+{
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string Name;
+    public float Weight;
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public struct NcSpoutOptions
 {
@@ -222,6 +230,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_set_tracking_frame(ref NcTrackingFrame frame);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_set_expression_weights([In] NcExpressionWeight[] weights, uint count);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_create_render_resources(ulong handle);

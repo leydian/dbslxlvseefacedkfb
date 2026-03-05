@@ -37,9 +37,19 @@ public interface IRenderPresetStore
     void Save(RenderPresetStoreModel store);
 }
 
+public enum TrackingSourceType
+{
+    OscIfacial = 0,
+    WebcamOnnx = 1,
+}
+
 public sealed record TrackingStartOptions(
     ushort ListenPort,
-    int StaleTimeoutMs);
+    int StaleTimeoutMs,
+    TrackingSourceType SourceType,
+    string WebcamDeviceId,
+    string OnnxModelPath,
+    int InferenceFpsCap);
 
 public sealed record TrackingDiagnostics(
     bool IsActive,
@@ -50,7 +60,9 @@ public sealed record TrackingDiagnostics(
     ulong ReceivedPackets,
     ulong DroppedPackets,
     ulong ParseErrors,
-    string StatusMessage);
+    string StatusMessage,
+    TrackingSourceType SourceType,
+    string SourceStatus);
 
 public interface ITrackingInputService
 {
@@ -58,5 +70,6 @@ public interface ITrackingInputService
     NcResultCode Stop();
     NcResultCode Recenter();
     bool TryGetLatestFrame(out NcTrackingFrame frame);
+    bool TryGetLatestExpressionWeights(out IReadOnlyDictionary<string, float> weights);
     TrackingDiagnostics GetDiagnostics();
 }

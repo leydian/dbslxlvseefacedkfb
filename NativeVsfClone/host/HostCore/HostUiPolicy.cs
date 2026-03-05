@@ -23,6 +23,21 @@ public sealed record HostUiStatusText(
     public string QuickStatusText => $"Session={SessionText} | Avatar={AvatarText} | Outputs={OutputText}";
 }
 
+public enum HostNextRecommendedAction
+{
+    WaitBusy,
+    InitializeSession,
+    SelectAvatarFile,
+    LoadAvatar,
+    StartOutputs,
+    Ready,
+}
+
+public sealed record HostNextActionHint(
+    HostNextRecommendedAction Action,
+    string Title,
+    string Instruction);
+
 public static class HostUiPolicy
 {
     public static HostUiAvailability EvaluateAvailability(
@@ -64,5 +79,57 @@ public static class HostUiPolicy
         var renderText = $"{session.LastRenderRc} {session.RenderWidthPx}x{session.RenderHeightPx}";
 
         return new HostUiStatusText(sessionText, avatarText, renderText, outputText, busyText);
+    }
+
+    public static HostNextActionHint BuildNextActionHint(
+        HostSessionState session,
+        OutputState outputs,
+        HostOperationState operation,
+        HostValidationState validation)
+    {
+        if (operation.IsBusy)
+        {
+            return new HostNextActionHint(
+                HostNextRecommendedAction.WaitBusy,
+                "Working",
+                $"{operation.CurrentOperation} in progress. Wait for completion.");
+        }
+
+        if (!session.IsInitialized)
+        {
+            return new HostNextActionHint(
+                HostNextRecommendedAction.InitializeSession,
+                "Step 1",
+                "Click Initialize to start the session.");
+        }
+
+        if (!validation.AvatarPathValid)
+        {
+            return new HostNextActionHint(
+                HostNextRecommendedAction.SelectAvatarFile,
+                "Step 2",
+                "Select a valid avatar file path.");
+        }
+
+        if (!session.ActiveAvatarHandle.HasValue)
+        {
+            return new HostNextActionHint(
+                HostNextRecommendedAction.LoadAvatar,
+                "Step 2",
+                "Click Load to import the selected avatar.");
+        }
+
+        if (!outputs.SpoutActive && !outputs.OscActive)
+        {
+            return new HostNextActionHint(
+                HostNextRecommendedAction.StartOutputs,
+                "Step 3",
+                "Start Spout or OSC output for broadcast.");
+        }
+
+        return new HostNextActionHint(
+            HostNextRecommendedAction.Ready,
+            "Ready",
+            "Broadcast pipeline is running.");
     }
 }

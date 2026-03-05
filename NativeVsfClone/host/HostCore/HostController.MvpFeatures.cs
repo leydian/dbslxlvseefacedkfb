@@ -313,12 +313,23 @@ public sealed partial class HostController
 
     public TrackingInputSettings GetTrackingInputSettings() => _sessionPersistence.Tracking;
 
-    public void ConfigureTrackingInputSettings(ushort listenPort, int staleTimeoutMs)
+    public void ConfigureTrackingInputSettings(
+        ushort listenPort,
+        int staleTimeoutMs,
+        TrackingSourceType? sourceType = null,
+        string? webcamDeviceId = null,
+        string? onnxModelPath = null,
+        int? inferenceFpsCap = null)
     {
+        var current = _sessionPersistence.Tracking;
         var normalized = new TrackingInputSettings(
             listenPort == 0 ? (ushort)49983 : listenPort,
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
-            _sessionPersistence.Tracking.LastActive);
+            current.LastActive,
+            sourceType ?? current.SourceType,
+            webcamDeviceId ?? current.WebcamDeviceId,
+            onnxModelPath ?? current.OnnxModelPath,
+            Math.Clamp(inferenceFpsCap ?? current.InferenceFpsCap, 5, 120));
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -329,7 +340,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, fps_cap={normalized.InferenceFpsCap}",
                 NcResultCode.Ok),
             false);
     }
@@ -351,10 +362,15 @@ public sealed partial class HostController
 
     private void SetTrackingState(ushort listenPort, int staleTimeoutMs, bool active)
     {
+        var current = _sessionPersistence.Tracking;
         var normalized = new TrackingInputSettings(
             listenPort == 0 ? (ushort)49983 : listenPort,
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
-            active);
+            active,
+            current.SourceType,
+            current.WebcamDeviceId,
+            current.OnnxModelPath,
+            current.InferenceFpsCap);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,

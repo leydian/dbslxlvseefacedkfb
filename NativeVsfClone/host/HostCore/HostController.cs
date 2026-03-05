@@ -27,7 +27,7 @@ public sealed partial class HostController
     private DateTimeOffset _lastOutputRecoveryAttemptUtc = DateTimeOffset.MinValue;
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
-    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped");
+    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
     private string _lastTrackingFormat = "unknown";
     private ulong _lastTrackingParseErrors;
     private bool _lastTrackingActive;
@@ -293,9 +293,14 @@ public sealed partial class HostController
     {
         return ExecuteOperation("StartTracking", () =>
         {
+            var trackingSettings = _sessionPersistence.Tracking;
             var options = new TrackingStartOptions(
                 listenPort == 0 ? (ushort)49983 : listenPort,
-                staleTimeoutMs);
+                staleTimeoutMs,
+                trackingSettings.SourceType,
+                trackingSettings.WebcamDeviceId,
+                trackingSettings.OnnxModelPath,
+                trackingSettings.InferenceFpsCap);
             var rc = _trackingInputService.Start(options);
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
             if (rc == NcResultCode.Ok)
@@ -480,6 +485,26 @@ public sealed partial class HostController
             if (trackingRc != NcResultCode.Ok)
             {
                 TrackResult("SetTrackingFrame", trackingRc);
+            }
+        }
+        if (_trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
+            expressionWeights.Count > 0)
+        {
+            var payload = expressionWeights
+                .Where(static pair => !IsPoseChannel(pair.Key))
+                .Select(static pair => new NcExpressionWeight
+                {
+                    Name = pair.Key,
+                    Weight = Math.Clamp(pair.Value, 0.0f, 1.0f),
+                })
+                .ToArray();
+            if (payload.Length > 0)
+            {
+                var exprRc = NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
+                if (exprRc != NcResultCode.Ok)
+                {
+                    TrackResult("SetExpressionWeights", exprRc);
+                }
             }
         }
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
@@ -789,6 +814,21 @@ public sealed partial class HostController
     private static float Clamp(float value, float min, float max)
     {
         return Math.Min(max, Math.Max(min, value));
+    }
+
+    private static bool IsPoseChannel(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return true;
+        }
+
+        return key.Equals("headyaw", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("headpitch", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("headroll", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("headposx", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("headposy", StringComparison.OrdinalIgnoreCase) ||
+               key.Equals("headposz", StringComparison.OrdinalIgnoreCase);
     }
 
     private void TrackResult(string source, NcResultCode rc)
