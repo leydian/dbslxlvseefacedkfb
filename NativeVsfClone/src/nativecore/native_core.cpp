@@ -438,7 +438,9 @@ WarningMeta ClassifyWarningCode(std::string code) {
         meta.critical = false;
         return meta;
     }
-    if (code == "vrm_material_safe_fallback_applied" || code == "vrm_mtoon_matcap_unresolved") {
+    if (code == "vrm_material_safe_fallback_applied" ||
+        code == "vrm_mtoon_matcap_unresolved" ||
+        code == "vrm_material_texture_unresolved") {
         meta.severity = "warn";
         meta.category = "render";
         meta.critical = false;
@@ -3168,6 +3170,10 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
     for (const auto& payload : avatar_pkg.material_payloads) {
         GpuMaterialResource material {};
         const bool conservative_xav2_material = (avatar_pkg.source_type == AvatarSourceType::Xav2);
+        const bool is_vrm_source = avatar_pkg.source_type == AvatarSourceType::Vrm;
+        const char* unresolved_texture_code = is_vrm_source
+            ? "VRM_MATERIAL_TEXTURE_UNRESOLVED"
+            : "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
         std::vector<std::string> fallback_reasons;
         const std::string shader_family = NormalizeShaderFamilyKey(payload.shader_family);
         const bool family_supported = IsSupportedShaderFamilyKey(shader_family);
@@ -3325,12 +3331,12 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_base_ref) {
                 unresolved_base_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
                         << ", slot=base, ref=" << base_texture_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
                 }
             } else {
                 unresolved_base_texture = true;
@@ -3351,12 +3357,12 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_normal_ref) {
                 unresolved_normal_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
                         << ", slot=normal, ref=" << normal_texture_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
                 }
             } else {
                 unresolved_normal_texture = true;
@@ -3375,12 +3381,12 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_rim_ref) {
                 unresolved_rim_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
                         << ", slot=rim, ref=" << rim_texture_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
                 }
             } else {
                 unresolved_rim_texture = true;
@@ -3398,12 +3404,12 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_emission_ref) {
                 unresolved_emission_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
                         << ", slot=emission, ref=" << emission_texture_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
                 }
             } else {
                 unresolved_emission_texture = true;
@@ -3423,12 +3429,12 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_matcap_ref) {
                 unresolved_matcap_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
                         << ", slot=matcap, ref=" << matcap_texture_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
                 }
             } else {
                 unresolved_matcap_texture = true;
@@ -3446,12 +3452,12 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_uv_mask_ref) {
                 unresolved_uv_mask_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" << payload.name
+                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
                         << ", slot=uvAnimationMask, ref=" << uv_anim_mask_ref;
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back("XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED");
+                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
                 }
             } else {
                 unresolved_uv_mask_texture = true;

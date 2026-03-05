@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <unordered_set>
 
@@ -58,6 +60,8 @@ WarningMeta ClassifyWarningCode(const std::string& raw_code) {
     const std::string code = ToLower(raw_code);
     static const std::unordered_set<std::string> kCriticalCodes = {
         "xav2_skinning_static_disabled",
+        "xav2_skinning_fallback_skipped_no_skeleton",
+        "material_index_oob_skipped",
         "xav2_material_typed_texture_unresolved",
         "xav3_skeleton_payload_missing",
         "xav3_skeleton_mesh_bind_mismatch",
@@ -85,6 +89,25 @@ WarningMeta ClassifyWarningCode(const std::string& raw_code) {
     if (code.rfind("w_", 0U) == 0U) {
         meta.severity = "warn";
         meta.category = "payload";
+        return meta;
+    }
+    if (code == "skinning_matrix_convention_applied") {
+        meta.severity = "info";
+        meta.category = "render";
+        return meta;
+    }
+    if (code == "skinning_static_disabled") {
+        meta.severity = "warn";
+        meta.category = "render";
+        meta.critical = false;
+        return meta;
+    }
+    if (code == "vrm_material_safe_fallback_applied" ||
+        code == "vrm_mtoon_matcap_unresolved" ||
+        code == "vrm_material_texture_unresolved") {
+        meta.severity = "warn";
+        meta.category = "render";
+        meta.critical = false;
         return meta;
     }
     if (code.rfind("xav2_", 0U) == 0U || code.rfind("xav3_", 0U) == 0U || code.rfind("xav4_", 0U) == 0U) {
@@ -125,7 +148,8 @@ bool TryParsePolicy(
 
 void PrintUsage() {
     std::cout << "Usage:\n"
-              << "  avatar_tool <path_to_avatar_file> [--xav2-unknown-section-policy=warn|ignore|fail]\n";
+              << "  avatar_tool <path_to_avatar_file> [--xav2-unknown-section-policy=warn|ignore|fail]\n"
+              << "             [--dump-warnings | --dump-warnings-limit=<N>]\n";
 }
 
 }  // namespace
@@ -138,13 +162,33 @@ int main(int argc, char** argv) {
 
     std::string path;
     vsfclone::avatar::AvatarLoadOptions load_options {};
+    std::size_t warning_dump_limit = 0U;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         constexpr const char* kPolicyArg = "--xav2-unknown-section-policy=";
+        constexpr const char* kDumpWarningsLimitArg = "--dump-warnings-limit=";
         if (arg.rfind(kPolicyArg, 0) == 0) {
             const std::string raw = arg.substr(std::char_traits<char>::length(kPolicyArg));
             if (!TryParsePolicy(raw, &load_options.xav2_unknown_section_policy)) {
                 std::cerr << "invalid policy: " << raw << " (expected warn|ignore|fail)\n";
+                return 1;
+            }
+            continue;
+        }
+        if (arg == "--dump-warnings") {
+            warning_dump_limit = std::numeric_limits<std::size_t>::max();
+            continue;
+        }
+        if (arg.rfind(kDumpWarningsLimitArg, 0) == 0) {
+            const std::string raw = arg.substr(std::char_traits<char>::length(kDumpWarningsLimitArg));
+            if (raw.empty()) {
+                std::cerr << "invalid warning dump limit: empty value\n";
+                return 1;
+            }
+            try {
+                warning_dump_limit = static_cast<std::size_t>(std::stoull(raw));
+            } catch (...) {
+                std::cerr << "invalid warning dump limit: " << raw << "\n";
                 return 1;
             }
             continue;
@@ -201,6 +245,12 @@ int main(int argc, char** argv) {
     std::cout << "  MaterialDiagnostics: " << info.material_diagnostics.size() << "\n";
     std::size_t mtoon_advanced_material_count = 0U;
     std::size_t mtoon_fallback_material_count = 0U;
+    std::size_t mtoon_outline_material_count = 0U;
+    std::size_t mtoon_uv_anim_material_count = 0U;
+    std::size_t mtoon_matcap_material_count = 0U;
+    std::size_t vrm_safe_fallback_warning_count = 0U;
+    std::size_t vrm_matcap_unresolved_warning_count = 0U;
+    std::size_t vrm_texture_unresolved_warning_count = 0U;
     std::size_t opaque_material_count = 0U;
     std::size_t mask_material_count = 0U;
     std::size_t blend_material_count = 0U;
@@ -224,11 +274,62 @@ int main(int argc, char** argv) {
             ++mtoon_fallback_material_count;
         }
     }
+    for (const auto& payload : info.material_payloads) {
+        bool has_outline = false;
+        bool has_uv_anim = false;
+        bool has_matcap = false;
+        for (const auto& p : payload.typed_float_params) {
+            const auto key = ToLower(p.id);
+            if ((key == "_outlinewidth" || key == "_outlinelightingmix") && std::abs(p.value) > 0.0001f) {
+                has_outline = true;
+            }
+            if ((key == "_uvanimscrollx" || key == "_uvanimscrolly" || key == "_uvanimrotation") && std::abs(p.value) > 0.0001f) {
+                has_uv_anim = true;
+            }
+            if (key == "_matcapblend" && p.value > 0.0001f) {
+                has_matcap = true;
+            }
+        }
+        for (const auto& t : payload.typed_texture_params) {
+            const auto slot = ToLower(t.slot);
+            if (slot == "matcap" || slot == "_matcaptex" || slot == "_matcaptexture") {
+                has_matcap = true;
+            }
+            if (slot == "uvanimationmask" || slot == "_uvanimmasktex") {
+                has_uv_anim = true;
+            }
+        }
+        if (has_outline) {
+            ++mtoon_outline_material_count;
+        }
+        if (has_uv_anim) {
+            ++mtoon_uv_anim_material_count;
+        }
+        if (has_matcap) {
+            ++mtoon_matcap_material_count;
+        }
+    }
+    for (const auto& code_raw : info.warning_codes) {
+        const auto code = ToLower(code_raw);
+        if (code == "vrm_material_safe_fallback_applied") {
+            ++vrm_safe_fallback_warning_count;
+        } else if (code == "vrm_mtoon_matcap_unresolved") {
+            ++vrm_matcap_unresolved_warning_count;
+        } else if (code == "vrm_material_texture_unresolved") {
+            ++vrm_texture_unresolved_warning_count;
+        }
+    }
     std::cout << "  OpaqueMaterials: " << opaque_material_count << "\n";
     std::cout << "  MaskMaterials: " << mask_material_count << "\n";
     std::cout << "  BlendMaterials: " << blend_material_count << "\n";
     std::cout << "  MtoonAdvancedMaterials: " << mtoon_advanced_material_count << "\n";
     std::cout << "  MtoonFallbackMaterials: " << mtoon_fallback_material_count << "\n";
+    std::cout << "  MtoonOutlineMaterials: " << mtoon_outline_material_count << "\n";
+    std::cout << "  MtoonUvAnimMaterials: " << mtoon_uv_anim_material_count << "\n";
+    std::cout << "  MtoonMatcapMaterials: " << mtoon_matcap_material_count << "\n";
+    std::cout << "  VrmSafeFallbackWarnings: " << vrm_safe_fallback_warning_count << "\n";
+    std::cout << "  VrmMatcapUnresolvedWarnings: " << vrm_matcap_unresolved_warning_count << "\n";
+    std::cout << "  VrmTextureUnresolvedWarnings: " << vrm_texture_unresolved_warning_count << "\n";
     std::size_t warning_info_count = 0U;
     std::size_t warning_warn_count = 0U;
     std::size_t warning_error_count = 0U;
@@ -263,6 +364,20 @@ int main(int argc, char** argv) {
     }
     if (!info.warnings.empty()) {
         std::cout << "  LastWarning: " << info.warnings.back() << "\n";
+    }
+    if (warning_dump_limit > 0U && !info.warnings.empty()) {
+        const std::size_t available = info.warnings.size();
+        const std::size_t dump_count =
+            warning_dump_limit == std::numeric_limits<std::size_t>::max()
+                ? available
+                : std::min(available, warning_dump_limit);
+        std::cout << "  WarningDumpCount: " << dump_count << "\n";
+        for (std::size_t i = 0U; i < dump_count; ++i) {
+            std::cout << "  Warning[" << i << "]: " << info.warnings[i] << "\n";
+        }
+        if (dump_count < available) {
+            std::cout << "  WarningDumpTruncated: true\n";
+        }
     }
     if (!info.material_diagnostics.empty()) {
         const auto& diag = info.material_diagnostics.back();

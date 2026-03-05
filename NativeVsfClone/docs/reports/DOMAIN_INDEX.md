@@ -75,6 +75,7 @@ Domain-level report navigation hub.
 - [2026-03-02_ui_render_benchmark_plan.md](./weekly/2026-W10/2026-03-02_ui_render_benchmark_plan.md)
 
 ## vrm
+- [2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md](./weekly/2026-W10/2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md)
 - [2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md](./weekly/2026-W10/2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_uplift.md](./weekly/2026-W10/2026-03-06_vrm_springbone_mtoon_runtime_uplift.md)
 - [2026-03-06_vrm_to_xav2_strict_allowlist_and_quality_gate.md](./weekly/2026-W10/2026-03-06_vrm_to_xav2_strict_allowlist_and_quality_gate.md)

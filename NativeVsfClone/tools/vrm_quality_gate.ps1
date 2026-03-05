@@ -100,6 +100,14 @@ foreach ($f in $candidates) {
         ExpressionCount = (To-Int "$($fields["ExpressionCount"])")
         MaterialDiagnostics = (To-Int "$($fields["MaterialDiagnostics"])")
         BlendMaterials = (To-Int "$($fields["BlendMaterials"])")
+        MtoonAdvancedMaterials = (To-Int "$($fields["MtoonAdvancedMaterials"])")
+        MtoonFallbackMaterials = (To-Int "$($fields["MtoonFallbackMaterials"])")
+        MtoonOutlineMaterials = (To-Int "$($fields["MtoonOutlineMaterials"])")
+        MtoonUvAnimMaterials = (To-Int "$($fields["MtoonUvAnimMaterials"])")
+        MtoonMatcapMaterials = (To-Int "$($fields["MtoonMatcapMaterials"])")
+        VrmSafeFallbackWarnings = (To-Int "$($fields["VrmSafeFallbackWarnings"])")
+        VrmMatcapUnresolvedWarnings = (To-Int "$($fields["VrmMatcapUnresolvedWarnings"])")
+        VrmTextureUnresolvedWarnings = (To-Int "$($fields["VrmTextureUnresolvedWarnings"])")
     }
 }
 
@@ -113,7 +121,10 @@ $gateG = $true  # blend material coverage (informational when no blend samples)
 $gateH = $true  # spring payload completeness
 $gateI = $true  # runtime activation readiness (payload/collider linkage)
 $gateJ = $true  # spring payload stability guards
+$gateK = $true  # mtoon unresolved/fallback strict guard
+$gateL = $true  # mtoon advanced feature coverage (observational)
 $gateGMode = "enforced"
+$gateLMode = "enforced"
 $failReasons = @()
 
 foreach ($r in $rows) {
@@ -132,6 +143,10 @@ foreach ($r in $rows) {
     if ($r.ExpressionCount -le 0) {
         $gateD = $false
         $failReasons += "GateD: $($r.Name) expected ExpressionCount > 0 but got $($r.ExpressionCount)"
+    }
+    if ($r.VrmSafeFallbackWarnings -gt 0 -or $r.VrmMatcapUnresolvedWarnings -gt 0 -or $r.VrmTextureUnresolvedWarnings -gt 0) {
+        $gateK = $false
+        $failReasons += "GateK: $($r.Name) expected no VRM MToon unresolved/fallback warnings but got safeFallback=$($r.VrmSafeFallbackWarnings), matcapUnresolved=$($r.VrmMatcapUnresolvedWarnings), textureUnresolved=$($r.VrmTextureUnresolvedWarnings)"
     }
 }
 
@@ -182,6 +197,28 @@ if (-not $hasBlendMaterial) {
     $gateG = $true
     $gateGMode = "no-blend-sample"
 }
+$hasMtoonAdvanced = ($rows | Where-Object { $_.MtoonAdvancedMaterials -gt 0 } | Measure-Object).Count -gt 0
+$hasMtoonOutline = ($rows | Where-Object { $_.MtoonOutlineMaterials -gt 0 } | Measure-Object).Count -gt 0
+$hasMtoonUvAnim = ($rows | Where-Object { $_.MtoonUvAnimMaterials -gt 0 } | Measure-Object).Count -gt 0
+$hasMtoonMatcap = ($rows | Where-Object { $_.MtoonMatcapMaterials -gt 0 } | Measure-Object).Count -gt 0
+if (-not $hasMtoonAdvanced) {
+    $gateL = $true
+    $gateLMode = "no-mtoon-advanced-sample"
+} else {
+    if (-not ($hasMtoonOutline -or $hasMtoonUvAnim -or $hasMtoonMatcap)) {
+        $gateL = $true
+        $gateLMode = "no-advanced-feature-coverage"
+    } elseif (-not $hasMtoonUvAnim) {
+        $gateL = $true
+        $gateLMode = "partial-no-uvanim-sample"
+    } elseif (-not $hasMtoonOutline -or -not $hasMtoonMatcap) {
+        $gateL = $true
+        $gateLMode = "partial"
+    } else {
+        $gateL = $true
+        $gateLMode = "full"
+    }
+}
 
 $summary = @()
 $summary += "VRM Quality Gate Summary"
@@ -201,13 +238,15 @@ $summary += "- GateG (blend material coverage): $(if($gateG){'PASS'}else{'FAIL'}
 $summary += "- GateH (spring payload completeness): $(if($gateH){'PASS'}else{'FAIL'})"
 $summary += "- GateI (spring runtime activation readiness): $(if($gateI){'PASS'}else{'FAIL'})"
 $summary += "- GateJ (spring payload stability guard): $(if($gateJ){'PASS'}else{'FAIL'})"
-$overall = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateH -and $gateI -and $gateJ
+$summary += "- GateK (VRM MToon unresolved/fallback strict): $(if($gateK){'PASS'}else{'FAIL'})"
+$summary += "- GateL (MToon advanced feature coverage): $(if($gateL){'PASS'}else{'FAIL'}) [mode=$gateLMode]"
+$overall = $gateA -and $gateB -and $gateC -and $gateD -and $gateE -and $gateF -and $gateH -and $gateI -and $gateJ -and $gateK -and $gateL
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Per-sample"
 foreach ($r in $rows) {
-    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}, materialDiag={9}, blendMat={10}" -f
-        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount, $r.MaterialDiagnostics, $r.BlendMaterials)
+    $summary += ("- {0}: format={1}, compat={2}, stage={3}, primary={4}, mesh={5}, material={6}, texture={7}, expression={8}, materialDiag={9}, blendMat={10}, mtoon(adv/fallback/outline/uv/matcap)={11}/{12}/{13}/{14}/{15}, vrmWarn(safe/matcap/tex)={16}/{17}/{18}" -f
+        $r.Name, $r.Format, $r.Compat, $r.ParserStage, $r.PrimaryError, $r.MeshPayloads, $r.MaterialPayloads, $r.TexturePayloads, $r.ExpressionCount, $r.MaterialDiagnostics, $r.BlendMaterials, $r.MtoonAdvancedMaterials, $r.MtoonFallbackMaterials, $r.MtoonOutlineMaterials, $r.MtoonUvAnimMaterials, $r.MtoonMatcapMaterials, $r.VrmSafeFallbackWarnings, $r.VrmMatcapUnresolvedWarnings, $r.VrmTextureUnresolvedWarnings)
 }
 if ($failReasons.Count -gt 0) {
     $summary += ""

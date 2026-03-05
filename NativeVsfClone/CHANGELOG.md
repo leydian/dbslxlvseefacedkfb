@@ -2,6 +2,61 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - VRM MToon gate hardening (warning-code normalization + GateK/GateL)
+
+### Summary
+
+Completed the first operational slice for staged MToon parity by normalizing VRM-side unresolved material warning codes, exposing MToon slot coverage counters in `avatar_tool`, and extending VRM quality gating with dedicated MToon checks (`GateK`, `GateL`) without destabilizing existing A..J quality contracts.
+
+### Changed
+
+- Native renderer warning-code normalization:
+  - `src/nativecore/native_core.cpp`
+  - unresolved texture warning code is now source-aware:
+    - VRM: `VRM_MATERIAL_TEXTURE_UNRESOLVED`
+    - XAV2: `XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED` (unchanged)
+  - VRM-specific render warning classification expanded:
+    - `VRM_MATERIAL_TEXTURE_UNRESOLVED`
+    - `VRM_MATERIAL_SAFE_FALLBACK_APPLIED`
+    - `VRM_MTOON_MATCAP_UNRESOLVED`
+- Avatar probe output expansion for MToon gating:
+  - `tools/avatar_tool.cpp`
+  - added MToon/VRM diagnostics counters to output:
+    - `MtoonOutlineMaterials`
+    - `MtoonUvAnimMaterials`
+    - `MtoonMatcapMaterials`
+    - `VrmSafeFallbackWarnings`
+    - `VrmMatcapUnresolvedWarnings`
+    - `VrmTextureUnresolvedWarnings`
+  - warning classifier in tool updated to categorize new VRM warnings as render warnings.
+- VRM quality gate extension:
+  - `tools/vrm_quality_gate.ps1`
+  - added parsing of new probe fields.
+  - added `GateK` (strict fail):
+    - fails when any sample reports unresolved/fallback VRM MToon warning counters.
+  - added `GateL` (coverage/observational):
+    - tracks outline/uv/matcap advanced coverage mode (`full|partial|no-advanced-feature-coverage|...`).
+    - currently PASS with mode annotation to avoid breaking baseline cohorts that lack advanced-feature samples.
+  - per-sample summary now prints MToon and VRM warning vectors.
+- Documentation updates:
+  - `docs/reports/vrm_mtoon_gate_hardening_and_stage1_baseline_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build-thumb --config Release --target nativecore avatar_tool`: PASS
+- `avatar_tool sample/개인작11-3.vrm` (field smoke): PASS
+  - new counters emitted:
+    - `MtoonOutlineMaterials`, `MtoonUvAnimMaterials`, `MtoonMatcapMaterials`
+    - `VrmSafeFallbackWarnings`, `VrmMatcapUnresolvedWarnings`, `VrmTextureUnresolvedWarnings`
+- `powershell -ExecutionPolicy Bypass -File tools/vrm_quality_gate.ps1 -SampleDir sample -AvatarToolPath build-thumb/Release/avatar_tool.exe -Profile fixed5`: PASS
+  - `GateA..J`: PASS
+  - `GateK`: PASS
+  - `GateL`: PASS (`mode=no-advanced-feature-coverage`)
+
 ## 2026-03-06 - VRM MToon diagnostics precision + safe material fallback + warning priority
 
 ### Summary
