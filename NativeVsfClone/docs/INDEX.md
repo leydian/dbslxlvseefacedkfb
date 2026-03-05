@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [session_change_summary_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/session_change_summary_2026-03-06.md): consolidated 2026-03-06 workspace rollup for WPF consumer-mode UX restructuring, HostCore session/guide updates, tracking input service/interface plumbing, and VSFAvatar gate script expansion
 - [xav2_typed_material_v2_liltoon_phase1_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_typed_material_v2_liltoon_phase1_2026-03-06.md): XAV2 `0x0015` typed material params implementation across Unity exporter/runtime and native loader/renderer with lilToon phase1 extraction
 - [xav2_skinning_stabilization_and_v2_path_2026-03-06.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/xav2_skinning_stabilization_and_v2_path_2026-03-06.md): native XAV2 skinning stabilization, lilToon phase-1 shading uplift, and v2 loader/runtime/export path activation summary
 - [vsfavatar_render_gate_and_error_contract_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/vsfavatar_render_gate_and_error_contract_2026-03-05.md): VSFAvatar sidecar/loader contract v4 update, host load-failure diagnostic preservation, and new VSF render gate integration

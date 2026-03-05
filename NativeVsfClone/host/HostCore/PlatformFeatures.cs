@@ -47,6 +47,11 @@ public sealed record SidecarSettings(
     int TimeoutMs,
     bool StrictMode);
 
+public sealed record TrackingInputSettings(
+    ushort ListenPort,
+    int StaleTimeoutMs,
+    bool LastActive);
+
 public sealed record SessionPersistenceModel(
     int Version,
     string AvatarPath,
@@ -54,17 +59,21 @@ public sealed record SessionPersistenceModel(
     ushort OscBindPort,
     string OscPublishAddress,
     SidecarSettings Sidecar,
+    TrackingInputSettings Tracking,
     string? LastProfileName,
+    string UiMode,
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 1,
+        Version: 3,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
         OscPublishAddress: "127.0.0.1:39540",
         Sidecar: new SidecarSettings("sidecar", string.Empty, 15000, false),
+        Tracking: new TrackingInputSettings(49983, 500, false),
         LastProfileName: "quality",
+        UiMode: "beginner",
         LastUpdatedUtc: DateTimeOffset.UtcNow);
 }
 
@@ -128,12 +137,41 @@ public sealed class SessionStateStore
         {
             var json = File.ReadAllText(_path, Encoding.UTF8);
             var model = JsonSerializer.Deserialize<SessionPersistenceModel>(json, JsonOptions);
-            return model ?? SessionPersistenceModel.CreateDefault();
+            if (model is not null)
+            {
+                return Normalize(model);
+            }
         }
         catch
         {
-            return SessionPersistenceModel.CreateDefault();
+            // Try v1 fallback shape below.
         }
+
+        try
+        {
+            var json = File.ReadAllText(_path, Encoding.UTF8);
+            var legacy = JsonSerializer.Deserialize<SessionPersistenceModelV1>(json, JsonOptions);
+            if (legacy is not null)
+            {
+                return Normalize(new SessionPersistenceModel(
+                    Version: 3,
+                    AvatarPath: legacy.AvatarPath,
+                    SpoutChannelName: legacy.SpoutChannelName,
+                    OscBindPort: legacy.OscBindPort,
+                    OscPublishAddress: legacy.OscPublishAddress,
+                    Sidecar: legacy.Sidecar,
+                    Tracking: new TrackingInputSettings(49983, 500, false),
+                    LastProfileName: legacy.LastProfileName,
+                    UiMode: "beginner",
+                    LastUpdatedUtc: legacy.LastUpdatedUtc));
+            }
+        }
+        catch
+        {
+            // Fall through to defaults.
+        }
+
+        return SessionPersistenceModel.CreateDefault();
     }
 
     public void Save(SessionPersistenceModel model)
@@ -144,9 +182,51 @@ public sealed class SessionStateStore
             Directory.CreateDirectory(directory);
         }
 
-        var json = JsonSerializer.Serialize(model, JsonOptions);
+        var json = JsonSerializer.Serialize(Normalize(model), JsonOptions);
         File.WriteAllText(_path, json, Encoding.UTF8);
     }
+
+    private static SessionPersistenceModel Normalize(SessionPersistenceModel model)
+    {
+        var mode = NormalizeUiMode(model.UiMode);
+        var lastUpdated = model.LastUpdatedUtc == default ? DateTimeOffset.UtcNow : model.LastUpdatedUtc;
+        return model with
+        {
+            Version = Math.Max(3, model.Version),
+            Tracking = NormalizeTracking(model.Tracking),
+            UiMode = mode,
+            LastUpdatedUtc = lastUpdated,
+        };
+    }
+
+    private static TrackingInputSettings NormalizeTracking(TrackingInputSettings? value)
+    {
+        if (value is null)
+        {
+            return new TrackingInputSettings(49983, 500, false);
+        }
+
+        var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
+        var stale = Math.Clamp(value.StaleTimeoutMs <= 0 ? 500 : value.StaleTimeoutMs, 50, 5000);
+        return new TrackingInputSettings(port, stale, value.LastActive);
+    }
+
+    private static string NormalizeUiMode(string value)
+    {
+        return string.Equals(value?.Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
+            ? "advanced"
+            : "beginner";
+    }
+
+    private sealed record SessionPersistenceModelV1(
+        int Version,
+        string AvatarPath,
+        string SpoutChannelName,
+        ushort OscBindPort,
+        string OscPublishAddress,
+        SidecarSettings Sidecar,
+        string? LastProfileName,
+        DateTimeOffset LastUpdatedUtc);
 }
 
 public sealed class AutoQualityPolicyStore
@@ -303,17 +383,17 @@ public static class HostContent
     {
         return string.Join(Environment.NewLine, new[]
         {
-            "Quickstart",
-            "1) Run Preflight and resolve failed checks.",
-            "2) Initialize session.",
-            "3) Import avatar (.vrm/.xav2/.vsfavatar).",
-            "4) Verify render stats and choose profile (quality/performance/stability).",
-            "5) Start outputs (Spout/OSC) and confirm status strip.",
+            "빠른 시작 (Quickstart)",
+            "1) 사전 점검(Preflight)을 실행하고 실패 항목을 먼저 해결하세요.",
+            "2) 세션 초기화(Initialize) 버튼을 누르세요.",
+            "3) 아바타 불러오기(Load Avatar): .vrm / .xav2 / .vsfavatar",
+            "4) 화면 프레임 상태를 확인하고 프로필을 선택하세요: 품질(quality) / 성능(performance) / 안정(stability)",
+            "5) 출력 시작(Start Outputs): Spout/OSC 상태가 켜졌는지 확인하세요.",
             "",
-            "Troubleshooting",
-            "- Load fails: verify extension and file existence, then check runtime diagnostics.",
-            "- Output mismatch: use output restart and collect diagnostics bundle.",
-            "- WinUI blocked: use WPF track and inspect diagnostics manifest.",
+            "문제 해결 (Troubleshooting)",
+            "- 로드 실패(Load failed): 파일 경로/확장자를 확인하고 진단(Runtime/Avatar)을 확인하세요.",
+            "- 출력 불일치(Output mismatch): 출력을 다시 시작하고 진단 번들(Export Diagnostics)을 수집하세요.",
+            "- WinUI 차단(WinUI blocked): WPF 트랙을 사용하고 진단 매니페스트를 확인하세요.",
         });
     }
 
@@ -321,15 +401,15 @@ public static class HostContent
     {
         return string.Join(Environment.NewLine, new[]
         {
-            "Compatibility Matrix",
-            "- .vrm: supported (runtime mesh/material slice, partial advanced features).",
-            "- .xav2: supported (vxa2-derived container path).",
-            "- .vsfavatar: supported with sidecar-first policy + fallback modes.",
+            "호환성 매트릭스 (Compatibility Matrix)",
+            "- .vrm: 지원 (기본 메쉬/재질 경로, 일부 고급 기능은 제한될 수 있음)",
+            "- .xav2: 지원 (vxa2 기반 컨테이너 경로)",
+            "- .vsfavatar: 지원 (sidecar 우선 + fallback 정책)",
             "",
-            "Fallback Policy",
-            "- sidecar: fallback to in-house parser on sidecar failure.",
-            "- sidecar-strict: no fallback, fail fast with diagnostics.",
-            "- inhouse: bypass sidecar process entirely.",
+            "폴백 정책 (Fallback Policy)",
+            "- sidecar: sidecar 실패 시 in-house 파서로 자동 전환",
+            "- sidecar-strict: 폴백 없이 즉시 실패하고 진단 정보 제공",
+            "- inhouse: sidecar를 사용하지 않고 내부 파서만 사용",
         });
     }
 }

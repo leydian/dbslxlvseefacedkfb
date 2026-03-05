@@ -18,7 +18,8 @@ param(
         "NewOnYou.vsfavatar",
         "Character vywjd.vsfavatar",
         "PPU (2).vsfavatar",
-        "VRM dkdlrh.vsfavatar"
+        "VRM dkdlrh.vsfavatar",
+        "*11-3.vsfavatar"
     )
 )
 

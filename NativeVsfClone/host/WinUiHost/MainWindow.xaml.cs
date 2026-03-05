@@ -334,6 +334,54 @@ public sealed partial class MainWindow : Window
         _ = _controller.StopOsc();
     }
 
+    private async void StartTracking_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (!ushort.TryParse(TrackingPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var listenPort))
+        {
+            await ShowMessageAsync("Invalid Input", "Tracking listen port must be an integer between 0 and 65535.");
+            return;
+        }
+
+        var settings = _controller.GetTrackingInputSettings();
+        var rc = _controller.StartTracking(listenPort, settings.StaleTimeoutMs);
+        if (rc != NcResultCode.Ok)
+        {
+            await ShowMessageAsync("Tracking", $"Start tracking failed: {rc}");
+            return;
+        }
+
+        _controller.ConfigureTrackingInputSettings(listenPort, settings.StaleTimeoutMs);
+    }
+
+    private void StopTracking_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        _ = _controller.StopTracking();
+    }
+
+    private async void RecenterTracking_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        var rc = _controller.RecenterTracking();
+        if (rc != NcResultCode.Ok)
+        {
+            await ShowMessageAsync("Tracking", "Recenter requires active tracking input.");
+        }
+    }
+
     private void CopyLogs_Click(object sender, RoutedEventArgs e)
     {
         var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
@@ -768,6 +816,7 @@ public sealed partial class MainWindow : Window
             _controller.RenderState,
             CameraModeComboBox.SelectedIndex == 2);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
+        var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
         ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
@@ -804,7 +853,12 @@ public sealed partial class MainWindow : Window
         SidecarStrictCheckBox.IsEnabled = !operation.IsBusy;
         TelemetryOptInCheckBox.IsEnabled = !operation.IsBusy;
         TelemetryRedactCheckBox.IsEnabled = !operation.IsBusy;
+        StartTrackingButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        StopTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive;
+        RecenterTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive && !tracking.IsStale;
+        TrackingPortTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors}";
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
@@ -898,6 +952,8 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
+        var tracking = _controller.TrackingDiagnostics;
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1143,6 +1199,7 @@ public sealed partial class MainWindow : Window
         SpoutChannelTextBox.Text = session.SpoutChannelName;
         OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
         OscPublishAddressTextBox.Text = session.OscPublishAddress;
+        TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
         SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);

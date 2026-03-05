@@ -15,6 +15,8 @@ namespace WpfHost;
 
 public partial class MainWindow : Window
 {
+    private const string UiModeBeginner = "beginner";
+    private const string UiModeAdvanced = "advanced";
     private readonly HostController _controller = new();
     private readonly DispatcherTimer _timer = new();
     private readonly DispatcherTimer _uiRefreshTimer = new();
@@ -37,6 +39,8 @@ public partial class MainWindow : Window
     private bool _isLoadRunning;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
     private bool _uiReady;
+    private string _uiMode = UiModeBeginner;
+    private bool _diagnosticsForcedVisible;
 
     public MainWindow()
     {
@@ -186,6 +190,16 @@ public partial class MainWindow : Window
         UpdateUiState();
     }
 
+    private void BeginnerMode_Click(object sender, RoutedEventArgs e)
+    {
+        SetUiMode(UiModeBeginner, persist: true);
+    }
+
+    private void AdvancedMode_Click(object sender, RoutedEventArgs e)
+    {
+        SetUiMode(UiModeAdvanced, persist: true);
+    }
+
     private async void Load_Click(object sender, RoutedEventArgs e)
     {
         if (_controller.OperationState.IsBusy)
@@ -220,6 +234,7 @@ public partial class MainWindow : Window
         UpdateUiState();
         if (rc != NcResultCode.Ok)
         {
+            RevealDiagnosticsForFailure("LoadAvatar");
             var detail = _controller.GetLastLoadFailureDetails();
             if (string.IsNullOrWhiteSpace(detail))
             {
@@ -278,7 +293,12 @@ public partial class MainWindow : Window
             channel = "VsfClone";
             SpoutChannelTextBox.Text = channel;
         }
-        _ = _controller.StartSpout(metrics.pixelWidth, metrics.pixelHeight, 60, channel);
+        var rc = _controller.StartSpout(metrics.pixelWidth, metrics.pixelHeight, 60, channel);
+        if (rc != NcResultCode.Ok)
+        {
+            RevealDiagnosticsForFailure("StartSpout");
+            MessageBox.Show(this, $"Spout 시작 실패: {rc}", "출력 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void StopSpout_Click(object sender, RoutedEventArgs e)
@@ -332,7 +352,12 @@ public partial class MainWindow : Window
         }
 
         var publishAddress = OscPublishAddressTextBox.Text.Trim();
-        _ = _controller.StartOsc(bindPort, publishAddress);
+        var rc = _controller.StartOsc(bindPort, publishAddress);
+        if (rc != NcResultCode.Ok)
+        {
+            RevealDiagnosticsForFailure("StartOsc");
+            MessageBox.Show(this, $"OSC 시작 실패: {rc}", "출력 오류", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private void StopOsc_Click(object sender, RoutedEventArgs e)
@@ -347,6 +372,55 @@ public partial class MainWindow : Window
             return;
         }
         _ = _controller.StopOsc();
+    }
+
+    private void StartTracking_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (!ushort.TryParse(TrackingPortTextBox.Text.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var listenPort))
+        {
+            MessageBox.Show(this, "Tracking listen port must be 0-65535.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var rc = _controller.StartTracking(
+            listenPort,
+            staleTimeoutMs: _controller.GetTrackingInputSettings().StaleTimeoutMs);
+        if (rc != NcResultCode.Ok)
+        {
+            MessageBox.Show(this, $"Start tracking failed: {rc}", "Tracking", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _controller.ConfigureTrackingInputSettings(listenPort, _controller.GetTrackingInputSettings().StaleTimeoutMs);
+    }
+
+    private void StopTracking_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        _ = _controller.StopTracking();
+    }
+
+    private void RecenterTracking_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        var rc = _controller.RecenterTracking();
+        if (rc != NcResultCode.Ok)
+        {
+            MessageBox.Show(this, "Recenter requires active tracking input.", "Tracking", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
     }
 
     private void CopyLogs_Click(object sender, RoutedEventArgs e)
@@ -370,8 +444,12 @@ public partial class MainWindow : Window
 
         var failed = preflight.Checks.Where(x => !x.Passed).ToList();
         PreflightHintText.Text = failed.Count == 0
-            ? "Preflight passed. You can proceed with Initialize -> Load -> Start outputs."
-            : "Preflight failed checks: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
+            ? "사전 점검이 통과되었습니다. 초기화 -> 불러오기 -> 출력 시작 순서로 진행하세요."
+            : "사전 점검 실패 항목: " + string.Join(" | ", failed.Select(x => $"[{x.CheckCode}] {x.Name}: {x.Remediation}"));
+        if (failed.Count > 0)
+        {
+            RevealDiagnosticsForFailure("Preflight");
+        }
         MessageBox.Show(this, sb.ToString(), "Preflight Result", MessageBoxButton.OK, preflight.Passed ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
@@ -718,6 +796,7 @@ public partial class MainWindow : Window
         RunOnUiThread(() =>
         {
             ErrorStatusText.Text = $"{e.Source}: {e.ResultCode}";
+            RevealDiagnosticsForFailure(e.Source);
             _pendingLogsRefresh = true;
             var guide = _controller.GetLastErrorGuidance();
             if (!string.IsNullOrWhiteSpace(guide))
@@ -785,6 +864,7 @@ public partial class MainWindow : Window
             _controller.RenderState,
             CameraModeComboBox.SelectedIndex == 2);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
+        var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
         ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
@@ -821,8 +901,13 @@ public partial class MainWindow : Window
         SidecarStrictCheckBox.IsEnabled = !operation.IsBusy;
         TelemetryOptInCheckBox.IsEnabled = !operation.IsBusy;
         TelemetryRedactCheckBox.IsEnabled = !operation.IsBusy;
+        StartTrackingButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        StopTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive;
+        RecenterTrackingButton.IsEnabled = !operation.IsBusy && tracking.IsActive && !tracking.IsStale;
+        TrackingPortTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -833,6 +918,7 @@ public partial class MainWindow : Window
 
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
+        ApplyModeVisibility();
     }
 
     private bool ShouldSkipRenderInteraction()
@@ -928,6 +1014,8 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
+        var tracking = _controller.TrackingDiagnostics;
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, format={tracking.DetectedFormat}, fps={tracking.InputFps:F1}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1099,6 +1187,10 @@ public partial class MainWindow : Window
     private void ApplySessionDefaultsToUi()
     {
         var session = _controller.SessionPersistence;
+        _uiMode = string.Equals(session.UiMode, UiModeAdvanced, StringComparison.OrdinalIgnoreCase)
+            ? UiModeAdvanced
+            : UiModeBeginner;
+        _diagnosticsForcedVisible = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
         if (!string.IsNullOrWhiteSpace(session.AvatarPath))
         {
             AvatarPathTextBox.Text = session.AvatarPath;
@@ -1107,6 +1199,7 @@ public partial class MainWindow : Window
         SpoutChannelTextBox.Text = session.SpoutChannelName;
         OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
         OscPublishAddressTextBox.Text = session.OscPublishAddress;
+        TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
         SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);
@@ -1124,10 +1217,76 @@ public partial class MainWindow : Window
         AutoQualityCooldownTextBox.Text = aq.CooldownSeconds.ToString(CultureInfo.InvariantCulture);
         AutoQualityRecoveryThresholdTextBox.Text = aq.RecoveryFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
         AutoQualityRecoveryConsecutiveTextBox.Text = aq.RecoveryConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
+        ApplyModeVisibility();
     }
 
     private void RefreshGuides()
     {
         GuidesTextBox.Text = _controller.GetQuickstartText() + Environment.NewLine + Environment.NewLine + _controller.GetCompatibilityText();
+    }
+
+    private void SetUiMode(string mode, bool persist)
+    {
+        var normalized = string.Equals(mode, UiModeAdvanced, StringComparison.OrdinalIgnoreCase)
+            ? UiModeAdvanced
+            : UiModeBeginner;
+        _uiMode = normalized;
+        if (string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal))
+        {
+            _diagnosticsForcedVisible = true;
+        }
+
+        if (persist)
+        {
+            _controller.SetUiMode(_uiMode);
+        }
+
+        ApplyModeVisibility();
+        UpdateUiState();
+    }
+
+    private void ApplyModeVisibility()
+    {
+        var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        BeginnerModeButton.IsEnabled = !advanced;
+        AdvancedModeButton.IsEnabled = advanced ? false : true;
+        BeginnerModeButton.FontWeight = advanced ? FontWeights.Normal : FontWeights.SemiBold;
+        AdvancedModeButton.FontWeight = advanced ? FontWeights.SemiBold : FontWeights.Normal;
+
+        TrackingGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        PlatformOpsGroup.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        RenderAdvancedExpander.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        RenderAdvancedExpander.IsExpanded = advanced;
+
+        var showDiagnostics = advanced || _diagnosticsForcedVisible;
+        DiagnosticsRow.Height = showDiagnostics ? new GridLength(260.0) : new GridLength(0.0);
+        DiagnosticsTabControl.Visibility = showDiagnostics ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RevealDiagnosticsForFailure(string source)
+    {
+        _diagnosticsForcedVisible = true;
+        var tabIndex = 2;
+        if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
+        {
+            tabIndex = 1;
+        }
+        else if (source.Contains("Preflight", StringComparison.OrdinalIgnoreCase))
+        {
+            tabIndex = 3;
+        }
+        else if (source.Contains("StartSpout", StringComparison.OrdinalIgnoreCase) ||
+                 source.Contains("StartOsc", StringComparison.OrdinalIgnoreCase) ||
+                 source.Contains("Render", StringComparison.OrdinalIgnoreCase))
+        {
+            tabIndex = 0;
+        }
+
+        ApplyModeVisibility();
+        DiagnosticsTabControl.SelectedIndex = tabIndex;
+        _isLogsTabActive = tabIndex == 2;
+        _pendingRuntimeRefresh = true;
+        _pendingAvatarRefresh = true;
+        _pendingLogsRefresh = true;
     }
 }

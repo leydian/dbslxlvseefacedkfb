@@ -34,6 +34,27 @@ public sealed partial class HostController
 
     public SessionPersistenceModel SessionPersistence => _sessionPersistence;
 
+    public string GetUiMode() => _sessionPersistence.UiMode;
+
+    public void SetUiMode(string uiMode)
+    {
+        var normalized = string.Equals(uiMode?.Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
+            ? "advanced"
+            : "beginner";
+        if (string.Equals(_sessionPersistence.UiMode, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _sessionPersistence = _sessionPersistence with
+        {
+            UiMode = normalized,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+        AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "UiMode", $"mode={normalized}", NcResultCode.Ok), false);
+    }
+
     public void InitializeMvpFeatures()
     {
         _sessionPersistence = _sessionStore.Load();
@@ -57,20 +78,20 @@ public sealed partial class HostController
         var trimmed = path?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmed))
         {
-            return new ImportPlan("none", false, "Select an avatar file path first.", "No fallback available until a path is provided.");
+            return new ImportPlan("none", false, "먼저 아바타 파일 경로를 선택하세요.", "경로가 없으면 폴백(Fallback)을 적용할 수 없습니다.");
         }
         if (!File.Exists(trimmed))
         {
-            return new ImportPlan("missing-file", false, "Selected avatar path does not exist. Verify path and try again.", "Check path accessibility and retry.");
+            return new ImportPlan("missing-file", false, "선택한 아바타 경로가 존재하지 않습니다. 경로를 확인하세요.", "파일 접근 권한/경로를 확인한 뒤 다시 시도하세요.");
         }
 
         var ext = Path.GetExtension(trimmed).ToLowerInvariant();
         return ext switch
         {
-            ".vrm" => new ImportPlan("vrm", true, "VRM route selected: runtime-ready mesh/material path.", "Fallback: convert to XAV2 if runtime compatibility warnings appear."),
-            ".xav2" => new ImportPlan("xav2", true, "XAV2 route selected: vxa2-derived runtime container.", "Fallback: use VRM path when deterministic package load is blocked."),
-            ".vsfavatar" => new ImportPlan("vsfavatar", true, $"VSFAvatar route selected: parser mode={_sessionPersistence.Sidecar.ParserMode}.", "Fallback follows parser policy (sidecar/inhouse/sidecar-strict)."),
-            _ => new ImportPlan("unsupported-extension", false, "Unknown extension. Supported: .vrm, .vsfavatar, .xav2", "Convert avatar to one of the supported formats."),
+            ".vrm" => new ImportPlan("vrm", true, "VRM 경로가 선택되었습니다. 기본 런타임 렌더 경로를 사용합니다.", "호환성 경고가 반복되면 XAV2로 변환해 다시 시도하세요."),
+            ".xav2" => new ImportPlan("xav2", true, "XAV2 경로가 선택되었습니다. vxa2 기반 컨테이너를 사용합니다.", "불러오기가 막히면 VRM 경로로 재시도하세요."),
+            ".vsfavatar" => new ImportPlan("vsfavatar", true, $"VSFAvatar 경로가 선택되었습니다. parser_mode={_sessionPersistence.Sidecar.ParserMode}", "폴백은 parser 정책(sidecar/inhouse/sidecar-strict)을 따릅니다."),
+            _ => new ImportPlan("unsupported-extension", false, "지원하지 않는 확장자입니다. 지원 형식: .vrm, .vsfavatar, .xav2", "지원 형식으로 변환한 뒤 다시 시도하세요."),
         };
     }
 
@@ -290,6 +311,29 @@ public sealed partial class HostController
 
     public SidecarSettings GetSidecarSettings() => _sessionPersistence.Sidecar;
 
+    public TrackingInputSettings GetTrackingInputSettings() => _sessionPersistence.Tracking;
+
+    public void ConfigureTrackingInputSettings(ushort listenPort, int staleTimeoutMs)
+    {
+        var normalized = new TrackingInputSettings(
+            listenPort == 0 ? (ushort)49983 : listenPort,
+            Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
+            _sessionPersistence.Tracking.LastActive);
+        _sessionPersistence = _sessionPersistence with
+        {
+            Tracking = normalized,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+        AddLog(
+            new HostLogEntry(
+                DateTimeOffset.UtcNow,
+                "TrackingConfig",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}",
+                NcResultCode.Ok),
+            false);
+    }
+
     public void ConfigureSidecarSettings(SidecarSettings settings)
     {
         var mode = settings.StrictMode ? "sidecar-strict" : settings.ParserMode;
@@ -303,6 +347,20 @@ public sealed partial class HostController
         ApplySidecarEnvironment(normalized);
         PersistSessionSnapshot();
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "SidecarConfig", $"mode={normalized.ParserMode}, timeout={normalized.TimeoutMs}", NcResultCode.Ok), false);
+    }
+
+    private void SetTrackingState(ushort listenPort, int staleTimeoutMs, bool active)
+    {
+        var normalized = new TrackingInputSettings(
+            listenPort == 0 ? (ushort)49983 : listenPort,
+            Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
+            active);
+        _sessionPersistence = _sessionPersistence with
+        {
+            Tracking = normalized,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
     }
 
     public void SetTelemetryPolicy(bool optIn, bool redactSensitiveFields)
@@ -605,14 +663,18 @@ public sealed partial class HostController
 
         if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
         {
+            var (parserStage, primaryError) = GetLoadFailureContext();
             if (detail.Contains("renderable mesh payloads", StringComparison.OrdinalIgnoreCase))
             {
+                title = $"Runtime avatar load failed (format recognized, stage={parserStage})";
                 action = "VSFAvatar metadata loaded, but render mesh payload is missing. Export diagnostics and convert via supported runtime path.";
             }
             else
             {
-                action = "Check avatar file extension/path, then retry. If it fails again, export diagnostics.";
+                title = $"Runtime avatar load failed (format recognized, stage={parserStage})";
+                action = "Check parser_stage/primary_error details, then retry. If it fails again, export diagnostics and convert to .xav2/.vrm.";
             }
+            detail = AppendLoadContextDetail(detail, parserStage, primaryError);
         }
         else if (source.Contains("StartSpout", StringComparison.OrdinalIgnoreCase) ||
                  source.Contains("StartOsc", StringComparison.OrdinalIgnoreCase))
@@ -626,6 +688,33 @@ public sealed partial class HostController
 
         LastUserFacingError = new UserFacingError(errorCode, category, title, action, detail);
         return LastUserFacingError;
+    }
+
+    private (string ParserStage, string PrimaryError) GetLoadFailureContext()
+    {
+        var info = _sessionService.LastLoadAttemptInfo;
+        if (!info.HasValue)
+        {
+            return ("unknown", "NONE");
+        }
+
+        var parserStage = string.IsNullOrWhiteSpace(info.Value.ParserStage)
+            ? "unknown"
+            : info.Value.ParserStage.Trim();
+        var primaryError = string.IsNullOrWhiteSpace(info.Value.PrimaryErrorCode)
+            ? "NONE"
+            : info.Value.PrimaryErrorCode.Trim();
+        return (parserStage, primaryError);
+    }
+
+    private static string AppendLoadContextDetail(string detail, string parserStage, string primaryError)
+    {
+        var context = $"load_context: parser_stage={parserStage}, primary_error={primaryError}";
+        if (string.IsNullOrWhiteSpace(detail))
+        {
+            return context;
+        }
+        return $"{context}{Environment.NewLine}{detail}";
     }
 
     private void TrackTelemetryEvent(string source, NcResultCode rc)

@@ -56,6 +56,7 @@ public sealed record DiagnosticsSnapshot(
     HostSessionState Session,
     OutputState Outputs,
     RenderUiState Render,
+    TrackingDiagnostics Tracking,
     DiagnosticsModel Runtime,
     NcAvatarInfo? AvatarInfo,
     NcResultCode LastRenderRc);

@@ -36,3 +36,27 @@ public interface IRenderPresetStore
     RenderPresetStoreModel Load();
     void Save(RenderPresetStoreModel store);
 }
+
+public sealed record TrackingStartOptions(
+    ushort ListenPort,
+    int StaleTimeoutMs);
+
+public sealed record TrackingDiagnostics(
+    bool IsActive,
+    string DetectedFormat,
+    double InputFps,
+    int LastPacketAgeMs,
+    bool IsStale,
+    ulong ReceivedPackets,
+    ulong DroppedPackets,
+    ulong ParseErrors,
+    string StatusMessage);
+
+public interface ITrackingInputService
+{
+    NcResultCode Start(TrackingStartOptions options);
+    NcResultCode Stop();
+    NcResultCode Recenter();
+    bool TryGetLatestFrame(out NcTrackingFrame frame);
+    TrackingDiagnostics GetDiagnostics();
+}

@@ -13,6 +13,7 @@ public sealed partial class HostController
     private readonly IRenderLoopService _renderLoopService;
     private readonly IOutputService _outputService;
     private readonly IRenderPresetStore _presetStore;
+    private readonly ITrackingInputService _trackingInputService;
     private readonly Queue<HostLogEntry> _logs = new();
     private RenderPresetStoreModel _presetStoreModel;
     private NcRenderQualityOptions _renderOptions;
@@ -26,9 +27,10 @@ public sealed partial class HostController
     private DateTimeOffset _lastOutputRecoveryAttemptUtc = DateTimeOffset.MinValue;
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
+    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, int.MaxValue, true, 0, 0, 0, "stopped");
 
     public HostController()
-        : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore())
+        : this(new AvatarSessionService(), new RenderLoopService(), new OutputService(), new RenderPresetStore(), new TrackingInputService())
     {
     }
 
@@ -36,12 +38,14 @@ public sealed partial class HostController
         IAvatarSessionService sessionService,
         IRenderLoopService renderLoopService,
         IOutputService outputService,
-        IRenderPresetStore presetStore)
+        IRenderPresetStore presetStore,
+        ITrackingInputService? trackingInputService = null)
     {
         _sessionService = sessionService;
         _renderLoopService = renderLoopService;
         _outputService = outputService;
         _presetStore = presetStore;
+        _trackingInputService = trackingInputService ?? new TrackingInputService();
         _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
         _presetStoreModel = EnsurePresetStoreModel(_presetStore.Load());
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
@@ -72,6 +76,7 @@ public sealed partial class HostController
     public IReadOnlyCollection<HostLogEntry> LogEntries => _logs.ToArray();
     public IReadOnlyList<RenderPresetModel> RenderPresets => _presetStoreModel.Presets;
     public string? SelectedRenderPresetName => _presetStoreModel.LastSelectedPresetName;
+    public TrackingDiagnostics TrackingDiagnostics => _trackingDiagnostics;
 
     public NcResultCode Initialize()
     {
@@ -118,6 +123,9 @@ public sealed partial class HostController
             {
                 TrackResult("UnloadAvatar", _sessionService.UnloadAvatar());
             }
+
+            TrackResult("StopTracking", _trackingInputService.Stop());
+            _trackingDiagnostics = _trackingInputService.GetDiagnostics();
 
             var rc = _sessionService.Shutdown();
             TrackResult("Shutdown", rc);
@@ -276,6 +284,55 @@ public sealed partial class HostController
         });
     }
 
+    public NcResultCode StartTracking(
+        ushort listenPort,
+        int staleTimeoutMs)
+    {
+        return ExecuteOperation("StartTracking", () =>
+        {
+            var options = new TrackingStartOptions(
+                listenPort == 0 ? (ushort)49983 : listenPort,
+                staleTimeoutMs);
+            var rc = _trackingInputService.Start(options);
+            _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            if (rc == NcResultCode.Ok)
+            {
+                SetTrackingState(listenPort, staleTimeoutMs, true);
+            }
+            TrackResult("StartTracking", rc);
+            RefreshState();
+            return rc;
+        });
+    }
+
+    public NcResultCode StopTracking()
+    {
+        return ExecuteOperation("StopTracking", () =>
+        {
+            var rc = _trackingInputService.Stop();
+            _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            if (rc == NcResultCode.Ok)
+            {
+                SetTrackingState(_sessionPersistence.Tracking.ListenPort, _sessionPersistence.Tracking.StaleTimeoutMs, false);
+            }
+            TrackResult("StopTracking", rc);
+            RefreshState();
+            return rc;
+        });
+    }
+
+    public NcResultCode RecenterTracking()
+    {
+        return ExecuteOperation("RecenterTracking", () =>
+        {
+            var rc = _trackingInputService.Recenter();
+            _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            TrackResult("RecenterTracking", rc);
+            RefreshState();
+            return rc;
+        });
+    }
+
     public NcResultCode SetBroadcastMode(bool enabled)
     {
         return ExecuteOperation("SetBroadcastMode", () =>
@@ -414,6 +471,16 @@ public sealed partial class HostController
 
     public NcResultCode Tick(float deltaTimeSeconds)
     {
+        if (_trackingInputService.TryGetLatestFrame(out var trackingFrame))
+        {
+            var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref trackingFrame);
+            if (trackingRc != NcResultCode.Ok)
+            {
+                TrackResult("SetTrackingFrame", trackingRc);
+            }
+        }
+        _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+
         if (_sessionService.ActiveAvatarHandle.HasValue)
         {
             if (NativeCoreInterop.nc_get_runtime_stats(out var statsRc) == NcResultCode.Ok &&
@@ -511,6 +578,7 @@ public sealed partial class HostController
             SessionState,
             Outputs,
             RenderState,
+            _trackingDiagnostics,
             runtime,
             _sessionService.ActiveAvatarInfo,
             SessionState.LastRenderRc);
@@ -725,6 +793,16 @@ public sealed partial class HostController
         if (rc == NcResultCode.Ok)
         {
             AddLog(new HostLogEntry(DateTimeOffset.UtcNow, source, "ok", rc), false);
+            return;
+        }
+
+        if (source.Contains("Tracking", StringComparison.OrdinalIgnoreCase))
+        {
+            var trackingMessage = string.IsNullOrWhiteSpace(_trackingDiagnostics.StatusMessage)
+                ? "tracking operation failed"
+                : _trackingDiagnostics.StatusMessage;
+            var trackingEntry = new HostLogEntry(DateTimeOffset.UtcNow, source, trackingMessage, rc);
+            AddLog(trackingEntry, true);
             return;
         }
 

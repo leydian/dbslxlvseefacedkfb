@@ -104,6 +104,27 @@ public struct NcSpringBoneInfo
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct NcTrackingFrame
+{
+    public float HeadPosX;
+    public float HeadPosY;
+    public float HeadPosZ;
+    public float HeadRotX;
+    public float HeadRotY;
+    public float HeadRotZ;
+    public float HeadRotW;
+    public float EyeGazeLX;
+    public float EyeGazeLY;
+    public float EyeGazeLZ;
+    public float EyeGazeRX;
+    public float EyeGazeRY;
+    public float EyeGazeRZ;
+    public float BlinkL;
+    public float BlinkR;
+    public float MouthOpen;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct NcSpoutOptions
 {
     public uint Width;
@@ -198,6 +219,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_get_springbone_info(ulong handle, out NcSpringBoneInfo outInfo);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_set_tracking_frame(ref NcTrackingFrame frame);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_create_render_resources(ulong handle);
