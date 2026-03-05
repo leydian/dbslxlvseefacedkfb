@@ -4476,8 +4476,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         });
         const bool is_mask = (alpha_mode == "MASK");
         const bool is_blend = (alpha_mode == "BLEND");
-        const bool force_no_cull_for_xav2 =
-            (item.pkg != nullptr && item.pkg->source_type == AvatarSourceType::Xav2);
+        const bool force_no_cull_for_avatar =
+            (item.pkg != nullptr &&
+                (item.pkg->source_type == AvatarSourceType::Xav2 ||
+                 item.pkg->source_type == AvatarSourceType::Vrm));
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         if (is_blend) {
             device_ctx->OMSetBlendState(renderer.blend_alpha, blend_factor, 0xFFFFFFFFU);
@@ -4492,13 +4494,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         if (outline_pass) {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
-            if (double_sided || force_no_cull_for_xav2) {
+            if (double_sided || force_no_cull_for_avatar) {
                 device_ctx->RSSetState(renderer.raster_cull_none);
             } else {
                 device_ctx->RSSetState(renderer.raster_cull_front);
             }
         } else {
-            device_ctx->RSSetState((double_sided || force_no_cull_for_xav2) ? renderer.raster_cull_none : renderer.raster_cull_back);
+            device_ctx->RSSetState((double_sided || force_no_cull_for_avatar) ? renderer.raster_cull_none : renderer.raster_cull_back);
         }
 
         const UINT stride = item.mesh->vertex_stride;

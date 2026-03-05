@@ -12,7 +12,7 @@
 - `vxavatar`: 4 reports
 - `wpf`: 14 reports
 - `release`: 3 reports
-- `vrm`: 13 reports
+- `vrm`: 14 reports
 - `winui`: 3 reports
 - `workspace`: 3 reports
 - `avatar`: 2 reports
@@ -50,3 +50,4 @@
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.
 - Newly added: review `2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md` for GateK/GateL policy, VRM unresolved warning-code normalization, and stage-1 MToon parity baseline telemetry.
 - Newly added: review `2026-03-06_vrm_node_transform_skinning_and_preview_yaw_autofallback.md` for skinned node-transform unification, conflict-only fallback warning contract, and VRM preview yaw auto-fallback diagnostics.
+- Newly added: review `2026-03-06_vrm_crash_guard_front_yaw_and_cull_hotfix.md` for invalid node-transform crash guard, VRM front-facing yaw default, and VRM no-cull render hotfix for transparent-looking outfit breakage.

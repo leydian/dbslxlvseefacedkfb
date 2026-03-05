@@ -89,6 +89,7 @@ Report list for this week.
 - [2026-03-06_vrm_springbone_mtoon_runtime_refinement.md](./2026-03-06_vrm_springbone_mtoon_runtime_refinement.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_uplift.md](./2026-03-06_vrm_springbone_mtoon_runtime_uplift.md)
 - [2026-03-06_vrm_node_transform_skinning_and_preview_yaw_autofallback.md](./2026-03-06_vrm_node_transform_skinning_and_preview_yaw_autofallback.md)
+- [2026-03-06_vrm_crash_guard_front_yaw_and_cull_hotfix.md](./2026-03-06_vrm_crash_guard_front_yaw_and_cull_hotfix.md)
 - [2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md](./2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md)
 - [2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md](./2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md)
 - [2026-03-06_vrm_to_xav2_strict_allowlist_and_quality_gate.md](./2026-03-06_vrm_to_xav2_strict_allowlist_and_quality_gate.md)
