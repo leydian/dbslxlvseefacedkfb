@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using HostCore;
@@ -36,6 +38,7 @@ public sealed partial class MainWindow : Window
     private string _lastRuntimeText = string.Empty;
     private string _lastAvatarText = string.Empty;
     private string _lastLogsText = string.Empty;
+    private bool _isLoadRunning;
     private readonly IntPtr _hwnd;
     private readonly AppWindow? _appWindow;
     private HostValidationState _validationState = new(true, true, true, string.Empty, string.Empty, string.Empty);
@@ -67,11 +70,14 @@ public sealed partial class MainWindow : Window
         _controller.StateChanged += Controller_StateChanged;
         _controller.DiagnosticsUpdated += Controller_DiagnosticsUpdated;
         _controller.ErrorRaised += Controller_ErrorRaised;
+        _controller.LoadProgressChanged += Controller_LoadProgressChanged;
         _isLogsTabActive = DiagnosticsTabControl.SelectedIndex == 2;
+        ApplySessionDefaultsToUi();
         RefreshValidationState();
         SyncRenderControlsFromState();
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
+        RefreshGuides();
         _uiRefreshTimer.Start();
     }
 
@@ -149,6 +155,7 @@ public sealed partial class MainWindow : Window
         picker.FileTypeFilter.Add(".vxavatar");
         picker.FileTypeFilter.Add(".vsfavatar");
         picker.FileTypeFilter.Add(".vxa2");
+        picker.FileTypeFilter.Add(".xav2");
         picker.FileTypeFilter.Add(".*");
         InitializeWithWindow.Initialize(picker, _hwnd);
 
@@ -165,7 +172,7 @@ public sealed partial class MainWindow : Window
         UpdateUiState();
     }
 
-    private void Load_Click(object sender, RoutedEventArgs e)
+    private async void Load_Click(object sender, RoutedEventArgs e)
     {
         if (_controller.OperationState.IsBusy)
         {
@@ -184,7 +191,28 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _ = _controller.LoadAvatar(AvatarPathTextBox.Text.Trim());
+        if (!int.TryParse(LoadTimeoutTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMs))
+        {
+            timeoutMs = 20000;
+            LoadTimeoutTextBox.Text = "20000";
+        }
+
+        _isLoadRunning = true;
+        UpdateUiState();
+        var guidance = _controller.BuildImportGuidance(AvatarPathTextBox.Text.Trim());
+        SessionStatusText.Text = $"Session: {guidance}";
+        var rc = await _controller.LoadAvatarAsync(AvatarPathTextBox.Text.Trim(), timeoutMs);
+        _isLoadRunning = false;
+        UpdateUiState();
+        if (rc != NcResultCode.Ok)
+        {
+            await ShowMessageAsync("Load Failed", $"Load failed: {rc}");
+        }
+    }
+
+    private void CancelLoad_Click(object sender, RoutedEventArgs e)
+    {
+        _controller.CancelLoadAvatar();
     }
 
     private async void Unload_Click(object sender, RoutedEventArgs e)
@@ -304,6 +332,108 @@ public sealed partial class MainWindow : Window
         var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
         package.SetText(LogsTextBox.Text);
         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+    }
+
+    private async void RunPreflight_Click(object sender, RoutedEventArgs e)
+    {
+        var preflight = _controller.RunPreflight();
+        var sb = new StringBuilder();
+        sb.AppendLine($"Preflight: {(preflight.Passed ? "PASS" : "FAIL")}");
+        foreach (var c in preflight.Checks)
+        {
+            sb.AppendLine($"- {(c.Passed ? "PASS" : "FAIL")} {c.Name}: {c.Detail}");
+            if (!c.Passed)
+            {
+                sb.AppendLine($"  remediation: {c.Remediation}");
+            }
+        }
+
+        var failed = preflight.Checks.Where(x => !x.Passed).ToList();
+        PreflightHintText.Text = failed.Count == 0
+            ? "Preflight passed. Proceed with Initialize -> Load -> Start outputs."
+            : "Preflight failed checks: " + string.Join(" | ", failed.Select(x => $"{x.Name}: {x.Remediation}"));
+
+        await ShowMessageAsync("Preflight Result", sb.ToString());
+    }
+
+    private async void ExportDiag_Click(object sender, RoutedEventArgs e)
+    {
+        var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "diagnostics");
+        var path = _controller.ExportDiagnosticsBundle(outputDir);
+        await ShowMessageAsync("Export Diagnostics", $"Diagnostics bundle created:\n{path}");
+    }
+
+    private async void ExportMetrics_Click(object sender, RoutedEventArgs e)
+    {
+        var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "metrics");
+        var path = _controller.ExportRollingMetricsCsv(Path.Combine(outputDir, $"metrics_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.csv"));
+        await ShowMessageAsync("Export Metrics", $"Metrics exported:\n{path}");
+    }
+
+    private void ProfileQuality_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("quality");
+    }
+
+    private void ProfilePerformance_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("performance");
+    }
+
+    private void ProfileStability_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("stability");
+    }
+
+    private void ApplySidecar_Click(object sender, RoutedEventArgs e)
+    {
+        var mode = ParserModeComboBox.SelectedItem as string ?? "sidecar";
+        if (!int.TryParse(SidecarTimeoutTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeoutMs))
+        {
+            timeoutMs = 15000;
+            SidecarTimeoutTextBox.Text = "15000";
+        }
+
+        _controller.ConfigureSidecarSettings(new SidecarSettings(
+            ParserMode: mode,
+            SidecarPath: SidecarPathTextBox.Text.Trim(),
+            TimeoutMs: timeoutMs,
+            StrictMode: SidecarStrictCheckBox.IsChecked == true));
+    }
+
+    private void ApplyTelemetry_Click(object sender, RoutedEventArgs e)
+    {
+        _controller.SetTelemetryPolicy(
+            TelemetryOptInCheckBox.IsChecked == true,
+            TelemetryRedactCheckBox.IsChecked == true);
+    }
+
+    private async void ExportTelemetry_Click(object sender, RoutedEventArgs e)
+    {
+        var outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VsfCloneHost", "telemetry");
+        var path = _controller.ExportTelemetry(Path.Combine(outputDir, $"telemetry_{DateTimeOffset.UtcNow:yyyyMMdd_HHmmss}.json"));
+        await ShowMessageAsync("Export Telemetry", $"Telemetry exported:\n{path}");
+    }
+
+    private void ApplyAutoQualityPolicy_Click(object sender, RoutedEventArgs e)
+    {
+        if (!float.TryParse(AutoQualityThresholdTextBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold))
+        {
+            threshold = 28.0f;
+            AutoQualityThresholdTextBox.Text = "28.0";
+        }
+        if (!int.TryParse(AutoQualityConsecutiveTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var consecutive))
+        {
+            consecutive = 120;
+            AutoQualityConsecutiveTextBox.Text = "120";
+        }
+        if (!int.TryParse(AutoQualityCooldownTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var cooldown))
+        {
+            cooldown = 30;
+            AutoQualityCooldownTextBox.Text = "30";
+        }
+
+        _controller.ConfigureAutoQualityPolicy(new AutoQualityPolicy(threshold, consecutive, cooldown));
     }
 
     private void BroadcastMode_Changed(object sender, RoutedEventArgs e)
@@ -565,6 +695,25 @@ public sealed partial class MainWindow : Window
     {
         ErrorStatusText.Text = $"LastError: {e.Source} {e.ResultCode}";
         _pendingLogsRefresh = true;
+        var guide = _controller.GetLastErrorGuidance();
+        if (!string.IsNullOrWhiteSpace(guide))
+        {
+            PreflightHintText.Text = guide;
+        }
+    }
+
+    private void Controller_LoadProgressChanged(object? sender, LoadProgressState e)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            LoadProgressBar.Value = e.Percent;
+            LoadProgressText.Text = $"Load progress: {e.Stage} ({e.Percent}%) - {e.Message}";
+            if (e.IsTerminal)
+            {
+                _isLoadRunning = false;
+                UpdateUiState();
+            }
+        });
     }
 
     private void MarkAllDirty(bool includeLogs)
@@ -605,7 +754,8 @@ public sealed partial class MainWindow : Window
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
         ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
         BrowseAvatarButton.IsEnabled = uiState.BrowseAvatarEnabled;
-        LoadButton.IsEnabled = uiState.LoadEnabled;
+        LoadButton.IsEnabled = uiState.LoadEnabled && !_isLoadRunning;
+        CancelLoadButton.IsEnabled = _isLoadRunning;
         UnloadButton.IsEnabled = uiState.UnloadEnabled;
         StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
@@ -627,12 +777,23 @@ public sealed partial class MainWindow : Window
         ResetRenderButton.IsEnabled = uiState.RenderControlsEnabled;
         PresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
         PresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        RunPreflightButton.IsEnabled = !operation.IsBusy;
+        ExportDiagButton.IsEnabled = !operation.IsBusy;
+        ExportMetricsButton.IsEnabled = !operation.IsBusy;
+        ParserModeComboBox.IsEnabled = !operation.IsBusy;
+        SidecarPathTextBox.IsEnabled = !operation.IsBusy;
+        SidecarTimeoutTextBox.IsEnabled = !operation.IsBusy;
+        SidecarStrictCheckBox.IsEnabled = !operation.IsBusy;
+        TelemetryOptInCheckBox.IsEnabled = !operation.IsBusy;
+        TelemetryRedactCheckBox.IsEnabled = !operation.IsBusy;
+        LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
         RenderStatusText.Text = $"Render: {statusText.RenderText}";
         OutputStatusText.Text = $"Outputs: {statusText.OutputText}";
         BusyStatusText.Text = $"Busy: {statusText.BusyText}";
+        TrackStatusText.Text = $"Track: {_controller.GetReleaseTrackStatus()}";
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
     }
@@ -951,5 +1112,38 @@ public sealed partial class MainWindow : Window
             ShowDebugOverlay = DebugOverlayCheckBox.IsChecked == true,
         };
         return _controller.ApplyRenderUiState(state);
+    }
+
+    private void ApplySessionDefaultsToUi()
+    {
+        var session = _controller.SessionPersistence;
+        if (!string.IsNullOrWhiteSpace(session.AvatarPath))
+        {
+            AvatarPathTextBox.Text = session.AvatarPath;
+        }
+
+        SpoutChannelTextBox.Text = session.SpoutChannelName;
+        OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
+        OscPublishAddressTextBox.Text = session.OscPublishAddress;
+
+        SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
+        SidecarTimeoutTextBox.Text = session.Sidecar.TimeoutMs.ToString(CultureInfo.InvariantCulture);
+        SidecarStrictCheckBox.IsChecked = session.Sidecar.StrictMode;
+        ParserModeComboBox.SelectedIndex = session.Sidecar.ParserMode switch
+        {
+            "inhouse" => 1,
+            "sidecar-strict" => 2,
+            _ => 0,
+        };
+
+        var aq = _controller.GetAutoQualityPolicy();
+        AutoQualityThresholdTextBox.Text = aq.HighFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
+        AutoQualityConsecutiveTextBox.Text = aq.ConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
+        AutoQualityCooldownTextBox.Text = aq.CooldownSeconds.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void RefreshGuides()
+    {
+        GuidesTextBox.Text = _controller.GetQuickstartText() + Environment.NewLine + Environment.NewLine + _controller.GetCompatibilityText();
     }
 }

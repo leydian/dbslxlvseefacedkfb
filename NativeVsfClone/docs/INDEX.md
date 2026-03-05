@@ -15,6 +15,7 @@ Entry point for `NativeVsfClone` documentation.
 
 ## Reports
 
+- [r01_r20_phase2_winui_parity_execution_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_phase2_winui_parity_execution_2026-03-05.md): phase-2 execution report for WinUI parity lift (Platform Ops, async-load progress/cancel, guides/track status) with current XAML compiler blocker evidence
 - [r01_r20_detailed_plan_and_execution_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_detailed_plan_and_execution_2026-03-05.md): detailed execution plan plus implementation result for the latest R01-R20 follow-up round (Top5 hardening)
 - [platform_persona_requirements_reassessment_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/platform_persona_requirements_reassessment_2026-03-05.md): latest-state reassessment of 20 platform requirements with 3 user personas + planner/developer, including coverage tags and updated Top 5 execution priorities
 - [r01_r20_mvp_implementation_round_2026-03-05.md](/D:/dbslxlvseefacedkfb/NativeVsfClone/docs/reports/r01_r20_mvp_implementation_round_2026-03-05.md): detailed implementation rollup for R01-R20 MVP feature code across HostCore/WPF/tools with verification and coverage snapshot

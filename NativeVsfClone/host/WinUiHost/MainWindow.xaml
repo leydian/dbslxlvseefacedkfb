@@ -19,6 +19,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
@@ -47,8 +48,21 @@
                     <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
                         <Button x:Name="LoadButton" Content="Load" Click="Load_Click" MinWidth="92"/>
+                        <Button x:Name="CancelLoadButton" Content="Cancel Load" Click="CancelLoad_Click" MinWidth="92"/>
                         <Button x:Name="UnloadButton" Content="Unload" Click="Unload_Click" MinWidth="92"/>
                     </StackPanel>
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="40"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Timeout" VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" x:Name="LoadTimeoutTextBox" Text="20000"/>
+                        <TextBlock Grid.Column="2" Text="ms" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                    </Grid>
+                    <ProgressBar x:Name="LoadProgressBar" Minimum="0" Maximum="100" Value="0" Margin="0,8,0,0"/>
+                    <TextBlock x:Name="LoadProgressText" Text="Load progress: idle" Margin="0,4,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
             </Border>
 
@@ -186,6 +200,80 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
+
+            <Border Grid.Row="4" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
+                <StackPanel>
+                    <TextBlock Text="Platform Ops" FontSize="16"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,8">
+                        <Button x:Name="RunPreflightButton" Content="Run Preflight" Click="RunPreflight_Click" MinWidth="112"/>
+                        <Button x:Name="ExportDiagButton" Content="Export Diagnostics" Click="ExportDiag_Click" MinWidth="128"/>
+                        <Button x:Name="ExportMetricsButton" Content="Export Metrics" Click="ExportMetrics_Click" MinWidth="112"/>
+                    </StackPanel>
+                    <TextBlock x:Name="PreflightHintText" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                    <TextBlock Text="Render Profiles"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,8">
+                        <Button Content="Quality" Click="ProfileQuality_Click" MinWidth="92"/>
+                        <Button Content="Performance" Click="ProfilePerformance_Click" MinWidth="92"/>
+                        <Button Content="Stability" Click="ProfileStability_Click" MinWidth="92"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Sidecar Settings"/>
+                    <Grid Margin="0,4,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Mode"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" x:Name="ParserModeComboBox">
+                            <x:String>sidecar</x:String>
+                            <x:String>inhouse</x:String>
+                            <x:String>sidecar-strict</x:String>
+                        </ComboBox>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Path" Margin="0,8,0,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="SidecarPathTextBox" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Timeout" Margin="0,8,0,0"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="SidecarTimeoutTextBox" Text="15000" Margin="0,8,0,0"/>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                        <CheckBox x:Name="SidecarStrictCheckBox" Content="Strict Mode (no fallback)"/>
+                        <Button Content="Apply Sidecar" Click="ApplySidecar_Click" MinWidth="112"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Telemetry"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,8">
+                        <CheckBox x:Name="TelemetryOptInCheckBox" Content="Opt-in"/>
+                        <CheckBox x:Name="TelemetryRedactCheckBox" Content="Redact Sensitive" IsChecked="True"/>
+                        <Button Content="Apply Telemetry" Click="ApplyTelemetry_Click" MinWidth="112"/>
+                        <Button Content="Export Telemetry" Click="ExportTelemetry_Click" MinWidth="120"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Auto Quality Policy"/>
+                    <Grid Margin="0,4,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Threshold"/>
+                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="AutoQualityThresholdTextBox" Text="28.0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Consecutive" Margin="0,8,0,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="AutoQualityConsecutiveTextBox" Text="120" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Cooldown" Margin="0,8,0,0"/>
+                        <TextBox Grid.Row="2" Grid.Column="1" x:Name="AutoQualityCooldownTextBox" Text="30" Margin="0,8,0,0"/>
+                    </Grid>
+                    <Button Content="Apply Auto Quality Policy" Click="ApplyAutoQualityPolicy_Click" MinWidth="180"/>
+                </StackPanel>
+            </Border>
         </Grid>
         </ScrollViewer>
 
@@ -223,6 +311,9 @@
                         <TextBox x:Name="LogsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,4,0,0"/>
                     </StackPanel>
                 </TabViewItem>
+                <TabViewItem Header="Guides">
+                    <TextBox x:Name="GuidesTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                </TabViewItem>
             </TabView>
 
             <Border Grid.Row="2" Padding="8" Background="#0F1720" BorderBrush="#2D3A48" BorderThickness="1">
@@ -234,6 +325,7 @@
                     <TextBlock x:Name="OutputStatusText" Foreground="#D7E6F5"/>
                     <TextBlock x:Name="BusyStatusText" Foreground="#D7E6F5"/>
                     <TextBlock x:Name="ErrorStatusText" Foreground="#F2B8B5"/>
+                    <TextBlock x:Name="TrackStatusText" Foreground="#D7E6F5"/>
                 </StackPanel>
             </Border>
         </Grid>

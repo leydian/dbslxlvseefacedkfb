@@ -2,6 +2,34 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-05 - R01-R20 phase2 execution: WinUI parity lift and operational controls
+
+### Summary
+
+Executed the next R01-R20 delivery slice by porting WPF-side operational controls to WinUI for parity, including async load progress/cancel UX, preflight/remediation surfaces, auto-quality policy control, and guide/track visibility.
+
+### Changed
+
+- WinUI host parity implementation:
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - added:
+    - avatar load timeout + cancel + progress stage UI
+    - platform ops controls (preflight, diagnostics export, metrics export, profiles, sidecar, telemetry, auto-quality policy)
+    - guides tab and track-status text surface
+    - `.xav2` picker filter support
+    - event wiring for `LoadProgressChanged`, preflight remediation, and error guidance
+- docs updates:
+  - `docs/reports/r01_r20_phase2_winui_parity_execution_2026-03-05.md` (new)
+  - `docs/INDEX.md` (new report link)
+
+### Verified
+
+- build:
+  - `dotnet build NativeVsfClone\host\HostCore\HostCore.csproj -c Release` PASS
+  - `dotnet build NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+  - `dotnet build NativeVsfClone\host\WinUiHost\WinUiHost.csproj -c Release -p:Platform=x64 --no-restore` FAIL (existing `MSB3073`/`XamlCompiler.exe` path)
+
 ## 2026-03-05 - R01-R20 follow-up hardening (detailed plan + Top5 execution)
 
 ### Summary
