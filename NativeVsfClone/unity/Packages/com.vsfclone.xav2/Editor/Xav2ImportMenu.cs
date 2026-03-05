@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -67,6 +68,130 @@ namespace VsfClone.Xav2.Editor
                 Selection.activeObject = prefab;
                 EditorGUIUtility.PingObject(prefab);
             }
+        }
+
+        [MenuItem("Tools/VsfClone/XAV2/Diagnose Rig (Strict/Fallback)...", priority = 21)]
+        public static void DiagnoseRigStrictVsFallback()
+        {
+            var inputPath = EditorUtility.OpenFilePanel("Diagnose XAV2 Rig", Application.dataPath, "xav2");
+            if (string.IsNullOrWhiteSpace(inputPath))
+            {
+                return;
+            }
+
+            const string strictRoot = "Assets/ImportedXav2DiagStrict";
+            const string fallbackRoot = "Assets/ImportedXav2DiagFallback";
+
+            AssetDatabase.DeleteAsset(strictRoot);
+            AssetDatabase.DeleteAsset(fallbackRoot);
+            AssetDatabase.Refresh();
+
+            var strictOptions = new Xav2ImportOptions
+            {
+                OutputRoot = strictRoot,
+                FailOnRigDataMissing = true,
+                RigRecoveryPolicy = Xav2RigRecoveryPolicy.Strict
+            };
+            var fallbackOptions = new Xav2ImportOptions
+            {
+                OutputRoot = fallbackRoot,
+                FailOnRigDataMissing = false,
+                RigRecoveryPolicy = Xav2RigRecoveryPolicy.Fallback
+            };
+
+            var strictReport = Xav2Importer.Import(inputPath, strictOptions);
+            var fallbackReport = Xav2Importer.Import(inputPath, fallbackOptions);
+            var summary = BuildRigDiagnosticSummary(inputPath, strictReport, fallbackReport);
+
+            Debug.Log($"[XAV2] Rig diagnosis completed.\n{summary}");
+            EditorUtility.DisplayDialog("XAV2 Rig Diagnosis", summary, "OK");
+        }
+
+        private static string BuildRigDiagnosticSummary(
+            string inputPath,
+            Xav2ImportReport strictReport,
+            Xav2ImportReport fallbackReport)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"Source: {Path.GetFileName(inputPath)}");
+            AppendPolicySummary(sb, "Strict", strictReport);
+            AppendPolicySummary(sb, "Fallback", fallbackReport);
+            sb.AppendLine("Decision guide:");
+            if (!strictReport.Success && fallbackReport.Success)
+            {
+                sb.AppendLine("- Strict failed and fallback succeeded: fix rig source data, then re-export.");
+            }
+            else if (strictReport.Success && strictReport.RigDiagnostics.Count > 0)
+            {
+                sb.AppendLine("- Strict succeeded with rig diagnostics: investigate rig warnings before shipping.");
+            }
+            else if (strictReport.Success && strictReport.RigDiagnostics.Count == 0)
+            {
+                sb.AppendLine("- Strict succeeded without rig diagnostics: rig data is likely healthy.");
+            }
+            else
+            {
+                sb.AppendLine("- Both paths failed: inspect warning/error codes and source file integrity first.");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static void AppendPolicySummary(StringBuilder sb, string policyName, Xav2ImportReport report)
+        {
+            sb.AppendLine($"{policyName}: success={report.Success}, partial={report.IsPartial}, rigQuality={report.RigQuality}");
+            if (!report.Success && !string.IsNullOrWhiteSpace(report.ErrorMessage))
+            {
+                sb.AppendLine($"  error: {report.ErrorMessage}");
+            }
+
+            sb.AppendLine($"  warnings={report.Warnings.Count}, recoverable={report.RecoverableErrors.Count}, rigDiagnostics={report.RigDiagnostics.Count}");
+            var rigCodes = CollectRigCodes(report);
+            sb.AppendLine($"  rigCodes={(rigCodes.Count > 0 ? string.Join(", ", rigCodes) : "none")}");
+        }
+
+        private static List<string> CollectRigCodes(Xav2ImportReport report)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>();
+
+            for (var i = 0; i < report.WarningCodes.Count; i++)
+            {
+                var code = report.WarningCodes[i];
+                if (!string.IsNullOrWhiteSpace(code) && code.StartsWith("XAV4_RIG_") && seen.Add(code))
+                {
+                    result.Add(code);
+                }
+            }
+
+            for (var i = 0; i < report.Warnings.Count; i++)
+            {
+                var warning = report.Warnings[i];
+                var marker = "XAV4_RIG_";
+                var idx = warning.IndexOf(marker, System.StringComparison.Ordinal);
+                if (idx < 0)
+                {
+                    continue;
+                }
+
+                var end = warning.IndexOf(':', idx);
+                var code = end > idx ? warning.Substring(idx, end - idx) : warning.Substring(idx);
+                if (seen.Add(code))
+                {
+                    result.Add(code);
+                }
+            }
+
+            for (var i = 0; i < report.RigDiagnostics.Count; i++)
+            {
+                var code = report.RigDiagnostics[i].Code;
+                if (!string.IsNullOrWhiteSpace(code) && seen.Add(code))
+                {
+                    result.Add(code);
+                }
+            }
+
+            return result;
         }
     }
 }

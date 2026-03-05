@@ -423,7 +423,7 @@ namespace VsfClone.Xav2.Editor
                 Radius = GetFloatMember(component, "hitRadius", "radius", "Radius"),
                 Gravity = GetVector3Member(component, "gravityDir", "gravity", "GravityDir"),
                 ColliderRefs = GetColliderRefs(component, colliderNameByInstance),
-                Enabled = component.enabled
+                Enabled = GetComponentEnabled(component)
             };
         }
 
@@ -450,8 +450,13 @@ namespace VsfClone.Xav2.Editor
                 Radius = GetFloatMember(component, "radius", "Radius"),
                 Gravity = GetVector3Member(component, "gravity", "Gravity"),
                 ColliderRefs = GetColliderRefs(component, colliderNameByInstance),
-                Enabled = component.enabled
+                Enabled = GetComponentEnabled(component)
             };
+        }
+
+        private static bool GetComponentEnabled(Component component)
+        {
+            return component is Behaviour behaviour ? behaviour.enabled : true;
         }
 
         private static List<string> ResolveBonePaths(Transform root, IReadOnlyList<Transform> bones)

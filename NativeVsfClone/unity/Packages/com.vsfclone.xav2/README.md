@@ -28,6 +28,7 @@ Runtime load policy:
   - menu export defaults to compression enabled (`LZ4/Balanced`, format `v5`)
 - Import:
   - `Tools/VsfClone/XAV2/Import XAV2...`
+  - `Tools/VsfClone/XAV2/Diagnose Rig (Strict/Fallback)...`
   - Output root default: `Assets/ImportedXav2/<avatarId>/`
   - Collision policy default: unique suffix (`_1`, `_2`, ...)
   - Partial import default: continue with warnings
@@ -35,6 +36,12 @@ Runtime load policy:
   - Rig policy defaults:
     - `FailOnRigDataMissing = true`
     - `RigRecoveryPolicy = Strict`
+
+Rig diagnosis workflow:
+
+- Run `Diagnose Rig (Strict/Fallback)...` on the same `.xav2` that shows rendering breakage.
+- Compare `success`, `rigQuality`, `rigDiagnostics`, and `rigCodes` between strict/fallback.
+- If strict fails but fallback succeeds, treat it as source rig data quality issue and regenerate the source avatar file.
 
 ## Runtime loader API
 
