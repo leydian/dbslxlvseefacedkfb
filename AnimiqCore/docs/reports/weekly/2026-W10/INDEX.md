@@ -182,6 +182,7 @@ Report list for this week.
 - [2026-03-06_vrm_to_miq_quality_runtime_validation_hardening.md](./2026-03-06_vrm_to_miq_quality_runtime_validation_hardening.md)
 - [2026-03-06_vrm_runtime_metrics_v2_api.md](./2026-03-06_vrm_runtime_metrics_v2_api.md)
 - [2026-03-06_nativecore_realtime_shadow_pipeline.md](./2026-03-06_nativecore_realtime_shadow_pipeline.md)
+- [2026-03-06_nativecore_fallback_hardening_dominant_cause_warning_convergence.md](./2026-03-06_nativecore_fallback_hardening_dominant_cause_warning_convergence.md)
 - [2026-03-06_animiq_rebrand_and_miq_migration.md](./2026-03-06_animiq_rebrand_and_miq_migration.md)
 - [2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md](./2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md)
 - [2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md](./2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md)

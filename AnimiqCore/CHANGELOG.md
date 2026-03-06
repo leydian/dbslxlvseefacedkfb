@@ -2,6 +2,62 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - NativeCore fallback hardening: dominant-cause warning exclusivity + arm/shadow/expression resilience
+
+### Summary
+
+Implemented NativeCore-side runtime fallback hardening so mixed-quality VRM/MIQ inputs preserve core render liveliness while diagnostics converge to a single dominant cause instead of stale multi-cause accumulation.
+
+Primary outcomes:
+
+- arm-pose disable diagnostics now resolve to explicit runtime causes (`format unsupported` vs `payload missing` vs `policy disabled`),
+- shadow-disable diagnostics are emitted as a mutually exclusive set to avoid stale reason carry-over,
+- warning classification now recognizes feature-gate/recovery codes as render-class warnings (and `NC_SET_*` as critical render errors),
+- VRM expression fallback now emits a warning code alongside MIQ for parity.
+
+### Changed
+
+- Native runtime diagnostics and warning lifecycle:
+  - `src/nativecore/native_core.cpp`
+  - added:
+    - `RemoveAvatarWarningCode(...)`
+    - `PushAvatarWarningExclusive(...)`
+  - behavior:
+    - before pushing a new dominant warning code in the same family, prior family codes/messages are removed.
+- Warning metadata classification expansion:
+  - `src/nativecore/native_core.cpp`
+  - newly recognized as render warnings:
+    - `ARM_POSE_*`
+    - `SHADOW_DISABLED_*`
+    - `TRACKING_*`
+    - `EXPRESSION_COUNT_ZERO`
+    - `SHADOW_PASS_NOT_REPORTED`
+  - newly recognized as critical render errors:
+    - `NC_SET_*`
+- Arm-pose fallback reason tightening:
+  - `src/nativecore/native_core.cpp` (`ApplyArmPoseToAvatar(...)`)
+  - on disable path, emits exactly one of:
+    - `ARM_POSE_FORMAT_UNSUPPORTED` (non-MIQ)
+    - `ARM_POSE_PAYLOAD_MISSING` (incomplete skin/skeleton/rig payloads)
+    - `ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY` (policy gated with complete payloads)
+- Shadow dominant-cause convergence:
+  - `src/nativecore/native_core.cpp` (render queue build path)
+  - shadow disable reason is now exclusive across:
+    - `SHADOW_DISABLED_TOGGLE_OFF`
+    - `SHADOW_DISABLED_FAST_FALLBACK`
+    - `SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL`
+    - `SHADOW_DISABLED_SHADOW_DRAW_EMPTY`
+- VRM/MIQ expression fallback warning-code parity:
+  - `src/nativecore/native_core.cpp` (`nc_load_avatar(...)`)
+  - added VRM fallback warning code:
+    - `VRM_EXPRESSION_FALLBACK_APPLIED`
+  - MIQ existing code retained:
+    - `MIQ_EXPRESSION_FALLBACK_APPLIED`
+
+### Verification
+
+- `cmake --build AnimiqCore/build_plan_impl --config Release --target nativecore`: PASS
+
 ## 2026-03-06 - Tracking diagnostics consistency: ARKit52 snapshot merge + iFacial backend-ready alignment
 
 ### Summary

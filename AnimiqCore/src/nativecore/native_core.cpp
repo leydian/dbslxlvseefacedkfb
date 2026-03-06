@@ -710,6 +710,22 @@ WarningMeta ClassifyWarningCode(std::string code) {
         meta.critical = false;
         return meta;
     }
+    if (code.rfind("arm_pose_", 0U) == 0U ||
+        code.rfind("shadow_disabled_", 0U) == 0U ||
+        code == "shadow_pass_not_reported" ||
+        code.rfind("tracking_", 0U) == 0U ||
+        code == "expression_count_zero") {
+        meta.severity = "warn";
+        meta.category = "render";
+        meta.critical = false;
+        return meta;
+    }
+    if (code.rfind("nc_set_", 0U) == 0U) {
+        meta.severity = "error";
+        meta.category = "render";
+        meta.critical = true;
+        return meta;
+    }
     if (code.rfind("miq_", 0U) == 0U || code.rfind("xav3_", 0U) == 0U || code.rfind("xav4_", 0U) == 0U) {
         meta.severity = "warn";
         meta.category = "render";
@@ -2106,6 +2122,37 @@ void PushAvatarWarningUnique(AvatarPackage* pkg, const std::string& message, con
     if (std::find(pkg->warning_codes.begin(), pkg->warning_codes.end(), code) == pkg->warning_codes.end()) {
         pkg->warning_codes.push_back(code);
     }
+}
+
+void RemoveAvatarWarningCode(AvatarPackage* pkg, const std::string& code) {
+    if (pkg == nullptr || code.empty()) {
+        return;
+    }
+    pkg->warning_codes.erase(
+        std::remove(pkg->warning_codes.begin(), pkg->warning_codes.end(), code),
+        pkg->warning_codes.end());
+    pkg->warnings.erase(
+        std::remove_if(pkg->warnings.begin(), pkg->warnings.end(), [&](const std::string& warning) {
+            return warning.find(code) != std::string::npos;
+        }),
+        pkg->warnings.end());
+}
+
+void PushAvatarWarningExclusive(
+    AvatarPackage* pkg,
+    const std::string& message,
+    const std::string& code,
+    std::initializer_list<const char*> exclusive_codes) {
+    if (pkg == nullptr) {
+        return;
+    }
+    for (const char* exclusive_code : exclusive_codes) {
+        if (exclusive_code == nullptr || *exclusive_code == '\0') {
+            continue;
+        }
+        RemoveAvatarWarningCode(pkg, exclusive_code);
+    }
+    PushAvatarWarningUnique(pkg, message, code);
 }
 
 std::string ToLowerAscii(std::string s) {
@@ -4022,13 +4069,30 @@ bool ApplyArmPoseToAvatar(
     }
     const bool arm_pose_enabled = ShouldApplyArmPoseForAvatar(avatar_pkg);
     if (!arm_pose_enabled) {
-        if (!avatar_pkg.skin_payloads.empty()) {
-            auto avatar_it = g_state.avatars.find(handle);
-            if (avatar_it != g_state.avatars.end()) {
-                PushAvatarWarningUnique(
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            const bool payload_complete =
+                !avatar_pkg.skin_payloads.empty() &&
+                !avatar_pkg.skeleton_payloads.empty() &&
+                !avatar_pkg.skeleton_rig_payloads.empty();
+            if (avatar_pkg.source_type != AvatarSourceType::Miq) {
+                PushAvatarWarningExclusive(
+                    &avatar_it->second,
+                    "W_RENDER: ARM_POSE_FORMAT_UNSUPPORTED: arm pose is supported for MIQ payloads.",
+                    "ARM_POSE_FORMAT_UNSUPPORTED",
+                    {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+            } else if (!payload_complete) {
+                PushAvatarWarningExclusive(
+                    &avatar_it->second,
+                    "W_RENDER: ARM_POSE_PAYLOAD_MISSING: arm pose skipped due to missing skin/skeleton/rig payload.",
+                    "ARM_POSE_PAYLOAD_MISSING",
+                    {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+            } else {
+                PushAvatarWarningExclusive(
                     &avatar_it->second,
                     "W_RENDER: ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY: arm pose skipped due to static skinning policy.",
-                    "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY");
+                    "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY",
+                    {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
             }
         }
         return true;
@@ -4040,10 +4104,11 @@ bool ApplyArmPoseToAvatar(
     if (avatar_pkg.skin_payloads.empty() || avatar_pkg.skeleton_payloads.empty() || avatar_pkg.skeleton_rig_payloads.empty()) {
         auto avatar_it = g_state.avatars.find(handle);
         if (avatar_it != g_state.avatars.end()) {
-            PushAvatarWarningUnique(
+            PushAvatarWarningExclusive(
                 &avatar_it->second,
                 "W_RENDER: ARM_POSE_PAYLOAD_MISSING: arm pose skipped due to missing skin/skeleton/rig payload.",
-                "ARM_POSE_PAYLOAD_MISSING");
+                "ARM_POSE_PAYLOAD_MISSING",
+                {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
         }
         return true;
     }
@@ -6648,25 +6713,29 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
                 if (lighting.enable_shadow == 0U) {
-                    PushAvatarWarningUnique(
+                    PushAvatarWarningExclusive(
                         &avatar_it->second,
                         "W_RENDER: SHADOW_DISABLED_TOGGLE_OFF: lighting.enable_shadow=0.",
-                        "SHADOW_DISABLED_TOGGLE_OFF");
+                        "SHADOW_DISABLED_TOGGLE_OFF",
+                        {"SHADOW_DISABLED_TOGGLE_OFF", "SHADOW_DISABLED_FAST_FALLBACK", "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL", "SHADOW_DISABLED_SHADOW_DRAW_EMPTY"});
                 } else if (fast_fallback) {
-                    PushAvatarWarningUnique(
+                    PushAvatarWarningExclusive(
                         &avatar_it->second,
                         "W_RENDER: SHADOW_DISABLED_FAST_FALLBACK: quality profile disables realtime shadow pass.",
-                        "SHADOW_DISABLED_FAST_FALLBACK");
+                        "SHADOW_DISABLED_FAST_FALLBACK",
+                        {"SHADOW_DISABLED_TOGGLE_OFF", "SHADOW_DISABLED_FAST_FALLBACK", "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL", "SHADOW_DISABLED_SHADOW_DRAW_EMPTY"});
                 } else if (!avatar_has_shadow_capable_material) {
-                    PushAvatarWarningUnique(
+                    PushAvatarWarningExclusive(
                         &avatar_it->second,
                         "W_RENDER: SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL: no material advertises shadow pass.",
-                        "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL");
+                        "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL",
+                        {"SHADOW_DISABLED_TOGGLE_OFF", "SHADOW_DISABLED_FAST_FALLBACK", "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL", "SHADOW_DISABLED_SHADOW_DRAW_EMPTY"});
                 } else if (!avatar_shadow_draw_enqueued) {
-                    PushAvatarWarningUnique(
+                    PushAvatarWarningExclusive(
                         &avatar_it->second,
                         "W_RENDER: SHADOW_DISABLED_SHADOW_DRAW_EMPTY: shadow-capable materials exist but no shadow draw was enqueued.",
-                        "SHADOW_DISABLED_SHADOW_DRAW_EMPTY");
+                        "SHADOW_DISABLED_SHADOW_DRAW_EMPTY",
+                        {"SHADOW_DISABLED_TOGGLE_OFF", "SHADOW_DISABLED_FAST_FALLBACK", "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL", "SHADOW_DISABLED_SHADOW_DRAW_EMPTY"});
                 }
             }
         }
@@ -7326,6 +7395,7 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
         loaded.value.expressions.push_back({"joy", "joy", 0.0f, 0.0f});
         if (loaded.value.source_type == animiq::avatar::AvatarSourceType::Vrm) {
             loaded.value.warnings.push_back("W_VRM_EXPRESSION_FALLBACK: runtime injected blink/aa/joy expression defaults");
+            loaded.value.warning_codes.push_back("VRM_EXPRESSION_FALLBACK_APPLIED");
         } else {
             loaded.value.warnings.push_back("W_MIQ_EXPRESSION_FALLBACK: runtime injected blink/aa/joy expression defaults");
             loaded.value.warning_codes.push_back("MIQ_EXPRESSION_FALLBACK_APPLIED");
