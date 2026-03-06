@@ -40,6 +40,11 @@ Updated `host/WinUiHost/MainWindow.xaml` resources:
 Behavioral impact:
 - no logic change; visual semantics become centralized and easier to retune.
 
+Detailed footprint:
+- token declarations expanded in `MainWindow.xaml` near window resource block
+- onboarding/status related token families are now grouped semantically rather than left as one-off literals
+- token naming follows existing `Brush.*` pattern to remain compatible with current resource lookup style
+
 ### 2) Onboarding action bar styling moved to semantic token usage
 
 Updated onboarding surfaces in `MainWindow.xaml`:
@@ -51,6 +56,12 @@ Updated onboarding surfaces in `MainWindow.xaml`:
 
 Behavioral impact:
 - improved visual coherence across onboarding states and section cards.
+
+Detailed footprint:
+- onboarding panel: border/background/title/body now resource-driven
+- step strip: background/border/text color moved to resource keys
+- status and section card borders normalized to `Brush.CardBorder` for cross-panel consistency
+- validation text path updated from literal red to `Brush.Error`
 
 ### 3) Actionability badge state color hardcoding removed from code-behind
 
@@ -69,6 +80,11 @@ Updated `host/WinUiHost/MainWindow.xaml.cs`:
 Behavioral impact:
 - badge state style now follows resource contract and stays in sync with theme/token changes.
 
+Detailed footprint:
+- `ActionabilityBadgeBorder` named element added in XAML for code-behind state styling
+- `ResolveBrush(string key)` centralizes resource resolution and null-safe fallback behavior
+- runtime state transitions now update all three badge visuals (text/bg/border) through token keys only
+
 ## Verification
 
 Executed:
@@ -78,10 +94,21 @@ Executed:
 2. `dotnet build NativeVsfClone\host\WinUiHost\WinUiHost.csproj -c Release --no-restore /p:BuildProjectReferences=false`
 - FAIL in this environment at WinUI markup compiler step (`XamlCompiler.exe` exit code `1`), same environment-dependent diagnostic limitation as before.
 
+Manual review checks completed:
+- confirmed no remaining `ColorHelper` hardcoded badge color writes in `MainWindow.xaml.cs`
+- confirmed onboarding badge state branch (`READY` / `BLOCKED`) now maps to resource keys for text/background/border
+- confirmed resource keys referenced in code exist in XAML resource dictionary
+
 ## Risks / Limitations
 
 - WinUI compile verification is still constrained by current environment-level XAML compiler diagnostics.
 - This pass improves style consistency but does not yet introduce a shared cross-host token source between WPF `App.xaml` and WinUI resources.
+
+Acceptance checklist status:
+- `Actionability badge literal colors removed`: DONE
+- `Onboarding/step color semantics tokenized`: DONE
+- `Primary status/card border consistency pass`: DONE
+- `WinUI compile pass with line-level diagnostics`: BLOCKED (environment)
 
 ## Next Steps
 
