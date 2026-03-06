@@ -101,6 +101,7 @@ Report list for this week.
 - [2026-03-06_tracking_ifacial_key_alias_expansion_for_ifm_lr_prefix.md](./2026-03-06_tracking_ifacial_key_alias_expansion_for_ifm_lr_prefix.md)
 - [2026-03-06_tracking_ifm_key_sample_telemetry_and_browouterup_alias_fix.md](./2026-03-06_tracking_ifm_key_sample_telemetry_and_browouterup_alias_fix.md)
 - [2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md](./2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md)
+- [2026-03-06_tracking_arkit52_snapshot_consistency_and_ifacial_backend_ready_fix.md](./2026-03-06_tracking_arkit52_snapshot_consistency_and_ifacial_backend_ready_fix.md)
 - [2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md](./2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md)
 - [2026-03-06_tracking_wpf_benchmark_controls_basic_advanced.md](./2026-03-06_tracking_wpf_benchmark_controls_basic_advanced.md)
 - [2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md](./2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md)

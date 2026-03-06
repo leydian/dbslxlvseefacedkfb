@@ -839,6 +839,7 @@ public sealed class TrackingInputService : ITrackingInputService
                     DroppedPackets = _diagnostics.DroppedPackets + 1,
                     SourceStatus = sourceStatus,
                     StatusMessage = statusMessage,
+                    ModelSchemaOk = false,
                     LastErrorCode = lastErrorCode,
                 };
                 _ifacialConsecutiveFailures++;
@@ -856,6 +857,7 @@ public sealed class TrackingInputService : ITrackingInputService
                         ? "udp-drop-threshold-exceeded"
                         : "udp-no-mapped-channels",
                     StatusMessage = "packet dropped (no mapped channels)",
+                    ModelSchemaOk = false,
                     LastErrorCode = (_diagnostics.DroppedPackets + 1 >= (ulong)_options.DroppedPacketWarnThreshold)
                         ? "TRACKING_DROP_THRESHOLD_EXCEEDED"
                         : "TRACKING_NO_MAPPED_CHANNELS",
@@ -888,6 +890,7 @@ public sealed class TrackingInputService : ITrackingInputService
                         ? (hadReceiveTimeout ? "ifacial-active:receive-recovered" : "ifacial-active")
                         : "ifacial-recovering",
                     StatusMessage = hadReceiveTimeout ? $"receiving:{formatName}:recovered" : $"receiving:{formatName}",
+                    ModelSchemaOk = true,
                     LastErrorCode = string.Empty,
                     ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
                     FallbackCount = _fallbackCount,

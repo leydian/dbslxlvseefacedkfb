@@ -2,6 +2,38 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking diagnostics consistency: ARKit52 snapshot merge + iFacial backend-ready alignment
+
+### Summary
+
+Fixed a host diagnostics merge issue where ARKit52 resolution counters could be computed during `Tick()` but then overwritten by subsequent service snapshot refresh, leading to misleading `arkit52=0/52` displays under active iFacial traffic.
+
+Also aligned iFacial diagnostics to set `ModelSchemaOk` (`backend_ready`) explicitly:
+
+- `true` on successful mapped receive path
+- `false` on parse/no-mapped failure paths
+
+### Changed
+
+- Host diagnostics merge path:
+  - `host/HostCore/HostController.cs`
+  - added cached ARKit52 summary state and re-apply step after service diagnostics refresh
+  - added shared helper to apply ARKit52 summary fields consistently
+  - reset cached summary on tracking lifecycle boundaries (`StartTracking`, `StopTracking`, `RecenterTracking`, `Shutdown`)
+- iFacial receive diagnostics:
+  - `host/HostCore/TrackingInputService.cs`
+  - set `ModelSchemaOk=false` on parse failure and no-mapped-channel paths
+  - set `ModelSchemaOk=true` on successful mapped iFacial receive path
+- Weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_arkit52_snapshot_consistency_and_ifacial_backend_ready_fix.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `tools/publish_hosts.ps1 -SkipNativeBuild`: PASS (WPF launch smoke PASS)
+
 ## 2026-03-06 - Avatar preview flip auto-resolution via contract metrics (VRM + MIQ VRM-origin)
 
 ### Summary
