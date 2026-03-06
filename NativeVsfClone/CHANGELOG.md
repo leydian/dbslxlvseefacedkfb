@@ -2,6 +2,36 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 Unity LTS matrix gate policy integration
+
+### Summary
+
+Integrated matrix-driven Unity LTS gate orchestration for XAV2 and wired
+official-line all-pass blocking policy into release readiness telemetry.
+
+### Changed
+
+- Unity matrix gate orchestration:
+  - added `tools/unity_xav2_lts_gate.ps1`
+  - policy: `official-lines-all-pass-required` (official defaults: `2021-lts`, `2022-lts`; candidate default: `2023-lts`)
+- XAV2 parity gate:
+  - updated `tools/xav2_parity_gate.ps1` to matrix-aware params (`UnityLine`, `MatrixPath`) and per-line artifact outputs
+  - retained legacy unsuffixed summary aliases for `2021-lts` compatibility
+- Environment bootstrap:
+  - updated `tools/unity_xav2_env_bootstrap.ps1` to resolve editor env var by matrix line instead of fixed `UNITY_2021_3_18F1_EDITOR_PATH`
+- Release and baseline wiring:
+  - updated `tools/run_quality_baseline.ps1` with `-EnableUnityXav2LtsGate`
+  - updated `tools/release_readiness_gate.ps1` with `-EnableUnityXav2LtsGate`
+  - updated `tools/release_gate_dashboard.ps1` to surface `Unity XAV2 LTS Gate` and prefer matrix gate signal for Unity XAV2 pass status
+- Documentation alignment:
+  - updated package README + public compatibility/migration docs to phase model:
+    - phase 1 official: `2021-lts`, `2022-lts`
+    - phase 2 candidate target: `2023-lts`
+
+### Verification
+
+- PowerShell parser validation on updated scripts: PASS
+
 ## 2026-03-06 - XAV2 public SDK packaging baseline (v1.0.0)
 
 ### Summary

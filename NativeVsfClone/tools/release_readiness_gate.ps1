@@ -13,6 +13,7 @@ param(
     [switch]$EnableSpout2Interop,
     [switch]$EnableSpout2Strict,
     [switch]$RequireSpout2StrictContract,
+    [switch]$EnableUnityXav2LtsGate,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
     [switch]$RequireUnityXav2ForWpfOnly,
@@ -86,6 +87,7 @@ try {
             if ($EnableSpout2Interop) { $args += "-EnableSpout2Interop" }
             if ($EnableSpout2Strict) { $args += "-EnableSpout2Strict" }
             if ($RequireSpout2StrictContract) { $args += "-RequireSpout2StrictContract" }
+            if ($EnableUnityXav2LtsGate) { $args += "-EnableUnityXav2LtsGate" }
             & powershell @args
         }))
     } else {
@@ -206,6 +208,7 @@ $lines.Add("EnableUnityXav2EnvBootstrap: $EnableUnityXav2EnvBootstrap")
 $lines.Add("EnableSpout2Interop: $EnableSpout2Interop")
 $lines.Add("EnableSpout2Strict: $EnableSpout2Strict")
 $lines.Add("RequireSpout2StrictContract: $RequireSpout2StrictContract")
+$lines.Add("EnableUnityXav2LtsGate: $EnableUnityXav2LtsGate")
 $lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
 $lines.Add("EnableXav2Parity: $EnableXav2Parity")
 $lines.Add("RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly")
@@ -229,6 +232,7 @@ $lines.Add("- build/reports/nuget_mirror_bootstrap_summary.txt")
 $lines.Add("- build/reports/unity_xav2_env_bootstrap_summary.txt")
 $lines.Add("- build/reports/mediapipe_sidecar_sanity_summary.txt")
 $lines.Add("- build/reports/spout2_interop_gate_summary.txt")
+$lines.Add("- build/reports/unity_xav2_lts_gate_summary.txt")
 $lines.Add("- build/reports/xav2_compression_quality_gate_summary.txt")
 $lines.Add("- build/reports/xav2_parity_gate_summary.txt")
 

@@ -141,6 +141,13 @@ $rows += [PSCustomObject]@{
     source_file = $unityValidationSummary
 }
 
+$unityLtsGate = Join-Path $ReportDir "unity_xav2_lts_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "Unity XAV2 LTS Gate"
+    status_line = Get-StatusFromFile -Path $unityLtsGate -Pattern "Overall:"
+    source_file = $unityLtsGate
+}
+
 $compressionGate = Join-Path $ReportDir "xav2_compression_quality_gate_summary.txt"
 $rows += [PSCustomObject]@{
     track = "XAV2 Compression Quality"
@@ -197,6 +204,7 @@ foreach ($r in $avatarRows) {
 }
 
 $unityPass = [string]::Equals($unityStatus, "PASS", [System.StringComparison]::OrdinalIgnoreCase)
+$unityLtsPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Unity XAV2 LTS Gate" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $compressionPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Compression Quality" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $parityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Unity/Native Parity" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $trackingHostE2EPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking HostE2E" }) | Select-Object -First 1).status_line)) -eq "PASS"
@@ -204,7 +212,7 @@ $trackingFuzzPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { 
 $trackingMediapipeSanityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking Mediapipe Sanity" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $trackingContractAllPass = $trackingHostE2EPass -and $trackingFuzzPass -and $trackingMediapipeSanityPass
 
-$unityXav2AllPass = $unityPass -and $compressionPass -and $parityPass
+$unityXav2AllPass = if ($unityLtsPass) { $true } else { $unityPass -and $compressionPass -and $parityPass }
 $wpfUnityRequirementMet = if ($RequireUnityXav2ForWpfOnly) { $unityXav2AllPass } else { $true }
 $fullUnityRequirementMet = if ($RequireUnityXav2ForFull) { $unityXav2AllPass } else { $true }
 
@@ -216,6 +224,7 @@ $summary = [PSCustomObject]@{
     gate_summary = [ordered]@{
         avatar_gates_all_pass = $avatarAllPass
         unity_xav2_validate_pass = $unityPass
+        unity_xav2_lts_gate_pass = $unityLtsPass
         xav2_compression_quality_pass = $compressionPass
         xav2_unity_native_parity_pass = $parityPass
         unity_xav2_all_pass = $unityXav2AllPass
