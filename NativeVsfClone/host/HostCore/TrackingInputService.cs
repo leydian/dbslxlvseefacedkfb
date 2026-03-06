@@ -112,6 +112,14 @@ public sealed class TrackingInputService : ITrackingInputService
     private int _recenterStabilizeFramesRemaining;
     private DateTimeOffset _trackingStartedUtc = DateTimeOffset.MinValue;
     private bool _webcamRuntimeUnavailable;
+    private bool _autoStabilityTuningEnabled = true;
+    private DateTimeOffset _lastSourceSwitchUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _activeSourceSinceUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _sourceSwitchWindowStartUtc = DateTimeOffset.MinValue;
+    private int _recentSourceSwitchCount;
+    private string _lastSourceSwitchReason = string.Empty;
+    private DateTimeOffset _sourceSwitchCooldownUntilUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastStabilityTuneUtc = DateTimeOffset.MinValue;
 
     public NcResultCode Start(TrackingStartOptions options)
     {
@@ -137,6 +145,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 LatencyProfile = Enum.IsDefined(typeof(TrackingLatencyProfile), options.LatencyProfile)
                     ? options.LatencyProfile
                     : TrackingLatencyProfile.Balanced,
+                AutoStabilityTuningEnabled = options.SourceType == TrackingSourceType.HybridAuto && options.AutoStabilityTuningEnabled,
                 UpperBodyEnabled = options.UpperBodyEnabled,
                 UpperBodyStrength = Math.Clamp(float.IsFinite(options.UpperBodyStrength) ? options.UpperBodyStrength : 1.0f, 0.0f, 1.5f),
                 UpperBodySmoothing = Enum.IsDefined(typeof(UpperBodySmoothingProfile), options.UpperBodySmoothing)
@@ -149,6 +158,7 @@ public sealed class TrackingInputService : ITrackingInputService
             _upperBodyEnabled = _options.UpperBodyEnabled;
             _upperBodyStrength = _options.UpperBodyStrength;
             _upperBodySmoothing = _options.UpperBodySmoothing;
+            _autoStabilityTuningEnabled = _options.AutoStabilityTuningEnabled;
             ResetRuntimeState();
             _trackingStartedUtc = DateTimeOffset.UtcNow;
             _webcamRuntimeUnavailable = false;
@@ -166,6 +176,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
                 _receiveTask = Task.Run(() => WebcamLoopAsync(_cts.Token));
                 _activeRuntimeSource = TrackingRuntimeSource.Webcam;
+                _activeSourceSinceUtc = DateTimeOffset.UtcNow;
                 _diagnostics = _diagnostics with
                 {
                     IsActive = true,
@@ -197,6 +208,7 @@ public sealed class TrackingInputService : ITrackingInputService
             _cts = new CancellationTokenSource();
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
             _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
+            _activeSourceSinceUtc = DateTimeOffset.UtcNow;
             _diagnostics = _diagnostics with
             {
                 IsActive = true,
@@ -331,6 +343,8 @@ public sealed class TrackingInputService : ITrackingInputService
             var webcamAgeMs = GetPacketAgeMs(_lastWebcamPacketUtc);
             var stale = ageMs > _options.StaleTimeoutMs;
             EvaluateSourceArbitration(ageMs);
+            var now = DateTimeOffset.UtcNow;
+            MaybeApplyAutoStabilityTuning(now);
             submitWatch.Stop();
             UpdateSubmitStageMs(submitWatch.Elapsed.TotalMilliseconds);
             if (!stale)
@@ -368,8 +382,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 UpperBodyActiveSource = ResolveUpperBodyActiveSourceLabel(),
                 UpperBodyStatus = _upperBodyStatus,
                 UpperBodyLastError = _upperBodyLastError,
+                RecentSourceSwitchCount = GetRecentSourceSwitchCount(now),
+                LastSourceSwitchReason = _lastSourceSwitchReason,
+                SourceSwitchCooldownRemainingMs = _sourceSwitchCooldownUntilUtc <= now
+                    ? 0
+                    : Math.Max(0, (int)(_sourceSwitchCooldownUntilUtc - now).TotalMilliseconds),
             };
             ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
+            ApplySourceSwitchWarningIfNeeded(now);
 
             frame = stale ? BuildNeutralFrame() : _lastOutputFrame;
             return true;
@@ -432,13 +452,14 @@ public sealed class TrackingInputService : ITrackingInputService
             if (ageMs > _options.StaleTimeoutMs)
             {
                 // Decay to neutral when fresh upper-body input is not available.
-                _smoothedLeftShoulderPitch = Ema(_smoothedLeftShoulderPitch, 0.0f, 0.18f);
-                _smoothedRightShoulderPitch = Ema(_smoothedRightShoulderPitch, 0.0f, 0.18f);
-                _smoothedLeftUpperArmPitch = Ema(_smoothedLeftUpperArmPitch, 0.0f, 0.18f);
-                _smoothedRightUpperArmPitch = Ema(_smoothedRightUpperArmPitch, 0.0f, 0.18f);
+                var decayAlpha = _autoStabilityTuningEnabled ? 0.13f : 0.18f;
+                _smoothedLeftShoulderPitch = Ema(_smoothedLeftShoulderPitch, 0.0f, decayAlpha);
+                _smoothedRightShoulderPitch = Ema(_smoothedRightShoulderPitch, 0.0f, decayAlpha);
+                _smoothedLeftUpperArmPitch = Ema(_smoothedLeftUpperArmPitch, 0.0f, decayAlpha);
+                _smoothedRightUpperArmPitch = Ema(_smoothedRightUpperArmPitch, 0.0f, decayAlpha);
                 var hasResidual = HasUpperBodyResidual();
                 _upperBodyStatus = hasResidual ? "stale-decay" : "stale-neutral";
-                _upperBodyConfidence = Math.Clamp(_upperBodyConfidence * 0.82, 0.0, 1.0);
+                _upperBodyConfidence = Math.Clamp(_upperBodyConfidence * (_autoStabilityTuningEnabled ? 0.88 : 0.82), 0.0, 1.0);
                 _upperBodyActiveSource = "none";
                 pose = new TrackingUpperBodyPose(
                     hasResidual,
@@ -450,6 +471,16 @@ public sealed class TrackingInputService : ITrackingInputService
                     ageMs,
                     _upperBodyStatus);
                 return hasResidual;
+            }
+
+            if (_autoStabilityTuningEnabled && _upperBodyConfidence < 0.20)
+            {
+                // Low-confidence upper-body updates are softened to avoid visible twitching.
+                _smoothedLeftShoulderPitch = Ema(_smoothedLeftShoulderPitch, 0.0f, 0.10f);
+                _smoothedRightShoulderPitch = Ema(_smoothedRightShoulderPitch, 0.0f, 0.10f);
+                _smoothedLeftUpperArmPitch = Ema(_smoothedLeftUpperArmPitch, 0.0f, 0.10f);
+                _smoothedRightUpperArmPitch = Ema(_smoothedRightUpperArmPitch, 0.0f, 0.10f);
+                _upperBodyStatus = "low-confidence-decay";
             }
 
             _upperBodyActiveSource = preferred == TrackingRuntimeSource.Ifacial ? "osc" : "webcam";
@@ -478,6 +509,8 @@ public sealed class TrackingInputService : ITrackingInputService
             var webcamAgeMs = GetPacketAgeMs(_lastWebcamPacketUtc);
             var stale = ageMs > _options.StaleTimeoutMs;
             EvaluateSourceArbitration(ageMs);
+            var now = DateTimeOffset.UtcNow;
+            MaybeApplyAutoStabilityTuning(now);
             _diagnostics = _diagnostics with
             {
                 LastPacketAgeMs = ageMs,
@@ -508,8 +541,14 @@ public sealed class TrackingInputService : ITrackingInputService
                 UpperBodyActiveSource = ResolveUpperBodyActiveSourceLabel(),
                 UpperBodyStatus = _upperBodyStatus,
                 UpperBodyLastError = _upperBodyLastError,
+                RecentSourceSwitchCount = GetRecentSourceSwitchCount(now),
+                LastSourceSwitchReason = _lastSourceSwitchReason,
+                SourceSwitchCooldownRemainingMs = _sourceSwitchCooldownUntilUtc <= now
+                    ? 0
+                    : Math.Max(0, (int)(_sourceSwitchCooldownUntilUtc - now).TotalMilliseconds),
             };
             ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
+            ApplySourceSwitchWarningIfNeeded(now);
             return _diagnostics;
         }
     }
@@ -586,6 +625,13 @@ public sealed class TrackingInputService : ITrackingInputService
         _recenterStabilizeFramesRemaining = 0;
         _trackingStartedUtc = DateTimeOffset.MinValue;
         _webcamRuntimeUnavailable = false;
+        _lastSourceSwitchUtc = DateTimeOffset.MinValue;
+        _activeSourceSinceUtc = DateTimeOffset.UtcNow;
+        _sourceSwitchWindowStartUtc = DateTimeOffset.MinValue;
+        _recentSourceSwitchCount = 0;
+        _lastSourceSwitchReason = string.Empty;
+        _sourceSwitchCooldownUntilUtc = DateTimeOffset.MinValue;
+        _lastStabilityTuneUtc = DateTimeOffset.MinValue;
         _diagnostics = new TrackingDiagnostics(
             true,
             "unknown",
@@ -615,7 +661,10 @@ public sealed class TrackingInputService : ITrackingInputService
             _options.SourceLockMode,
             string.Empty,
             _options.PoseFilterProfile,
-            _poseDeadbandDeg);
+            _poseDeadbandDeg,
+            RecentSourceSwitchCount: 0,
+            LastSourceSwitchReason: string.Empty,
+            SourceSwitchCooldownRemainingMs: 0);
     }
 
     private async Task ReceiveLoopAsync(CancellationToken token)
@@ -2081,6 +2130,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private void EvaluateSourceArbitration(int currentAgeMs)
     {
         _switchBlockedReason = string.Empty;
+        var now = DateTimeOffset.UtcNow;
         if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
         {
             _activeRuntimeSource = TrackingRuntimeSource.Webcam;
@@ -2112,7 +2162,6 @@ public sealed class TrackingInputService : ITrackingInputService
             return;
         }
 
-        var now = DateTimeOffset.UtcNow;
         var ifacialAge = _lastIfacialPacketUtc == DateTimeOffset.MinValue
             ? int.MaxValue
             : (int)Math.Max(0.0, (now - _lastIfacialPacketUtc).TotalMilliseconds);
@@ -2120,26 +2169,55 @@ public sealed class TrackingInputService : ITrackingInputService
             ? int.MaxValue
             : (int)Math.Max(0.0, (now - _lastWebcamPacketUtc).TotalMilliseconds);
         var ageMs = currentAgeMs > 0 ? currentAgeMs : ifacialAge;
+        var ifacialConfidence = ComputeIfacialConfidence(ifacialAge);
+        var webcamConfidence = ComputeWebcamConfidence(webcamAge);
+        var cooldownActive = _autoStabilityTuningEnabled && now < _sourceSwitchCooldownUntilUtc;
+        var currentSourceHoldMs = _activeSourceSinceUtc == DateTimeOffset.MinValue
+            ? int.MaxValue
+            : (int)Math.Max(0.0, (now - _activeSourceSinceUtc).TotalMilliseconds);
+        var minHoldMs = _autoStabilityTuningEnabled ? 1600 : 700;
+        var fallbackFailureThreshold = _autoStabilityTuningEnabled ? 3 : 4;
 
-        var shouldFallback = (ageMs >= _ifacialFallbackAgeMs || _ifacialConsecutiveFailures >= 4) &&
-                             webcamAge < (_options.StaleTimeoutMs * 2);
+        if (_autoStabilityTuningEnabled && _activeRuntimeSource != TrackingRuntimeSource.None)
+        {
+            _switchBlockedReason = cooldownActive
+                ? $"switch-cooldown:{Math.Max(0, (int)(_sourceSwitchCooldownUntilUtc - now).TotalMilliseconds)}ms"
+                : string.Empty;
+        }
+
+        var shouldFallback = (ageMs >= _ifacialFallbackAgeMs ||
+                              _ifacialConsecutiveFailures >= fallbackFailureThreshold ||
+                              (_autoStabilityTuningEnabled && ifacialConfidence < 0.22 && _ifacialConsecutiveFailures >= 2)) &&
+                             webcamAge < (_options.StaleTimeoutMs * 2) &&
+                             webcamConfidence >= (_autoStabilityTuningEnabled ? 0.20 : 0.0);
+        if (_autoStabilityTuningEnabled && (cooldownActive || currentSourceHoldMs < minHoldMs))
+        {
+            shouldFallback = false;
+        }
         if (shouldFallback && _activeRuntimeSource != TrackingRuntimeSource.Webcam)
         {
             _activeRuntimeSource = TrackingRuntimeSource.Webcam;
             _fallbackCount++;
             _ifacialRecoveryStreak = 0;
+            RegisterSourceSwitch(now, "fallback:webcam");
         }
 
         if (_activeRuntimeSource == TrackingRuntimeSource.Webcam)
         {
-            var ifacialRecovered = ifacialAge <= _ifacialRecoveryAgeMs && _ifacialConsecutiveFailures == 0;
+            var ifacialRecovered = ifacialAge <= _ifacialRecoveryAgeMs &&
+                                   _ifacialConsecutiveFailures == 0 &&
+                                   ifacialConfidence >= (_autoStabilityTuningEnabled ? 0.32 : 0.0);
             if (ifacialRecovered)
             {
                 _ifacialRecoveryStreak++;
                 if (_ifacialRecoveryStreak >= _ifacialRecoveryStreakRequired)
                 {
-                    _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
-                    _ifacialRecoveryStreak = 0;
+                    if (!_autoStabilityTuningEnabled || (!cooldownActive && currentSourceHoldMs >= minHoldMs))
+                    {
+                        _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
+                        _ifacialRecoveryStreak = 0;
+                        RegisterSourceSwitch(now, "recover:ifacial");
+                    }
                 }
             }
             else
@@ -2150,6 +2228,7 @@ public sealed class TrackingInputService : ITrackingInputService
         else if (_activeRuntimeSource == TrackingRuntimeSource.None)
         {
             _activeRuntimeSource = ifacialAge < int.MaxValue ? TrackingRuntimeSource.Ifacial : TrackingRuntimeSource.Webcam;
+            _activeSourceSinceUtc = now;
         }
     }
 
@@ -2207,21 +2286,110 @@ public sealed class TrackingInputService : ITrackingInputService
             ? int.MaxValue
             : (int)Math.Max(0.0, (now - _lastWebcamPacketUtc).TotalMilliseconds);
 
-        var ifacialConfidence = ifacialAge == int.MaxValue
-            ? 0.0
-            : Math.Clamp(1.0 - (ifacialAge / 900.0), 0.0, 1.0);
+        var ifacialConfidence = ComputeIfacialConfidence(ifacialAge);
         if (_ifacialConsecutiveFailures > 0)
         {
             ifacialConfidence *= Math.Clamp(1.0 - (_ifacialConsecutiveFailures * 0.15), 0.0, 1.0);
         }
 
-        var webcamConfidence = (_latestMediapipePacket is null)
-            ? (webcamAge == int.MaxValue ? 0.0 : Math.Clamp(1.0 - (webcamAge / 1200.0), 0.0, 1.0))
-            : Math.Clamp(_latestMediapipePacket.SourceConfidence, 0.0, 1.0);
+        var webcamConfidence = ComputeWebcamConfidence(webcamAge);
 
         return string.Create(
             CultureInfo.InvariantCulture,
             $"ifacial={ifacialConfidence:F2},webcam={webcamConfidence:F2}");
+    }
+
+    private static double ComputeIfacialConfidence(int ifacialAgeMs)
+    {
+        return ifacialAgeMs == int.MaxValue
+            ? 0.0
+            : Math.Clamp(1.0 - (ifacialAgeMs / 900.0), 0.0, 1.0);
+    }
+
+    private double ComputeWebcamConfidence(int webcamAgeMs)
+    {
+        return (_latestMediapipePacket is null)
+            ? (webcamAgeMs == int.MaxValue ? 0.0 : Math.Clamp(1.0 - (webcamAgeMs / 1200.0), 0.0, 1.0))
+            : Math.Clamp(_latestMediapipePacket.SourceConfidence, 0.0, 1.0);
+    }
+
+    private void RegisterSourceSwitch(DateTimeOffset now, string reason)
+    {
+        if (_sourceSwitchWindowStartUtc == DateTimeOffset.MinValue ||
+            (now - _sourceSwitchWindowStartUtc).TotalSeconds > 30.0)
+        {
+            _sourceSwitchWindowStartUtc = now;
+            _recentSourceSwitchCount = 0;
+        }
+
+        _recentSourceSwitchCount++;
+        _lastSourceSwitchReason = reason;
+        _lastSourceSwitchUtc = now;
+        _activeSourceSinceUtc = now;
+        if (_autoStabilityTuningEnabled)
+        {
+            _sourceSwitchCooldownUntilUtc = now.AddMilliseconds(900);
+        }
+    }
+
+    private int GetRecentSourceSwitchCount(DateTimeOffset now)
+    {
+        if (_sourceSwitchWindowStartUtc == DateTimeOffset.MinValue)
+        {
+            return 0;
+        }
+
+        if ((now - _sourceSwitchWindowStartUtc).TotalSeconds > 30.0)
+        {
+            _sourceSwitchWindowStartUtc = now;
+            _recentSourceSwitchCount = 0;
+            return 0;
+        }
+
+        return _recentSourceSwitchCount;
+    }
+
+    private void MaybeApplyAutoStabilityTuning(DateTimeOffset now)
+    {
+        if (!_autoStabilityTuningEnabled || _options.SourceType != TrackingSourceType.HybridAuto)
+        {
+            _poseDeadbandDeg = Math.Clamp(_options.PoseDeadbandDeg, 0.0f, 3.0f);
+            return;
+        }
+
+        if (_lastStabilityTuneUtc != DateTimeOffset.MinValue &&
+            (now - _lastStabilityTuneUtc).TotalMilliseconds < 500.0)
+        {
+            return;
+        }
+        _lastStabilityTuneUtc = now;
+
+        var received = Math.Max(1.0, _diagnostics.ReceivedPackets);
+        var parseRatio = _diagnostics.ParseErrors / received;
+        var dropRatio = _diagnostics.DroppedPackets / received;
+        var switchRate = GetRecentSourceSwitchCount(now) / 30.0;
+        var instabilityScore = (parseRatio * 1.4) + (dropRatio * 1.0) + (switchRate * 0.7);
+        var baseDeadband = Math.Clamp(_options.PoseDeadbandDeg, 0.0f, 3.0f);
+
+        float targetDeadband;
+        if (instabilityScore >= 0.30)
+        {
+            targetDeadband = MathF.Min(2.4f, baseDeadband + 0.70f);
+        }
+        else if (instabilityScore >= 0.15)
+        {
+            targetDeadband = MathF.Min(2.0f, baseDeadband + 0.35f);
+        }
+        else if (instabilityScore <= 0.05)
+        {
+            targetDeadband = MathF.Max(0.0f, baseDeadband - 0.12f);
+        }
+        else
+        {
+            targetDeadband = baseDeadband;
+        }
+
+        _poseDeadbandDeg = Ema(_poseDeadbandDeg, targetDeadband, 0.16f);
     }
 
     private static int GetPacketAgeMs(DateTimeOffset packetUtc)
@@ -2301,6 +2469,31 @@ public sealed class TrackingInputService : ITrackingInputService
                string.Equals(code, "TRACKING_IFACIAL_NO_PACKET", StringComparison.Ordinal) ||
                string.Equals(code, "TRACKING_WEBCAM_NO_FRAME", StringComparison.Ordinal) ||
                string.Equals(code, "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE", StringComparison.Ordinal);
+    }
+
+    private void ApplySourceSwitchWarningIfNeeded(DateTimeOffset now)
+    {
+        if (!_autoStabilityTuningEnabled || _options.SourceType != TrackingSourceType.HybridAuto)
+        {
+            if (string.Equals(_diagnostics.LastErrorCode, "TRACKING_SOURCE_SWITCH_THRASH", StringComparison.Ordinal))
+            {
+                _diagnostics = _diagnostics with { LastErrorCode = string.Empty };
+            }
+            return;
+        }
+
+        var switchCount = GetRecentSourceSwitchCount(now);
+        var hasThrash = switchCount >= 6;
+        if (hasThrash && string.IsNullOrWhiteSpace(_diagnostics.LastErrorCode))
+        {
+            _diagnostics = _diagnostics with { LastErrorCode = "TRACKING_SOURCE_SWITCH_THRASH" };
+            return;
+        }
+
+        if (!hasThrash && string.Equals(_diagnostics.LastErrorCode, "TRACKING_SOURCE_SWITCH_THRASH", StringComparison.Ordinal))
+        {
+            _diagnostics = _diagnostics with { LastErrorCode = string.Empty };
+        }
     }
 
     private static string ToActiveSourceLabel(TrackingRuntimeSource source)

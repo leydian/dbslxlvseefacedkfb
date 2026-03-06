@@ -90,6 +90,7 @@ public sealed record TrackingStartOptions(
     TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced,
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
     float PoseDeadbandDeg = 0.9f,
+    bool AutoStabilityTuningEnabled = true,
     bool UpperBodyEnabled = true,
     float UpperBodyStrength = 1.0f,
     UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced);
@@ -144,7 +145,10 @@ public sealed record TrackingDiagnostics(
     int UpperBodyPacketAgeMs = int.MaxValue,
     string UpperBodyActiveSource = "none",
     string UpperBodyStatus = "idle",
-    string UpperBodyLastError = "");
+    string UpperBodyLastError = "",
+    int RecentSourceSwitchCount = 0,
+    string LastSourceSwitchReason = "",
+    int SourceSwitchCooldownRemainingMs = 0);
 
 public readonly record struct TrackingUpperBodyPose(
     bool IsValid,

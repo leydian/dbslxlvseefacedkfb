@@ -60,6 +60,7 @@ public sealed record TrackingInputSettings(
     TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced,
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
     float PoseDeadbandDeg = 0.9f,
+    bool AutoStabilityTuningEnabled = true,
     bool UpperBodyEnabled = true,
     float UpperBodyStrength = 1.0f,
     UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced);
@@ -90,13 +91,13 @@ public sealed record SessionPersistenceModel(
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 9,
+        Version: 10,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
         OscPublishAddress: "127.0.0.1:39540",
         Sidecar: new SidecarSettings("sidecar", string.Empty, 15000, false),
-        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
+        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true),
         RecentAvatars: Array.Empty<RecentAvatarEntry>(),
         LastProfileName: "quality",
         UiMode: "beginner",
@@ -206,13 +207,13 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 9,
+                    Version: 10,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, 1.0f, UpperBodySmoothingProfile.Balanced),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, true, 1.0f, UpperBodySmoothingProfile.Balanced),
                     RecentAvatars: Array.Empty<RecentAvatarEntry>(),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
@@ -250,8 +251,8 @@ public sealed class SessionStateStore
         var showTrackingIpv4Hint = model.Version < 9 ? true : model.UiShowTrackingIpv4Hint;
         return model with
         {
-            Version = Math.Max(9, model.Version),
-            Tracking = NormalizeTracking(model.Tracking),
+            Version = Math.Max(10, model.Version),
+            Tracking = NormalizeTracking(model.Tracking, model.Version),
             RecentAvatars = NormalizeRecentAvatars(model.RecentAvatars),
             UiMode = mode,
             UiActiveSection = NormalizeUiActiveSection(model.UiActiveSection),
@@ -261,11 +262,11 @@ public sealed class SessionStateStore
         };
     }
 
-    private static TrackingInputSettings NormalizeTracking(TrackingInputSettings? value)
+    private static TrackingInputSettings NormalizeTracking(TrackingInputSettings? value, int modelVersion)
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, 1.0f, UpperBodySmoothingProfile.Balanced);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, true, 1.0f, UpperBodySmoothingProfile.Balanced);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
@@ -286,6 +287,9 @@ public sealed class SessionStateStore
         var parseThreshold = Math.Clamp(value.ParseErrorWarnThreshold <= 0 ? 10 : value.ParseErrorWarnThreshold, 1, 10000);
         var droppedThreshold = Math.Clamp(value.DroppedPacketWarnThreshold <= 0 ? 10 : value.DroppedPacketWarnThreshold, 1, 10000);
         var deadbandDeg = Math.Clamp(float.IsFinite(value.PoseDeadbandDeg) ? value.PoseDeadbandDeg : 0.9f, 0.0f, 3.0f);
+        var autoStabilityTuningEnabled = modelVersion < 10
+            ? sourceType == TrackingSourceType.HybridAuto
+            : value.AutoStabilityTuningEnabled;
         var upperBodyStrength = Math.Clamp(float.IsFinite(value.UpperBodyStrength) ? value.UpperBodyStrength : 1.0f, 0.0f, 1.5f);
         var upperBodySmoothing = Enum.IsDefined(typeof(UpperBodySmoothingProfile), value.UpperBodySmoothing)
             ? value.UpperBodySmoothing
@@ -303,6 +307,7 @@ public sealed class SessionStateStore
             latencyProfile,
             poseFilterProfile,
             deadbandDeg,
+            autoStabilityTuningEnabled,
             value.UpperBodyEnabled,
             upperBodyStrength,
             upperBodySmoothing);

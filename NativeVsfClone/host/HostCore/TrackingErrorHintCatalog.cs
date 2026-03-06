@@ -19,6 +19,7 @@ public static class TrackingErrorHintCatalog
             "TRACKING_OSC_TYPE_UNSUPPORTED" => " hint=OSC type tag unsupported; disable non-iFacial stream or VMC extensions",
             "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
             "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
+            "TRACKING_SOURCE_SWITCH_THRASH" => " hint=source switching too frequently; stabilize network/light or lock source temporarily",
             "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
             "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
             "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",

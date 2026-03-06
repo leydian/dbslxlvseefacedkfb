@@ -211,7 +211,7 @@ public partial class MainWindow : Window
         }
 
         if (_controller.SessionState.IsInitialized &&
-            !Confirm("Session is already initialized. Reinitialize and reset active outputs/avatar?"))
+            !Confirm("세션이 이미 시작되어 있습니다. 다시 시작하면서 현재 출력/아바타를 초기화할까요?"))
         {
             return;
         }
@@ -247,7 +247,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("런타임을 종료하고 렌더/출력을 중지하시겠습니까? (Shutdown runtime and stop rendering/outputs?)"))
+        if (!Confirm("세션을 종료하고 현재 출력을 중지할까요?"))
         {
             return;
         }
@@ -468,6 +468,11 @@ public partial class MainWindow : Window
 
     private void ToggleDiagnosticsPanel_Click(object sender, RoutedEventArgs e)
     {
+        if (!string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         _diagnosticsPinnedVisible = !_diagnosticsPinnedVisible;
         if (_diagnosticsPinnedVisible)
         {
@@ -752,7 +757,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("현재 아바타를 해제하시겠습니까? (Unload active avatar?)"))
+        if (!Confirm("현재 아바타를 내릴까요?"))
         {
             return;
         }
@@ -767,7 +772,7 @@ public partial class MainWindow : Window
         }
 
         if (_controller.Outputs.SpoutActive &&
-            !Confirm("Spout is active. Restart with current settings?"))
+            !Confirm("화면 출력이 이미 켜져 있습니다. 현재 설정으로 다시 시작할까요?"))
         {
             return;
         }
@@ -791,8 +796,8 @@ public partial class MainWindow : Window
             RevealDiagnosticsForFailure("StartSpout");
             ReportUserFailure(
                 "StartSpout",
-                $"Spout output failed to start ({rc}). Check channel name and retry.",
-                $"Spout start failed: {rc}");
+                $"화면 출력 시작에 실패했습니다 ({rc}). 채널 이름을 확인하고 다시 시도해 주세요.",
+                $"화면 출력 시작 실패: {rc}");
             return;
         }
 
@@ -806,7 +811,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("Spout 출력을 중지하시겠습니까? (Stop Spout output?)"))
+        if (!Confirm("화면 출력을 중지할까요?"))
         {
             return;
         }
@@ -839,7 +844,7 @@ public partial class MainWindow : Window
         }
 
         if (_controller.Outputs.OscActive &&
-            !Confirm("OSC is active. Restart with current settings?"))
+            !Confirm("모션 출력이 이미 켜져 있습니다. 현재 설정으로 다시 시작할까요?"))
         {
             return;
         }
@@ -856,8 +861,8 @@ public partial class MainWindow : Window
             RevealDiagnosticsForFailure("StartOsc");
             ReportUserFailure(
                 "StartOsc",
-                $"OSC output failed to start ({rc}). Check port/address and retry.",
-                $"OSC start failed: {rc}");
+                $"모션 출력 시작에 실패했습니다 ({rc}). 포트/주소를 확인하고 다시 시도해 주세요.",
+                $"모션 출력 시작 실패: {rc}");
             return;
         }
 
@@ -871,7 +876,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!Confirm("Stop OSC output?"))
+        if (!Confirm("모션 출력을 중지할까요?"))
         {
             return;
         }
@@ -954,6 +959,7 @@ public partial class MainWindow : Window
             latencyProfile: latencyProfile,
             poseFilterProfile: poseFilterProfile,
             poseDeadbandDeg: (float)TrackingPoseDeadbandSlider.Value,
+            autoStabilityTuningEnabled: TrackingAutoStabilityCheckBox.IsChecked == true,
             upperBodyEnabled: TrackingUpperBodyEnabledCheckBox.IsChecked == true);
 
         var rc = _controller.StartTracking(
@@ -1960,19 +1966,37 @@ public partial class MainWindow : Window
         TrackingLatencyProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseFilterProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseDeadbandSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingAutoStabilityCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingUpperBodyEnabledCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} auto_stability={trackingSettings.AutoStabilityTuningEnabled} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} switches={tracking.RecentSourceSwitchCount} switch_reason={tracking.LastSourceSwitchReason} switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
 
-        SessionStatusText.Text = statusText.SessionText;
-        AvatarStatusText.Text = statusText.AvatarText;
+        SessionStatusText.Text = statusText.SessionText switch
+        {
+            "Initialized" => "실행 중",
+            _ => "중지",
+        };
+        AvatarStatusText.Text = statusText.AvatarText switch
+        {
+            "Loaded" => "불러옴",
+            _ => "없음",
+        };
         RenderStatusText.Text = statusText.RenderText;
-        OutputStatusText.Text = statusText.OutputText;
-        BusyStatusText.Text = statusText.BusyText;
-        QuickStatusText.Text = statusText.QuickStatusText;
+        var advancedMode = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        OutputStatusText.Text = advancedMode
+            ? outputs.SpoutActive && outputs.OscActive
+                ? "Spout + OSC 켜짐"
+                : outputs.SpoutActive
+                    ? "Spout 켜짐"
+                    : outputs.OscActive
+                        ? "OSC 켜짐"
+                        : "꺼짐"
+            : (outputs.SpoutActive || outputs.OscActive) ? "켜짐" : "꺼짐";
+        BusyStatusText.Text = operation.IsBusy ? operation.CurrentOperation : "대기";
+        QuickStatusText.Text = $"세션: {SessionStatusText.Text} | 아바타: {AvatarStatusText.Text} | 출력: {OutputStatusText.Text}";
         QuickNextActionText.Text = onboarding.StepTitle;
         PrimaryActionDescriptionText.Text = onboarding.Instruction;
         NextActionSummaryText.Text = onboarding.NextActionSummary;
@@ -1982,12 +2006,12 @@ public partial class MainWindow : Window
             : Visibility.Visible;
         if (onboarding.Actionability == HostActionability.Blocked)
         {
-            ActionabilityBadgeText.Text = "BLOCKED";
+            ActionabilityBadgeText.Text = "대기 필요";
             ActionabilityBadgeText.Foreground = (Brush)FindResource("Color.Warning");
         }
         else
         {
-            ActionabilityBadgeText.Text = "READY";
+            ActionabilityBadgeText.Text = "진행 가능";
             ActionabilityBadgeText.Foreground = (Brush)FindResource("Color.BadgeNeutralText");
         }
 
@@ -2201,7 +2225,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, switches={tracking.RecentSourceSwitchCount}, switch_reason={tracking.LastSourceSwitchReason}, switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -2295,7 +2319,7 @@ public partial class MainWindow : Window
 
     private bool Confirm(string message)
     {
-        var result = MessageBox.Show(this, message, "작업 확인 (Confirm Action)", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        var result = MessageBox.Show(this, message, "작업 확인", MessageBoxButton.YesNo, MessageBoxImage.Question);
         return result == MessageBoxResult.Yes;
     }
 
@@ -2636,12 +2660,10 @@ public partial class MainWindow : Window
     private void ApplySessionDefaultsToUi()
     {
         var session = _controller.SessionPersistence;
-        _uiMode = string.Equals(session.UiMode, UiModeAdvanced, StringComparison.OrdinalIgnoreCase)
-            ? UiModeAdvanced
-            : UiModeBeginner;
-        _activeSection = ParseSectionKey(session.UiActiveSection);
+        _uiMode = UiModeBeginner;
+        _activeSection = UiSection.GettingStarted;
         _isDarkTheme = string.Equals(session.UiThemeMode, "dark", StringComparison.OrdinalIgnoreCase);
-        _diagnosticsPinnedVisible = session.UiDiagnosticsPinned;
+        _diagnosticsPinnedVisible = false;
         _diagnosticsForcedVisible = false;
         ApplyThemeResources();
         if (!string.IsNullOrWhiteSpace(session.AvatarPath))
@@ -2686,6 +2708,7 @@ public partial class MainWindow : Window
         };
         TrackingPoseDeadbandSlider.Value = session.Tracking.PoseDeadbandDeg;
         TrackingPoseDeadbandValueText.Text = $"{session.Tracking.PoseDeadbandDeg:F2}\u00b0";
+        TrackingAutoStabilityCheckBox.IsChecked = session.Tracking.AutoStabilityTuningEnabled;
         TrackingUpperBodyEnabledCheckBox.IsChecked = session.Tracking.UpperBodyEnabled;
         _showTrackingIpv4Hint = session.UiShowTrackingIpv4Hint;
         RefreshTrackingIpv4Hint();
@@ -2731,6 +2754,7 @@ public partial class MainWindow : Window
         if (string.Equals(_uiMode, UiModeBeginner, StringComparison.Ordinal))
         {
             _diagnosticsPinnedVisible = false;
+            _diagnosticsForcedVisible = false;
         }
 
         if (persist)
@@ -2782,6 +2806,13 @@ public partial class MainWindow : Window
 
     private void ActivateSection(UiSection section)
     {
+        var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        if (!advanced &&
+            (section == UiSection.Render || section == UiSection.Tracking || section == UiSection.PlatformOps))
+        {
+            section = UiSection.GettingStarted;
+        }
+
         if (_activeSection == section)
         {
             return;
@@ -2900,29 +2931,29 @@ public partial class MainWindow : Window
 
         var lightPalette = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Color.Surface"] = "#F6F8FC",
-            ["Color.SurfaceAlt"] = "#EEF2F8",
-            ["Color.Card"] = "#FBFCFF",
-            ["Color.CardStrong"] = "#FFFFFF",
-            ["Color.Border"] = "#CFD9E6",
-            ["Color.BorderStrong"] = "#B4C4D7",
-            ["Color.Text"] = "#1C2530",
-            ["Color.TextMuted"] = "#5A6878",
-            ["Color.TextSubtle"] = "#728196",
-            ["Color.Primary"] = "#0D75C8",
-            ["Color.PrimaryHover"] = "#0B68B0",
-            ["Color.PrimaryPressed"] = "#095389",
+            ["Color.Surface"] = "#F2F6FC",
+            ["Color.SurfaceAlt"] = "#EAF1FA",
+            ["Color.Card"] = "#F8FBFF",
+            ["Color.CardStrong"] = "#FEFFFF",
+            ["Color.Border"] = "#C7D7EB",
+            ["Color.BorderStrong"] = "#AFC4DE",
+            ["Color.Text"] = "#1A2736",
+            ["Color.TextMuted"] = "#53687D",
+            ["Color.TextSubtle"] = "#6D8297",
+            ["Color.Primary"] = "#0B6FC2",
+            ["Color.PrimaryHover"] = "#0A62AB",
+            ["Color.PrimaryPressed"] = "#084F89",
             ["Color.TabBg"] = "#F0F4FA",
             ["Color.TabActive"] = "#FFFFFF",
-            ["Color.NavRailBg"] = "#EEF3F9",
-            ["Color.NavItemBg"] = "#F8FBFF",
+            ["Color.NavRailBg"] = "#E8F0FA",
+            ["Color.NavItemBg"] = "#F4F9FF",
             ["Color.NavItemActiveBg"] = "#FFFFFF",
             ["Color.NavItemText"] = "#3A4E63",
             ["Color.NavItemActiveText"] = "#1C2530",
-            ["Color.OnboardingBarBg"] = "#EAF4FF",
-            ["Color.OnboardingBarBorder"] = "#BCD8F3",
-            ["Color.OnboardingBarTitle"] = "#11395B",
-            ["Color.OnboardingBarBody"] = "#2A4A67",
+            ["Color.OnboardingBarBg"] = "#E4F1FF",
+            ["Color.OnboardingBarBorder"] = "#B2D1F0",
+            ["Color.OnboardingBarTitle"] = "#0F365B",
+            ["Color.OnboardingBarBody"] = "#244B71",
             ["Color.BadgeNeutralBg"] = "#EFF3F9",
             ["Color.BadgeNeutralText"] = "#43586E",
             ["Color.RenderShellBg"] = "#182639",
@@ -2931,12 +2962,12 @@ public partial class MainWindow : Window
             ["Color.StatusBarBorder"] = "#546E88",
             ["Color.StatusBarLabel"] = "#D7E5F3",
             ["Color.StatusBarValue"] = "#F4FAFF",
-            ["Color.PanelInfoBg"] = "#F3F7FD",
-            ["Color.PanelInfoBorder"] = "#D7E3F2",
-            ["Color.PanelInfoText"] = "#35516B",
-            ["Color.PanelInfoAltBg"] = "#EDF3FA",
-            ["Color.PanelInfoAltBorder"] = "#CAD8E8",
-            ["Color.PanelInfoAltText"] = "#243548",
+            ["Color.PanelInfoBg"] = "#EEF5FE",
+            ["Color.PanelInfoBorder"] = "#D0E0F2",
+            ["Color.PanelInfoText"] = "#2F4F6F",
+            ["Color.PanelInfoAltBg"] = "#E8F0FA",
+            ["Color.PanelInfoAltBorder"] = "#C4D5EA",
+            ["Color.PanelInfoAltText"] = "#223A55",
             ["Color.PanelSuccessBg"] = "#EEF6EF",
             ["Color.PanelSuccessBorder"] = "#BFDCC2",
             ["Color.PanelSuccessTitle"] = "#1E5130",
@@ -2976,7 +3007,7 @@ public partial class MainWindow : Window
             SetBrush(key, value);
         }
 
-        ThemeToggleButton.Content = _isDarkTheme ? "Light Theme" : "Dark Theme";
+        ThemeToggleButton.Content = _isDarkTheme ? "라이트 테마" : "다크 테마";
     }
 
     private void ApplySectionVisibility()
@@ -2992,7 +3023,7 @@ public partial class MainWindow : Window
         var showTracking = canUseAdvancedSections && _activeSection == UiSection.Tracking;
         var showOps = canUseAdvancedSections && _activeSection == UiSection.PlatformOps;
 
-        ModeGroup.Visibility = showGettingStarted ? Visibility.Visible : Visibility.Collapsed;
+        ModeGroup.Visibility = Visibility.Visible;
         QuickActionsGroup.Visibility = showGettingStarted ? Visibility.Visible : Visibility.Collapsed;
         SessionGroup.Visibility = showSessionAvatar ? Visibility.Visible : Visibility.Collapsed;
         AvatarGroup.Visibility = showSessionAvatar ? Visibility.Visible : Visibility.Collapsed;
@@ -3029,6 +3060,7 @@ public partial class MainWindow : Window
         foreach (var (button, section, enabled) in navMap)
         {
             button.IsEnabled = enabled;
+            button.Visibility = !advanced && !enabled ? Visibility.Collapsed : Visibility.Visible;
             var active = section == _activeSection;
             button.Background = active ? activeBg : inactiveBg;
             button.Foreground = active ? activeFg : inactiveFg;
@@ -3037,7 +3069,8 @@ public partial class MainWindow : Window
             button.Opacity = enabled ? 1.0 : 0.55;
         }
 
-        ToggleDiagnosticsButton.Content = _diagnosticsPinnedVisible ? "Diagnostics: Open" : "Diagnostics: Closed";
+        ToggleDiagnosticsButton.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        ToggleDiagnosticsButton.Content = _diagnosticsPinnedVisible ? "진단: 열림" : "진단: 닫힘";
     }
 
     private IEnumerable<Button> GetNavButtons()
@@ -3141,14 +3174,30 @@ public partial class MainWindow : Window
 
         ApplySectionVisibility();
         ApplyNavRailState();
+        ApplyStatusBarDensity(advanced);
 
-        var showDiagnostics = _diagnosticsForcedVisible || _diagnosticsPinnedVisible;
+        var showDiagnostics = advanced && (_diagnosticsForcedVisible || _diagnosticsPinnedVisible);
         DiagnosticsRow.Height = showDiagnostics ? new GridLength(260.0) : new GridLength(0.0);
         DiagnosticsTabControl.Visibility = showDiagnostics ? Visibility.Visible : Visibility.Collapsed;
         BeginnerFailureHintPanel.Visibility = beginner && !string.IsNullOrWhiteSpace(_beginnerFailureHint)
             ? Visibility.Visible
             : Visibility.Collapsed;
         OpenDiagnosticsFromHintButton.Visibility = beginner ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApplyStatusBarDensity(bool advanced)
+    {
+        var extraVisibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        RenderStatusLabel.Visibility = extraVisibility;
+        RenderStatusText.Visibility = extraVisibility;
+        FrameStatusLabel.Visibility = extraVisibility;
+        FrameStatusText.Visibility = extraVisibility;
+        BusyStatusLabel.Visibility = extraVisibility;
+        BusyStatusText.Visibility = extraVisibility;
+        ErrorStatusLabel.Visibility = extraVisibility;
+        ErrorStatusText.Visibility = extraVisibility;
+        TrackStatusLabel.Visibility = extraVisibility;
+        TrackStatusText.Visibility = extraVisibility;
     }
 
     private void SetOnboardingStepState(TextBlock target, bool completed)
@@ -3188,6 +3237,11 @@ public partial class MainWindow : Window
 
     private void OpenDiagnosticsFromHint_Click(object sender, RoutedEventArgs e)
     {
+        if (IsBeginnerMode())
+        {
+            SetUiMode(UiModeAdvanced, persist: true);
+        }
+
         var onboarding = HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState);
         _controller.TrackOnboardingUiEvent(
             "recovery_action_clicked",
@@ -3229,7 +3283,7 @@ public partial class MainWindow : Window
     {
         ShowFailureHint(source, beginnerMessage);
         var message = IsBeginnerMode() ? beginnerMessage : advancedMessage;
-        MessageBox.Show(this, message, "조치 필요 (Action Required)", MessageBoxButton.OK, MessageBoxImage.Warning);
+        MessageBox.Show(this, message, "조치 필요", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 }
 

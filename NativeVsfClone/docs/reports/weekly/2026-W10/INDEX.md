@@ -90,6 +90,7 @@ Report list for this week.
 - [2026-03-06_tracking_latency_lock_followup.md](./2026-03-06_tracking_latency_lock_followup.md)
 - [2026-03-06_tracking_render_followup.md](./2026-03-06_tracking_render_followup.md)
 - [2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md](./2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md)
+- [2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md](./2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md)
 - [2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md](./2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md)
 - [2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md](./2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md)
 - [2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md](./2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md)

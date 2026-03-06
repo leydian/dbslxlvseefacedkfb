@@ -409,6 +409,7 @@ public sealed partial class HostController
                 trackingSettings.LatencyProfile,
                 trackingSettings.PoseFilterProfile,
                 trackingSettings.PoseDeadbandDeg,
+                trackingSettings.AutoStabilityTuningEnabled,
                 trackingSettings.UpperBodyEnabled,
                 trackingSettings.UpperBodyStrength,
                 trackingSettings.UpperBodySmoothing);

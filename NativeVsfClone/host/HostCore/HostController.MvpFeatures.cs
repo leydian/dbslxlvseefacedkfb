@@ -768,6 +768,7 @@ public sealed partial class HostController
         TrackingLatencyProfile? latencyProfile = null,
         PoseFilterProfile? poseFilterProfile = null,
         float? poseDeadbandDeg = null,
+        bool? autoStabilityTuningEnabled = null,
         bool? upperBodyEnabled = null,
         float? upperBodyStrength = null,
         UpperBodySmoothingProfile? upperBodySmoothing = null)
@@ -796,6 +797,7 @@ public sealed partial class HostController
             resolvedProfile,
             resolvedPoseFilter,
             resolvedDeadband,
+            autoStabilityTuningEnabled ?? current.AutoStabilityTuningEnabled,
             upperBodyEnabled ?? current.UpperBodyEnabled,
             resolvedUpperBodyStrength,
             upperBodySmoothing ?? current.UpperBodySmoothing);
@@ -809,7 +811,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, upper_body={normalized.UpperBodyEnabled}, upper_strength={normalized.UpperBodyStrength:F2}, upper_smoothing={normalized.UpperBodySmoothing}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, auto_stability={normalized.AutoStabilityTuningEnabled}, upper_body={normalized.UpperBodyEnabled}, upper_strength={normalized.UpperBodyStrength:F2}, upper_smoothing={normalized.UpperBodySmoothing}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
                 NcResultCode.Ok),
             false);
     }
@@ -845,6 +847,7 @@ public sealed partial class HostController
             current.LatencyProfile,
             current.PoseFilterProfile,
             current.PoseDeadbandDeg,
+            current.AutoStabilityTuningEnabled,
             current.UpperBodyEnabled,
             current.UpperBodyStrength,
             current.UpperBodySmoothing);
@@ -1388,7 +1391,7 @@ public sealed partial class HostController
 
         if (source.Contains("LoadAvatar", StringComparison.OrdinalIgnoreCase))
         {
-            var (parserStage, primaryError) = GetLoadFailureContext();
+            var (parserMode, parserStage, primaryError) = GetLoadFailureContext();
             if (detail.Contains("renderable mesh payloads", StringComparison.OrdinalIgnoreCase))
             {
                 title = $"Runtime avatar load failed (format recognized, stage={parserStage})";
@@ -1399,7 +1402,7 @@ public sealed partial class HostController
                 title = $"Runtime avatar load failed (format recognized, stage={parserStage})";
                 action = "Check parser_stage/primary_error details, then retry. If it fails again, export diagnostics and convert to .xav2/.vrm.";
             }
-            detail = AppendLoadContextDetail(detail, parserStage, primaryError);
+            detail = AppendLoadContextDetail(detail, parserMode, parserStage, primaryError);
         }
         else if (source.Contains("StartSpout", StringComparison.OrdinalIgnoreCase) ||
                  source.Contains("StartOsc", StringComparison.OrdinalIgnoreCase))
@@ -1420,12 +1423,15 @@ public sealed partial class HostController
         return LastUserFacingError;
     }
 
-    private (string ParserStage, string PrimaryError) GetLoadFailureContext()
+    private (string ParserMode, string ParserStage, string PrimaryError) GetLoadFailureContext()
     {
+        var parserMode = string.IsNullOrWhiteSpace(_sessionPersistence.Sidecar.ParserMode)
+            ? "sidecar"
+            : _sessionPersistence.Sidecar.ParserMode.Trim();
         var info = _sessionService.LastLoadAttemptInfo;
         if (!info.HasValue)
         {
-            return ("unknown", "NONE");
+            return (parserMode, "unknown", "NONE");
         }
 
         var parserStage = string.IsNullOrWhiteSpace(info.Value.ParserStage)
@@ -1434,12 +1440,12 @@ public sealed partial class HostController
         var primaryError = string.IsNullOrWhiteSpace(info.Value.PrimaryErrorCode)
             ? "NONE"
             : info.Value.PrimaryErrorCode.Trim();
-        return (parserStage, primaryError);
+        return (parserMode, parserStage, primaryError);
     }
 
-    private static string AppendLoadContextDetail(string detail, string parserStage, string primaryError)
+    private static string AppendLoadContextDetail(string detail, string parserMode, string parserStage, string primaryError)
     {
-        var context = $"load_context: parser_stage={parserStage}, primary_error={primaryError}";
+        var context = $"load_context: parser_mode={parserMode}, parser_stage={parserStage}, primary_error={primaryError}";
         if (string.IsNullOrWhiteSpace(detail))
         {
             return context;

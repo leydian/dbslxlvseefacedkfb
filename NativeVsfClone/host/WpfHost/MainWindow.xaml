@@ -45,16 +45,16 @@
                     CornerRadius="8"
                     Padding="10">
                 <StackPanel>
-                    <TextBlock Text="WORKSPACE" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
-                    <TextBlock Text="Host Control" Margin="0,4,0,12" FontSize="18" FontWeight="SemiBold"/>
-                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="Getting Started" Click="NavGettingStarted_Click" ToolTip="Ctrl+1"/>
-                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="Session / Avatar" Click="NavSessionAvatar_Click" ToolTip="Ctrl+2"/>
-                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="Render" Click="NavRender_Click" ToolTip="Ctrl+3"/>
-                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="Outputs" Click="NavOutputs_Click" ToolTip="Ctrl+4"/>
-                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="Tracking" Click="NavTracking_Click" ToolTip="Ctrl+5"/>
-                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="Platform Ops" Click="NavPlatformOps_Click" ToolTip="Ctrl+6"/>
+                    <TextBlock Text="작업공간" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
+                    <TextBlock Text="빠른 제어" Margin="0,4,0,12" FontSize="18" FontWeight="SemiBold"/>
+                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="시작하기" Click="NavGettingStarted_Click" ToolTip="Ctrl+1"/>
+                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="세션/아바타" Click="NavSessionAvatar_Click" ToolTip="Ctrl+2"/>
+                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="렌더 설정" Click="NavRender_Click" ToolTip="Ctrl+3"/>
+                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="출력 설정" Click="NavOutputs_Click" ToolTip="Ctrl+4"/>
+                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="트래킹" Click="NavTracking_Click" ToolTip="Ctrl+5"/>
+                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="고급 운영" Click="NavPlatformOps_Click" ToolTip="Ctrl+6"/>
                     <Separator Margin="0,4,0,8"/>
-                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="Diagnostics Panel" Click="ToggleDiagnosticsPanel_Click" ToolTip="Ctrl+D"/>
+                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="진단 패널" Click="ToggleDiagnosticsPanel_Click" ToolTip="Ctrl+D"/>
                 </StackPanel>
             </Border>
 
@@ -62,31 +62,31 @@
 
             <ScrollViewer x:Name="ControlPanelScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,0,2">
-                <GroupBox x:Name="ModeGroup" Header="모드 선택 (Mode)" Margin="0,0,0,8">
+                <GroupBox x:Name="ModeGroup" Header="화면 설정" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="초급 모드는 필수 작업만 보여주고, 고급 모드는 전체 운영/진단 기능을 표시합니다." TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
+                        <TextBlock Text="기본은 초급 보기입니다. 고급 보기를 켜면 운영/진단 메뉴가 열립니다." TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
                         <WrapPanel>
-                            <Button x:Name="BeginnerModeButton" Content="초급 모드 (Beginner)" Click="BeginnerMode_Click" Margin="0,0,8,0" MinWidth="170"/>
-                            <Button x:Name="AdvancedModeButton" Content="고급 모드 (Advanced)" Click="AdvancedMode_Click" MinWidth="170"/>
+                            <Button x:Name="BeginnerModeButton" Content="초급 보기" Click="BeginnerMode_Click" Margin="0,0,8,0" MinWidth="120"/>
+                            <Button x:Name="AdvancedModeButton" Content="고급 보기" Click="AdvancedMode_Click" MinWidth="120"/>
                             <Button x:Name="RenderOnlyToggleButton" Content="렌더 전용 모드 (F11)" Click="RenderOnlyToggle_Click" Margin="8,0,0,0" MinWidth="170"/>
-                            <Button x:Name="ThemeToggleButton" Content="Dark Theme" Click="ThemeToggle_Click" Margin="8,0,0,0" MinWidth="120" ToolTip="Ctrl+T"/>
+                            <Button x:Name="ThemeToggleButton" Content="다크 테마" Click="ThemeToggle_Click" Margin="8,0,0,0" MinWidth="120" ToolTip="Ctrl+T"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="QuickActionsGroup" Header="시작하기 (Getting Started)" Margin="0,0,0,8">
+                <GroupBox x:Name="QuickActionsGroup" Header="시작하기" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="처음 실행 흐름: 세션 시작 -> 아바타 불러오기 -> 방송 출력 시작" TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
+                        <TextBlock Text="처음에는 이 3단계만 따라오면 됩니다: 세션 시작 -> 아바타 불러오기 -> 출력 시작" TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
                         <Border Background="{DynamicResource Color.OnboardingBarBg}" BorderBrush="{DynamicResource Color.OnboardingBarBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
                             <StackPanel>
                                 <DockPanel LastChildFill="True">
                                     <Border DockPanel.Dock="Right" Background="{DynamicResource Color.BadgeNeutralBg}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="10" Padding="8,3" Margin="8,0,0,0">
-                                        <TextBlock x:Name="ActionabilityBadgeText" Text="READY" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Color.BadgeNeutralText}"/>
+                                        <TextBlock x:Name="ActionabilityBadgeText" Text="진행 가능" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Color.BadgeNeutralText}"/>
                                     </Border>
-                                    <TextBlock x:Name="QuickNextActionText" Text="Step 1. Start Session" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Color.OnboardingBarTitle}"/>
+                                    <TextBlock x:Name="QuickNextActionText" Text="1단계. 세션 시작" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Color.OnboardingBarTitle}"/>
                                 </DockPanel>
-                                <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output pipeline." Margin="0,5,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.OnboardingBarBody}"/>
-                                <TextBlock x:Name="NextActionSummaryText" Text="Start session to unlock avatar import." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.OnboardingBarBody}" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="PrimaryActionDescriptionText" Text="먼저 세션을 시작해 주세요." Margin="0,5,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.OnboardingBarBody}"/>
+                                <TextBlock x:Name="NextActionSummaryText" Text="세션을 시작하면 아바타를 불러올 수 있어요." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.OnboardingBarBody}" FontWeight="SemiBold"/>
                                 <TextBlock x:Name="BlockReasonShortText" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.Warning}" Visibility="Collapsed"/>
                                 <WrapPanel Margin="0,10,0,0">
                                     <Button x:Name="PrimaryActionButton" Content="세션 시작" Click="PrimaryAction_Click" MinHeight="40" MinWidth="180" FontWeight="SemiBold"/>
@@ -100,24 +100,24 @@
                             <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="6" Padding="9" Margin="0,0,6,0">
                                 <StackPanel>
                                     <TextBlock Text="1) 세션 시작" FontWeight="SemiBold" FontSize="12"/>
-                                    <TextBlock x:Name="OnboardingStep1Text" Text="대기" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
+                                    <TextBlock x:Name="OnboardingStep1Text" Text="다음 단계" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
                                 </StackPanel>
                             </Border>
                             <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="6" Padding="9" Margin="0,0,6,0">
                                 <StackPanel>
                                     <TextBlock Text="2) 아바타 불러오기" FontWeight="SemiBold" FontSize="12"/>
-                                    <TextBlock x:Name="OnboardingStep2Text" Text="대기" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
+                                    <TextBlock x:Name="OnboardingStep2Text" Text="대기 중" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
                                 </StackPanel>
                             </Border>
                             <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="6" Padding="9">
                                 <StackPanel>
                                     <TextBlock Text="3) 출력 시작" FontWeight="SemiBold" FontSize="12"/>
-                                    <TextBlock x:Name="OnboardingStep3Text" Text="대기" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
+                                    <TextBlock x:Name="OnboardingStep3Text" Text="대기 중" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
                                 </StackPanel>
                             </Border>
                         </UniformGrid>
                         <Border Background="{DynamicResource Color.PanelInfoAltBg}" BorderBrush="{DynamicResource Color.PanelInfoAltBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6">
-                            <TextBlock x:Name="QuickStatusText" Text="Session=Stopped | Avatar=None | Outputs=Off" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelInfoAltText}" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="QuickStatusText" Text="세션: 중지 | 아바타: 없음 | 출력: 꺼짐" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelInfoAltText}" FontWeight="SemiBold"/>
                         </Border>
                         <Border Background="{DynamicResource Color.PanelSuccessBg}" BorderBrush="{DynamicResource Color.PanelSuccessBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
@@ -134,37 +134,37 @@
                         </Border>
                         <Border x:Name="BeginnerFailureHintPanel" Visibility="Collapsed" Background="{DynamicResource Color.PanelErrorBg}" BorderBrush="{DynamicResource Color.PanelErrorBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
-                                <TextBlock Text="Action needed" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelErrorText}" Margin="0,0,0,2"/>
+                                <TextBlock Text="조치가 필요합니다" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelErrorText}" Margin="0,0,0,2"/>
                                 <TextBlock x:Name="BeginnerFailureHintText" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelErrorText}"/>
                                 <WrapPanel Margin="0,8,0,0">
-                                    <Button x:Name="OpenDiagnosticsFromHintButton" Style="{StaticResource TertiaryButtonStyle}" Content="Open Advanced Diagnostics" Click="OpenDiagnosticsFromHint_Click" HorizontalAlignment="Left" MinWidth="180"/>
-                                    <Button x:Name="DismissFailureHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="Dismiss" Click="DismissFailureHint_Click" Margin="8,0,0,0" HorizontalAlignment="Left" MinWidth="90"/>
+                                    <Button x:Name="OpenDiagnosticsFromHintButton" Style="{StaticResource TertiaryButtonStyle}" Content="고급 진단 열기" Click="OpenDiagnosticsFromHint_Click" HorizontalAlignment="Left" MinWidth="160"/>
+                                    <Button x:Name="DismissFailureHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="닫기" Click="DismissFailureHint_Click" Margin="8,0,0,0" HorizontalAlignment="Left" MinWidth="90"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
                         <Border x:Name="OnboardingRecoveryPanel" Visibility="Collapsed" Background="{DynamicResource Color.PanelWarningBg}" BorderBrush="{DynamicResource Color.PanelWarningBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
-                                <TextBlock Text="복구 안내 (Recovery)" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelWarningText}"/>
+                                <TextBlock Text="복구 안내" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelWarningText}"/>
                                 <TextBlock x:Name="OnboardingRecoveryText" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelWarningText}" Margin="0,2,0,0"/>
-                                <Button x:Name="DismissRecoveryHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="Dismiss" Click="DismissFailureHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="90"/>
+                                <Button x:Name="DismissRecoveryHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="닫기" Click="DismissFailureHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="90"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="SessionGroup" Header="1) 세션 (Session)" Margin="0,0,0,8">
+                <GroupBox x:Name="SessionGroup" Header="1) 세션" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="세션 시작/종료를 제어합니다." TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
                         <WrapPanel>
-                            <Button x:Name="InitializeButton" Content="초기화 (Initialize)" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="ShutdownButton" Content="종료 (Shutdown)" Click="Shutdown_Click" MinWidth="130"/>
+                            <Button x:Name="InitializeButton" Content="세션 시작" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="130"/>
+                            <Button x:Name="ShutdownButton" Content="세션 종료" Click="Shutdown_Click" MinWidth="130"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="AvatarGroup" Header="2) 아바타 (Avatar)" Margin="0,0,0,8">
+                <GroupBox x:Name="AvatarGroup" Header="2) 아바타" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <TextBlock Text="아바타 파일 경로 (Avatar Path)" FontWeight="SemiBold"/>
+                        <TextBlock Text="아바타 파일 경로" FontWeight="SemiBold"/>
                         <DockPanel Margin="0,4,0,8">
                             <Button x:Name="BrowseAvatarButton" Content="찾아보기..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                             <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged" />
@@ -189,9 +189,9 @@
                             </Grid>
                         </Border>
                         <WrapPanel>
-                            <Button x:Name="LoadButton" Content="불러오기 (Load)" Click="Load_Click" Margin="0,0,8,0" MinWidth="130"/>
+                            <Button x:Name="LoadButton" Content="불러오기" Click="Load_Click" Margin="0,0,8,0" MinWidth="130"/>
                             <Button x:Name="CancelLoadButton" Content="불러오기 취소" Click="CancelLoad_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="UnloadButton" Content="해제 (Unload)" Click="Unload_Click" MinWidth="130"/>
+                            <Button x:Name="UnloadButton" Content="내리기" Click="Unload_Click" MinWidth="130"/>
                         </WrapPanel>
                         <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
@@ -199,31 +199,31 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="70"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Timeout" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="시간 제한" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="LoadTimeoutTextBox" Text="20000"/>
                             <TextBlock Grid.Column="2" Text="ms" Margin="6,0,0,0" VerticalAlignment="Center"/>
                         </Grid>
                         <ProgressBar x:Name="LoadProgressBar" Margin="0,8,0,4" Minimum="0" Maximum="100" Height="10" Value="0"/>
-                        <TextBlock x:Name="LoadProgressText" Text="Load progress: idle" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="LoadProgressText" Text="불러오기 상태: 대기" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap"/>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="RenderGroup" Header="3) 렌더 (Render)" Margin="0,0,0,8">
+                <GroupBox x:Name="RenderGroup" Header="3) 화면" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
-                                <TextBlock Text="기본 (Basic)" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                                <CheckBox x:Name="BroadcastModeCheckBox" Content="방송 모드 (Broadcast Mode)" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
+                                <TextBlock Text="기본" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <CheckBox x:Name="BroadcastModeCheckBox" Content="방송 화면 최적화" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Camera" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="카메라" VerticalAlignment="Center"/>
                                     <ComboBox Grid.Column="1" x:Name="CameraModeComboBox" SelectionChanged="CameraMode_SelectionChanged">
-                                        <ComboBoxItem Content="Auto Fit Full"/>
-                                        <ComboBoxItem Content="Auto Fit Bust"/>
-                                        <ComboBoxItem Content="Manual"/>
+                                        <ComboBoxItem Content="자동 전체"/>
+                                        <ComboBoxItem Content="자동 상반신"/>
+                                        <ComboBoxItem Content="수동"/>
                                     </ComboBox>
                                 </Grid>
                                 <Grid Margin="0,0,0,2">
@@ -232,14 +232,14 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Framing" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="구도" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="FramingSlider" Minimum="0.35" Maximum="0.95" Value="0.72" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="FramingSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="FramingValueText" Text="0.72" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                             </StackPanel>
                         </Border>
 
-                        <Expander x:Name="RenderAdvancedExpander" Header="고급 설정 (Advanced)" IsExpanded="False">
+                        <Expander x:Name="RenderAdvancedExpander" Header="고급 설정" IsExpanded="False">
                             <StackPanel Margin="0,8,0,0">
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
@@ -247,7 +247,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Headroom" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="머리 여백" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="HeadroomSlider" Minimum="0.00" Maximum="0.50" Value="0.10" TickFrequency="0.01" IsSnapToTickEnabled="False" ValueChanged="HeadroomSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="HeadroomValueText" Text="0.10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -257,7 +257,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="좌우 회전" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="YawSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="YawSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="YawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -267,7 +267,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="FOV" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="화각" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="FovSlider" Minimum="20" Maximum="70" Value="35" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="FovSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="FovValueText" Text="35" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -276,38 +276,38 @@
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Background" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="배경" VerticalAlignment="Center"/>
                                     <ComboBox Grid.Column="1" x:Name="BackgroundPresetComboBox" SelectionChanged="BackgroundPreset_SelectionChanged">
-                                        <ComboBoxItem Content="Dark Blue"/>
-                                        <ComboBoxItem Content="Neutral Gray"/>
-                                        <ComboBoxItem Content="Green Screen"/>
+                                        <ComboBoxItem Content="짙은 파랑"/>
+                                        <ComboBoxItem Content="중립 회색"/>
+                                        <ComboBoxItem Content="크로마키 그린"/>
                                     </ComboBox>
                                 </Grid>
-                                <CheckBox x:Name="MirrorModeCheckBox" Content="미러 모드 (Mirror Mode)" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
+                                <CheckBox x:Name="MirrorModeCheckBox" Content="미러 모드" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
                                 <CheckBox x:Name="DebugOverlayCheckBox" Content="디버그 오버레이 표시" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
                                 <Separator Margin="0,10,0,10"/>
-                                <TextBlock Text="Pose (본 포즈 보정)" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <TextBlock Text="포즈 보정" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Bone" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="본" VerticalAlignment="Center"/>
                                     <ComboBox Grid.Column="1" x:Name="PoseBoneComboBox" SelectionChanged="PoseBone_SelectionChanged">
-                                        <ComboBoxItem Content="Hips"/>
-                                        <ComboBoxItem Content="Spine"/>
-                                        <ComboBoxItem Content="Chest"/>
-                                        <ComboBoxItem Content="UpperChest"/>
-                                        <ComboBoxItem Content="Neck"/>
-                                        <ComboBoxItem Content="Head"/>
-                                        <ComboBoxItem Content="LeftUpperArm"/>
-                                        <ComboBoxItem Content="RightUpperArm"/>
-                                        <ComboBoxItem Content="LeftShoulder"/>
-                                        <ComboBoxItem Content="RightShoulder"/>
-                                        <ComboBoxItem Content="LeftLowerArm"/>
-                                        <ComboBoxItem Content="RightLowerArm"/>
-                                        <ComboBoxItem Content="LeftHand"/>
-                                        <ComboBoxItem Content="RightHand"/>
+                                        <ComboBoxItem Content="골반"/>
+                                        <ComboBoxItem Content="척추"/>
+                                        <ComboBoxItem Content="가슴"/>
+                                        <ComboBoxItem Content="윗가슴"/>
+                                        <ComboBoxItem Content="목"/>
+                                        <ComboBoxItem Content="머리"/>
+                                        <ComboBoxItem Content="왼쪽 위팔"/>
+                                        <ComboBoxItem Content="오른쪽 위팔"/>
+                                        <ComboBoxItem Content="왼쪽 어깨"/>
+                                        <ComboBoxItem Content="오른쪽 어깨"/>
+                                        <ComboBoxItem Content="왼쪽 아래팔"/>
+                                        <ComboBoxItem Content="오른쪽 아래팔"/>
+                                        <ComboBoxItem Content="왼손"/>
+                                        <ComboBoxItem Content="오른손"/>
                                     </ComboBox>
                                 </Grid>
                                 <Grid Margin="0,0,0,8">
@@ -316,7 +316,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Pitch" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="위아래" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="PosePitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PosePitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -326,7 +326,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="좌우 회전" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="PoseYawSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PoseYawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -336,18 +336,18 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Roll" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="기울기" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="PoseRollSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PoseRollValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
-                                <TextBlock Text="Arm Pitch (팔 올림/내림)" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <TextBlock Text="팔 올림/내림" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                 <Grid Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Both" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="양팔" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="ArmBothPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="ArmBothPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -357,7 +357,7 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Left Arm" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="왼팔" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="ArmLeftPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="ArmLeftPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
@@ -367,18 +367,18 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Right Arm" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="0" Text="오른팔" VerticalAlignment="Center"/>
                                     <Slider Grid.Column="1" x:Name="ArmRightPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="ArmRightPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <WrapPanel Margin="0,0,0,8">
-                                    <Button x:Name="PoseResetBoneButton" Content="Reset Bone" Width="100" Margin="0,0,8,0" Click="PoseResetBone_Click"/>
-                                    <Button x:Name="PoseResetAllButton" Content="Reset All" Width="100" Click="PoseResetAll_Click"/>
+                                    <Button x:Name="PoseResetBoneButton" Content="현재 본 초기화" Width="100" Margin="0,0,8,0" Click="PoseResetBone_Click"/>
+                                    <Button x:Name="PoseResetAllButton" Content="전체 초기화" Width="100" Click="PoseResetAll_Click"/>
                                 </WrapPanel>
-                                <TextBlock Text="Pose Presets" FontWeight="SemiBold"/>
+                                <TextBlock Text="포즈 프리셋" FontWeight="SemiBold"/>
                                 <DockPanel Margin="0,4,0,8">
-                                    <Button x:Name="SavePosePresetButton" Content="Save Pose" Width="88" Click="SavePosePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
-                                    <TextBox x:Name="PosePresetNameTextBox" Text="My Pose Preset"/>
+                                    <Button x:Name="SavePosePresetButton" Content="포즈 저장" Width="88" Click="SavePosePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="PosePresetNameTextBox" Text="내 포즈 프리셋"/>
                                 </DockPanel>
                                 <DockPanel Margin="0,0,0,8">
                                     <WrapPanel DockPanel.Dock="Right">
@@ -387,14 +387,14 @@
                                     </WrapPanel>
                                     <ComboBox x:Name="PosePresetComboBox"/>
                                 </DockPanel>
-                                <TextBlock Text="Arm Quality" FontWeight="SemiBold"/>
+                                <TextBlock Text="팔 움직임 품질" FontWeight="SemiBold"/>
                                 <WrapPanel Margin="0,4,0,8">
-                                    <CheckBox x:Name="ArmSmoothingCheckBox" Content="Smoothing" IsChecked="True" Checked="ArmTuning_Changed" Unchecked="ArmTuning_Changed" Margin="0,0,12,0"/>
-                                    <TextBlock Text="Deadband" VerticalAlignment="Center"/>
+                                    <CheckBox x:Name="ArmSmoothingCheckBox" Content="부드럽게 보정" IsChecked="True" Checked="ArmTuning_Changed" Unchecked="ArmTuning_Changed" Margin="0,0,12,0"/>
+                                    <TextBlock Text="불감 구간" VerticalAlignment="Center"/>
                                     <Slider x:Name="ArmDeadbandSlider" Width="120" Minimum="0.0" Maximum="3.0" Value="0.8" TickFrequency="0.1" ValueChanged="ArmTuning_Changed" Margin="8,0,0,0"/>
                                     <TextBlock x:Name="ArmDeadbandValueText" Text="0.80°" Width="52" Margin="6,0,0,0" VerticalAlignment="Center"/>
                                 </WrapPanel>
-                                <TextBlock Text="Suggested Arm Presets" FontWeight="SemiBold"/>
+                                <TextBlock Text="추천 팔 프리셋" FontWeight="SemiBold"/>
                                 <DockPanel Margin="0,4,0,8">
                                     <WrapPanel DockPanel.Dock="Right">
                                         <Button x:Name="ApplySuggestedArmPresetButton" Content="적용" Width="74" Margin="8,0,0,0" Click="ApplySuggestedArmPreset_Click"/>
@@ -403,10 +403,10 @@
                                     <ComboBox x:Name="SuggestedArmPresetComboBox"/>
                                 </DockPanel>
                                 <Separator Margin="0,10,0,10"/>
-                                <TextBlock Text="프리셋 (Presets)" FontWeight="SemiBold"/>
+                                <TextBlock Text="렌더 프리셋" FontWeight="SemiBold"/>
                                 <DockPanel Margin="0,4,0,8">
-                                    <Button x:Name="SavePresetButton" Content="Save" Width="74" Click="SavePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
-                                    <TextBox x:Name="PresetNameTextBox" Text="My Preset"/>
+                                    <Button x:Name="SavePresetButton" Content="저장" Width="74" Click="SavePreset_Click" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                    <TextBox x:Name="PresetNameTextBox" Text="내 프리셋"/>
                                 </DockPanel>
                                 <DockPanel Margin="0,0,0,8">
                                     <WrapPanel DockPanel.Dock="Right">
@@ -415,29 +415,29 @@
                                     </WrapPanel>
                                     <ComboBox x:Name="PresetComboBox"/>
                                 </DockPanel>
-                                <Button x:Name="ResetRenderButton" Content="Reset To Default" Width="132" Click="ResetRender_Click"/>
+                                <Button x:Name="ResetRenderButton" Content="기본값으로 초기화" Width="132" Click="ResetRender_Click"/>
                             </StackPanel>
                         </Expander>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="OutputsGroup" Header="4) 출력 (Outputs)">
+                <GroupBox x:Name="OutputsGroup" Header="4) 출력">
                     <StackPanel Margin="8">
-                        <TextBlock Text="Spout" FontWeight="SemiBold"/>
+                        <TextBlock Text="화면 출력" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Channel" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="채널 이름" VerticalAlignment="Center"/>
                             <TextBox Grid.Column="1" x:Name="SpoutChannelTextBox" Text="VsfClone"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <Button x:Name="StartSpoutButton" Content="Spout 시작" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
-                            <Button x:Name="StopSpoutButton" Content="Spout 중지" Click="StopSpout_Click" MinWidth="110"/>
+                            <Button x:Name="StartSpoutButton" Content="화면 출력 시작" Click="StartSpout_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopSpoutButton" Content="화면 출력 중지" Click="StopSpout_Click" MinWidth="110"/>
                         </WrapPanel>
 
-                        <TextBlock Text="OSC" FontWeight="SemiBold"/>
+                        <TextBlock Text="모션 출력" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
@@ -447,21 +447,21 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Bind Port" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="수신 포트" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="OscBindPortTextBox" Text="39539" TextChanged="InputTextChanged"/>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Publish" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="보낼 주소" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="1" Grid.Column="1" x:Name="OscPublishAddressTextBox" Text="127.0.0.1:39540" Margin="0,8,0,0" TextChanged="InputTextChanged"/>
                         </Grid>
                         <TextBlock x:Name="OscBindValidationText" Foreground="{DynamicResource Color.ValidationErrorText}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                         <TextBlock x:Name="OscPublishValidationText" Foreground="{DynamicResource Color.ValidationErrorText}" Margin="0,0,0,8" TextWrapping="Wrap"/>
                         <WrapPanel>
-                            <Button x:Name="StartOscButton" Content="OSC 시작" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
-                            <Button x:Name="StopOscButton" Content="OSC 중지" Click="StopOsc_Click" MinWidth="110"/>
+                            <Button x:Name="StartOscButton" Content="모션 출력 시작" Click="StartOsc_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopOscButton" Content="모션 출력 중지" Click="StopOsc_Click" MinWidth="110"/>
                         </WrapPanel>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="TrackingGroup" Header="5) 트래킹 입력 (Tracking Input)" Margin="0,8,0,0">
+                <GroupBox x:Name="TrackingGroup" Header="5) 트래킹 입력" Margin="0,8,0,0">
                     <StackPanel Margin="8">
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
@@ -480,58 +480,61 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Listen Port" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="수신 포트" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Source" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="입력 소스" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
-                                <ComboBoxItem Content="Auto (OSC + Webcam)"/>
-                                <ComboBoxItem Content="OSC (iFacialMocap)"/>
-                                <ComboBoxItem Content="Webcam (MediaPipe)"/>
+                                <ComboBoxItem Content="자동 (모션+웹캠)"/>
+                                <ComboBoxItem Content="모션 전용"/>
+                                <ComboBoxItem Content="웹캠 전용"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Webcam" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="웹캠" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <DockPanel Grid.Row="2" Grid.Column="1" Margin="0,8,0,0">
                                 <Button x:Name="RefreshTrackingWebcamButton" Content="새로고침" Width="70" DockPanel.Dock="Right" Margin="8,0,0,0" Click="RefreshTrackingWebcam_Click"/>
                                 <ComboBox x:Name="TrackingWebcamDeviceComboBox"/>
                             </DockPanel>
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Infer FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="추론 FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Parse Warn" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="파싱 경고" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingParseWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Drop Warn" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="드롭 경고" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="5" Grid.Column="1" x:Name="TrackingDropWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Source Lock" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="소스 고정" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <ComboBox Grid.Row="6" Grid.Column="1" x:Name="TrackingSourceLockComboBox" Margin="0,8,0,0">
-                                <ComboBoxItem Content="Auto"/>
-                                <ComboBoxItem Content="iFacial Locked"/>
-                                <ComboBoxItem Content="Webcam Locked"/>
+                                <ComboBoxItem Content="자동"/>
+                                <ComboBoxItem Content="iFacial 고정"/>
+                                <ComboBoxItem Content="웹캠 고정"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Latency" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="지연 프로필" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <ComboBox Grid.Row="7" Grid.Column="1" x:Name="TrackingLatencyProfileComboBox" Margin="0,8,0,0">
-                                <ComboBoxItem Content="Low Latency"/>
-                                <ComboBoxItem Content="Balanced"/>
-                                <ComboBoxItem Content="Stable"/>
+                                <ComboBoxItem Content="저지연"/>
+                                <ComboBoxItem Content="균형"/>
+                                <ComboBoxItem Content="안정"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Pose Filter" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="포즈 필터" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <ComboBox Grid.Row="8" Grid.Column="1" x:Name="TrackingPoseFilterProfileComboBox" Margin="0,8,0,0" SelectionChanged="TrackingPoseFilterProfile_SelectionChanged">
-                                <ComboBoxItem Content="Reactive"/>
-                                <ComboBoxItem Content="Balanced"/>
-                                <ComboBoxItem Content="Stable"/>
+                                <ComboBoxItem Content="반응형"/>
+                                <ComboBoxItem Content="균형"/>
+                                <ComboBoxItem Content="안정"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Deadband" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="불감 구간" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,8,0,0">
                                 <TextBlock x:Name="TrackingPoseDeadbandValueText" Text="0.90°" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                                 <Slider x:Name="TrackingPoseDeadbandSlider" Minimum="0.0" Maximum="3.0" Value="0.9" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="TrackingPoseDeadbandSlider_ValueChanged"/>
                             </DockPanel>
-                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Upper Body" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="상반신" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <CheckBox Grid.Row="10" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="안정화" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <CheckBox Grid.Row="11" Grid.Column="1" x:Name="TrackingAutoStabilityCheckBox" Content="자동 안정화 튜닝" Margin="0,8,0,0"/>
                         </Grid>
                         <Border x:Name="TrackingIpv4HintPanel" BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
-                                <TextBlock Text="iFacialMocap 대상 PC IPv4" FontWeight="SemiBold"/>
-                                <TextBlock Text="Recommended IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
+                                <TextBlock Text="iFacialMocap 연결용 IPv4" FontWeight="SemiBold"/>
+                                <TextBlock Text="권장 IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
                                 <TextBlock x:Name="TrackingIpv4RecommendedText" Text="-" FontFamily="Consolas" FontWeight="SemiBold"/>
-                                <TextBlock Text="All IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
+                                <TextBlock Text="전체 IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
                                 <TextBlock x:Name="TrackingIpv4AllText" Text="-" FontFamily="Consolas" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -540,15 +543,15 @@
                             <Button x:Name="TrackingIpv4ToggleButton" Content="IPv4 안내 숨기기" Click="ToggleTrackingIpv4Hint_Click" Margin="8,0,0,0" MinWidth="150"/>
                         </WrapPanel>
                         <WrapPanel Margin="0,0,0,8">
-                            <Button x:Name="StartTrackingButton" Content="Start Tracking" Click="StartTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
-                            <Button x:Name="StopTrackingButton" Content="Stop Tracking" Click="StopTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
-                            <Button x:Name="RecenterTrackingButton" Content="Recenter" Click="RecenterTracking_Click" MinWidth="96"/>
+                            <Button x:Name="StartTrackingButton" Content="트래킹 시작" Click="StartTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="StopTrackingButton" Content="트래킹 중지" Click="StopTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
+                            <Button x:Name="RecenterTrackingButton" Content="기준 재설정" Click="RecenterTracking_Click" MinWidth="96"/>
                         </WrapPanel>
                         <TextBlock x:Name="TrackingStatusText" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap"/>
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="PlatformOpsGroup" Header="6) 운영/진단 (Platform Ops)" Margin="0,8,0,0">
+                <GroupBox x:Name="PlatformOpsGroup" Header="6) 운영/진단" Margin="0,8,0,0">
                     <StackPanel Margin="8">
                         <WrapPanel Margin="0,0,0,8">
                             <Button x:Name="RunPreflightButton" Content="사전 점검 실행" Click="RunPreflight_Click" Margin="0,0,8,0" MinWidth="112"/>
@@ -557,11 +560,11 @@
                         </WrapPanel>
                         <TextBlock x:Name="PreflightHintText" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-                        <TextBlock Text="렌더 프로파일 (Render Profiles)" FontWeight="SemiBold"/>
+                        <TextBlock Text="렌더 프로파일" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,4,0,8">
-                            <Button Content="Quality" Click="ProfileQuality_Click" Margin="0,0,8,0" MinWidth="92"/>
-                            <Button Content="Performance" Click="ProfilePerformance_Click" Margin="0,0,8,0" MinWidth="92"/>
-                            <Button Content="Stability" Click="ProfileStability_Click" MinWidth="92"/>
+                            <Button Content="화질 우선" Click="ProfileQuality_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button Content="성능 우선" Click="ProfilePerformance_Click" Margin="0,0,8,0" MinWidth="92"/>
+                            <Button Content="안정 우선" Click="ProfileStability_Click" MinWidth="92"/>
                         </WrapPanel>
 
                         <TextBlock Text="Sidecar 설정" FontWeight="SemiBold"/>
@@ -575,31 +578,31 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Mode" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="모드" VerticalAlignment="Center"/>
                             <ComboBox Grid.Row="0" Grid.Column="1" x:Name="ParserModeComboBox">
                                 <ComboBoxItem Content="sidecar"/>
                                 <ComboBoxItem Content="inhouse"/>
                                 <ComboBoxItem Content="sidecar-strict"/>
                             </ComboBox>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Path" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="경로" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="1" Grid.Column="1" x:Name="SidecarPathTextBox" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Timeout" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="시간 제한" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="2" Grid.Column="1" x:Name="SidecarTimeoutTextBox" Text="15000" Margin="0,8,0,0"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <CheckBox x:Name="SidecarStrictCheckBox" Content="엄격 모드 (Strict, no fallback)" Margin="0,0,12,0"/>
+                            <CheckBox x:Name="SidecarStrictCheckBox" Content="엄격 모드 (대체 경로 없음)" Margin="0,0,12,0"/>
                             <Button Content="Sidecar 적용" Click="ApplySidecar_Click" MinWidth="112"/>
                         </WrapPanel>
 
-                        <TextBlock Text="텔레메트리 (Telemetry)" FontWeight="SemiBold"/>
+                        <TextBlock Text="텔레메트리" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,4,0,0">
-                            <CheckBox x:Name="TelemetryOptInCheckBox" Content="수집 동의 (Opt-in)" Margin="0,0,8,0"/>
-                            <CheckBox x:Name="TelemetryRedactCheckBox" Content="Redact Sensitive" IsChecked="True" Margin="0,0,8,0"/>
-                            <Button Content="Telemetry 적용" Click="ApplyTelemetry_Click" Margin="0,0,8,0" MinWidth="112"/>
-                            <Button Content="Telemetry 내보내기" Click="ExportTelemetry_Click" MinWidth="120"/>
+                            <CheckBox x:Name="TelemetryOptInCheckBox" Content="수집 동의" Margin="0,0,8,0"/>
+                            <CheckBox x:Name="TelemetryRedactCheckBox" Content="민감정보 가림" IsChecked="True" Margin="0,0,8,0"/>
+                            <Button Content="텔레메트리 적용" Click="ApplyTelemetry_Click" Margin="0,0,8,0" MinWidth="112"/>
+                            <Button Content="텔레메트리 내보내기" Click="ExportTelemetry_Click" MinWidth="120"/>
                         </WrapPanel>
 
-                        <TextBlock Text="자동 품질 정책 (Auto Quality)" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                        <TextBlock Text="자동 품질 정책" FontWeight="SemiBold" Margin="0,10,0,0"/>
                         <Grid Margin="0,4,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
@@ -609,15 +612,15 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Threshold"/>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="임계값"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="AutoQualityThresholdTextBox" Text="28.0"/>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Consecutive" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="연속 프레임" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="1" Grid.Column="1" x:Name="AutoQualityConsecutiveTextBox" Text="120" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Cooldown" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="재시도 대기" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="2" Grid.Column="1" x:Name="AutoQualityCooldownTextBox" Text="30" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Recovery ms" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="복구 기준 ms" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="3" Grid.Column="1" x:Name="AutoQualityRecoveryThresholdTextBox" Text="22.0" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Recovery n" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="복구 연속 수" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="4" Grid.Column="1" x:Name="AutoQualityRecoveryConsecutiveTextBox" Text="240" Margin="0,8,0,0"/>
                         </Grid>
                         <Button Content="자동 품질 정책 적용" Click="ApplyAutoQualityPolicy_Click" MinWidth="170"/>
@@ -651,7 +654,7 @@
                         BorderBrush="{DynamicResource Color.OverlayHintBorder}"
                         BorderThickness="1"
                         CornerRadius="4">
-                    <TextBlock Text="렌더 전용 모드 (Render-only) · F11로 UI 복귀"
+                    <TextBlock Text="렌더 전용 모드 · F11로 UI 복귀"
                                Foreground="{DynamicResource Color.OverlayHintText}"
                                FontWeight="SemiBold"/>
                 </Border>
@@ -661,52 +664,54 @@
             </Grid>
 
             <TabControl x:Name="DiagnosticsTabControl" Grid.Row="1" Margin="0,8,0,8" SelectionChanged="DiagnosticsTabControl_SelectionChanged">
-                <TabItem Header="런타임 (Runtime)">
+                <TabItem Header="런타임">
                     <DockPanel>
                         <Button Content="런타임 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyRuntime_Click"/>
                         <TextBox x:Name="RuntimeDiagnosticsTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
-                <TabItem Header="아바타 (Avatar)">
+                <TabItem Header="아바타">
                     <DockPanel>
                         <Button Content="아바타 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyAvatar_Click"/>
                         <TextBox x:Name="AvatarDiagnosticsTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
-                <TabItem Header="로그 (Logs)">
+                <TabItem Header="로그">
                     <DockPanel>
                         <Button Content="로그 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyLogs_Click"/>
                         <TextBox x:Name="LogsTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
-                <TabItem Header="가이드 (Guides)">
+                <TabItem Header="가이드">
                     <TextBox x:Name="GuidesTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                 </TabItem>
             </TabControl>
 
             <Border x:Name="StatusBarBorder" Grid.Row="2" Padding="8" Background="{DynamicResource Color.StatusBarBg}" BorderBrush="{DynamicResource Color.StatusBarBorder}" BorderThickness="1" CornerRadius="8">
                 <WrapPanel>
-                    <TextBlock Text="Session: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="SessionStatusLabel" Text="세션: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="SessionStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="Avatar: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="AvatarStatusLabel" Text="아바타: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="AvatarStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="Render: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="RenderStatusLabel" Text="렌더: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="RenderStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="Frame: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="FrameStatusLabel" Text="프레임: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="FrameStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="Outputs: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="OutputStatusLabel" Text="출력: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="OutputStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="Busy: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="BusyStatusLabel" Text="작업: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="BusyStatusText" Margin="0,0,12,0" FontWeight="SemiBold" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="LastError: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
+                    <TextBlock x:Name="ErrorStatusLabel" Text="오류: " Foreground="{DynamicResource Color.StatusBarLabel}"/>
                     <TextBlock x:Name="ErrorStatusText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Width="360" Foreground="{DynamicResource Color.StatusBarValue}"/>
-                    <TextBlock Text="Track: " Foreground="{DynamicResource Color.StatusBarLabel}" Margin="12,0,0,0"/>
+                    <TextBlock x:Name="TrackStatusLabel" Text="트랙: " Foreground="{DynamicResource Color.StatusBarLabel}" Margin="12,0,0,0"/>
                     <TextBlock x:Name="TrackStatusText" FontWeight="SemiBold" Width="300" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Color.StatusBarValue}"/>
                 </WrapPanel>
             </Border>
         </Grid>
     </Grid>
 </Window>
+
+
 
 
 
