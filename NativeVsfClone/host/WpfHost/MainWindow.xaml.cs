@@ -455,6 +455,12 @@ public partial class MainWindow : Window
         SetUiMode(UiModeAdvanced, persist: true);
     }
 
+    private void ViewModeToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var isAdvanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
+        SetUiMode(isAdvanced ? UiModeBeginner : UiModeAdvanced, persist: true);
+    }
+
     private void ThemeToggle_Click(object sender, RoutedEventArgs e)
     {
         _isDarkTheme = !_isDarkTheme;
@@ -1482,6 +1488,110 @@ public partial class MainWindow : Window
         QueueRenderApply();
     }
 
+    private void LightEulerSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (LightPitchValueText is not null && LightPitchSlider is not null)
+        {
+            LightPitchValueText.Text = LightPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (LightYawValueText is not null && LightYawSlider is not null)
+        {
+            LightYawValueText.Text = LightYawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void LightIntensitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (LightIntensityValueText is not null && LightIntensitySlider is not null)
+        {
+            LightIntensityValueText.Text = LightIntensitySlider.Value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void LightRangeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (LightRangeValueText is not null && LightRangeSlider is not null)
+        {
+            LightRangeValueText.Text = LightRangeSlider.Value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void SpotAngleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (SpotAngleValueText is not null && SpotAngleSlider is not null)
+        {
+            SpotAngleValueText.Text = SpotAngleSlider.Value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void ShadowStrengthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ShadowStrengthValueText is not null && ShadowStrengthSlider is not null)
+        {
+            ShadowStrengthValueText.Text = ShadowStrengthSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void ShadowBiasSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ShadowBiasValueText is not null && ShadowBiasSlider is not null)
+        {
+            ShadowBiasValueText.Text = ShadowBiasSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void AmbientIntensitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (AmbientIntensityValueText is not null && AmbientIntensitySlider is not null)
+        {
+            AmbientIntensityValueText.Text = AmbientIntensitySlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void ShadowEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
     private void BackgroundPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ShouldSkipRenderInteraction())
@@ -2067,6 +2177,15 @@ public partial class MainWindow : Window
         YawSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
         FovSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
         BackgroundPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        LightPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
+        LightYawSlider.IsEnabled = uiState.RenderControlsEnabled;
+        LightIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
+        LightRangeSlider.IsEnabled = uiState.RenderControlsEnabled;
+        SpotAngleSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowStrengthSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowBiasSlider.IsEnabled = uiState.RenderControlsEnabled;
+        AmbientIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowEnabledCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         PoseBoneComboBox.IsEnabled = uiState.RenderControlsEnabled;
@@ -2528,6 +2647,23 @@ public partial class MainWindow : Window
         };
         MirrorModeCheckBox.IsChecked = render.MirrorMode;
         DebugOverlayCheckBox.IsChecked = render.ShowDebugOverlay;
+        LightPitchSlider.Value = render.LightPitchDeg;
+        LightPitchValueText.Text = render.LightPitchDeg.ToString("F0", CultureInfo.InvariantCulture);
+        LightYawSlider.Value = render.LightYawDeg;
+        LightYawValueText.Text = render.LightYawDeg.ToString("F0", CultureInfo.InvariantCulture);
+        LightIntensitySlider.Value = render.LightIntensity;
+        LightIntensityValueText.Text = render.LightIntensity.ToString("F1", CultureInfo.InvariantCulture);
+        LightRangeSlider.Value = render.LightRange;
+        LightRangeValueText.Text = render.LightRange.ToString("F1", CultureInfo.InvariantCulture);
+        SpotAngleSlider.Value = render.SpotAngleDeg;
+        SpotAngleValueText.Text = render.SpotAngleDeg.ToString("F1", CultureInfo.InvariantCulture);
+        ShadowStrengthSlider.Value = render.ShadowStrength;
+        ShadowStrengthValueText.Text = render.ShadowStrength.ToString("F2", CultureInfo.InvariantCulture);
+        ShadowBiasSlider.Value = render.ShadowBias;
+        ShadowBiasValueText.Text = render.ShadowBias.ToString("F2", CultureInfo.InvariantCulture);
+        AmbientIntensitySlider.Value = render.AmbientIntensity;
+        AmbientIntensityValueText.Text = render.AmbientIntensity.ToString("F2", CultureInfo.InvariantCulture);
+        ShadowEnabledCheckBox.IsChecked = render.ShadowEnabled;
         if (TrackingShowPositionCheckBox is not null)
         {
             TrackingShowPositionCheckBox.IsChecked = render.ShowDebugOverlay;
@@ -2841,6 +2977,15 @@ public partial class MainWindow : Window
             BackgroundPreset = preset,
             MirrorMode = MirrorModeCheckBox.IsChecked == true,
             ShowDebugOverlay = DebugOverlayCheckBox.IsChecked == true,
+            LightPitchDeg = (float)LightPitchSlider.Value,
+            LightYawDeg = (float)LightYawSlider.Value,
+            LightIntensity = (float)LightIntensitySlider.Value,
+            LightRange = (float)LightRangeSlider.Value,
+            SpotAngleDeg = (float)SpotAngleSlider.Value,
+            ShadowStrength = (float)ShadowStrengthSlider.Value,
+            ShadowBias = (float)ShadowBiasSlider.Value,
+            AmbientIntensity = (float)AmbientIntensitySlider.Value,
+            ShadowEnabled = ShadowEnabledCheckBox.IsChecked == true,
         };
         return _controller.ApplyRenderUiState(state);
     }
@@ -3135,6 +3280,7 @@ public partial class MainWindow : Window
             ["Color.DisabledText"] = "#7E94AE",
             ["Color.LogAreaBg"] = "#132335",
             ["Color.LogAreaBorder"] = "#36516D",
+            ["Color.GroupBoxHeaderBg"] = "#1B2E44",
         };
 
         var lightPalette = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -3207,6 +3353,7 @@ public partial class MainWindow : Window
             ["Color.DisabledText"] = "#8A9AAF",
             ["Color.LogAreaBg"] = "#F4F7FC",
             ["Color.LogAreaBorder"] = "#C7D4E5",
+            ["Color.GroupBoxHeaderBg"] = "#F5F0FF",
         };
 
         var palette = _isDarkTheme ? darkPalette : lightPalette;
@@ -3368,10 +3515,8 @@ public partial class MainWindow : Window
 
         var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
         var beginner = !advanced;
-        BeginnerModeButton.IsEnabled = !advanced;
-        AdvancedModeButton.IsEnabled = advanced ? false : true;
-        BeginnerModeButton.FontWeight = advanced ? FontWeights.Normal : FontWeights.SemiBold;
-        AdvancedModeButton.FontWeight = advanced ? FontWeights.SemiBold : FontWeights.Normal;
+        ViewModeToggleButton.Content = advanced ? "초급 보기로 전환" : "고급 보기로 전환";
+        ViewModeToggleButton.FontWeight = advanced ? FontWeights.SemiBold : FontWeights.Normal;
 
         if (!advanced &&
             _activeSection != UiSection.GettingStarted &&

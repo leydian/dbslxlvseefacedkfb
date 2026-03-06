@@ -279,6 +279,29 @@ public struct NcRenderQualityOptions
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct NcLightingOptions
+{
+    public float LightPositionX;
+    public float LightPositionY;
+    public float LightPositionZ;
+    public float LightEulerPitchDeg;
+    public float LightEulerYawDeg;
+    public float LightEulerRollDeg;
+    public float Intensity;
+    public float Range;
+    public float SpotAngleDeg;
+    public float InnerSpotAngleDeg;
+    public float ShadowStrength;
+    public float ShadowBias;
+    public float ShadowNormalBias;
+    public float ShadowNearPlane;
+    public uint ShadowResolution;
+    public float AmbientIntensity;
+    public uint EnableSunLight;
+    public uint EnableShadow;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct NcPoseBoneOffset
 {
     public NcPoseBoneId BoneId;
@@ -407,6 +430,12 @@ public static class NativeCoreInterop
     public static extern NcResultCode nc_get_render_quality_options(out NcRenderQualityOptions outOptions);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_set_lighting_options(ref NcLightingOptions options);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_lighting_options(out NcLightingOptions outOptions);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_set_pose_offsets([In] NcPoseBoneOffset[] offsets, uint count);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -488,6 +517,31 @@ public static class NativeCoreInterop
         options.Headroom = 0.12f;
         options.ShowDebugOverlay = 0U;
         return options;
+    }
+
+    public static NcLightingOptions BuildVsfRealtimeShadowPreset()
+    {
+        return new NcLightingOptions
+        {
+            LightPositionX = -0.72f,
+            LightPositionY = 19.35f,
+            LightPositionZ = 3.7f,
+            LightEulerPitchDeg = 19.201f,
+            LightEulerYawDeg = 175.0f,
+            LightEulerRollDeg = 2.582f,
+            Intensity = 12.5f,
+            Range = 16.4f,
+            SpotAngleDeg = 16.6f,
+            InnerSpotAngleDeg = 0.0f,
+            ShadowStrength = 1.0f,
+            ShadowBias = 0.1f,
+            ShadowNormalBias = 0.0f,
+            ShadowNearPlane = 8.5f,
+            ShadowResolution = 8192U,
+            AmbientIntensity = 1.0f,
+            EnableSunLight = 0U,
+            EnableShadow = 1U,
+        };
     }
 
     public static string FormatSpoutBackend(uint backendKind)

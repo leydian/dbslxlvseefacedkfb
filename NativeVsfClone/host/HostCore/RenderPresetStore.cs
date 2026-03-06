@@ -16,7 +16,17 @@ public sealed record RenderPresetModel(
     float FovDeg,
     BackgroundPreset BackgroundPreset,
     bool ShowDebugOverlay,
-    bool MirrorMode);
+    bool MirrorMode,
+    float LightPitchDeg = 19.201f,
+    float LightYawDeg = 175.0f,
+    float LightRollDeg = 2.582f,
+    float LightIntensity = 12.5f,
+    float LightRange = 16.4f,
+    float SpotAngleDeg = 16.6f,
+    float ShadowStrength = 1.0f,
+    float ShadowBias = 0.1f,
+    float AmbientIntensity = 1.0f,
+    bool ShadowEnabled = true);
 
 public sealed class RenderPresetStoreModel
 {
@@ -66,6 +76,27 @@ public sealed class RenderPresetStoreModel
                     BackgroundPreset.GreenScreen,
                     false,
                     false),
+                new(
+                    "VSF Realtime Shadow",
+                    true,
+                    RenderCameraMode.AutoFitBust,
+                    0.72f,
+                    0.10f,
+                    0.0f,
+                    35.0f,
+                    BackgroundPreset.DarkBlue,
+                    false,
+                    false,
+                    19.201f,
+                    175.0f,
+                    2.582f,
+                    12.5f,
+                    16.4f,
+                    16.6f,
+                    1.0f,
+                    0.1f,
+                    1.0f,
+                    true),
             },
             LastSelectedPresetName = "Broadcast Default",
         };

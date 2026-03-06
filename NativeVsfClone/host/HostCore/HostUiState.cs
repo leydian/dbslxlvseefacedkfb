@@ -87,7 +87,17 @@ public sealed record RenderUiState(
     float FovDeg,
     BackgroundPreset BackgroundPreset,
     bool ShowDebugOverlay,
-    bool MirrorMode);
+    bool MirrorMode,
+    float LightPitchDeg = 19.201f,
+    float LightYawDeg = 175.0f,
+    float LightRollDeg = 2.582f,
+    float LightIntensity = 12.5f,
+    float LightRange = 16.4f,
+    float SpotAngleDeg = 16.6f,
+    float ShadowStrength = 1.0f,
+    float ShadowBias = 0.1f,
+    float AmbientIntensity = 1.0f,
+    bool ShadowEnabled = true);
 
 public sealed record DiagnosticsSnapshot(
     DateTimeOffset TimestampUtc,

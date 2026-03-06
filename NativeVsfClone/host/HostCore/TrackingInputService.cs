@@ -281,6 +281,7 @@ public sealed class TrackingInputService : ITrackingInputService
             var ipv4 = new UdpClient(AddressFamily.InterNetwork);
             ipv4.Client.ExclusiveAddressUse = false;
             ipv4.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            ipv4.Client.ReceiveTimeout = ReceiveWatchdogPollMs;
             ipv4.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
             bindMode = "udp4";
             return ipv4;
@@ -296,6 +297,7 @@ public sealed class TrackingInputService : ITrackingInputService
             dualStack.Client.ExclusiveAddressUse = false;
             dualStack.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             dualStack.Client.DualMode = true;
+            dualStack.Client.ReceiveTimeout = ReceiveWatchdogPollMs;
             dualStack.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
             bindMode = "udp6-dual";
             return dualStack;
@@ -308,6 +310,7 @@ public sealed class TrackingInputService : ITrackingInputService
         var finalIpv4 = new UdpClient(AddressFamily.InterNetwork);
         finalIpv4.Client.ExclusiveAddressUse = false;
         finalIpv4.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        finalIpv4.Client.ReceiveTimeout = ReceiveWatchdogPollMs;
         finalIpv4.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
         bindMode = "udp4-final";
         return finalIpv4;
@@ -745,19 +748,19 @@ public sealed class TrackingInputService : ITrackingInputService
                     break;
                 }
 
-                var receiveTask = activeClient.ReceiveAsync(token).AsTask();
-                var completed = await Task.WhenAny(receiveTask, Task.Delay(ReceiveWatchdogPollMs, token));
-                if (!ReferenceEquals(completed, receiveTask))
-                {
-                    TryRebindIfacialSocketWhenNoPackets();
-                    continue;
-                }
-
-                result = await receiveTask;
+                IPEndPoint remote = new(IPAddress.Any, 0);
+                var buffer = activeClient.Receive(ref remote);
+                result = new UdpReceiveResult(buffer, remote);
             }
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
+            {
+                MarkReceiveTimeoutNoPacket();
+                TryRebindIfacialSocketWhenNoPackets();
+                continue;
             }
             catch (ObjectDisposedException)
             {
@@ -859,11 +862,15 @@ public sealed class TrackingInputService : ITrackingInputService
                     UpdateSmoothStageMs(smoothWatch.Elapsed.TotalMilliseconds);
                     AdvanceCalibration();
                 }
+                var hadReceiveTimeout = _diagnostics.SourceStatus.StartsWith("receive-timeout", StringComparison.Ordinal) ||
+                                        _diagnostics.SourceStatus.StartsWith("receive-rebind", StringComparison.Ordinal);
                 _diagnostics = _diagnostics with
                 {
                     DetectedFormat = formatName,
-                    SourceStatus = _activeRuntimeSource == TrackingRuntimeSource.Ifacial ? "ifacial-active" : "ifacial-recovering",
-                    StatusMessage = $"receiving:{formatName}",
+                    SourceStatus = _activeRuntimeSource == TrackingRuntimeSource.Ifacial
+                        ? (hadReceiveTimeout ? "ifacial-active:receive-recovered" : "ifacial-active")
+                        : "ifacial-recovering",
+                    StatusMessage = hadReceiveTimeout ? $"receiving:{formatName}:recovered" : $"receiving:{formatName}",
                     LastErrorCode = string.Empty,
                     ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
                     FallbackCount = _fallbackCount,
@@ -987,8 +994,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 _udpClient = CreateUdpListener(_options.ListenPort, out _udpBindMode);
                 _diagnostics = _diagnostics with
                 {
-                    SourceStatus = $"udp-rebind:{_options.ListenPort}:{_udpBindMode}",
-                    StatusMessage = $"rebound:{_options.ListenPort} ({_udpBindMode}) after no-packet={noPacketAgeMs}ms",
+                    SourceStatus = $"receive-rebind:{_options.ListenPort}:{_udpBindMode}",
+                    StatusMessage = $"receive-rebind:{_options.ListenPort} ({_udpBindMode}) after no-packet={noPacketAgeMs}ms",
                     LastErrorCode = string.Empty,
                 };
             }
@@ -996,11 +1003,39 @@ public sealed class TrackingInputService : ITrackingInputService
             {
                 _diagnostics = _diagnostics with
                 {
-                    SourceStatus = "udp-rebind-failed",
-                    StatusMessage = $"rebind failed: {ex.Message}",
+                    SourceStatus = "receive-rebind-failed",
+                    StatusMessage = $"receive rebind failed: {ex.Message}",
                     LastErrorCode = "TRACKING_UDP_REBIND_FAILED",
                 };
             }
+        }
+    }
+
+    private void MarkReceiveTimeoutNoPacket()
+    {
+        lock (_sync)
+        {
+            if (_udpClient is null || _options.SourceType == TrackingSourceType.WebcamMediapipe)
+            {
+                return;
+            }
+
+            if (_lastIfacialPacketUtc != DateTimeOffset.MinValue)
+            {
+                return;
+            }
+
+            if (_diagnostics.SourceStatus.StartsWith("receive-timeout", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _diagnostics = _diagnostics with
+            {
+                SourceStatus = $"receive-timeout:{_options.ListenPort}",
+                StatusMessage = $"receive timeout:{_options.ListenPort} waiting packet",
+                LastErrorCode = string.Empty,
+            };
         }
     }
 

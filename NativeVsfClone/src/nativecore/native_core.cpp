@@ -169,10 +169,15 @@ struct RendererResources {
     ID3D11BlendState* blend_additive = nullptr;
     ID3D11BlendState* blend_depth_only = nullptr;
     ID3D11SamplerState* linear_sampler = nullptr;
+    ID3D11SamplerState* shadow_sampler = nullptr;
     ID3D11Texture2D* depth_texture = nullptr;
     ID3D11DepthStencilView* depth_dsv = nullptr;
+    ID3D11Texture2D* shadow_texture = nullptr;
+    ID3D11DepthStencilView* shadow_dsv = nullptr;
+    ID3D11ShaderResourceView* shadow_srv = nullptr;
     std::uint32_t depth_width = 0;
     std::uint32_t depth_height = 0;
+    std::uint32_t shadow_resolution = 0U;
     std::unordered_map<std::uint64_t, std::vector<GpuMeshResource>> avatar_meshes;
     std::unordered_map<std::uint64_t, std::vector<GpuMaterialResource>> avatar_materials;
 };
@@ -239,6 +244,7 @@ struct CoreState {
     osc::OscEndpoint osc;
     NcTrackingFrame latest_tracking {};
     NcRenderQualityOptions render_quality {};
+    NcLightingOptions lighting_options {};
     std::array<NcPoseBoneOffset, 15U> pose_offsets {};
     float last_frame_ms = 0.0f;
     float last_gpu_frame_ms = 0.0f;
@@ -280,6 +286,29 @@ NcRenderQualityOptions MakeDefaultRenderQualityOptions() {
     return options;
 }
 
+NcLightingOptions MakeDefaultLightingOptions() {
+    NcLightingOptions options {};
+    options.light_position[0] = -0.72f;
+    options.light_position[1] = 19.35f;
+    options.light_position[2] = 3.7f;
+    options.light_euler_deg[0] = 19.201f;
+    options.light_euler_deg[1] = 175.0f;
+    options.light_euler_deg[2] = 2.582f;
+    options.intensity = 12.5f;
+    options.range = 16.4f;
+    options.spot_angle_deg = 16.6f;
+    options.inner_spot_angle_deg = 0.0f;
+    options.shadow_strength = 1.0f;
+    options.shadow_bias = 0.1f;
+    options.shadow_normal_bias = 0.0f;
+    options.shadow_near_plane = 8.5f;
+    options.shadow_resolution = 8192U;
+    options.ambient_intensity = 1.0f;
+    options.enable_sun_light = 0U;
+    options.enable_shadow = 1U;
+    return options;
+}
+
 NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions& options) {
     NcRenderQualityOptions out = options;
     if (out.camera_mode < NC_CAMERA_MODE_AUTO_FIT_FULL || out.camera_mode > NC_CAMERA_MODE_MANUAL) {
@@ -296,6 +325,41 @@ NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions
         out.quality_profile = NC_RENDER_QUALITY_DEFAULT;
     }
     out.show_debug_overlay = out.show_debug_overlay > 0U ? 1U : 0U;
+    return out;
+}
+
+std::uint32_t NormalizeShadowResolution(std::uint32_t value) {
+    if (value <= 256U) {
+        return 256U;
+    }
+    if (value >= 8192U) {
+        return 8192U;
+    }
+    std::uint32_t out = 256U;
+    while (out < value && out < 8192U) {
+        out <<= 1U;
+    }
+    return out;
+}
+
+NcLightingOptions SanitizeLightingOptions(const NcLightingOptions& options) {
+    NcLightingOptions out = options;
+    for (int i = 0; i < 3; ++i) {
+        out.light_position[i] = std::isfinite(out.light_position[i]) ? out.light_position[i] : 0.0f;
+        out.light_euler_deg[i] = std::isfinite(out.light_euler_deg[i]) ? out.light_euler_deg[i] : 0.0f;
+    }
+    out.intensity = std::max(0.0f, std::min(64.0f, out.intensity));
+    out.range = std::max(0.25f, std::min(200.0f, out.range));
+    out.spot_angle_deg = std::max(1.0f, std::min(179.0f, out.spot_angle_deg));
+    out.inner_spot_angle_deg = std::max(0.0f, std::min(out.spot_angle_deg, out.inner_spot_angle_deg));
+    out.shadow_strength = std::max(0.0f, std::min(1.0f, out.shadow_strength));
+    out.shadow_bias = std::max(0.0f, std::min(8.0f, out.shadow_bias));
+    out.shadow_normal_bias = std::max(0.0f, std::min(4.0f, out.shadow_normal_bias));
+    out.shadow_near_plane = std::max(0.01f, std::min(100.0f, out.shadow_near_plane));
+    out.shadow_resolution = NormalizeShadowResolution(out.shadow_resolution);
+    out.ambient_intensity = std::max(0.0f, std::min(2.0f, out.ambient_intensity));
+    out.enable_sun_light = out.enable_sun_light > 0U ? 1U : 0U;
+    out.enable_shadow = out.enable_shadow > 0U ? 1U : 0U;
     return out;
 }
 
@@ -433,7 +497,9 @@ ParityDiagnosticsSummary ComputeParityDiagnostics(
         const bool has_shadow_token =
             HasLooseToken(pass_tokens, "shadow") ||
             HasLooseToken(pass_tokens, "shadowcaster") ||
-            HasLooseToken(pass_tokens, "castshadow");
+            HasLooseToken(pass_tokens, "castshadow") ||
+            HasLooseToken(pass_tokens, "forwardadd") ||
+            HasLooseToken(pass_tokens, "forward_add");
         const bool has_base_color = std::any_of(
             material.typed_color_params.begin(),
             material.typed_color_params.end(),
@@ -1284,6 +1350,22 @@ void ResetRendererResources(RendererResources* renderer) {
         renderer->linear_sampler->Release();
         renderer->linear_sampler = nullptr;
     }
+    if (renderer->shadow_sampler != nullptr) {
+        renderer->shadow_sampler->Release();
+        renderer->shadow_sampler = nullptr;
+    }
+    if (renderer->shadow_srv != nullptr) {
+        renderer->shadow_srv->Release();
+        renderer->shadow_srv = nullptr;
+    }
+    if (renderer->shadow_dsv != nullptr) {
+        renderer->shadow_dsv->Release();
+        renderer->shadow_dsv = nullptr;
+    }
+    if (renderer->shadow_texture != nullptr) {
+        renderer->shadow_texture->Release();
+        renderer->shadow_texture = nullptr;
+    }
     if (renderer->blend_opaque != nullptr) {
         renderer->blend_opaque->Release();
         renderer->blend_opaque = nullptr;
@@ -1346,6 +1428,7 @@ void ResetRendererResources(RendererResources* renderer) {
     }
     renderer->depth_width = 0U;
     renderer->depth_height = 0U;
+    renderer->shadow_resolution = 0U;
 }
 
 bool EnsureDepthResources(RendererResources* renderer, ID3D11Device* device, std::uint32_t width, std::uint32_t height) {
@@ -1384,6 +1467,61 @@ bool EnsureDepthResources(RendererResources* renderer, ID3D11Device* device, std
     return true;
 }
 
+bool EnsureShadowResources(RendererResources* renderer, ID3D11Device* device, std::uint32_t shadow_resolution) {
+    if (renderer == nullptr || device == nullptr || shadow_resolution == 0U) {
+        return false;
+    }
+    if (renderer->shadow_texture != nullptr &&
+        renderer->shadow_dsv != nullptr &&
+        renderer->shadow_srv != nullptr &&
+        renderer->shadow_resolution == shadow_resolution) {
+        return true;
+    }
+    if (renderer->shadow_srv != nullptr) {
+        renderer->shadow_srv->Release();
+        renderer->shadow_srv = nullptr;
+    }
+    if (renderer->shadow_dsv != nullptr) {
+        renderer->shadow_dsv->Release();
+        renderer->shadow_dsv = nullptr;
+    }
+    if (renderer->shadow_texture != nullptr) {
+        renderer->shadow_texture->Release();
+        renderer->shadow_texture = nullptr;
+    }
+
+    D3D11_TEXTURE2D_DESC shadow_desc {};
+    shadow_desc.Width = shadow_resolution;
+    shadow_desc.Height = shadow_resolution;
+    shadow_desc.MipLevels = 1U;
+    shadow_desc.ArraySize = 1U;
+    shadow_desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+    shadow_desc.SampleDesc.Count = 1U;
+    shadow_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(device->CreateTexture2D(&shadow_desc, nullptr, &renderer->shadow_texture)) || renderer->shadow_texture == nullptr) {
+        return false;
+    }
+
+    D3D11_DEPTH_STENCIL_VIEW_DESC dsv_desc {};
+    dsv_desc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    dsv_desc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    dsv_desc.Texture2D.MipSlice = 0U;
+    if (FAILED(device->CreateDepthStencilView(renderer->shadow_texture, &dsv_desc, &renderer->shadow_dsv)) || renderer->shadow_dsv == nullptr) {
+        return false;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc {};
+    srv_desc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srv_desc.Texture2D.MostDetailedMip = 0U;
+    srv_desc.Texture2D.MipLevels = 1U;
+    if (FAILED(device->CreateShaderResourceView(renderer->shadow_texture, &srv_desc, &renderer->shadow_srv)) || renderer->shadow_srv == nullptr) {
+        return false;
+    }
+    renderer->shadow_resolution = shadow_resolution;
+    return true;
+}
+
 bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) {
     if (renderer == nullptr || device == nullptr) {
         return false;
@@ -1407,18 +1545,22 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         renderer->depth_write != nullptr && renderer->depth_read != nullptr &&
         renderer->blend_opaque != nullptr && renderer->blend_alpha != nullptr &&
         renderer->blend_additive != nullptr && renderer->blend_depth_only != nullptr &&
-        renderer->linear_sampler != nullptr) {
+        renderer->linear_sampler != nullptr && renderer->shadow_sampler != nullptr) {
         return true;
     }
 
     constexpr char kVertexShaderSrc[] =
         "cbuffer SceneCB : register(b0) {\n"
         "  float4x4 world_view_proj;\n"
+        "  float4x4 world_matrix;\n"
+        "  float4x4 light_view_proj;\n"
         "  float4 base_color;\n"
         "  float4 shade_color;\n"
         "  float4 emission_color;\n"
         "  float4 rim_color;\n"
         "  float4 matcap_color;\n"
+        "  float4 lighting_params;\n"
+        "  float4 shadow_params;\n"
         "  float4 liltoon_mix;\n"
         "  float4 liltoon_params;\n"
         "  float4 liltoon_aux;\n"
@@ -1428,7 +1570,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float4 time_params;\n"
         "};\n"
         "struct VSIn { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
-        "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float3 nrm : NORMAL; float2 uv : TEXCOORD0; };\n"
+        "struct VSOut { float4 pos : SV_POSITION; float4 color : COLOR0; float3 nrm : NORMAL; float2 uv : TEXCOORD0; float3 world_pos : TEXCOORD1; };\n"
         "VSOut main(VSIn i) {\n"
         "  VSOut o;\n"
         "  float3 pos = i.pos;\n"
@@ -1439,16 +1581,21 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  o.color = base_color;\n"
         "  o.nrm = normalize(i.nrm);\n"
         "  o.uv = i.uv;\n"
+        "  o.world_pos = mul(float4(pos, 1.0), world_matrix).xyz;\n"
         "  return o;\n"
         "}\n";
     constexpr char kPixelShaderCommonSrc[] =
         "cbuffer SceneCB : register(b0) {\n"
         "  float4x4 world_view_proj;\n"
+        "  float4x4 world_matrix;\n"
+        "  float4x4 light_view_proj;\n"
         "  float4 base_color;\n"
         "  float4 shade_color;\n"
         "  float4 emission_color;\n"
         "  float4 rim_color;\n"
         "  float4 matcap_color;\n"
+        "  float4 lighting_params;\n"
+        "  float4 shadow_params;\n"
         "  float4 liltoon_mix;\n"
         "  float4 liltoon_params;\n"
         "  float4 liltoon_aux;\n"
@@ -1463,8 +1610,10 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "Texture2D tex3 : register(t3);\n"
         "Texture2D tex4 : register(t4);\n"
         "Texture2D tex5 : register(t5);\n"
+        "Texture2D tex6 : register(t6);\n"
         "SamplerState samp0 : register(s0);\n"
-        "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float3 nrm : NORMAL, float2 uv : TEXCOORD0) : SV_TARGET {\n"
+        "SamplerComparisonState samp1 : register(s1);\n"
+        "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float3 nrm : NORMAL, float2 uv : TEXCOORD0, float3 world_pos : TEXCOORD1) : SV_TARGET {\n"
         "  float is_outline_pass = outline_params.w;\n"
         "  float is_emission_pass = outline_params.z;\n"
         "  if (is_outline_pass > 0.5) {\n"
@@ -1507,7 +1656,9 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "    float3 ntex = tex1.Sample(samp0, sample_uv).xyz * 2.0 - 1.0;\n"
         "    normal = normalize(float3(normal.xy + ntex.xy * saturate(liltoon_mix.z), max(0.15, normal.z * abs(ntex.z))));\n"
         "  }\n"
-        "  float3 light_dir = normalize(float3(0.35, 0.45, 0.82));\n"
+        "  float3 light_dir = normalize(lighting_params.xyz);\n"
+        "  float ambient = saturate(lighting_params.w);\n"
+        "  float direct_scale = max(0.0, shadow_params.w);\n"
         "  float ndotl = saturate(dot(normal, light_dir));\n"
         "#if defined(FAMILY_MTOON)\n"
         "  float lit = ndotl > 0.5 ? 1.0 : 0.62;\n"
@@ -1521,7 +1672,18 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "      out_color.a *= texel.a;\n"
         "    }\n"
         "  }\n"
-        "  out_color.rgb *= lit;\n"
+        "  out_color.rgb *= lerp(ambient, 1.0, saturate(lit * direct_scale));\n"
+        "  float shadow_enabled = shadow_params.y;\n"
+        "  float shadow_strength = shadow_params.x;\n"
+        "  if (shadow_enabled > 0.5) {\n"
+        "    float4 shadow_pos = mul(float4(world_pos, 1.0), light_view_proj);\n"
+        "    float inv_w = rcp(max(0.0001, shadow_pos.w));\n"
+        "    float2 suv = shadow_pos.xy * inv_w * float2(0.5, -0.5) + 0.5;\n"
+        "    float depth = shadow_pos.z * inv_w;\n"
+        "    float visibility = tex6.SampleCmpLevelZero(samp1, suv, depth - shadow_params.z);\n"
+        "    float atten = lerp(1.0 - shadow_strength, 1.0, visibility);\n"
+        "    out_color.rgb *= atten;\n"
+        "  }\n"
         "#if defined(FAMILY_MTOON)\n"
         "  float shade_t = saturate((1.0 - lit) * saturate(liltoon_mix.x) * 1.35);\n"
         "#else\n"
@@ -1723,11 +1885,15 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
 
     struct alignas(16) SceneConstants {
         float world_view_proj[16];
+        float world_matrix[16];
+        float light_view_proj[16];
         float base_color[4];
         float shade_color[4];
         float emission_color[4];
         float rim_color[4];
         float matcap_color[4];
+        float lighting_params[4];
+        float shadow_params[4];
         float liltoon_mix[4];
         float liltoon_params[4];
         float liltoon_aux[4];
@@ -1828,6 +1994,24 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     sampler_desc.MaxLOD = D3D11_FLOAT32_MAX;
     hr = device->CreateSamplerState(&sampler_desc, &renderer->linear_sampler);
     if (FAILED(hr) || renderer->linear_sampler == nullptr) {
+        return false;
+    }
+    D3D11_SAMPLER_DESC shadow_sampler_desc {};
+    shadow_sampler_desc.Filter = D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    shadow_sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_BORDER;
+    shadow_sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_BORDER;
+    shadow_sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_BORDER;
+    shadow_sampler_desc.MipLODBias = 0.0f;
+    shadow_sampler_desc.MaxAnisotropy = 1U;
+    shadow_sampler_desc.ComparisonFunc = D3D11_COMPARISON_LESS_EQUAL;
+    shadow_sampler_desc.BorderColor[0] = 1.0f;
+    shadow_sampler_desc.BorderColor[1] = 1.0f;
+    shadow_sampler_desc.BorderColor[2] = 1.0f;
+    shadow_sampler_desc.BorderColor[3] = 1.0f;
+    shadow_sampler_desc.MinLOD = 0.0f;
+    shadow_sampler_desc.MaxLOD = D3D11_FLOAT32_MAX;
+    hr = device->CreateSamplerState(&shadow_sampler_desc, &renderer->shadow_sampler);
+    if (FAILED(hr) || renderer->shadow_sampler == nullptr) {
         return false;
     }
     return true;
@@ -4707,7 +4891,9 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         const bool has_shadow_token =
             HasLooseToken(pass_tokens, "shadow") ||
             HasLooseToken(pass_tokens, "shadowcaster") ||
-            HasLooseToken(pass_tokens, "castshadow");
+            HasLooseToken(pass_tokens, "castshadow") ||
+            HasLooseToken(pass_tokens, "forwardadd") ||
+            HasLooseToken(pass_tokens, "forward_add");
         material.enable_depth_pass = !pass_declared || has_depth_token;
         material.enable_shadow_pass = has_shadow_token;
         // Some XAV2 exports carry non-canonical pass strings. If every pass is
@@ -5486,7 +5672,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     }
 
     const auto quality = SanitizeRenderQualityOptions(g_state.render_quality);
+    const auto lighting = SanitizeLightingOptions(g_state.lighting_options);
     const bool fast_fallback = (quality.quality_profile == NC_RENDER_QUALITY_FAST_FALLBACK);
+    const bool shadow_runtime_enabled = !fast_fallback && lighting.enable_shadow > 0U;
+    if (shadow_runtime_enabled && !EnsureShadowResources(&renderer, device, lighting.shadow_resolution)) {
+        SetError(NC_ERROR_INTERNAL, "render", "failed to initialize shadow-map resources", true);
+        return NC_ERROR_INTERNAL;
+    }
     const float frame_dt = std::max(1.0f / 240.0f, std::min(1.0f / 15.0f, ctx->delta_time_seconds));
     g_state.runtime_time_seconds =
         std::fmod(std::max(0.0f, g_state.runtime_time_seconds + frame_dt), 3600.0f);
@@ -5560,6 +5752,30 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     const float look_at_y = quality.headroom * 0.6f;
     const auto view = ComputeViewMatrix(camera_distance, look_at_y, quality.yaw_deg);
     const auto proj = ComputeProjectionMatrix(ctx->width, ctx->height, fov_deg);
+    const DirectX::XMVECTOR light_position = DirectX::XMVectorSet(
+        lighting.light_position[0],
+        lighting.light_position[1],
+        lighting.light_position[2],
+        1.0f);
+    const auto light_rot = DirectX::XMMatrixRotationRollPitchYaw(
+        DirectX::XMConvertToRadians(lighting.light_euler_deg[0]),
+        DirectX::XMConvertToRadians(lighting.light_euler_deg[1]),
+        DirectX::XMConvertToRadians(lighting.light_euler_deg[2]));
+    const DirectX::XMVECTOR light_forward = DirectX::XMVector3Normalize(
+        DirectX::XMVector3TransformNormal(DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), light_rot));
+    const DirectX::XMVECTOR shading_light_dir = DirectX::XMVectorNegate(light_forward);
+    DirectX::XMFLOAT3 shading_light_dir3 {};
+    DirectX::XMStoreFloat3(&shading_light_dir3, shading_light_dir);
+    const DirectX::XMVECTOR light_up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    const auto light_view = DirectX::XMMatrixLookToLH(light_position, light_forward, light_up);
+    const float light_near = std::max(0.01f, std::min(lighting.shadow_near_plane, lighting.range - 0.05f));
+    const auto light_proj = DirectX::XMMatrixPerspectiveFovLH(
+        DirectX::XMConvertToRadians(lighting.spot_angle_deg),
+        1.0f,
+        light_near,
+        std::max(light_near + 0.05f, lighting.range));
+    const auto light_view_proj = light_view * light_proj;
+    const float light_intensity_scale = std::max(0.0f, std::min(4.0f, lighting.intensity / 12.5f));
     std::uint32_t avatar_slot = 0U;
     for (const auto handle : g_state.render_ready_avatars) {
         auto it = g_state.avatars.find(handle);
@@ -6177,11 +6393,15 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
 
     struct alignas(16) SceneConstants {
         float world_view_proj[16];
+        float world_matrix[16];
+        float light_view_proj[16];
         float base_color[4];
         float shade_color[4];
         float emission_color[4];
         float rim_color[4];
         float matcap_color[4];
+        float lighting_params[4];
+        float shadow_params[4];
         float liltoon_mix[4];
         float liltoon_params[4];
         float liltoon_aux[4];
@@ -6197,6 +6417,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         Outline,
         Emission
     };
+    bool rendering_shadow_map = false;
     auto draw_pass = [&](const DrawItem& item, RenderPassKind pass_kind, RenderFamilyBackendKind backend_kind) {
         if (item.mesh == nullptr || item.mesh->vertex_buffer == nullptr || item.mesh->index_buffer == nullptr || item.pkg == nullptr) {
             return;
@@ -6282,16 +6503,34 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const UINT offset = 0U;
         device_ctx->IASetVertexBuffers(0U, 1U, &item.mesh->vertex_buffer, &stride, &offset);
         device_ctx->IASetIndexBuffer(item.mesh->index_buffer, DXGI_FORMAT_R32_UINT, 0U);
-        device_ctx->PSSetSamplers(0U, 1U, &renderer.linear_sampler);
-        ID3D11ShaderResourceView* srvs[6] = {base_srv, normal_srv, rim_srv, emission_srv, matcap_srv, uv_mask_srv};
-        device_ctx->PSSetShaderResources(0U, 6U, srvs);
+        ID3D11SamplerState* samplers[2] = {renderer.linear_sampler, renderer.shadow_sampler};
+        device_ctx->PSSetSamplers(0U, 2U, samplers);
+        ID3D11ShaderResourceView* shadow_srv = rendering_shadow_map ? nullptr : renderer.shadow_srv;
+        ID3D11ShaderResourceView* srvs[7] = {base_srv, normal_srv, rim_srv, emission_srv, matcap_srv, uv_mask_srv, shadow_srv};
+        device_ctx->PSSetShaderResources(0U, 7U, srvs);
 
-        const auto world_view_proj = item.world * view * proj;
+        const auto world_view_proj = item.world * ((rendering_shadow_map && shadow_pass) ? light_view_proj : (view * proj));
         const auto world_view_proj_t = DirectX::XMMatrixTranspose(world_view_proj);
+        const auto world_matrix_t = DirectX::XMMatrixTranspose(item.world);
+        const auto light_view_proj_t = DirectX::XMMatrixTranspose(light_view_proj);
         SceneConstants cb {};
         DirectX::XMFLOAT4X4 wvp_store {};
+        DirectX::XMFLOAT4X4 world_store {};
+        DirectX::XMFLOAT4X4 light_wvp_store {};
         DirectX::XMStoreFloat4x4(&wvp_store, world_view_proj_t);
+        DirectX::XMStoreFloat4x4(&world_store, world_matrix_t);
+        DirectX::XMStoreFloat4x4(&light_wvp_store, light_view_proj_t);
         std::memcpy(cb.world_view_proj, &wvp_store, sizeof(cb.world_view_proj));
+        std::memcpy(cb.world_matrix, &world_store, sizeof(cb.world_matrix));
+        std::memcpy(cb.light_view_proj, &light_wvp_store, sizeof(cb.light_view_proj));
+        cb.lighting_params[0] = shading_light_dir3.x;
+        cb.lighting_params[1] = shading_light_dir3.y;
+        cb.lighting_params[2] = shading_light_dir3.z;
+        cb.lighting_params[3] = std::max(0.0f, std::min(1.0f, lighting.ambient_intensity));
+        cb.shadow_params[0] = lighting.shadow_strength;
+        cb.shadow_params[1] = (shadow_runtime_enabled && !depth_only_pass && !shadow_pass && !outline_pass && !emission_pass) ? 1.0f : 0.0f;
+        cb.shadow_params[2] = lighting.shadow_bias * 0.001f;
+        cb.shadow_params[3] = light_intensity_scale;
         if (item.material != nullptr) {
             cb.base_color[0] = item.material->base_color[0];
             cb.base_color[1] = item.material->base_color[1];
@@ -6406,6 +6645,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         cb.alpha_misc[1] = (is_mask && !emission_pass) ? 1.0f : 0.0f;
         cb.alpha_misc[2] = base_srv != nullptr ? 1.0f : 0.0f;
         cb.alpha_misc[3] = ((is_mask || is_blend) && !emission_pass) ? 1.0f : 0.0f;
+        if (rendering_shadow_map && shadow_pass) {
+            cb.shadow_params[1] = 0.0f;
+        }
 
         D3D11_MAPPED_SUBRESOURCE mapped {};
         if (SUCCEEDED(device_ctx->Map(renderer.constant_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
@@ -6413,8 +6655,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             device_ctx->Unmap(renderer.constant_buffer, 0U);
         }
         device_ctx->DrawIndexed(item.mesh->index_count, 0U, 0);
-        ID3D11ShaderResourceView* null_srvs[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-        device_ctx->PSSetShaderResources(0U, 6U, null_srvs);
+        ID3D11ShaderResourceView* null_srvs[7] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+        device_ctx->PSSetShaderResources(0U, 7U, null_srvs);
         ++frame_draw_calls;
     };
     std::uint32_t frame_pass_count = 0U;
@@ -6445,13 +6687,38 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         RenderFamilyBackendKind::Mtoon,
         RenderFamilyBackendKind::Poiyomi,
         RenderFamilyBackendKind::Standard};
+    if (shadow_runtime_enabled && renderer.shadow_dsv != nullptr && renderer.shadow_resolution > 0U) {
+        D3D11_VIEWPORT shadow_viewport {};
+        shadow_viewport.TopLeftX = 0.0f;
+        shadow_viewport.TopLeftY = 0.0f;
+        shadow_viewport.Width = static_cast<float>(renderer.shadow_resolution);
+        shadow_viewport.Height = static_cast<float>(renderer.shadow_resolution);
+        shadow_viewport.MinDepth = 0.0f;
+        shadow_viewport.MaxDepth = 1.0f;
+        ID3D11RenderTargetView* null_rtv = nullptr;
+        device_ctx->OMSetRenderTargets(0U, &null_rtv, renderer.shadow_dsv);
+        device_ctx->ClearDepthStencilView(renderer.shadow_dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0U);
+        device_ctx->RSSetViewports(1U, &shadow_viewport);
+        rendering_shadow_map = true;
+        for (const auto backend_kind : backend_order) {
+            const auto& q = family_draws[backend_index(backend_kind)];
+            for (const auto& item : q.shadow_draws) {
+                draw_pass(item, RenderPassKind::ShadowCaster, backend_kind);
+            }
+        }
+        rendering_shadow_map = false;
+        device_ctx->OMSetRenderTargets(1U, &rtv, renderer.depth_dsv);
+        device_ctx->RSSetViewports(1U, &viewport);
+    }
     for (const auto backend_kind : backend_order) {
         const auto& q = family_draws[backend_index(backend_kind)];
         for (const auto& item : q.depth_draws) {
             draw_pass(item, RenderPassKind::DepthOnly, backend_kind);
         }
-        for (const auto& item : q.shadow_draws) {
-            draw_pass(item, RenderPassKind::ShadowCaster, backend_kind);
+        if (!shadow_runtime_enabled) {
+            for (const auto& item : q.shadow_draws) {
+                draw_pass(item, RenderPassKind::ShadowCaster, backend_kind);
+            }
         }
         for (const auto& item : q.opaque_draws) {
             draw_pass(item, RenderPassKind::Base, backend_kind);
@@ -6551,6 +6818,7 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.arm_pose_states.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
+    vsfclone::nativecore::g_state.lighting_options = vsfclone::nativecore::MakeDefaultLightingOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
     vsfclone::nativecore::g_state.last_frame_ms = 0.0f;
     vsfclone::nativecore::g_state.last_gpu_frame_ms = 0.0f;
@@ -6587,6 +6855,7 @@ NcResultCode nc_shutdown(void) {
     vsfclone::nativecore::g_state.arm_pose_states.clear();
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
+    vsfclone::nativecore::g_state.lighting_options = vsfclone::nativecore::MakeDefaultLightingOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
     vsfclone::nativecore::g_state.last_depth_pass_count = 0U;
     vsfclone::nativecore::g_state.last_shadow_pass_count = 0U;
@@ -7512,6 +7781,34 @@ NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options) 
         return NC_ERROR_INVALID_ARGUMENT;
     }
     *out_options = vsfclone::nativecore::SanitizeRenderQualityOptions(vsfclone::nativecore::g_state.render_quality);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_set_lighting_options(const NcLightingOptions* options) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (options == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "lighting options must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    vsfclone::nativecore::g_state.lighting_options = vsfclone::nativecore::SanitizeLightingOptions(*options);
+    vsfclone::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_lighting_options(NcLightingOptions* out_options) {
+    std::lock_guard<std::mutex> lock(vsfclone::nativecore::g_mutex);
+    if (!vsfclone::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_options == nullptr) {
+        vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "out lighting options must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+    *out_options = vsfclone::nativecore::SanitizeLightingOptions(vsfclone::nativecore::g_state.lighting_options);
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }

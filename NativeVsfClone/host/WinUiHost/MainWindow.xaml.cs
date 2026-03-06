@@ -996,6 +996,110 @@ public sealed partial class MainWindow : Window
         QueueRenderApply();
     }
 
+    private void LightEulerSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (LightPitchValueText is not null && LightPitchSlider is not null)
+        {
+            LightPitchValueText.Text = LightPitchSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (LightYawValueText is not null && LightYawSlider is not null)
+        {
+            LightYawValueText.Text = LightYawSlider.Value.ToString("F0", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void LightIntensitySlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (LightIntensityValueText is not null && LightIntensitySlider is not null)
+        {
+            LightIntensityValueText.Text = LightIntensitySlider.Value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void LightRangeSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (LightRangeValueText is not null && LightRangeSlider is not null)
+        {
+            LightRangeValueText.Text = LightRangeSlider.Value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void SpotAngleSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (SpotAngleValueText is not null && SpotAngleSlider is not null)
+        {
+            SpotAngleValueText.Text = SpotAngleSlider.Value.ToString("F1", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void ShadowStrengthSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (ShadowStrengthValueText is not null && ShadowStrengthSlider is not null)
+        {
+            ShadowStrengthValueText.Text = ShadowStrengthSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void ShadowBiasSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (ShadowBiasValueText is not null && ShadowBiasSlider is not null)
+        {
+            ShadowBiasValueText.Text = ShadowBiasSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void AmbientIntensitySlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (AmbientIntensityValueText is not null && AmbientIntensitySlider is not null)
+        {
+            AmbientIntensityValueText.Text = AmbientIntensitySlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        }
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
+    private void ShadowEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+        QueueRenderApply();
+    }
+
     private void BackgroundPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (ShouldSkipRenderInteraction())
@@ -1358,6 +1462,15 @@ public sealed partial class MainWindow : Window
         YawSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
         FovSlider.IsEnabled = uiState.RenderControlsEnabled && uiState.ManualCameraMode;
         BackgroundPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        LightPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
+        LightYawSlider.IsEnabled = uiState.RenderControlsEnabled;
+        LightIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
+        LightRangeSlider.IsEnabled = uiState.RenderControlsEnabled;
+        SpotAngleSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowStrengthSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowBiasSlider.IsEnabled = uiState.RenderControlsEnabled;
+        AmbientIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowEnabledCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -1784,6 +1897,23 @@ public sealed partial class MainWindow : Window
         };
         MirrorModeCheckBox.IsChecked = render.MirrorMode;
         DebugOverlayCheckBox.IsChecked = render.ShowDebugOverlay;
+        LightPitchSlider.Value = render.LightPitchDeg;
+        LightPitchValueText.Text = render.LightPitchDeg.ToString("F0", CultureInfo.InvariantCulture);
+        LightYawSlider.Value = render.LightYawDeg;
+        LightYawValueText.Text = render.LightYawDeg.ToString("F0", CultureInfo.InvariantCulture);
+        LightIntensitySlider.Value = render.LightIntensity;
+        LightIntensityValueText.Text = render.LightIntensity.ToString("F1", CultureInfo.InvariantCulture);
+        LightRangeSlider.Value = render.LightRange;
+        LightRangeValueText.Text = render.LightRange.ToString("F1", CultureInfo.InvariantCulture);
+        SpotAngleSlider.Value = render.SpotAngleDeg;
+        SpotAngleValueText.Text = render.SpotAngleDeg.ToString("F1", CultureInfo.InvariantCulture);
+        ShadowStrengthSlider.Value = render.ShadowStrength;
+        ShadowStrengthValueText.Text = render.ShadowStrength.ToString("F2", CultureInfo.InvariantCulture);
+        ShadowBiasSlider.Value = render.ShadowBias;
+        ShadowBiasValueText.Text = render.ShadowBias.ToString("F2", CultureInfo.InvariantCulture);
+        AmbientIntensitySlider.Value = render.AmbientIntensity;
+        AmbientIntensityValueText.Text = render.AmbientIntensity.ToString("F2", CultureInfo.InvariantCulture);
+        ShadowEnabledCheckBox.IsChecked = render.ShadowEnabled;
         _isSyncingRenderUi = false;
     }
 
@@ -1852,6 +1982,15 @@ public sealed partial class MainWindow : Window
             BackgroundPreset = preset,
             MirrorMode = MirrorModeCheckBox.IsChecked == true,
             ShowDebugOverlay = DebugOverlayCheckBox.IsChecked == true,
+            LightPitchDeg = (float)LightPitchSlider.Value,
+            LightYawDeg = (float)LightYawSlider.Value,
+            LightIntensity = (float)LightIntensitySlider.Value,
+            LightRange = (float)LightRangeSlider.Value,
+            SpotAngleDeg = (float)SpotAngleSlider.Value,
+            ShadowStrength = (float)ShadowStrengthSlider.Value,
+            ShadowBias = (float)ShadowBiasSlider.Value,
+            AmbientIntensity = (float)AmbientIntensitySlider.Value,
+            ShadowEnabled = ShadowEnabledCheckBox.IsChecked == true,
         };
         return _controller.ApplyRenderUiState(state);
     }

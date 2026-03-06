@@ -195,6 +195,23 @@ typedef struct NcRenderQualityOptions {
     uint32_t show_debug_overlay;
 } NcRenderQualityOptions;
 
+typedef struct NcLightingOptions {
+    float light_position[3];
+    float light_euler_deg[3];
+    float intensity;
+    float range;
+    float spot_angle_deg;
+    float inner_spot_angle_deg;
+    float shadow_strength;
+    float shadow_bias;
+    float shadow_normal_bias;
+    float shadow_near_plane;
+    uint32_t shadow_resolution;
+    float ambient_intensity;
+    uint32_t enable_sun_light;
+    uint32_t enable_shadow;
+} NcLightingOptions;
+
 typedef enum NcPoseBoneId {
     NC_POSE_BONE_UNKNOWN = 0,
     NC_POSE_BONE_HIPS = 1,
@@ -300,6 +317,8 @@ VSFCLONE_API NcResultCode nc_render_frame_to_window(void* hwnd, float delta_time
 VSFCLONE_API NcResultCode nc_render_avatar_thumbnail_png(const NcThumbnailRequest* request);
 VSFCLONE_API NcResultCode nc_set_render_quality_options(const NcRenderQualityOptions* options);
 VSFCLONE_API NcResultCode nc_get_render_quality_options(NcRenderQualityOptions* out_options);
+VSFCLONE_API NcResultCode nc_set_lighting_options(const NcLightingOptions* options);
+VSFCLONE_API NcResultCode nc_get_lighting_options(NcLightingOptions* out_options);
 VSFCLONE_API NcResultCode nc_set_pose_offsets(const NcPoseBoneOffset* offsets, uint32_t count);
 VSFCLONE_API NcResultCode nc_clear_pose_offsets(void);
 

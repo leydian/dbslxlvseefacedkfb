@@ -745,7 +745,7 @@ namespace VsfClone.Xav2.Editor
                 ShaderFamily = shaderFamily,
                 KeywordSet = "[]",
                 RenderState = "auto",
-                PassFlags = "base",
+                PassFlags = BuildPassFlags(material),
                 MaterialParamEncoding = (shaderFamily == "liltoon" || shaderFamily == "poiyomi" || shaderFamily == "standard" || shaderFamily == "mtoon") ? "typed-v4" : "legacy-json",
                 BaseColorTextureName = baseTextureName,
                 AlphaMode = ResolveAlphaMode(material),
@@ -912,6 +912,30 @@ namespace VsfClone.Xav2.Editor
                 : string.Equals(shaderVariant, "Poiyomi", StringComparison.OrdinalIgnoreCase)
                     ? "poiyomi"
                 : "legacy";
+        }
+
+        private static string BuildPassFlags(Material material)
+        {
+            var sb = new StringBuilder("base");
+            var shader = material?.shader;
+            if (shader == null)
+            {
+                return sb.ToString();
+            }
+
+            if (shader.FindPass("DepthOnly") >= 0 || shader.FindPass("DepthForwardOnly") >= 0)
+            {
+                sb.Append("|depth");
+            }
+            if (shader.FindPass("ShadowCaster") >= 0)
+            {
+                sb.Append("|shadowcaster");
+            }
+            if (shader.FindPass("ForwardAdd") >= 0)
+            {
+                sb.Append("|forwardadd");
+            }
+            return sb.ToString();
         }
 
         private static bool HasTypedColor(Xav2MaterialPayload payload, string id)

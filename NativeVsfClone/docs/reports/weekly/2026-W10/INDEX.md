@@ -169,3 +169,4 @@ Report list for this week.
 - [2026-03-06_xav2_lts_kpi_risk_signal_and_dashboard_failclosed.md](./2026-03-06_xav2_lts_kpi_risk_signal_and_dashboard_failclosed.md)
 - [2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md](./2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md)
 - [2026-03-06_vrm_runtime_metrics_v2_api.md](./2026-03-06_vrm_runtime_metrics_v2_api.md)
+- [2026-03-06_nativecore_realtime_shadow_pipeline.md](./2026-03-06_nativecore_realtime_shadow_pipeline.md)

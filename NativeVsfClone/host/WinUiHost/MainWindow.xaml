@@ -292,6 +292,88 @@
                             <x:String>Green Screen</x:String>
                         </ComboBox>
                     </Grid>
+                    <TextBlock Text="Realtime Shadow" FontWeight="SemiBold" Margin="0,2,0,6"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Light X" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="LightPitchSlider" Minimum="-180" Maximum="180" Value="19.201" StepFrequency="1" ValueChanged="LightEulerSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="LightPitchValueText" Text="19" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Light Y" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="LightYawSlider" Minimum="-180" Maximum="180" Value="175.0" StepFrequency="1" ValueChanged="LightEulerSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="LightYawValueText" Text="175" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Intensity" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="LightIntensitySlider" Minimum="0" Maximum="24" Value="12.5" StepFrequency="0.1" ValueChanged="LightIntensitySlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="LightIntensityValueText" Text="12.5" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Range" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="LightRangeSlider" Minimum="1" Maximum="60" Value="16.4" StepFrequency="0.1" ValueChanged="LightRangeSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="LightRangeValueText" Text="16.4" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Spot" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="SpotAngleSlider" Minimum="1" Maximum="120" Value="16.6" StepFrequency="0.1" ValueChanged="SpotAngleSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="SpotAngleValueText" Text="16.6" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Shadow" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="ShadowStrengthSlider" Minimum="0" Maximum="1" Value="1.0" StepFrequency="0.01" ValueChanged="ShadowStrengthSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="ShadowStrengthValueText" Text="1.00" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Bias" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="ShadowBiasSlider" Minimum="0" Maximum="1" Value="0.1" StepFrequency="0.01" ValueChanged="ShadowBiasSlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="ShadowBiasValueText" Text="0.10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="50"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Ambient" VerticalAlignment="Center"/>
+                        <Slider Grid.Column="1" x:Name="AmbientIntensitySlider" Minimum="0" Maximum="2" Value="1.0" StepFrequency="0.01" ValueChanged="AmbientIntensitySlider_ValueChanged"/>
+                        <TextBlock Grid.Column="2" x:Name="AmbientIntensityValueText" Text="1.00" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+                    <CheckBox x:Name="ShadowEnabledCheckBox" Content="Enable realtime shadow" IsChecked="True" Checked="ShadowEnabled_Changed" Unchecked="ShadowEnabled_Changed" Margin="0,0,0,8"/>
                     <CheckBox x:Name="MirrorModeCheckBox" Content="미러 모드 (Mirror Mode)" Checked="MirrorMode_Changed" Unchecked="MirrorMode_Changed" Margin="0,0,0,8"/>
                     <CheckBox x:Name="DebugOverlayCheckBox" Content="디버그 오버레이 표시" Checked="DebugOverlay_Changed" Unchecked="DebugOverlay_Changed"/>
                     <Separator Margin="0,10,0,10"/>

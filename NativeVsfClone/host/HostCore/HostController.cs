@@ -25,6 +25,7 @@ public sealed partial class HostController
     private RenderPresetStoreModel _presetStoreModel;
     private PosePresetStoreModel _posePresetStoreModel;
     private NcRenderQualityOptions _renderOptions;
+    private NcLightingOptions _lightingOptions;
     private long _snapshotVersion;
     private long _logVersion;
     private bool _windowAttached;
@@ -102,17 +103,19 @@ public sealed partial class HostController
         _posePresetStore = posePresetStore;
         _trackingInputService = trackingInputService ?? new TrackingInputService();
         _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
+        _lightingOptions = NativeCoreInterop.BuildVsfRealtimeShadowPreset();
         _presetStoreModel = EnsurePresetStoreModel(_presetStore.Load());
         _posePresetStoreModel = EnsurePosePresetStoreModel(_posePresetStore.Load());
         SessionState = new HostSessionState(false, false, null, NcResultCode.Ok);
         Outputs = new OutputState(false, false, "VsfClone", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
         _desiredSpoutActive = false;
         _desiredOscActive = false;
-        RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
+        RenderState = BuildRenderUiState(_renderOptions, _lightingOptions, true, BackgroundPreset.DarkBlue, false);
         if (TryGetSelectedPreset(out var selectedPreset))
         {
             RenderState = ToRenderUiState(selectedPreset);
             _renderOptions = ToNativeOptions(RenderState);
+            _lightingOptions = ToNativeLightingOptions(RenderState);
         }
         OperationState = new HostOperationState(false, string.Empty);
         CaptureRuntimeDiagnostics(force: true);
@@ -205,7 +208,7 @@ public sealed partial class HostController
             }
             ResetFirstBroadcastFlow();
             _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
-            RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
+            RenderState = BuildRenderUiState(_renderOptions, _lightingOptions, true, BackgroundPreset.DarkBlue, false);
             _poseOffsets = BuildDefaultPoseOffsets();
             _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
             _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
@@ -471,6 +474,7 @@ public sealed partial class HostController
             ApplyBackgroundPreset(ref _renderOptions, current.BackgroundPreset);
             ApplySelectedQualityProfile(ref _renderOptions);
             RenderState = current with { BroadcastMode = enabled };
+            _lightingOptions = ToNativeLightingOptions(RenderState);
             var rc = ApplyRenderOptionsInternal("SetBroadcastMode");
             RefreshState();
             return rc;
@@ -483,6 +487,7 @@ public sealed partial class HostController
         {
             var normalized = NormalizeRenderState(state);
             _renderOptions = ToNativeOptions(normalized);
+            _lightingOptions = ToNativeLightingOptions(normalized);
             ApplySelectedQualityProfile(ref _renderOptions);
             RenderState = normalized;
             var rc = ApplyRenderOptionsInternal("ApplyRenderUiState");
@@ -504,7 +509,17 @@ public sealed partial class HostController
             RenderState.FovDeg,
             RenderState.BackgroundPreset,
             RenderState.ShowDebugOverlay,
-            RenderState.MirrorMode);
+            RenderState.MirrorMode,
+            RenderState.LightPitchDeg,
+            RenderState.LightYawDeg,
+            RenderState.LightRollDeg,
+            RenderState.LightIntensity,
+            RenderState.LightRange,
+            RenderState.SpotAngleDeg,
+            RenderState.ShadowStrength,
+            RenderState.ShadowBias,
+            RenderState.AmbientIntensity,
+            RenderState.ShadowEnabled);
     }
 
     public bool SaveOrUpdateRenderPreset(string name)
@@ -1208,12 +1223,25 @@ public sealed partial class HostController
         {
             return rc;
         }
+        rc = NativeCoreInterop.nc_set_lighting_options(ref _lightingOptions);
+        TrackResult($"{source}.Lighting", rc);
+        if (rc != NcResultCode.Ok)
+        {
+            return rc;
+        }
 
         if (NativeCoreInterop.nc_get_render_quality_options(out var applied) == NcResultCode.Ok)
         {
             _renderOptions = applied;
+            var lightingApplied = _lightingOptions;
+            if (NativeCoreInterop.nc_get_lighting_options(out var lightingRoundtrip) == NcResultCode.Ok)
+            {
+                lightingApplied = lightingRoundtrip;
+                _lightingOptions = lightingRoundtrip;
+            }
             RenderState = BuildRenderUiState(
                 applied,
+                lightingApplied,
                 RenderState.BroadcastMode,
                 InferBackgroundPreset(applied),
                 RenderState.MirrorMode);
@@ -1235,6 +1263,31 @@ public sealed partial class HostController
         };
         ApplyBackgroundPreset(ref options, state.BackgroundPreset);
         return options;
+    }
+
+    private static NcLightingOptions ToNativeLightingOptions(RenderUiState state)
+    {
+        return new NcLightingOptions
+        {
+            LightPositionX = -0.72f,
+            LightPositionY = 19.35f,
+            LightPositionZ = 3.7f,
+            LightEulerPitchDeg = Clamp(state.LightPitchDeg, -180.0f, 180.0f),
+            LightEulerYawDeg = Clamp(state.LightYawDeg, -180.0f, 180.0f),
+            LightEulerRollDeg = Clamp(state.LightRollDeg, -180.0f, 180.0f),
+            Intensity = Clamp(state.LightIntensity, 0.0f, 64.0f),
+            Range = Clamp(state.LightRange, 0.25f, 200.0f),
+            SpotAngleDeg = Clamp(state.SpotAngleDeg, 1.0f, 179.0f),
+            InnerSpotAngleDeg = 0.0f,
+            ShadowStrength = Clamp(state.ShadowStrength, 0.0f, 1.0f),
+            ShadowBias = Clamp(state.ShadowBias, 0.0f, 8.0f),
+            ShadowNormalBias = 0.0f,
+            ShadowNearPlane = 8.5f,
+            ShadowResolution = 8192U,
+            AmbientIntensity = Clamp(state.AmbientIntensity, 0.0f, 2.0f),
+            EnableSunLight = 0U,
+            EnableShadow = state.ShadowEnabled ? 1U : 0U,
+        };
     }
 
     private void ApplySelectedQualityProfile(ref NcRenderQualityOptions options)
@@ -1313,6 +1366,7 @@ public sealed partial class HostController
 
     private static RenderUiState BuildRenderUiState(
         NcRenderQualityOptions options,
+        NcLightingOptions lighting,
         bool broadcastMode,
         BackgroundPreset preset,
         bool mirrorMode)
@@ -1326,7 +1380,17 @@ public sealed partial class HostController
             options.FovDeg,
             preset,
             options.ShowDebugOverlay != 0U,
-            mirrorMode);
+            mirrorMode,
+            lighting.LightEulerPitchDeg,
+            lighting.LightEulerYawDeg,
+            lighting.LightEulerRollDeg,
+            lighting.Intensity,
+            lighting.Range,
+            lighting.SpotAngleDeg,
+            lighting.ShadowStrength,
+            lighting.ShadowBias,
+            lighting.AmbientIntensity,
+            lighting.EnableShadow != 0U);
     }
 
     private static RenderUiState ToRenderUiState(RenderPresetModel preset)
@@ -1341,7 +1405,17 @@ public sealed partial class HostController
                 preset.FovDeg,
                 preset.BackgroundPreset,
                 preset.ShowDebugOverlay,
-                preset.MirrorMode));
+                preset.MirrorMode,
+                preset.LightPitchDeg,
+                preset.LightYawDeg,
+                preset.LightRollDeg,
+                preset.LightIntensity,
+                preset.LightRange,
+                preset.SpotAngleDeg,
+                preset.ShadowStrength,
+                preset.ShadowBias,
+                preset.AmbientIntensity,
+                preset.ShadowEnabled));
     }
 
     private static RenderUiState NormalizeRenderState(RenderUiState state)
@@ -1352,6 +1426,15 @@ public sealed partial class HostController
             Headroom = Clamp(state.Headroom, 0.0f, 0.5f),
             YawDeg = Clamp(state.YawDeg, -180.0f, 180.0f),
             FovDeg = Clamp(state.FovDeg, 20.0f, 70.0f),
+            LightPitchDeg = Clamp(state.LightPitchDeg, -180.0f, 180.0f),
+            LightYawDeg = Clamp(state.LightYawDeg, -180.0f, 180.0f),
+            LightRollDeg = Clamp(state.LightRollDeg, -180.0f, 180.0f),
+            LightIntensity = Clamp(state.LightIntensity, 0.0f, 64.0f),
+            LightRange = Clamp(state.LightRange, 0.25f, 200.0f),
+            SpotAngleDeg = Clamp(state.SpotAngleDeg, 1.0f, 179.0f),
+            ShadowStrength = Clamp(state.ShadowStrength, 0.0f, 1.0f),
+            ShadowBias = Clamp(state.ShadowBias, 0.0f, 8.0f),
+            AmbientIntensity = Clamp(state.AmbientIntensity, 0.0f, 2.0f),
         };
     }
 
