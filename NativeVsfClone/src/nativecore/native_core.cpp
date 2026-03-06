@@ -2377,7 +2377,8 @@ bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
     if (mode == StaticSkinningEnvMode::ForceOff) {
         return false;
     }
-    // In auto mode, prefer static skinning for XAV2 when skin and skeleton payloads are available.
+    // Auto mode: enable XAV2 static skinning when payloads are present.
+    // Per-mesh collapse guards will reject unsafe posed output.
     if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
         return !avatar_pkg.skin_payloads.empty() && !avatar_pkg.skeleton_payloads.empty();
     }
@@ -2805,6 +2806,7 @@ bool BuildGpuMeshForPayload(
         struct Stats {
             float max_abs = 0.0f;
             float extent_max = 0.0f;
+            float extent_min = 0.0f;
             bool finite = true;
         };
         Stats s {};
@@ -2842,6 +2844,7 @@ bool BuildGpuMeshForPayload(
         const float ey = std::max(0.0f, bmax_y - bmin_y);
         const float ez = std::max(0.0f, bmax_z - bmin_z);
         s.extent_max = std::max(ex, std::max(ey, ez));
+        s.extent_min = std::min(ex, std::min(ey, ez));
         return s;
     };
     if (skin_payload != nullptr) {
@@ -2869,8 +2872,16 @@ bool BuildGpuMeshForPayload(
         // Guard against collapsed pose output where vertices are squashed into
         // a thin tube or near-point cloud due to bad skeleton conventions.
         const bool collapsed_extent = skinning_applied && post_extent < (pre_extent * 0.20f);
-        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent) {
+        const float pre_min_extent = std::max(0.0001f, pre_stats.extent_min);
+        const float post_min_extent = std::max(0.0001f, post_stats.extent_min);
+        const bool collapsed_axis = skinning_applied && post_min_extent < (pre_min_extent * 0.15f);
+        const float pre_aspect = pre_extent / pre_min_extent;
+        const float post_aspect = post_extent / post_min_extent;
+        const bool tube_aspect_spike = skinning_applied && post_aspect > std::max(pre_aspect * 3.0f, 18.0f);
+        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike) {
             if (collapsed_extent && collapse_guard_triggered != nullptr) {
+                *collapse_guard_triggered = true;
+            } else if ((collapsed_axis || tube_aspect_spike) && collapse_guard_triggered != nullptr) {
                 *collapse_guard_triggered = true;
             }
             gpu_vertex_blob = bind_pose_blob;
@@ -3148,6 +3159,7 @@ bool ApplyArmPoseToAvatar(
         struct Stats {
             float max_abs = 0.0f;
             float extent_max = 0.0f;
+            float extent_min = 0.0f;
             bool finite = true;
         };
         Stats s {};
@@ -3185,6 +3197,7 @@ bool ApplyArmPoseToAvatar(
         const float ey = std::max(0.0f, bmax_y - bmin_y);
         const float ez = std::max(0.0f, bmax_z - bmin_z);
         s.extent_max = std::max(ex, std::max(ey, ez));
+        s.extent_min = std::min(ex, std::min(ey, ez));
         return s;
     };
     for (auto& mesh : meshes) {
@@ -3256,10 +3269,16 @@ bool ApplyArmPoseToAvatar(
         const bool exploded_extent = post_stats.extent_max > (pre_extent * 20.0f);
         const bool exploded_abs = post_stats.max_abs > std::max(200.0f, pre_stats.max_abs * 20.0f);
         const bool collapsed_extent = post_stats.extent_max < (pre_extent * 0.20f);
-        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent) {
+        const float pre_min_extent = std::max(0.0001f, pre_stats.extent_min);
+        const float post_min_extent = std::max(0.0001f, post_stats.extent_min);
+        const bool collapsed_axis = post_min_extent < (pre_min_extent * 0.15f);
+        const float pre_aspect = pre_extent / pre_min_extent;
+        const float post_aspect = std::max(0.0001f, post_stats.extent_max) / post_min_extent;
+        const bool tube_aspect_spike = post_aspect > std::max(pre_aspect * 3.0f, 18.0f);
+        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
-                if (collapsed_extent) {
+                if (collapsed_extent || collapsed_axis || tube_aspect_spike) {
                     std::ostringstream warning;
                     warning << "W_RENDER: XAV2_SKINNING_COLLAPSE_GUARD: mesh=" << mesh.mesh_name
                             << ", posed mesh rejected; keep bind pose.";
@@ -3976,6 +3995,17 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             HasLooseToken(pass_tokens, "castshadow");
         material.enable_depth_pass = !pass_declared || has_depth_token;
         material.enable_shadow_pass = has_shadow_token;
+        // Some XAV2 exports carry non-canonical pass strings. If every pass is
+        // disabled, force a base pass to avoid a "drawcalls=0 / active_passes=none" frame.
+        if (avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+            !material.enable_base_pass &&
+            !material.enable_depth_pass &&
+            !material.enable_shadow_pass &&
+            !material.enable_outline_pass &&
+            !material.enable_emission_pass) {
+            material.enable_base_pass = true;
+            fallback_reasons.push_back("xav2_pass_flags_defaulted_to_base");
+        }
         material.backend_requested = ResolveFamilyBackendRequest(shader_family);
         material.backend_selected = material.backend_requested;
         material.backend_fallback_applied = false;

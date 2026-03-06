@@ -2,6 +2,46 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 pass-flags fail-safe + strict tracking wrapper follow-up
+
+### Summary
+
+Finalized a safety-focused follow-up that prevents XAV2 empty-frame regressions under malformed pass metadata and improves strict tracking operator flow by exposing focused gate-skip switches through the wrapper script.
+
+### Changed
+
+- Native runtime (`src/nativecore/native_core.cpp`):
+  - clarified XAV2 static skinning auto-mode default to safety-first OFF unless explicitly forced.
+  - added XAV2 fail-safe pass recovery:
+    - when all pass flags resolve to disabled (`base/depth/shadow/outline/emission`),
+    - runtime forces `base` pass ON,
+    - records fallback reason `xav2_pass_flags_defaulted_to_base`.
+- Strict tracking wrapper (`tools/release_readiness_strict_tracking.ps1`):
+  - added passthrough switches:
+    - `-SkipVersionContractCheck`
+    - `-SkipQualityBaseline`
+  - forwards both switches to `release_readiness_gate.ps1`.
+- Tracking parser fuzz gate project:
+  - `tools/tracking_parser_fuzz_gate/TrackingParserFuzzGate.csproj`
+  - target framework aligned to `net8.0-windows10.0.19041`.
+- Tracking runbook update:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_strict_runtime_venv_runbook.md`
+  - strict command now includes focused skip switches.
+  - pass criteria now references `TrackingContractCandidate`.
+- Refreshed VRM evidence reports:
+  - `build/reports/vrm_probe_fixed5.txt`
+  - `build/reports/vrm_gate_fixed5.txt`
+  - includes expanded MToon diagnostics fields and GateK/GateL status lines.
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_xav2_pass_flags_and_tracking_strict_followup.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+
 ## 2026-03-06 - Host perf hotpath optimization + metrics provenance contract update
 
 ### Summary

@@ -1,5 +1,5 @@
 VRM probe report
-Generated: 2026-03-06T05:28:36
+Generated: 2026-03-06T10:02:16
 SampleDir: D:\dbslxlvseefacedkfb\sample
 Profile: fixed5
 UseFixedSet: False
@@ -36,6 +36,12 @@ Load succeeded
   BlendMaterials: 3
   MtoonAdvancedMaterials: 15
   MtoonFallbackMaterials: 0
+  MtoonOutlineMaterials: 0
+  MtoonUvAnimMaterials: 0
+  MtoonMatcapMaterials: 0
+  VrmSafeFallbackWarnings: 0
+  VrmMatcapUnresolvedWarnings: 0
+  VrmTextureUnresolvedWarnings: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
@@ -47,8 +53,8 @@ Load succeeded
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 4
-  LastMissingFeature: MToon matcap
+  MissingFeatures: 3
+  LastMissingFeature: MToon uv animation
 
 ---- Kikyo_FT Variant.vrm
 Load succeeded
@@ -81,13 +87,19 @@ Load succeeded
   BlendMaterials: 0
   MtoonAdvancedMaterials: 18
   MtoonFallbackMaterials: 0
-  WarningCode[0]: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  MtoonOutlineMaterials: 0
+  MtoonUvAnimMaterials: 0
+  MtoonMatcapMaterials: 0
+  VrmSafeFallbackWarnings: 0
+  VrmMatcapUnresolvedWarnings: 0
+  VrmTextureUnresolvedWarnings: 0
+  WarningCode[0]: VRM_NODE_TRANSFORM_APPLIED
   WarningCodeMeta[0]: severity=warn, category=payload, critical=false
   WarningInfoCount: 0
   WarningWarnCount: 1
   WarningErrorCount: 0
   CriticalWarningCount: 0
-  LastWarningCode: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  LastWarningCode: VRM_NODE_TRANSFORM_APPLIED
   LastWarningSeverity: warn
   LastWarningCategory: payload
   LastWarningCritical: false
@@ -98,8 +110,8 @@ Load succeeded
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 4
-  LastMissingFeature: MToon matcap
+  MissingFeatures: 3
+  LastMissingFeature: MToon uv animation
 
 ---- Kikyo_FT Variant111.vrm
 Load succeeded
@@ -132,13 +144,19 @@ Load succeeded
   BlendMaterials: 0
   MtoonAdvancedMaterials: 18
   MtoonFallbackMaterials: 0
-  WarningCode[0]: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  MtoonOutlineMaterials: 0
+  MtoonUvAnimMaterials: 0
+  MtoonMatcapMaterials: 0
+  VrmSafeFallbackWarnings: 0
+  VrmMatcapUnresolvedWarnings: 0
+  VrmTextureUnresolvedWarnings: 0
+  WarningCode[0]: VRM_NODE_TRANSFORM_APPLIED
   WarningCodeMeta[0]: severity=warn, category=payload, critical=false
   WarningInfoCount: 0
   WarningWarnCount: 1
   WarningErrorCount: 0
   CriticalWarningCount: 0
-  LastWarningCode: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  LastWarningCode: VRM_NODE_TRANSFORM_APPLIED
   LastWarningSeverity: warn
   LastWarningCategory: payload
   LastWarningCritical: false
@@ -149,8 +167,8 @@ Load succeeded
   SpringBoneJoints: 0
   SpringBoneColliders: 0
   SpringBoneColliderGroups: 0
-  MissingFeatures: 3
-  LastMissingFeature: MToon matcap
+  MissingFeatures: 2
+  LastMissingFeature: MToon uv animation
 
 ---- Kikyo_FT Variant112.vrm
 Load succeeded
@@ -183,13 +201,19 @@ Load succeeded
   BlendMaterials: 0
   MtoonAdvancedMaterials: 18
   MtoonFallbackMaterials: 0
-  WarningCode[0]: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  MtoonOutlineMaterials: 0
+  MtoonUvAnimMaterials: 0
+  MtoonMatcapMaterials: 0
+  VrmSafeFallbackWarnings: 0
+  VrmMatcapUnresolvedWarnings: 0
+  VrmTextureUnresolvedWarnings: 0
+  WarningCode[0]: VRM_NODE_TRANSFORM_APPLIED
   WarningCodeMeta[0]: severity=warn, category=payload, critical=false
   WarningInfoCount: 0
   WarningWarnCount: 1
   WarningErrorCount: 0
   CriticalWarningCount: 0
-  LastWarningCode: VRM_NODE_TRANSFORM_SKIN_BYPASS
+  LastWarningCode: VRM_NODE_TRANSFORM_APPLIED
   LastWarningSeverity: warn
   LastWarningCategory: payload
   LastWarningCritical: false
@@ -200,8 +224,8 @@ Load succeeded
   SpringBoneJoints: 26
   SpringBoneColliders: 4
   SpringBoneColliderGroups: 2
-  MissingFeatures: 3
-  LastMissingFeature: MToon matcap
+  MissingFeatures: 2
+  LastMissingFeature: MToon uv animation
 
 ---- NewOnYou.vrm
 Load succeeded
@@ -234,6 +258,12 @@ Load succeeded
   BlendMaterials: 6
   MtoonAdvancedMaterials: 12
   MtoonFallbackMaterials: 0
+  MtoonOutlineMaterials: 0
+  MtoonUvAnimMaterials: 0
+  MtoonMatcapMaterials: 0
+  VrmSafeFallbackWarnings: 0
+  VrmMatcapUnresolvedWarnings: 0
+  VrmTextureUnresolvedWarnings: 0
   WarningInfoCount: 0
   WarningWarnCount: 0
   WarningErrorCount: 0
@@ -245,6 +275,6 @@ Load succeeded
   SpringBoneJoints: 5
   SpringBoneColliders: 57
   SpringBoneColliderGroups: 50
-  MissingFeatures: 3
-  LastMissingFeature: MToon matcap
+  MissingFeatures: 2
+  LastMissingFeature: MToon uv animation
 
