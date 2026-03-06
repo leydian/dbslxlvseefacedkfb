@@ -985,6 +985,14 @@ std::vector<ValidationIssue> ValidatePackageForExport(const vsfclone::avatar::Av
         }
     }
 
+    if (!pkg.blendshape_payloads.empty() && pkg.expressions.empty()) {
+        PushIssue(
+            &issues,
+            "XAV2_EXPRESSION_CATALOG_EMPTY",
+            "blendshape payload exists but expression catalog is empty",
+            true);
+    }
+
     if (!blendshape_keys.empty()) {
         const std::array<std::string, 7> required_keys = {"a", "i", "u", "e", "o", "blink", "joy"};
         for (const auto& required : required_keys) {
@@ -1059,6 +1067,7 @@ StrictDecision EvaluateStrictDecision(
         "XAV2_BLENDSHAPE_DELTA_VERTEX_INVALID",
         "XAV2_BLENDSHAPE_DELTA_NORMAL_MISMATCH",
         "XAV2_BLENDSHAPE_DELTA_TANGENT_MISMATCH",
+        "XAV2_EXPRESSION_CATALOG_EMPTY",
         "XAV2_PHYSICS_SCHEMA_INVALID",
         "XAV2_PHYSICS_REF_MISSING",
         "XAV2_PHYSICS_COLLIDER_DUPLICATE",
@@ -1130,6 +1139,7 @@ QualitySummary BuildQualitySummary(
         "XAV2_SKELETON_SCHEMA_INVALID",
         "XAV4_RIG_SCHEMA_INVALID",
         "XAV2_BLENDSHAPE_SCHEMA_INVALID",
+        "XAV2_EXPRESSION_CATALOG_EMPTY",
         "XAV2_PHYSICS_SCHEMA_INVALID",
         "XAV2_PHYSICS_REF_MISSING",
         "XAV4_RIG_PARENT_INDEX_INVALID",
@@ -1488,6 +1498,10 @@ int main(int argc, char** argv) {
     }
     if (pkg.compat_level == vsfclone::avatar::AvatarCompatLevel::Failed) {
         std::cerr << "VRM parse failed with code: " << pkg.primary_error_code << "\n";
+        return 1;
+    }
+    if (!pkg.blendshape_payloads.empty() && pkg.expressions.empty()) {
+        std::cerr << "Export failed: blendshape payload exists but expression catalog is empty.\n";
         return 1;
     }
 

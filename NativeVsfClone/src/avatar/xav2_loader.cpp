@@ -53,6 +53,116 @@ std::string NormalizeRefKey(const std::string& raw) {
     return ToLower(out);
 }
 
+std::string NormalizeMorphKey(const std::string& raw) {
+    std::string key;
+    key.reserve(raw.size());
+    for (const unsigned char c : raw) {
+        if (std::isalnum(c) != 0) {
+            key.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+    return key;
+}
+
+void AddExpressionIfMissing(
+    std::vector<ExpressionState>* expressions,
+    const std::string& name,
+    const std::string& mapping_kind) {
+    if (expressions == nullptr || name.empty()) {
+        return;
+    }
+    const std::string needle = ToLower(name);
+    for (const auto& existing : *expressions) {
+        if (ToLower(existing.name) == needle) {
+            return;
+        }
+    }
+    ExpressionState expr;
+    expr.name = name;
+    expr.mapping_kind = mapping_kind.empty() ? "none" : mapping_kind;
+    expr.default_weight = 0.0f;
+    expr.runtime_weight = 0.0f;
+    expressions->push_back(std::move(expr));
+}
+
+ExpressionState* FindExpressionByName(std::vector<ExpressionState>* expressions, const std::string& name) {
+    if (expressions == nullptr || name.empty()) {
+        return nullptr;
+    }
+    const std::string needle = ToLower(name);
+    for (auto& existing : *expressions) {
+        if (ToLower(existing.name) == needle) {
+            return &existing;
+        }
+    }
+    return nullptr;
+}
+
+void AddExpressionBindIfMissing(
+    ExpressionState* expression,
+    const std::string& mesh_name,
+    const std::string& frame_name,
+    float weight_scale) {
+    if (expression == nullptr || mesh_name.empty() || frame_name.empty()) {
+        return;
+    }
+    const std::string mesh_key = ToLower(mesh_name);
+    const std::string frame_key = ToLower(frame_name);
+    for (const auto& bind : expression->binds) {
+        if (ToLower(bind.mesh_name) == mesh_key && ToLower(bind.frame_name) == frame_key) {
+            return;
+        }
+    }
+    ExpressionState::Bind bind;
+    bind.mesh_name = mesh_name;
+    bind.frame_name = frame_name;
+    bind.weight_scale = std::max(0.0f, std::min(1.0f, weight_scale));
+    expression->binds.push_back(std::move(bind));
+}
+
+std::pair<std::string, std::string> ResolveExpressionFromFrameName(const std::string& frame_name) {
+    const std::string key = NormalizeMorphKey(frame_name);
+    if (key.empty()) {
+        return {"", ""};
+    }
+    if (key.find("blink") != std::string::npos || key.find("eyeclose") != std::string::npos) {
+        return {"blink", "blink"};
+    }
+    if (key == "a" || key == "aa" || key.find("viseme") != std::string::npos || key.find("mouthopen") != std::string::npos) {
+        return {"aa", "viseme_aa"};
+    }
+    if (key.find("joy") != std::string::npos || key.find("happy") != std::string::npos || key.find("smile") != std::string::npos) {
+        return {"joy", "joy"};
+    }
+    return {key, "none"};
+}
+
+std::size_t BuildExpressionCatalogFromBlendShapes(AvatarPackage* pkg) {
+    if (pkg == nullptr || pkg->blendshape_payloads.empty()) {
+        return 0U;
+    }
+    std::size_t bind_count = 0U;
+    for (const auto& blendshape : pkg->blendshape_payloads) {
+        for (const auto& frame : blendshape.frames) {
+            const auto [expr_name, mapping_kind] = ResolveExpressionFromFrameName(frame.name);
+            if (expr_name.empty()) {
+                continue;
+            }
+            AddExpressionIfMissing(&pkg->expressions, expr_name, mapping_kind);
+            auto* expr = FindExpressionByName(&pkg->expressions, expr_name);
+            if (expr == nullptr) {
+                continue;
+            }
+            const std::size_t before = expr->binds.size();
+            AddExpressionBindIfMissing(expr, blendshape.mesh_name, frame.name, 1.0f);
+            if (expr->binds.size() > before) {
+                ++bind_count;
+            }
+        }
+    }
+    return bind_count;
+}
+
 std::string NormalizeShaderFamily(const std::string& raw) {
     const std::string key = NormalizeRefKey(raw);
     return key.empty() ? "legacy" : key;
@@ -1794,6 +1904,15 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             &pkg,
             "W_PAYLOAD: XAV2_BLENDSHAPE_PARTIAL: blendshape sections=" + std::to_string(blendshape_sections.size()) +
             ", mesh refs=" + std::to_string(mesh_refs.size()));
+    }
+    const std::size_t synthesized_expression_bind_count = BuildExpressionCatalogFromBlendShapes(&pkg);
+    if (!pkg.blendshape_payloads.empty() && !pkg.expressions.empty()) {
+        PushWarning(
+            &pkg,
+            "W_PAYLOAD: XAV2_EXPRESSION_CATALOG_SYNTHESIZED: expressions=" + std::to_string(pkg.expressions.size()) +
+                ", binds=" + std::to_string(synthesized_expression_bind_count));
+    } else if (!pkg.blendshape_payloads.empty() && pkg.expressions.empty()) {
+        PushWarning(&pkg, "W_PAYLOAD: XAV2_EXPRESSION_CATALOG_EMPTY: blendshape payload present but expression mapping unresolved.");
     }
     if (expects_springbones && springbone_sections.empty()) {
         PushWarning(&pkg, "W_PAYLOAD: XAV2_PHYSICS_REF_MISSING: expected springbone payloads but none parsed.");

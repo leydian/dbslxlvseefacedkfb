@@ -2757,11 +2757,6 @@ bool ShouldApplyArmPoseForAvatar(const AvatarPackage& avatar_pkg) {
     if (mode == StaticSkinningEnvMode::ForceOff) {
         return false;
     }
-    if (avatar_pkg.source_type == AvatarSourceType::Xav2 && avatar_pkg.source_ext == ".vrm") {
-        // Root fix: VRM-origin XAV2 can desync head/hair when arm-pose path
-        // re-skins meshes independently from initial mesh policy.
-        return false;
-    }
     // Auto mode: allow arm pose for XAV2 when the runtime has complete pose payloads.
     // Keep mesh static-skinning policy separate to avoid regressions in mesh-space safety rules.
     return avatar_pkg.source_type == AvatarSourceType::Xav2 &&
@@ -6278,6 +6273,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         std::vector<std::string> detached_mesh_names;
+        bool avatar_has_shadow_capable_material = false;
+        bool avatar_shadow_draw_enqueued = false;
         const bool is_xav2_avatar = it->second.source_type == AvatarSourceType::Xav2;
         const bool is_vrm_origin_xav2 = is_xav2_avatar && it->second.source_ext == ".vrm";
         const bool enable_vrm_mesh_recentering = false;
@@ -6512,8 +6509,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             if (!fast_fallback && material != nullptr && material->enable_depth_pass) {
                 q.depth_draws.push_back(item);
             }
+            if (material != nullptr && material->enable_shadow_pass) {
+                avatar_has_shadow_capable_material = true;
+            }
             if (!fast_fallback && material != nullptr && material->enable_shadow_pass) {
                 q.shadow_draws.push_back(item);
+                avatar_shadow_draw_enqueued = true;
             }
             if (material != nullptr && material->enable_base_pass) {
                 if (item.is_blend) {
@@ -6543,6 +6544,32 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 std::ostringstream warning;
                 warning << "W_RENDER: MATERIAL_INDEX_OOB_SKIPPED: meshes=" << material_index_oob_count;
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "MATERIAL_INDEX_OOB_SKIPPED");
+            }
+        }
+        {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                if (lighting.enable_shadow == 0U) {
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        "W_RENDER: SHADOW_DISABLED_TOGGLE_OFF: lighting.enable_shadow=0.",
+                        "SHADOW_DISABLED_TOGGLE_OFF");
+                } else if (fast_fallback) {
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        "W_RENDER: SHADOW_DISABLED_FAST_FALLBACK: quality profile disables realtime shadow pass.",
+                        "SHADOW_DISABLED_FAST_FALLBACK");
+                } else if (!avatar_has_shadow_capable_material) {
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        "W_RENDER: SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL: no material advertises shadow pass.",
+                        "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL");
+                } else if (!avatar_shadow_draw_enqueued) {
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        "W_RENDER: SHADOW_DISABLED_SHADOW_DRAW_EMPTY: shadow-capable materials exist but no shadow draw was enqueued.",
+                        "SHADOW_DISABLED_SHADOW_DRAW_EMPTY");
+                }
             }
         }
         if (mesh_extent_outlier_skipped_count > 0U) {
@@ -7177,11 +7204,19 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
         return NC_ERROR_IO;
     }
     vsfclone::nativecore::BuildArkit52ExpressionBindings(&loaded.value);
-    if (loaded.value.source_type == vsfclone::avatar::AvatarSourceType::Vrm && loaded.value.expressions.empty()) {
+    const bool needs_expression_fallback = loaded.value.expressions.empty() &&
+        (loaded.value.source_type == vsfclone::avatar::AvatarSourceType::Vrm ||
+         loaded.value.source_type == vsfclone::avatar::AvatarSourceType::Xav2);
+    if (needs_expression_fallback) {
         loaded.value.expressions.push_back({"blink", "blink", 0.0f, 0.0f});
         loaded.value.expressions.push_back({"aa", "viseme_aa", 0.0f, 0.0f});
         loaded.value.expressions.push_back({"joy", "joy", 0.0f, 0.0f});
-        loaded.value.warnings.push_back("W_VRM_EXPRESSION_FALLBACK: runtime injected blink/aa/joy expression defaults");
+        if (loaded.value.source_type == vsfclone::avatar::AvatarSourceType::Vrm) {
+            loaded.value.warnings.push_back("W_VRM_EXPRESSION_FALLBACK: runtime injected blink/aa/joy expression defaults");
+        } else {
+            loaded.value.warnings.push_back("W_XAV2_EXPRESSION_FALLBACK: runtime injected blink/aa/joy expression defaults");
+            loaded.value.warning_codes.push_back("XAV2_EXPRESSION_FALLBACK_APPLIED");
+        }
     }
 
     const std::uint64_t handle = vsfclone::nativecore::g_state.next_avatar_handle++;
