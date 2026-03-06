@@ -4,7 +4,7 @@
 - This summary groups weekly changes by domain.
 
 ## Highlights
-- `xav2`: 30 reports
+- `xav2`: 31 reports
 - `host`: 13 reports
 - `ui`: 9 reports
 - `vsfavatar`: 9 reports
@@ -75,6 +75,7 @@
 - Newly added: review `2026-03-06_xav2_full_parity_contract_enforcement.md` for strict lilToon/Poiyomi parity contract enforcement, typed-v3 canonical migration policy, and hard-fail diagnostics behavior.
 - Newly added: review `2026-03-06_xav2_extreme_detached_cluster_and_autofit_stability.md` for XAV2 detached-cluster draw safety override in `autofit_only`, tightened bounds-cluster filtering, and bust AutoFit focus stability clamp policy.
 - Newly added: review `2026-03-06_xav2_vrm_origin_detached_cluster_hotfix.md` for VRM-origin XAV2 detached-cluster draw skip hardening, static-skinning rollback to bind-pose default, and VRM-origin bust focus retune/clamp policy.
+- Newly added: review `2026-03-06_xav2_vrm_origin_hair_face_alignment_root_fix.md` for VRM-origin XAV2 hair/face desync root-cause isolation, re-export non-effect evidence, and final static/arm re-skinning policy lock.
 - Newly added: review `2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md` for strict parity-family expansion to Standard/MToon, Unity/native shader-family inference alignment, and typed-v3 export policy widening.
 - Newly added: review `2026-03-06_xav2_poiyomi_typed_material_parity_extension.md` for Poiyomi advanced typed-v3 extraction uplift, feature-flag parity alignment, and runtime typed parse regression coverage.
 - Newly added: review `2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md` for typed-v4 canonical contract uplift, pass-flag driven depth/shadow scheduling, and fast-fallback-safe runtime diagnostics expansion.

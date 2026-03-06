@@ -2,6 +2,52 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - VRM-origin XAV2 hair/face desync root-cause isolation and policy lock
+
+### Summary
+
+Resolved an intermittent but severe VRM-origin XAV2 render regression where hair and face appeared detached/misaligned after avatar load, despite successful parsing and runtime-ready status.
+
+The final stable fix was to lock VRM-origin XAV2 out of runtime re-skinning paths that can produce mixed mesh-space outcomes:
+- static skinning path disabled
+- arm-pose mesh re-skinning path disabled
+
+This preserves coherent bind-pose placement for face/hair/body under current runtime contracts.
+
+### Changed
+
+- Native runtime policy lock:
+  - `src/nativecore/native_core.cpp`
+  - `ShouldApplyStaticSkinningForAvatarMeshes(...)`
+    - `source_type == Xav2 && source_ext == ".vrm"` now force-returns `false`
+  - `ShouldApplyArmPoseForAvatar(...)`
+    - `source_type == Xav2 && source_ext == ".vrm"` now force-returns `false` in auto mode
+- Existing VRM-origin framing/outlier stabilization changes remain intact in same file:
+  - bust focus retune / vertical lift
+  - detached-cluster recenter scaffolding kept disabled (`enable_vrm_mesh_recentering = false`)
+
+### Root Cause Notes
+
+- Runtime diagnostics showed parser-level success for both sources (`Compat: full`, `ParserStage: runtime-ready`) but behavior diverged:
+  - source VRM load contained node-transform application warnings (`VRM_NODE_TRANSFORM_APPLIED: meshes=6`)
+  - re-exported XAV2 lacked equivalent runtime transform warning context while still carrying full payload counts
+- Re-export was validated but non-effective:
+  - `sample\\개인작10-2.vrm -> sample\\개인작10-2.reexport.xav2` generated successfully
+  - replacing `개인작10-2.xav2` with re-export output did not change render result
+  - hashes matched, confirming deterministic identical output from same source input
+
+### Verification
+
+- Build/deploy:
+  - `MSBuild build/nativecore.vcxproj /p:Configuration=Release /p:Platform=x64 /m`: PASS
+  - deployed `build/Release/nativecore.dll` -> `dist/wpf/nativecore.dll`
+  - runtime DLL hash parity confirmed after deploy
+- Loader checks:
+  - `build/Release/avatar_tool.exe "D:\\dbslxlvseefacedkfb\\sample\\개인작10-2.vrm" --dump-warnings-limit=200`: PASS
+  - `build/Release/avatar_tool.exe "D:\\dbslxlvseefacedkfb\\개인작10-2.xav2" --dump-warnings-limit=200`: PASS
+- Operator confirmation:
+  - after final policy lock, user confirmed issue resolved ("이제 잘돼!").
+
 ## 2026-03-06 - IFM key-sample telemetry surface + browOuterUp alias completion (50/52 -> 52/52 path)
 
 ### Summary

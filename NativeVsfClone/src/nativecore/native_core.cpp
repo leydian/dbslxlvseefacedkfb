@@ -2719,8 +2719,8 @@ bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
     // Per-mesh collapse guards will reject unsafe posed output.
     if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
         if (avatar_pkg.source_ext == ".vrm") {
-            // Keep VRM-derived XAV2 on bind-pose vertices by default.
-            // Mixed per-mesh static skinning outcomes can desynchronize face/hair/body placement.
+            // Root fix: VRM-origin XAV2 can produce mixed mesh-space outcomes
+            // (face/hair/body desync) when runtime static skinning is applied.
             return false;
         }
         return !avatar_pkg.skin_payloads.empty() && !avatar_pkg.skeleton_payloads.empty();
@@ -2755,6 +2755,11 @@ bool ShouldApplyArmPoseForAvatar(const AvatarPackage& avatar_pkg) {
         return true;
     }
     if (mode == StaticSkinningEnvMode::ForceOff) {
+        return false;
+    }
+    if (avatar_pkg.source_type == AvatarSourceType::Xav2 && avatar_pkg.source_ext == ".vrm") {
+        // Root fix: VRM-origin XAV2 can desync head/hair when arm-pose path
+        // re-skins meshes independently from initial mesh policy.
         return false;
     }
     // Auto mode: allow arm pose for XAV2 when the runtime has complete pose payloads.
@@ -6189,13 +6194,15 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 const float focus_max = avatar_bmin.y + safe_extent_y * 0.82f;
                 focus_y = std::max(focus_min, std::min(focus_max, focus_y));
                 if (it->second.source_ext == ".vrm") {
-                    const float vrm_focus_from_cluster = robust_cy + safe_extent_y * 0.06f;
-                    focus_y = focus_y * 0.25f + vrm_focus_from_cluster * 0.75f;
-                    const float vrm_focus_min = avatar_bmin.y + safe_extent_y * 0.48f;
-                    const float vrm_focus_max = avatar_bmin.y + safe_extent_y * 0.76f;
-                    focus_y = std::max(vrm_focus_min, std::min(vrm_focus_max, focus_y));
-                }
-            } else {
+                    // VRM-origin XAV2 tends to look "sunk" when bust focus is too high.
+                    // Bias slightly downward and clamp to a lower window.
+                const float vrm_focus_from_cluster = robust_cy - safe_extent_y * 0.14f;
+                focus_y = focus_y * 0.30f + vrm_focus_from_cluster * 0.70f;
+                const float vrm_focus_min = avatar_bmin.y + safe_extent_y * 0.34f;
+                const float vrm_focus_max = avatar_bmin.y + safe_extent_y * 0.64f;
+                focus_y = std::max(vrm_focus_min, std::min(vrm_focus_max, focus_y));
+            }
+        } else {
                 focus_y = focus_from_bounds;
             }
         }
@@ -6248,33 +6255,74 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             g_state.latest_tracking.head_pos[0] * kHeadPosScale,
             g_state.latest_tracking.head_pos[1] * kHeadPosScale,
             g_state.latest_tracking.head_pos[2] * kHeadPosScale);
+        float avatar_y_lift = 0.0f;
+        if (it->second.source_type == AvatarSourceType::Xav2 && it->second.source_ext == ".vrm") {
+            // VRM-origin XAV2 can appear visually sunk in bust mode; lift slightly.
+            avatar_y_lift = safe_extent_y * 0.12f;
+        }
         const auto world =
             DirectX::XMMatrixTranslation(-cx, -focus_y, -cz) *
             DirectX::XMMatrixRotationY(preview_yaw_override) *
             composed_head_rot *
             DirectX::XMMatrixScaling(fit_scale, fit_scale, fit_scale) *
             head_pos *
-            DirectX::XMMatrixTranslation(x_offset, -look_at_y, 0.0f);
+            DirectX::XMMatrixTranslation(x_offset, -look_at_y + avatar_y_lift, 0.0f);
         ++avatar_slot;
         std::uint32_t material_index_oob_count = 0U;
         std::uint32_t mesh_extent_outlier_skipped_count = 0U;
         std::uint32_t mesh_detached_outlier_skipped_count = 0U;
         std::uint32_t mesh_detached_cluster_skipped_count = 0U;
         std::uint32_t mesh_extreme_detached_cluster_skipped_count = 0U;
-        std::uint32_t mesh_vrm_origin_detached_cluster_skipped_count = 0U;
+        std::uint32_t mesh_vrm_origin_detached_cluster_recentered_count = 0U;
+        std::uint32_t mesh_vrm_origin_hair_head_realigned_count = 0U;
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         std::vector<std::string> detached_mesh_names;
         const bool is_xav2_avatar = it->second.source_type == AvatarSourceType::Xav2;
         const bool is_vrm_origin_xav2 = is_xav2_avatar && it->second.source_ext == ".vrm";
+        const bool enable_vrm_mesh_recentering = false;
         const bool skip_xav2_outlier_draws =
             is_xav2_avatar &&
             ResolveXav2OutlierDrawPolicy() == Xav2OutlierDrawPolicy::SkipDraw;
-        const bool skip_vrm_origin_bounds_excluded_draws =
-            is_vrm_origin_xav2;
+        bool head_ref_valid = false;
+        float head_ref_x = robust_cx;
+        float head_ref_y = robust_cy;
+        float head_ref_z = robust_cz;
+        if (is_vrm_origin_xav2 && enable_vrm_mesh_recentering) {
+            float acc_x = 0.0f;
+            float acc_y = 0.0f;
+            float acc_z = 0.0f;
+            std::uint32_t acc_n = 0U;
+            for (const auto& m : mesh_it->second) {
+                std::string name_key = m.mesh_name;
+                std::transform(name_key.begin(), name_key.end(), name_key.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                const bool is_head_ref =
+                    name_key.find("face") != std::string::npos ||
+                    name_key.find("head") != std::string::npos;
+                if (!is_head_ref) {
+                    continue;
+                }
+                if (!std::isfinite(m.center.x) || !std::isfinite(m.center.y) || !std::isfinite(m.center.z)) {
+                    continue;
+                }
+                acc_x += m.center.x;
+                acc_y += m.center.y;
+                acc_z += m.center.z;
+                ++acc_n;
+            }
+            if (acc_n > 0U) {
+                const float inv_n = 1.0f / static_cast<float>(acc_n);
+                head_ref_x = acc_x * inv_n;
+                head_ref_y = acc_y * inv_n;
+                head_ref_z = acc_z * inv_n;
+                head_ref_valid = true;
+            }
+        }
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
-            if ((skip_xav2_outlier_draws || skip_vrm_origin_bounds_excluded_draws) &&
+            if (skip_xav2_outlier_draws &&
                 mesh_index < preview_bounds_excluded.size() &&
                 preview_bounds_excluded[mesh_index] != 0U) {
                 ++mesh_bounds_outlier_draw_skipped_count;
@@ -6298,6 +6346,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 std::max(0.35f, median_extent * 1.1f);
             const bool extreme_detached_cluster =
                 is_xav2_avatar &&
+                !is_vrm_origin_xav2 &&
                 std::isfinite(robust_dist) &&
                 robust_dist > extreme_detached_cluster_threshold &&
                 std::isfinite(emax) &&
@@ -6309,22 +6358,77 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 }
                 continue;
             }
-            const float vrm_origin_detached_cluster_threshold =
-                std::max(1.4f, median_center_dist * 2.8f);
-            const float vrm_origin_detached_cluster_size_cap =
-                std::max(1.8f, median_extent * 3.2f);
-            const bool vrm_origin_detached_cluster =
+            const float vertical_detached_threshold = std::max(0.55f, safe_extent_y * 0.38f);
+            const float dy_from_robust = mesh.center.y - robust_cy;
+            const bool likely_footwear =
+                mesh.mesh_name.find("Boot") != std::string::npos ||
+                mesh.mesh_name.find("boot") != std::string::npos ||
+                mesh.mesh_name.find("Shoe") != std::string::npos ||
+                mesh.mesh_name.find("shoe") != std::string::npos;
+            const bool vrm_origin_vertical_detached =
                 is_vrm_origin_xav2 &&
-                std::isfinite(robust_dist) &&
-                robust_dist > vrm_origin_detached_cluster_threshold &&
+                enable_vrm_mesh_recentering &&
+                !likely_footwear &&
+                std::isfinite(dy_from_robust) &&
+                dy_from_robust > vertical_detached_threshold &&
                 std::isfinite(emax) &&
-                emax <= vrm_origin_detached_cluster_size_cap;
-            if (vrm_origin_detached_cluster) {
-                ++mesh_vrm_origin_detached_cluster_skipped_count;
+                emax <= std::max(0.35f, median_extent * 1.3f);
+            float vrm_detached_recenter_x = 0.0f;
+            float vrm_detached_recenter_y = 0.0f;
+            float vrm_detached_recenter_z = 0.0f;
+            float vrm_hair_align_x = 0.0f;
+            float vrm_hair_align_y = 0.0f;
+            float vrm_hair_align_z = 0.0f;
+            if (vrm_origin_vertical_detached) {
+                // Recenter detached upper clusters toward the robust body/head cluster
+                // instead of dropping them, to preserve footwear and accessory continuity.
+                vrm_detached_recenter_x = -dcx * 0.42f;
+                vrm_detached_recenter_y = -(dy_from_robust - vertical_detached_threshold * 0.45f);
+                vrm_detached_recenter_z = -dcz * 0.42f;
+                const float clamp_xz = std::max(0.05f, safe_extent_x * 0.35f);
+                const float clamp_y = std::max(0.08f, safe_extent_y * 0.55f);
+                vrm_detached_recenter_x = std::max(-clamp_xz, std::min(clamp_xz, vrm_detached_recenter_x));
+                vrm_detached_recenter_y = std::max(-clamp_y, std::min(clamp_y, vrm_detached_recenter_y));
+                vrm_detached_recenter_z = std::max(-clamp_xz, std::min(clamp_xz, vrm_detached_recenter_z));
+                ++mesh_vrm_origin_detached_cluster_recentered_count;
                 if (detached_mesh_names.size() < 6U) {
                     detached_mesh_names.push_back(mesh.mesh_name.empty() ? std::to_string(mesh_index) : mesh.mesh_name);
                 }
-                continue;
+            }
+            if (is_vrm_origin_xav2 && enable_vrm_mesh_recentering && head_ref_valid) {
+                std::string name_key = mesh.mesh_name;
+                std::transform(name_key.begin(), name_key.end(), name_key.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                const bool is_hair_candidate =
+                    name_key.find("hair") != std::string::npos ||
+                    name_key.find("hairpin") != std::string::npos ||
+                    name_key == "front.baked.baked" ||
+                    name_key == "back.baked.baked" ||
+                    name_key == "side.baked.baked";
+                if (is_hair_candidate) {
+                    const float hx = mesh.center.x - head_ref_x;
+                    const float hy = mesh.center.y - head_ref_y;
+                    const float hz = mesh.center.z - head_ref_z;
+                    const float head_dist = std::sqrt(hx * hx + hy * hy + hz * hz);
+                    const bool hair_misaligned =
+                        std::isfinite(head_dist) &&
+                        (std::abs(hy) > std::max(0.06f, safe_extent_y * 0.08f) ||
+                         head_dist > std::max(0.12f, median_center_dist * 0.70f)) &&
+                        std::isfinite(emax) &&
+                        emax <= std::max(0.9f, median_extent * 2.2f);
+                    if (hair_misaligned) {
+                        vrm_hair_align_x = -hx * 0.85f;
+                        vrm_hair_align_y = -hy * 0.85f;
+                        vrm_hair_align_z = -hz * 0.85f;
+                        const float clamp_xz = std::max(0.08f, safe_extent_x * 0.40f);
+                        const float clamp_y = std::max(0.10f, safe_extent_y * 0.45f);
+                        vrm_hair_align_x = std::max(-clamp_xz, std::min(clamp_xz, vrm_hair_align_x));
+                        vrm_hair_align_y = std::max(-clamp_y, std::min(clamp_y, vrm_hair_align_y));
+                        vrm_hair_align_z = std::max(-clamp_xz, std::min(clamp_xz, vrm_hair_align_z));
+                        ++mesh_vrm_origin_hair_head_realigned_count;
+                    }
+                }
             }
             if (skip_xav2_outlier_draws) {
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
@@ -6387,11 +6491,22 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             item.mesh = &mesh;
             item.material = material;
             item.backend = material != nullptr ? material->backend_selected : RenderFamilyBackendKind::Common;
-            item.world = world;
+            auto mesh_world = world;
+            if (vrm_origin_vertical_detached) {
+                mesh_world =
+                    DirectX::XMMatrixTranslation(vrm_detached_recenter_x, vrm_detached_recenter_y, vrm_detached_recenter_z) *
+                    mesh_world;
+            }
+            if (vrm_hair_align_x != 0.0f || vrm_hair_align_y != 0.0f || vrm_hair_align_z != 0.0f) {
+                mesh_world =
+                    DirectX::XMMatrixTranslation(vrm_hair_align_x, vrm_hair_align_y, vrm_hair_align_z) *
+                    mesh_world;
+            }
+            item.world = mesh_world;
             item.is_mask = (alpha_mode == "MASK");
             item.is_blend = (alpha_mode == "BLEND");
             const auto center = DirectX::XMVectorSet(mesh.center.x, mesh.center.y, mesh.center.z, 1.0f);
-            const auto center_view = DirectX::XMVector3TransformCoord(DirectX::XMVector3TransformCoord(center, world), view);
+            const auto center_view = DirectX::XMVector3TransformCoord(DirectX::XMVector3TransformCoord(center, mesh_world), view);
             item.view_z = DirectX::XMVectorGetZ(center_view);
             FamilyDrawQueues& q = family_draws[backend_index(item.backend)];
             if (!fast_fallback && material != nullptr && material->enable_depth_pass) {
@@ -6472,11 +6587,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED");
             }
         }
-        if (mesh_vrm_origin_detached_cluster_skipped_count > 0U) {
+        if (mesh_vrm_origin_detached_cluster_recentered_count > 0U) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
                 std::ostringstream warning;
-                warning << "W_RENDER: XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED: meshes=" << mesh_vrm_origin_detached_cluster_skipped_count;
+                warning << "W_RENDER: XAV2_VRM_ORIGIN_DETACHED_CLUSTER_RECENTERED: mode=vertical_only, meshes="
+                        << mesh_vrm_origin_detached_cluster_recentered_count;
                 if (!detached_mesh_names.empty()) {
                     warning << ", names=";
                     for (std::size_t i = 0U; i < detached_mesh_names.size(); ++i) {
@@ -6486,7 +6602,15 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                         warning << detached_mesh_names[i];
                     }
                 }
-                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED");
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_VRM_ORIGIN_DETACHED_CLUSTER_RECENTERED");
+            }
+        }
+        if (mesh_vrm_origin_hair_head_realigned_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_VRM_HAIR_HEAD_REALIGNED: meshes=" << mesh_vrm_origin_hair_head_realigned_count;
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_VRM_HAIR_HEAD_REALIGNED");
             }
         }
         if (mesh_detached_cluster_skipped_count > 0U) {
@@ -6537,10 +6661,16 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 preview_it->second += ", extreme_detached_skipped=" + std::to_string(mesh_extreme_detached_cluster_skipped_count);
             }
         }
-        if (mesh_vrm_origin_detached_cluster_skipped_count > 0U) {
+        if (mesh_vrm_origin_detached_cluster_recentered_count > 0U) {
             auto preview_it = g_state.avatar_preview_debug.find(handle);
             if (preview_it != g_state.avatar_preview_debug.end() && !preview_it->second.empty()) {
-                preview_it->second += ", vrm_origin_detached_skipped=" + std::to_string(mesh_vrm_origin_detached_cluster_skipped_count);
+                preview_it->second += ", vrm_origin_detached_recentered=" + std::to_string(mesh_vrm_origin_detached_cluster_recentered_count);
+            }
+        }
+        if (mesh_vrm_origin_hair_head_realigned_count > 0U) {
+            auto preview_it = g_state.avatar_preview_debug.find(handle);
+            if (preview_it != g_state.avatar_preview_debug.end() && !preview_it->second.empty()) {
+                preview_it->second += ", vrm_hair_head_realigned=" + std::to_string(mesh_vrm_origin_hair_head_realigned_count);
             }
         }
     }

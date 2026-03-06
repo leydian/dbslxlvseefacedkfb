@@ -169,6 +169,7 @@ Report list for this week.
 - [2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md](./2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md)
 - [2026-03-06_xav2_visibility_fallback_and_warning_gate.md](./2026-03-06_xav2_visibility_fallback_and_warning_gate.md)
 - [2026-03-06_xav2_vrm_origin_detached_cluster_hotfix.md](./2026-03-06_xav2_vrm_origin_detached_cluster_hotfix.md)
+- [2026-03-06_xav2_vrm_origin_hair_face_alignment_root_fix.md](./2026-03-06_xav2_vrm_origin_hair_face_alignment_root_fix.md)
 - [2026-03-06_xav2_warning_contract_gate_upgrade.md](./2026-03-06_xav2_warning_contract_gate_upgrade.md)
 - [2026-03-06_xav2_public_sdk_packaging_v100.md](./2026-03-06_xav2_public_sdk_packaging_v100.md)
 - [2026-03-06_xav2_unity_lts_matrix_gate_policy.md](./2026-03-06_xav2_unity_lts_matrix_gate_policy.md)
