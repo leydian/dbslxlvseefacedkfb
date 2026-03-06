@@ -5,29 +5,35 @@
         <FontFamily x:Key="Font.Body">Segoe UI Variable Text</FontFamily>
         <FontFamily x:Key="Font.Display">Segoe UI Variable Display</FontFamily>
 
-        <SolidColorBrush x:Key="Color.Surface" Color="#F2F6FB"/>
-        <SolidColorBrush x:Key="Color.SurfaceAlt" Color="#EAF0F8"/>
-        <SolidColorBrush x:Key="Color.Card" Color="#F8FBFF"/>
+        <SolidColorBrush x:Key="Color.Surface" Color="#F6F8FC"/>
+        <SolidColorBrush x:Key="Color.SurfaceAlt" Color="#EEF2F8"/>
+        <SolidColorBrush x:Key="Color.Card" Color="#FBFCFF"/>
         <SolidColorBrush x:Key="Color.CardStrong" Color="#FFFFFFFF"/>
-        <SolidColorBrush x:Key="Color.Border" Color="#C7D5E6"/>
-        <SolidColorBrush x:Key="Color.BorderStrong" Color="#A8BCD3"/>
-        <SolidColorBrush x:Key="Color.Text" Color="#1A2A3B"/>
-        <SolidColorBrush x:Key="Color.TextMuted" Color="#58697B"/>
-        <SolidColorBrush x:Key="Color.TextSubtle" Color="#6D7E92"/>
-        <SolidColorBrush x:Key="Color.Primary" Color="#1571B8"/>
-        <SolidColorBrush x:Key="Color.PrimaryHover" Color="#0F629F"/>
-        <SolidColorBrush x:Key="Color.PrimaryPressed" Color="#0D4F81"/>
+        <SolidColorBrush x:Key="Color.Border" Color="#CFD9E6"/>
+        <SolidColorBrush x:Key="Color.BorderStrong" Color="#B4C4D7"/>
+        <SolidColorBrush x:Key="Color.Text" Color="#1C2530"/>
+        <SolidColorBrush x:Key="Color.TextMuted" Color="#5A6878"/>
+        <SolidColorBrush x:Key="Color.TextSubtle" Color="#728196"/>
+        <SolidColorBrush x:Key="Color.Primary" Color="#0D75C8"/>
+        <SolidColorBrush x:Key="Color.PrimaryHover" Color="#0B68B0"/>
+        <SolidColorBrush x:Key="Color.PrimaryPressed" Color="#095389"/>
         <SolidColorBrush x:Key="Color.PrimaryText" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="Color.Success" Color="#0E7A4F"/>
-        <SolidColorBrush x:Key="Color.Warning" Color="#A86A1D"/>
-        <SolidColorBrush x:Key="Color.Error" Color="#9A3131"/>
-        <SolidColorBrush x:Key="Color.TabBg" Color="#EEF3FA"/>
+        <SolidColorBrush x:Key="Color.Success" Color="#1E8A54"/>
+        <SolidColorBrush x:Key="Color.Warning" Color="#A56B1A"/>
+        <SolidColorBrush x:Key="Color.Error" Color="#AD3B3B"/>
+        <SolidColorBrush x:Key="Color.TabBg" Color="#F0F4FA"/>
         <SolidColorBrush x:Key="Color.TabActive" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="Color.NavRailBg" Color="#E9F0F8"/>
-        <SolidColorBrush x:Key="Color.NavItemBg" Color="#F4F8FD"/>
+        <SolidColorBrush x:Key="Color.NavRailBg" Color="#EEF3F9"/>
+        <SolidColorBrush x:Key="Color.NavItemBg" Color="#F8FBFF"/>
         <SolidColorBrush x:Key="Color.NavItemActiveBg" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="Color.NavItemText" Color="#31485F"/>
-        <SolidColorBrush x:Key="Color.NavItemActiveText" Color="#1A2A3B"/>
+        <SolidColorBrush x:Key="Color.NavItemText" Color="#3A4E63"/>
+        <SolidColorBrush x:Key="Color.NavItemActiveText" Color="#1C2530"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarBg" Color="#EAF4FF"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarBorder" Color="#BCD8F3"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarTitle" Color="#11395B"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarBody" Color="#2A4A67"/>
+        <SolidColorBrush x:Key="Color.BadgeNeutralBg" Color="#EFF3F9"/>
+        <SolidColorBrush x:Key="Color.BadgeNeutralText" Color="#43586E"/>
         <SolidColorBrush x:Key="Color.RenderShellBg" Color="#182639"/>
         <SolidColorBrush x:Key="Color.RenderShellBorder" Color="#5A708B"/>
         <SolidColorBrush x:Key="Color.StatusBarBg" Color="#24384E"/>
@@ -77,6 +83,37 @@
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.52"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Color.CardStrong}"/>
+            <Setter Property="Foreground" Value="{StaticResource Color.Text}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Color.BorderStrong}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Color.SurfaceAlt}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.BorderStrong}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Color.Surface}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.BorderStrong}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TertiaryButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource Color.Primary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Color.Border}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Color.SurfaceAlt}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.BorderStrong}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Color.Surface}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>

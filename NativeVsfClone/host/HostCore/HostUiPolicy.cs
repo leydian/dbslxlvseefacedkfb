@@ -147,7 +147,10 @@ public static class HostUiPolicy
                 "Working",
                 $"{operation.CurrentOperation} in progress.",
                 "Current operation must finish before the next step.",
-                "Wait for completion");
+                "Wait for completion",
+                "Current task is running.",
+                "Operation in progress.",
+                HostActionability.Blocked);
         }
 
         if (!session.IsInitialized)
@@ -158,7 +161,10 @@ public static class HostUiPolicy
                 "Step 1. Start Session",
                 "Click Start Session to prepare camera and output runtime.",
                 string.Empty,
-                string.Empty);
+                string.Empty,
+                "Start session to unlock avatar import.",
+                string.Empty,
+                HostActionability.Immediate);
         }
 
         if (!validation.AvatarPathValid)
@@ -169,7 +175,10 @@ public static class HostUiPolicy
                 "Step 2. Load Avatar",
                 "Pick a valid avatar file, then continue.",
                 validation.AvatarPathError,
-                "Select a valid avatar file");
+                "Select a valid avatar file",
+                "Fix avatar path before loading.",
+                "Avatar path invalid.",
+                HostActionability.Blocked);
         }
 
         if (!session.ActiveAvatarHandle.HasValue)
@@ -180,7 +189,10 @@ public static class HostUiPolicy
                 "Step 2. Load Avatar",
                 "Click Load Avatar to import the selected file.",
                 string.Empty,
-                string.Empty);
+                string.Empty,
+                "Load the selected avatar file.",
+                string.Empty,
+                HostActionability.Immediate);
         }
 
         if (!outputs.SpoutActive && !outputs.OscActive)
@@ -191,7 +203,10 @@ public static class HostUiPolicy
                 "Step 3. Start Broadcast",
                 "Click Start Output. The app tries Spout first, then OSC if needed.",
                 string.Empty,
-                string.Empty);
+                string.Empty,
+                "Start output to complete onboarding.",
+                string.Empty,
+                HostActionability.Immediate);
         }
 
         return new HostOnboardingState(
@@ -200,6 +215,9 @@ public static class HostUiPolicy
             "Ready",
             "Broadcast output is running.",
             string.Empty,
-            string.Empty);
+            string.Empty,
+            "Onboarding complete.",
+            string.Empty,
+            HostActionability.Immediate);
     }
 }

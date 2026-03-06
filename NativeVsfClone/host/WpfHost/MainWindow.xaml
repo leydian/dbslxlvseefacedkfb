@@ -77,32 +77,39 @@
                 <GroupBox x:Name="QuickActionsGroup" Header="시작하기 (Getting Started)" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="처음 실행 흐름: 세션 시작 -> 아바타 불러오기 -> 방송 출력 시작" TextWrapping="Wrap" Foreground="#5E6B78" Margin="0,0,0,8"/>
-                        <Border Background="#F4F8FF" BorderBrush="#D0DDF4" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                        <Border Background="{DynamicResource Color.OnboardingBarBg}" BorderBrush="{DynamicResource Color.OnboardingBarBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
                             <StackPanel>
-                                <TextBlock x:Name="QuickNextActionText" Text="Step 1. Start Session" FontSize="16" FontWeight="SemiBold" Foreground="#17324D"/>
-                                <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output pipeline." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#2B4865"/>
-                                <Button x:Name="PrimaryActionButton" Content="세션 시작" Click="PrimaryAction_Click" Margin="0,10,0,0" MinHeight="40" FontWeight="SemiBold"/>
-                                <WrapPanel Margin="0,8,0,0">
-                                    <Button x:Name="QuickInitializeButton" Content="1) 세션 시작" Click="QuickInitialize_Click" Margin="0,0,8,0" MinWidth="130"/>
-                                    <Button x:Name="QuickLoadAvatarButton" Content="2) 아바타 로드" Click="QuickLoadAvatar_Click" Margin="0,0,8,0" MinWidth="130"/>
-                                    <Button x:Name="QuickStartBroadcastButton" Content="3) 출력 시작" Click="QuickStartBroadcast_Click" MinWidth="130"/>
+                                <DockPanel LastChildFill="True">
+                                    <Border DockPanel.Dock="Right" Background="{DynamicResource Color.BadgeNeutralBg}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="10" Padding="8,3" Margin="8,0,0,0">
+                                        <TextBlock x:Name="ActionabilityBadgeText" Text="READY" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Color.BadgeNeutralText}"/>
+                                    </Border>
+                                    <TextBlock x:Name="QuickNextActionText" Text="Step 1. Start Session" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Color.OnboardingBarTitle}"/>
+                                </DockPanel>
+                                <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output pipeline." Margin="0,5,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.OnboardingBarBody}"/>
+                                <TextBlock x:Name="NextActionSummaryText" Text="Start session to unlock avatar import." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.OnboardingBarBody}" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="BlockReasonShortText" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource Color.Warning}" Visibility="Collapsed"/>
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button x:Name="PrimaryActionButton" Content="세션 시작" Click="PrimaryAction_Click" MinHeight="40" MinWidth="180" FontWeight="SemiBold"/>
+                                    <Button x:Name="QuickInitializeButton" Style="{StaticResource SecondaryButtonStyle}" Content="세션" Click="QuickInitialize_Click" Margin="8,0,0,0" MinWidth="90"/>
+                                    <Button x:Name="QuickLoadAvatarButton" Style="{StaticResource SecondaryButtonStyle}" Content="아바타" Click="QuickLoadAvatar_Click" Margin="8,0,0,0" MinWidth="90"/>
+                                    <Button x:Name="QuickStartBroadcastButton" Style="{StaticResource SecondaryButtonStyle}" Content="출력" Click="QuickStartBroadcast_Click" Margin="8,0,0,0" MinWidth="90"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
                         <UniformGrid Columns="3" Margin="0,0,0,8">
-                            <Border Background="#EEF4FD" BorderBrush="#D6E2F4" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,6,0">
+                            <Border Background="#F3F7FD" BorderBrush="#D7E3F2" BorderThickness="1" CornerRadius="6" Padding="9" Margin="0,0,6,0">
                                 <StackPanel>
                                     <TextBlock Text="1) 세션 시작" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock x:Name="OnboardingStep1Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
                                 </StackPanel>
                             </Border>
-                            <Border Background="#EEF4FD" BorderBrush="#D6E2F4" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,6,0">
+                            <Border Background="#F3F7FD" BorderBrush="#D7E3F2" BorderThickness="1" CornerRadius="6" Padding="9" Margin="0,0,6,0">
                                 <StackPanel>
                                     <TextBlock Text="2) 아바타 불러오기" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock x:Name="OnboardingStep2Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
                                 </StackPanel>
                             </Border>
-                            <Border Background="#EEF4FD" BorderBrush="#D6E2F4" BorderThickness="1" CornerRadius="4" Padding="8">
+                            <Border Background="#F3F7FD" BorderBrush="#D7E3F2" BorderThickness="1" CornerRadius="6" Padding="9">
                                 <StackPanel>
                                     <TextBlock Text="3) 출력 시작" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock x:Name="OnboardingStep3Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
@@ -130,8 +137,8 @@
                                 <TextBlock Text="Action needed" FontWeight="SemiBold" Foreground="#7F1D1D" Margin="0,0,0,2"/>
                                 <TextBlock x:Name="BeginnerFailureHintText" TextWrapping="Wrap" Foreground="#7F1D1D"/>
                                 <WrapPanel Margin="0,8,0,0">
-                                    <Button x:Name="OpenDiagnosticsFromHintButton" Content="Open Advanced Diagnostics" Click="OpenDiagnosticsFromHint_Click" HorizontalAlignment="Left" MinWidth="180"/>
-                                    <Button x:Name="DismissFailureHintButton" Content="Dismiss" Click="DismissFailureHint_Click" Margin="8,0,0,0" HorizontalAlignment="Left" MinWidth="90"/>
+                                    <Button x:Name="OpenDiagnosticsFromHintButton" Style="{StaticResource TertiaryButtonStyle}" Content="Open Advanced Diagnostics" Click="OpenDiagnosticsFromHint_Click" HorizontalAlignment="Left" MinWidth="180"/>
+                                    <Button x:Name="DismissFailureHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="Dismiss" Click="DismissFailureHint_Click" Margin="8,0,0,0" HorizontalAlignment="Left" MinWidth="90"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
@@ -139,7 +146,7 @@
                             <StackPanel>
                                 <TextBlock Text="복구 안내 (Recovery)" FontWeight="SemiBold" Foreground="#7C4012"/>
                                 <TextBlock x:Name="OnboardingRecoveryText" TextWrapping="Wrap" Foreground="#7C4012" Margin="0,2,0,0"/>
-                                <Button x:Name="DismissRecoveryHintButton" Content="Dismiss" Click="DismissFailureHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="90"/>
+                                <Button x:Name="DismissRecoveryHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="Dismiss" Click="DismissFailureHint_Click" Margin="0,8,0,0" HorizontalAlignment="Left" MinWidth="90"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

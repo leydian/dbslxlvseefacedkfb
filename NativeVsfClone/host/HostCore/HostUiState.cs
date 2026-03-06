@@ -142,10 +142,19 @@ public enum HostPrimaryActionKind
     StartOutput = 3,
 }
 
+public enum HostActionability
+{
+    Immediate = 0,
+    Blocked = 1,
+}
+
 public sealed record HostOnboardingState(
     HostOnboardingStep Step,
     HostPrimaryActionKind PrimaryAction,
     string StepTitle,
     string Instruction,
     string BlockReason,
-    string RecoveryAction);
+    string RecoveryAction,
+    string NextActionSummary = "",
+    string BlockReasonShort = "",
+    HostActionability Actionability = HostActionability.Immediate);

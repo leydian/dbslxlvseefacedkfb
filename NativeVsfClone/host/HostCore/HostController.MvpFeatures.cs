@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -24,6 +25,9 @@ public sealed partial class HostController
     private int _highFrameCount;
     private int _recoveryFrameCount;
     private bool _autoQualityDowngraded;
+    private DateTimeOffset _lastProcessMemorySampleUtc = DateTimeOffset.MinValue;
+    private float _lastWorkingSetMb;
+    private float _lastPrivateMb;
     private CancellationTokenSource? _loadCancellation;
     private Task<NcResultCode>? _activeLoadTask;
     private Task<NcResultCode>? _activeLoadWorkerTask;
@@ -398,6 +402,8 @@ public sealed partial class HostController
         sb.AppendLine("# Release dashboard / readiness");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_gate_dashboard.ps1");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1");
+        sb.AppendLine("# Strict tracking contract requires explicit MediaPipe python via env or -MediapipePythonExe");
+        sb.AppendLine("$env:VSFCLONE_MEDIAPIPE_PYTHON='C:\\\\path\\\\to\\\\python.exe'; powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1");
         sb.AppendLine();
         sb.AppendLine("# Onboarding KPI summary from telemetry export");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\onboarding_kpi_summary.ps1 -TelemetryPath .\\build\\reports\\telemetry_latest.json");
@@ -583,11 +589,24 @@ public sealed partial class HostController
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("timestamp_utc,frame_ms,gpu_frame_ms,cpu_frame_ms,material_resolve_ms,pass_count,render_ready_avatar_count,spout_active,osc_active");
+        sb.AppendLine("timestamp_utc,frame_ms,gpu_frame_ms,cpu_frame_ms,material_resolve_ms,pass_count,render_ready_avatar_count,spout_active,osc_active,working_set_mb,private_mb,auto_quality_step");
         foreach (var item in _rollingMetrics)
         {
             sb.AppendLine(
-                $"{item.TimestampUtc:O},{item.FrameMs:F3},{item.GpuFrameMs:F3},{item.CpuFrameMs:F3},{item.MaterialResolveMs:F3},{item.PassCount},{item.RenderReadyAvatarCount},{item.SpoutActive},{item.OscActive}");
+                string.Join(
+                    ",",
+                    item.TimestampUtc.ToString("O", CultureInfo.InvariantCulture),
+                    item.FrameMs.ToString("F3", CultureInfo.InvariantCulture),
+                    item.GpuFrameMs.ToString("F3", CultureInfo.InvariantCulture),
+                    item.CpuFrameMs.ToString("F3", CultureInfo.InvariantCulture),
+                    item.MaterialResolveMs.ToString("F3", CultureInfo.InvariantCulture),
+                    item.PassCount.ToString(CultureInfo.InvariantCulture),
+                    item.RenderReadyAvatarCount.ToString(CultureInfo.InvariantCulture),
+                    item.SpoutActive.ToString(),
+                    item.OscActive.ToString(),
+                    item.WorkingSetMb.ToString("F3", CultureInfo.InvariantCulture),
+                    item.PrivateMb.ToString("F3", CultureInfo.InvariantCulture),
+                    item.AutoQualityStep));
         }
 
         File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
@@ -782,13 +801,19 @@ public sealed partial class HostController
             Math.Clamp(policy.ConsecutiveFrameLimit, 10, 1200),
             Math.Clamp(policy.CooldownSeconds, 5, 300),
             Math.Clamp(policy.RecoveryFrameMsThreshold, 8.0f, Math.Clamp(policy.HighFrameMsThreshold, 10.0f, 80.0f)),
-            Math.Clamp(policy.RecoveryConsecutiveFrameLimit, 10, 2400));
+            Math.Clamp(policy.RecoveryConsecutiveFrameLimit, 10, 2400),
+            policy.AutoTuneEnabled,
+            Math.Clamp(policy.WindowSampleCount, 120, 1800),
+            Math.Clamp(policy.DegradeP95FrameMs, 12.0f, 80.0f),
+            Math.Clamp(policy.DegradeDropRatio, 0.0f, 1.0f),
+            Math.Clamp(policy.RecoverP95FrameMs, 8.0f, Math.Clamp(policy.DegradeP95FrameMs, 12.0f, 80.0f)),
+            Math.Clamp(policy.RecoverDropRatio, 0.0f, Math.Clamp(policy.DegradeDropRatio, 0.0f, 1.0f)));
         _autoQualityStore.Save(_autoQualityPolicy);
         AddLog(
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "AutoQualityPolicy",
-                $"threshold_ms={_autoQualityPolicy.HighFrameMsThreshold:F1}, consecutive={_autoQualityPolicy.ConsecutiveFrameLimit}, cooldown_sec={_autoQualityPolicy.CooldownSeconds}, recovery_threshold_ms={_autoQualityPolicy.RecoveryFrameMsThreshold:F1}, recovery_consecutive={_autoQualityPolicy.RecoveryConsecutiveFrameLimit}",
+                $"threshold_ms={_autoQualityPolicy.HighFrameMsThreshold:F1}, consecutive={_autoQualityPolicy.ConsecutiveFrameLimit}, cooldown_sec={_autoQualityPolicy.CooldownSeconds}, recovery_threshold_ms={_autoQualityPolicy.RecoveryFrameMsThreshold:F1}, recovery_consecutive={_autoQualityPolicy.RecoveryConsecutiveFrameLimit}, auto_tune={_autoQualityPolicy.AutoTuneEnabled}, window={_autoQualityPolicy.WindowSampleCount}, degrade_p95={_autoQualityPolicy.DegradeP95FrameMs:F1}, degrade_drop={_autoQualityPolicy.DegradeDropRatio:F3}, recover_p95={_autoQualityPolicy.RecoverP95FrameMs:F1}, recover_drop={_autoQualityPolicy.RecoverDropRatio:F3}",
                 NcResultCode.Ok),
             false);
     }
@@ -966,6 +991,7 @@ public sealed partial class HostController
 
     private void RecordFrameMetricAndGuardrails(in NcRuntimeStats stats)
     {
+        TryCaptureProcessMemorySample();
         _rollingMetrics.Enqueue(new FrameMetric(
             DateTimeOffset.UtcNow,
             stats.LastFrameMs,
@@ -975,10 +1001,19 @@ public sealed partial class HostController
             stats.PassCount,
             stats.RenderReadyAvatarCount,
             stats.SpoutActive != 0U,
-            stats.OscActive != 0U));
+            stats.OscActive != 0U,
+            _lastWorkingSetMb,
+            _lastPrivateMb,
+            GetCurrentAutoQualityStepName()));
         while (_rollingMetrics.Count > RollingMetricCapacity)
         {
             _ = _rollingMetrics.Dequeue();
+        }
+
+        if (_autoQualityPolicy.AutoTuneEnabled)
+        {
+            ApplyAdaptiveAutoQualityFromWindow();
+            return;
         }
 
         if (stats.LastFrameMs > _autoQualityPolicy.HighFrameMsThreshold)
@@ -1025,6 +1060,145 @@ public sealed partial class HostController
         _autoQualityDowngraded = true;
         _ = ApplyRenderProfile("performance");
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "AutoQualityGuard", "applied performance profile due to sustained frame time pressure", NcResultCode.Ok), false);
+    }
+
+    private void TryCaptureProcessMemorySample()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if ((now - _lastProcessMemorySampleUtc) < TimeSpan.FromMilliseconds(500))
+        {
+            return;
+        }
+
+        _lastProcessMemorySampleUtc = now;
+        try
+        {
+            using var proc = Process.GetCurrentProcess();
+            _lastWorkingSetMb = (float)(proc.WorkingSet64 / (1024.0 * 1024.0));
+            _lastPrivateMb = (float)(proc.PrivateMemorySize64 / (1024.0 * 1024.0));
+        }
+        catch
+        {
+            // Keep last known values if process metrics sampling is unavailable.
+        }
+    }
+
+    private void ApplyAdaptiveAutoQualityFromWindow()
+    {
+        var windowCount = Math.Clamp(_autoQualityPolicy.WindowSampleCount, 120, RollingMetricCapacity);
+        var recent = _rollingMetrics
+            .Reverse()
+            .Take(windowCount)
+            .Select(item => (double)item.FrameMs)
+            .OrderBy(value => value)
+            .ToArray();
+        if (recent.Length < windowCount)
+        {
+            return;
+        }
+
+        var p95 = GetPercentile(recent, 95.0);
+        var dropCount = recent.Count(value => value > 33.3);
+        var dropRatio = dropCount / (double)recent.Length;
+        var currentProfile = (_sessionPersistence.LastProfileName ?? "quality").Trim().ToLowerInvariant();
+        var currentStep = GetAutoQualityStep(currentProfile);
+
+        if ((DateTimeOffset.UtcNow - _lastAutoQualityAdjustUtc) < TimeSpan.FromSeconds(_autoQualityPolicy.CooldownSeconds))
+        {
+            return;
+        }
+
+        var shouldDegrade = p95 > _autoQualityPolicy.DegradeP95FrameMs || dropRatio > _autoQualityPolicy.DegradeDropRatio;
+        var shouldRecover = p95 < _autoQualityPolicy.RecoverP95FrameMs && dropRatio < _autoQualityPolicy.RecoverDropRatio;
+
+        if (shouldDegrade && currentStep > 0)
+        {
+            var nextStep = currentStep - 1;
+            _lastAutoQualityAdjustUtc = DateTimeOffset.UtcNow;
+            _autoQualityDowngraded = true;
+            _ = ApplyRenderProfile(GetAutoQualityProfileForStep(nextStep));
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "AutoQualityAdaptive",
+                    $"degraded step={nextStep} p95_ms={p95:F2} drop_ratio={dropRatio:F3}",
+                    NcResultCode.Ok),
+                false);
+            return;
+        }
+
+        if (_autoQualityDowngraded && shouldRecover && currentStep < 2)
+        {
+            var nextStep = currentStep + 1;
+            _lastAutoQualityAdjustUtc = DateTimeOffset.UtcNow;
+            _autoQualityDowngraded = nextStep < 2;
+            _ = ApplyRenderProfile(GetAutoQualityProfileForStep(nextStep));
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "AutoQualityAdaptive",
+                    $"recovered step={nextStep} p95_ms={p95:F2} drop_ratio={dropRatio:F3}",
+                    NcResultCode.Ok),
+                false);
+        }
+    }
+
+    private static double GetPercentile(double[] sortedValues, double percent)
+    {
+        if (sortedValues.Length == 0)
+        {
+            return 0.0;
+        }
+        if (sortedValues.Length == 1)
+        {
+            return sortedValues[0];
+        }
+
+        var rank = (percent / 100.0) * (sortedValues.Length - 1);
+        var lower = (int)Math.Floor(rank);
+        var upper = (int)Math.Ceiling(rank);
+        if (lower == upper)
+        {
+            return sortedValues[lower];
+        }
+        var weight = rank - lower;
+        return sortedValues[lower] + ((sortedValues[upper] - sortedValues[lower]) * weight);
+    }
+
+    private string GetCurrentAutoQualityStepName()
+    {
+        var profile = (_sessionPersistence.LastProfileName ?? "quality").Trim().ToLowerInvariant();
+        return GetAutoQualityStepName(GetAutoQualityStep(profile));
+    }
+
+    private static int GetAutoQualityStep(string profileName)
+    {
+        return profileName switch
+        {
+            "performance" => 0,
+            "stability" => 1,
+            _ => 2,
+        };
+    }
+
+    private static string GetAutoQualityProfileForStep(int step)
+    {
+        return step switch
+        {
+            <= 0 => "performance",
+            1 => "stability",
+            _ => "quality",
+        };
+    }
+
+    private static string GetAutoQualityStepName(int step)
+    {
+        return step switch
+        {
+            <= 0 => "performance",
+            1 => "stability",
+            _ => "quality",
+        };
     }
 
     private bool ValidateOperationAllowed(string operationName, out NcResultCode blockedRc)
@@ -1194,6 +1368,32 @@ public sealed partial class HostController
                 ["avatar_loaded"] = SessionState.ActiveAvatarHandle.HasValue,
                 ["spout_active"] = Outputs.SpoutActive,
                 ["osc_active"] = Outputs.OscActive,
+                ["session_started_at"] = ToIso8601(_sessionStartedAtUtc),
+                ["initialized_at"] = ToIso8601(_initializedAtUtc),
+                ["avatar_loaded_at"] = ToIso8601(_avatarLoadedAtUtc),
+                ["output_started_at"] = ToIso8601(_outputStartedAtUtc),
+                ["within_3min_success"] = _within3MinSuccess,
+            });
+    }
+
+    public void TrackOnboardingUiEvent(
+        string eventName,
+        HostOnboardingStep step,
+        HostPrimaryActionKind primaryAction,
+        HostActionability actionability,
+        string reason)
+    {
+        var normalizedName = string.IsNullOrWhiteSpace(eventName)
+            ? "onboarding_ui_event"
+            : eventName.Trim();
+        _telemetry.Track(
+            normalizedName,
+            new Dictionary<string, object?>
+            {
+                ["step"] = step.ToString(),
+                ["primary_action"] = primaryAction.ToString(),
+                ["actionability"] = actionability.ToString(),
+                ["reason"] = string.IsNullOrWhiteSpace(reason) ? "none" : reason.Trim(),
                 ["session_started_at"] = ToIso8601(_sessionStartedAtUtc),
                 ["initialized_at"] = ToIso8601(_initializedAtUtc),
                 ["avatar_loaded_at"] = ToIso8601(_avatarLoadedAtUtc),

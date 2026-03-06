@@ -75,6 +75,7 @@ public partial class MainWindow : Window
     private UiSection _activeSection = UiSection.GettingStarted;
     private bool _diagnosticsPinnedVisible;
     private bool _isDarkTheme;
+    private HostOnboardingStep? _lastTrackedOnboardingStep;
 
     private static string ToPersistSectionKey(UiSection section) => section switch
     {
@@ -592,6 +593,13 @@ public partial class MainWindow : Window
         var action = PrimaryActionButton.Tag is HostPrimaryActionKind taggedAction
             ? taggedAction
             : HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState).PrimaryAction;
+        var onboarding = HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState);
+        _controller.TrackOnboardingUiEvent(
+            "primary_cta_clicked",
+            onboarding.Step,
+            action,
+            onboarding.Actionability,
+            onboarding.BlockReasonShort);
 
         switch (action)
         {
@@ -1925,6 +1933,32 @@ public partial class MainWindow : Window
         QuickStatusText.Text = statusText.QuickStatusText;
         QuickNextActionText.Text = onboarding.StepTitle;
         PrimaryActionDescriptionText.Text = onboarding.Instruction;
+        NextActionSummaryText.Text = onboarding.NextActionSummary;
+        BlockReasonShortText.Text = onboarding.BlockReasonShort;
+        BlockReasonShortText.Visibility = string.IsNullOrWhiteSpace(onboarding.BlockReasonShort)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (onboarding.Actionability == HostActionability.Blocked)
+        {
+            ActionabilityBadgeText.Text = "BLOCKED";
+            ActionabilityBadgeText.Foreground = (Brush)FindResource("Color.Warning");
+        }
+        else
+        {
+            ActionabilityBadgeText.Text = "READY";
+            ActionabilityBadgeText.Foreground = (Brush)FindResource("Color.BadgeNeutralText");
+        }
+
+        if (_lastTrackedOnboardingStep != onboarding.Step)
+        {
+            _controller.TrackOnboardingUiEvent(
+                "onboarding_step_viewed",
+                onboarding.Step,
+                onboarding.PrimaryAction,
+                onboarding.Actionability,
+                onboarding.BlockReasonShort);
+            _lastTrackedOnboardingStep = onboarding.Step;
+        }
         SetOnboardingStepState(OnboardingStep1Text, session.IsInitialized);
         SetOnboardingStepState(OnboardingStep2Text, session.ActiveAvatarHandle.HasValue);
         SetOnboardingStepState(OnboardingStep3Text, outputs.SpoutActive || outputs.OscActive);
@@ -2770,6 +2804,12 @@ public partial class MainWindow : Window
             SetBrush("Color.NavItemActiveBg", "#20374F");
             SetBrush("Color.NavItemText", "#B8CAE0");
             SetBrush("Color.NavItemActiveText", "#F1F7FF");
+            SetBrush("Color.OnboardingBarBg", "#152B41");
+            SetBrush("Color.OnboardingBarBorder", "#35526F");
+            SetBrush("Color.OnboardingBarTitle", "#E8F2FF");
+            SetBrush("Color.OnboardingBarBody", "#BDD3EA");
+            SetBrush("Color.BadgeNeutralBg", "#1D3248");
+            SetBrush("Color.BadgeNeutralText", "#BED3E8");
             SetBrush("Color.RenderShellBg", "#0A121D");
             SetBrush("Color.RenderShellBorder", "#3E5B7A");
             SetBrush("Color.StatusBarBg", "#0E1A28");
@@ -2780,25 +2820,31 @@ public partial class MainWindow : Window
         }
         else
         {
-            SetBrush("Color.Surface", "#F2F6FB");
-            SetBrush("Color.SurfaceAlt", "#EAF0F8");
-            SetBrush("Color.Card", "#F8FBFF");
+            SetBrush("Color.Surface", "#F6F8FC");
+            SetBrush("Color.SurfaceAlt", "#EEF2F8");
+            SetBrush("Color.Card", "#FBFCFF");
             SetBrush("Color.CardStrong", "#FFFFFF");
-            SetBrush("Color.Border", "#C7D5E6");
-            SetBrush("Color.BorderStrong", "#A8BCD3");
-            SetBrush("Color.Text", "#1A2A3B");
-            SetBrush("Color.TextMuted", "#58697B");
-            SetBrush("Color.TextSubtle", "#6D7E92");
-            SetBrush("Color.Primary", "#1571B8");
-            SetBrush("Color.PrimaryHover", "#0F629F");
-            SetBrush("Color.PrimaryPressed", "#0D4F81");
-            SetBrush("Color.TabBg", "#EEF3FA");
+            SetBrush("Color.Border", "#CFD9E6");
+            SetBrush("Color.BorderStrong", "#B4C4D7");
+            SetBrush("Color.Text", "#1C2530");
+            SetBrush("Color.TextMuted", "#5A6878");
+            SetBrush("Color.TextSubtle", "#728196");
+            SetBrush("Color.Primary", "#0D75C8");
+            SetBrush("Color.PrimaryHover", "#0B68B0");
+            SetBrush("Color.PrimaryPressed", "#095389");
+            SetBrush("Color.TabBg", "#F0F4FA");
             SetBrush("Color.TabActive", "#FFFFFF");
-            SetBrush("Color.NavRailBg", "#E9F0F8");
-            SetBrush("Color.NavItemBg", "#F4F8FD");
+            SetBrush("Color.NavRailBg", "#EEF3F9");
+            SetBrush("Color.NavItemBg", "#F8FBFF");
             SetBrush("Color.NavItemActiveBg", "#FFFFFF");
-            SetBrush("Color.NavItemText", "#31485F");
-            SetBrush("Color.NavItemActiveText", "#1A2A3B");
+            SetBrush("Color.NavItemText", "#3A4E63");
+            SetBrush("Color.NavItemActiveText", "#1C2530");
+            SetBrush("Color.OnboardingBarBg", "#EAF4FF");
+            SetBrush("Color.OnboardingBarBorder", "#BCD8F3");
+            SetBrush("Color.OnboardingBarTitle", "#11395B");
+            SetBrush("Color.OnboardingBarBody", "#2A4A67");
+            SetBrush("Color.BadgeNeutralBg", "#EFF3F9");
+            SetBrush("Color.BadgeNeutralText", "#43586E");
             SetBrush("Color.RenderShellBg", "#182639");
             SetBrush("Color.RenderShellBorder", "#5A708B");
             SetBrush("Color.StatusBarBg", "#24384E");
@@ -2813,11 +2859,12 @@ public partial class MainWindow : Window
     {
         var advanced = string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal);
         var canUseAdvancedSections = advanced;
+        var canUseConsumerSections = advanced || IsBeginnerMode();
 
         var showGettingStarted = _activeSection == UiSection.GettingStarted;
-        var showSessionAvatar = canUseAdvancedSections && _activeSection == UiSection.SessionAvatar;
+        var showSessionAvatar = canUseConsumerSections && _activeSection == UiSection.SessionAvatar;
         var showRender = canUseAdvancedSections && _activeSection == UiSection.Render;
-        var showOutputs = canUseAdvancedSections && _activeSection == UiSection.Outputs;
+        var showOutputs = canUseConsumerSections && _activeSection == UiSection.Outputs;
         var showTracking = canUseAdvancedSections && _activeSection == UiSection.Tracking;
         var showOps = canUseAdvancedSections && _activeSection == UiSection.PlatformOps;
 
@@ -2842,9 +2889,9 @@ public partial class MainWindow : Window
         var navMap = new[]
         {
             (NavGettingStartedButton, UiSection.GettingStarted, true),
-            (NavSessionAvatarButton, UiSection.SessionAvatar, advanced),
+            (NavSessionAvatarButton, UiSection.SessionAvatar, true),
             (NavRenderButton, UiSection.Render, advanced),
-            (NavOutputsButton, UiSection.Outputs, advanced),
+            (NavOutputsButton, UiSection.Outputs, true),
             (NavTrackingButton, UiSection.Tracking, advanced),
             (NavOpsButton, UiSection.PlatformOps, advanced),
         };
@@ -2959,7 +3006,10 @@ public partial class MainWindow : Window
         BeginnerModeButton.FontWeight = advanced ? FontWeights.Normal : FontWeights.SemiBold;
         AdvancedModeButton.FontWeight = advanced ? FontWeights.SemiBold : FontWeights.Normal;
 
-        if (!advanced && _activeSection != UiSection.GettingStarted)
+        if (!advanced &&
+            _activeSection != UiSection.GettingStarted &&
+            _activeSection != UiSection.SessionAvatar &&
+            _activeSection != UiSection.Outputs)
         {
             _activeSection = UiSection.GettingStarted;
             FocusPrimaryControlForSection(_activeSection);
@@ -3015,6 +3065,13 @@ public partial class MainWindow : Window
 
     private void OpenDiagnosticsFromHint_Click(object sender, RoutedEventArgs e)
     {
+        var onboarding = HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState);
+        _controller.TrackOnboardingUiEvent(
+            "recovery_action_clicked",
+            onboarding.Step,
+            onboarding.PrimaryAction,
+            onboarding.Actionability,
+            string.IsNullOrWhiteSpace(_beginnerFailureHint) ? onboarding.BlockReasonShort : _beginnerFailureHint);
         RevealDiagnosticsForFailure(string.IsNullOrWhiteSpace(_lastFailureSource) ? "LoadAvatar" : _lastFailureSource);
     }
 
