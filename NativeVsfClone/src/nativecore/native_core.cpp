@@ -2086,21 +2086,68 @@ bool ApplySecondaryMotionToAvatar(
 }
 
 bool ShouldApplyExperimentalStaticSkinning() {
-    static const bool enabled = []() {
+    enum class StaticSkinningEnvMode {
+        Auto = 0,
+        ForceOn,
+        ForceOff,
+    };
+    static const StaticSkinningEnvMode mode = []() {
         const char* raw = std::getenv("VSFCLONE_XAV2_ENABLE_STATIC_SKINNING");
         if (raw == nullptr) {
-            return false;
+            return StaticSkinningEnvMode::Auto;
         }
         std::string token(raw);
         std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
             return static_cast<char>(std::tolower(c));
         });
         if (token == "0" || token == "false" || token == "no" || token == "off") {
-            return false;
+            return StaticSkinningEnvMode::ForceOff;
         }
-        return token == "1" || token == "true" || token == "yes" || token == "on";
+        if (token == "1" || token == "true" || token == "yes" || token == "on") {
+            return StaticSkinningEnvMode::ForceOn;
+        }
+        if (token == "auto") {
+            return StaticSkinningEnvMode::Auto;
+        }
+        return StaticSkinningEnvMode::Auto;
     }();
-    return enabled;
+    return mode == StaticSkinningEnvMode::ForceOn;
+}
+
+bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
+    enum class StaticSkinningEnvMode {
+        Auto = 0,
+        ForceOn,
+        ForceOff,
+    };
+    static const StaticSkinningEnvMode mode = []() {
+        const char* raw = std::getenv("VSFCLONE_XAV2_ENABLE_STATIC_SKINNING");
+        if (raw == nullptr) {
+            return StaticSkinningEnvMode::Auto;
+        }
+        std::string token(raw);
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (token == "0" || token == "false" || token == "no" || token == "off") {
+            return StaticSkinningEnvMode::ForceOff;
+        }
+        if (token == "1" || token == "true" || token == "yes" || token == "on") {
+            return StaticSkinningEnvMode::ForceOn;
+        }
+        return StaticSkinningEnvMode::Auto;
+    }();
+    if (mode == StaticSkinningEnvMode::ForceOn) {
+        return true;
+    }
+    if (mode == StaticSkinningEnvMode::ForceOff) {
+        return false;
+    }
+    // In auto mode, prefer static skinning for XAV2 when skin and skeleton payloads are available.
+    if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
+        return !avatar_pkg.skin_payloads.empty() && !avatar_pkg.skeleton_payloads.empty();
+    }
+    return false;
 }
 
 void SanitizeTrackingFrame(NcTrackingFrame* frame) {
@@ -2461,6 +2508,7 @@ bool BuildGpuMeshForPayload(
     const avatar::MeshRenderPayload& payload,
     const avatar::SkinRenderPayload* skin_payload,
     const avatar::SkeletonRenderPayload* skeleton_payload,
+    bool enable_static_skinning,
     bool force_static_skinning_fallback,
     ID3D11Device* device,
     GpuMeshResource* out_mesh) {
@@ -2547,13 +2595,12 @@ bool BuildGpuMeshForPayload(
         return s;
     };
     if (skin_payload != nullptr) {
-        const bool enable_static_skinning = ShouldApplyExperimentalStaticSkinning();
         const auto pre_stats = compute_position_stats(gpu_vertex_blob);
         const bool can_apply_with_skeleton =
             skeleton_payload != nullptr && IsValidSkeletonPosePayload(*skin_payload, *skeleton_payload);
         if (enable_static_skinning && can_apply_with_skeleton) {
             (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, skeleton_payload);
-        } else if (enable_static_skinning && (force_static_skinning_fallback || ShouldApplyExperimentalStaticSkinning())) {
+        } else if (enable_static_skinning && force_static_skinning_fallback) {
             (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, nullptr);
         }
         const auto post_stats = compute_position_stats(gpu_vertex_blob);
@@ -2649,7 +2696,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
     if (renderer->avatar_meshes.find(handle) != renderer->avatar_meshes.end()) {
         return true;
     }
-    const bool static_skinning_enabled = ShouldApplyExperimentalStaticSkinning();
+    const bool static_skinning_enabled = ShouldApplyStaticSkinningForAvatarMeshes(avatar_pkg);
     if (!avatar_pkg.skin_payloads.empty() && !static_skinning_enabled) {
         auto avatar_it = g_state.avatars.find(handle);
         if (avatar_it != g_state.avatars.end()) {
@@ -2740,6 +2787,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                 payload,
                 skin_payload,
                 skeleton_payload,
+                static_skinning_enabled,
                 force_static_skinning_fallback,
                 device,
                 &mesh)) {
