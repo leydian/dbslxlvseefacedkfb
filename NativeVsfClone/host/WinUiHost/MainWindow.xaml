@@ -21,9 +21,70 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="0" BorderThickness="1" BorderBrush="#BCD8F3" Background="#EAF4FF" Padding="10" Margin="0,0,0,8" CornerRadius="6">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="QuickNextActionText" Grid.Column="0" Text="Step 1. Start Session" FontSize="17" FontWeight="SemiBold" Foreground="#11395B"/>
+                        <Border Grid.Column="1" Background="#EFF3F9" BorderBrush="#CFD9E6" BorderThickness="1" CornerRadius="10" Padding="8,2">
+                            <TextBlock x:Name="ActionabilityBadgeText" Text="READY" FontSize="11" FontWeight="SemiBold" Foreground="#43586E"/>
+                        </Border>
+                    </Grid>
+                    <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output runtime." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#2A4A67"/>
+                    <TextBlock x:Name="NextActionSummaryText" Text="Start session to unlock avatar import." Margin="0,3,0,0" TextWrapping="Wrap" Foreground="#2A4A67" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="BlockReasonShortText" Margin="0,3,0,0" TextWrapping="Wrap" Foreground="#A56B1A" Visibility="Collapsed"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+                        <Button x:Name="PrimaryActionButton" Content="세션 시작" Click="PrimaryAction_Click" MinWidth="170" MinHeight="38"/>
+                        <Button x:Name="QuickInitializeButton" Content="세션" Click="QuickInitialize_Click" MinWidth="76"/>
+                        <Button x:Name="QuickLoadAvatarButton" Content="아바타" Click="QuickLoadAvatar_Click" MinWidth="76"/>
+                        <Button x:Name="QuickStartBroadcastButton" Content="출력" Click="QuickStartBroadcast_Click" MinWidth="76"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="1" BorderThickness="1" BorderBrush="#D7E3F2" Background="#F3F7FD" Padding="8" Margin="0,0,0,8" CornerRadius="6">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="1) 세션 시작" FontWeight="SemiBold" FontSize="12"/>
+                        <TextBlock x:Name="OnboardingStep1Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="2) 아바타 불러오기" FontWeight="SemiBold" FontSize="12"/>
+                        <TextBlock x:Name="OnboardingStep2Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="3) 출력 시작" FontWeight="SemiBold" FontSize="12"/>
+                        <TextBlock x:Name="OnboardingStep3Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+                <StackPanel>
+                    <TextBlock Text="현재 상태 (Status)" FontSize="16"/>
+                    <TextBlock x:Name="QuickStatusText" Text="Session=Stopped | Avatar=None | Outputs=Off" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="OnboardingRecoveryText" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed" Foreground="#7C4012"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                        <Button x:Name="OpenDiagnosticsFromHintButton" Content="Open Diagnostics" Click="OpenDiagnosticsFromHint_Click" MinWidth="140" Visibility="Collapsed"/>
+                        <Button x:Name="DismissRecoveryHintButton" Content="Dismiss" Click="DismissRecoveryHint_Click" MinWidth="90" Visibility="Collapsed"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="3" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="세션 (Session)" FontSize="16"/>
                     <TextBlock Text="세션 수명주기 제어입니다. 아바타를 불러오기 전에 초기화를 실행하세요." TextWrapping="Wrap" Margin="0,4,0,8"/>
@@ -34,7 +95,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="1" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="4" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="아바타 (Avatar)" FontSize="16"/>
                     <TextBlock Text="아바타 파일 경로 (Avatar Path)" Margin="0,4,0,4"/>
@@ -85,7 +146,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="2" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="5" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="렌더 (Render)" FontSize="16"/>
                     <CheckBox x:Name="BroadcastModeCheckBox" Content="방송 모드 (Broadcast Mode)" IsChecked="True" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,8,0,8"/>
@@ -179,7 +240,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="3" BorderThickness="1" BorderBrush="#2D3A48" Padding="8">
+            <Border Grid.Row="6" BorderThickness="1" BorderBrush="#2D3A48" Padding="8">
                 <StackPanel>
                     <TextBlock Text="출력 (Outputs)" FontSize="16"/>
                     <TextBlock Text="Spout" Margin="0,4,0,4"/>
@@ -220,7 +281,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="4" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
+            <Border Grid.Row="7" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
                 <StackPanel>
                     <TextBlock Text="트래킹 입력 (Tracking Input)" FontSize="16"/>
                     <Grid Margin="0,8,0,8">
@@ -269,7 +330,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="5" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
+            <Border Grid.Row="8" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
                 <StackPanel>
                     <TextBlock Text="운영/진단 (Platform Ops)" FontSize="16"/>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,8">

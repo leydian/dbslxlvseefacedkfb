@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using HostCore;
+using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -54,6 +55,8 @@ public sealed partial class MainWindow : Window
     private bool _isRenderRightDragging;
     private double _lastRenderDragX;
     private bool _syncingRecentAvatarList;
+    private HostOnboardingStep? _lastTrackedOnboardingStep;
+    private string _recoveryHint = string.Empty;
 
     public MainWindow()
     {
@@ -354,11 +357,13 @@ public sealed partial class MainWindow : Window
         RefreshValidationState();
         if (!_controller.SessionState.IsInitialized)
         {
+            _recoveryHint = "세션을 먼저 시작하세요.";
             _ = ShowMessageAsync("불러오기 차단 (Load Blocked)", "먼저 세션을 초기화하세요. (Initialize the session first.)");
             return;
         }
         if (!_validationState.AvatarPathValid)
         {
+            _recoveryHint = _validationState.AvatarPathError;
             _ = ShowMessageAsync("입력 오류 (Invalid Input)", _validationState.AvatarPathError);
             return;
         }
@@ -387,6 +392,7 @@ public sealed partial class MainWindow : Window
                     ? technical
                     : $"{guidance}\n\n{technical}";
             }
+            _recoveryHint = $"아바타 로드 실패({rc}) - 경로/포맷을 확인 후 다시 시도하세요.";
             await ShowMessageAsync("불러오기 실패 (Load Failed)", $"Load failed: {rc}\n\n{detail}");
             return;
         }
@@ -398,6 +404,100 @@ public sealed partial class MainWindow : Window
             EnqueueThumbnailGeneration(loadedPath, force: false);
             RefreshRecentAvatarList();
         }
+        _recoveryHint = string.Empty;
+    }
+
+    private void PrimaryAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        RefreshValidationState();
+        var action = PrimaryActionButton.Tag is HostPrimaryActionKind taggedAction
+            ? taggedAction
+            : HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState).PrimaryAction;
+        var onboarding = HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState);
+        _controller.TrackOnboardingUiEvent(
+            "primary_cta_clicked",
+            onboarding.Step,
+            action,
+            onboarding.Actionability,
+            onboarding.BlockReasonShort);
+
+        switch (action)
+        {
+            case HostPrimaryActionKind.InitializeSession:
+                Initialize_Click(sender, e);
+                break;
+            case HostPrimaryActionKind.LoadAvatar:
+                Load_Click(sender, e);
+                break;
+            case HostPrimaryActionKind.StartOutput:
+                QuickStartBroadcast_Click(sender, e);
+                break;
+            default:
+                OpenDiagnosticsFromHint_Click(sender, e);
+                break;
+        }
+    }
+
+    private void QuickInitialize_Click(object sender, RoutedEventArgs e)
+    {
+        Initialize_Click(sender, e);
+    }
+
+    private void QuickLoadAvatar_Click(object sender, RoutedEventArgs e)
+    {
+        Load_Click(sender, e);
+    }
+
+    private void QuickStartBroadcast_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (!_controller.Outputs.SpoutActive && StartSpoutButton.IsEnabled)
+        {
+            StartSpout_Click(sender, e);
+        }
+
+        if (!_controller.Outputs.SpoutActive &&
+            !_controller.Outputs.OscActive &&
+            StartOscButton.IsEnabled)
+        {
+            StartOsc_Click(sender, e);
+            return;
+        }
+
+        if (!_controller.Outputs.OscActive && StartOscButton.IsEnabled)
+        {
+            StartOsc_Click(sender, e);
+        }
+    }
+
+    private void OpenDiagnosticsFromHint_Click(object sender, RoutedEventArgs e)
+    {
+        var onboarding = HostUiPolicy.BuildOnboardingState(_controller.SessionState, _controller.Outputs, _controller.OperationState, _validationState);
+        _controller.TrackOnboardingUiEvent(
+            "recovery_action_clicked",
+            onboarding.Step,
+            onboarding.PrimaryAction,
+            onboarding.Actionability,
+            string.IsNullOrWhiteSpace(_recoveryHint) ? onboarding.BlockReasonShort : _recoveryHint);
+        DiagnosticsTabControl.SelectedIndex = 2;
+        _isLogsTabActive = true;
+        _pendingLogsRefresh = true;
+        ProcessPendingUpdates(force: false);
+    }
+
+    private void DismissRecoveryHint_Click(object sender, RoutedEventArgs e)
+    {
+        _recoveryHint = string.Empty;
+        UpdateUiState();
     }
 
     private void CancelLoad_Click(object sender, RoutedEventArgs e)
@@ -1118,6 +1218,7 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(guide))
         {
             PreflightHintText.Text = guide;
+            _recoveryHint = guide;
         }
     }
 
@@ -1188,6 +1289,7 @@ public sealed partial class MainWindow : Window
             _controller.RenderState,
             CameraModeComboBox.SelectedIndex == 2);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
+        var onboarding = HostUiPolicy.BuildOnboardingState(session, outputs, operation, _validationState);
         var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
@@ -1202,6 +1304,9 @@ public sealed partial class MainWindow : Window
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;
         StopOscButton.IsEnabled = uiState.StopOscEnabled;
+        QuickInitializeButton.IsEnabled = uiState.InitializeEnabled;
+        QuickLoadAvatarButton.IsEnabled = uiState.LoadEnabled && !_isLoadRunning;
+        QuickStartBroadcastButton.IsEnabled = (uiState.StartSpoutEnabled || uiState.StartOscEnabled) && !operation.IsBusy;
 
         BroadcastModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         CameraModeComboBox.IsEnabled = uiState.RenderControlsEnabled;
@@ -1248,8 +1353,78 @@ public sealed partial class MainWindow : Window
         OutputStatusText.Text = $"Outputs: {statusText.OutputText}";
         BusyStatusText.Text = $"Busy: {statusText.BusyText}";
         TrackStatusText.Text = $"Track: {_controller.GetReleaseTrackStatus()}";
+        QuickStatusText.Text = statusText.QuickStatusText;
+        QuickNextActionText.Text = onboarding.StepTitle;
+        PrimaryActionDescriptionText.Text = onboarding.Instruction;
+        NextActionSummaryText.Text = onboarding.NextActionSummary;
+        BlockReasonShortText.Text = onboarding.BlockReasonShort;
+        BlockReasonShortText.Visibility = string.IsNullOrWhiteSpace(onboarding.BlockReasonShort)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (onboarding.Actionability == HostActionability.Blocked)
+        {
+            ActionabilityBadgeText.Text = "BLOCKED";
+            ActionabilityBadgeText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(ColorHelper.FromArgb(255, 165, 107, 26));
+        }
+        else
+        {
+            ActionabilityBadgeText.Text = "READY";
+            ActionabilityBadgeText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(ColorHelper.FromArgb(255, 67, 88, 110));
+        }
+
+        SetOnboardingStepState(OnboardingStep1Text, session.IsInitialized);
+        SetOnboardingStepState(OnboardingStep2Text, session.ActiveAvatarHandle.HasValue);
+        SetOnboardingStepState(OnboardingStep3Text, outputs.SpoutActive || outputs.OscActive);
+        var onboardingRecovery = string.IsNullOrWhiteSpace(onboarding.BlockReason)
+            ? string.Empty
+            : $"{onboarding.BlockReason} {onboarding.RecoveryAction}".Trim();
+        OnboardingRecoveryText.Text = string.IsNullOrWhiteSpace(_recoveryHint)
+            ? onboardingRecovery
+            : _recoveryHint;
+        OnboardingRecoveryText.Visibility = string.IsNullOrWhiteSpace(OnboardingRecoveryText.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        OpenDiagnosticsFromHintButton.Visibility = OnboardingRecoveryText.Visibility;
+        DismissRecoveryHintButton.Visibility = OnboardingRecoveryText.Visibility;
+
+        switch (onboarding.PrimaryAction)
+        {
+            case HostPrimaryActionKind.InitializeSession:
+                PrimaryActionButton.Content = "세션 시작";
+                PrimaryActionButton.IsEnabled = uiState.InitializeEnabled;
+                break;
+            case HostPrimaryActionKind.LoadAvatar:
+                PrimaryActionButton.Content = "아바타 불러오기";
+                PrimaryActionButton.IsEnabled = uiState.LoadEnabled && !_isLoadRunning;
+                break;
+            case HostPrimaryActionKind.StartOutput:
+                PrimaryActionButton.Content = "출력 시작";
+                PrimaryActionButton.IsEnabled = (uiState.StartSpoutEnabled || uiState.StartOscEnabled) && !operation.IsBusy;
+                break;
+            default:
+                PrimaryActionButton.Content = "다음 단계 대기";
+                PrimaryActionButton.IsEnabled = false;
+                break;
+        }
+        PrimaryActionButton.Tag = onboarding.PrimaryAction;
+
+        if (_lastTrackedOnboardingStep != onboarding.Step)
+        {
+            _controller.TrackOnboardingUiEvent(
+                "onboarding_step_viewed",
+                onboarding.Step,
+                onboarding.PrimaryAction,
+                onboarding.Actionability,
+                onboarding.BlockReasonShort);
+            _lastTrackedOnboardingStep = onboarding.Step;
+        }
         SyncRenderControlsFromState();
         SyncPresetControlsFromState();
+    }
+
+    private static void SetOnboardingStepState(TextBlock target, bool completed)
+    {
+        target.Text = completed ? "완료" : "다음 단계";
     }
 
     private bool ShouldSkipRenderInteraction()
