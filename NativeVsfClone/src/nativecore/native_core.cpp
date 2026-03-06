@@ -70,7 +70,9 @@ struct GpuMeshResource {
 enum class RenderFamilyBackendKind : std::uint8_t {
     Common = 0,
     Liltoon = 1,
-    Mtoon = 2
+    Mtoon = 2,
+    Poiyomi = 3,
+    Standard = 4
 };
 
 const char* RenderFamilyBackendName(RenderFamilyBackendKind kind) {
@@ -79,6 +81,10 @@ const char* RenderFamilyBackendName(RenderFamilyBackendKind kind) {
             return "liltoon";
         case RenderFamilyBackendKind::Mtoon:
             return "mtoon";
+        case RenderFamilyBackendKind::Poiyomi:
+            return "poiyomi";
+        case RenderFamilyBackendKind::Standard:
+            return "standard";
         case RenderFamilyBackendKind::Common:
         default:
             return "common";
@@ -91,6 +97,12 @@ RenderFamilyBackendKind ResolveFamilyBackendRequest(const std::string& shader_fa
     }
     if (shader_family == "mtoon") {
         return RenderFamilyBackendKind::Mtoon;
+    }
+    if (shader_family == "poiyomi") {
+        return RenderFamilyBackendKind::Poiyomi;
+    }
+    if (shader_family == "standard") {
+        return RenderFamilyBackendKind::Standard;
     }
     return RenderFamilyBackendKind::Common;
 }
@@ -142,6 +154,8 @@ struct RendererResources {
     ID3D11PixelShader* pixel_shader_common = nullptr;
     ID3D11PixelShader* pixel_shader_liltoon = nullptr;
     ID3D11PixelShader* pixel_shader_mtoon = nullptr;
+    ID3D11PixelShader* pixel_shader_poiyomi = nullptr;
+    ID3D11PixelShader* pixel_shader_standard = nullptr;
     ID3D11InputLayout* input_layout = nullptr;
     ID3D11Buffer* constant_buffer = nullptr;
     ID3D11RasterizerState* raster_cull_back = nullptr;
@@ -832,7 +846,7 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     {
         const auto material_it = g_state.renderer.avatar_materials.find(handle);
         if (material_it != g_state.renderer.avatar_materials.end() && !material_it->second.empty()) {
-            std::array<std::uint32_t, 3U> backend_counts = {0U, 0U, 0U};
+            std::array<std::uint32_t, 5U> backend_counts = {0U, 0U, 0U, 0U, 0U};
             std::uint32_t backend_fallback_count = 0U;
             bool has_depth = false;
             bool has_shadow = false;
@@ -842,7 +856,10 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
             for (const auto& material : material_it->second) {
                 const std::size_t idx =
                     material.backend_selected == RenderFamilyBackendKind::Liltoon ? 1U :
-                    material.backend_selected == RenderFamilyBackendKind::Mtoon ? 2U : 0U;
+                    material.backend_selected == RenderFamilyBackendKind::Mtoon ? 2U :
+                    material.backend_selected == RenderFamilyBackendKind::Poiyomi ? 3U :
+                    material.backend_selected == RenderFamilyBackendKind::Standard ? 4U :
+                    0U;
                 backend_counts[idx] += 1U;
                 if (material.backend_fallback_applied) {
                     ++backend_fallback_count;
@@ -853,13 +870,17 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
                 has_outline = has_outline || material.enable_outline_pass;
                 has_emission = has_emission || material.enable_emission_pass;
             }
-            const std::size_t dominant_idx =
-                backend_counts[1] > backend_counts[0]
-                    ? (backend_counts[2] > backend_counts[1] ? 2U : 1U)
-                    : (backend_counts[2] > backend_counts[0] ? 2U : 0U);
+            std::size_t dominant_idx = 0U;
+            for (std::size_t i = 1U; i < backend_counts.size(); ++i) {
+                if (backend_counts[i] > backend_counts[dominant_idx]) {
+                    dominant_idx = i;
+                }
+            }
             const RenderFamilyBackendKind dominant_backend =
                 dominant_idx == 1U ? RenderFamilyBackendKind::Liltoon :
                 dominant_idx == 2U ? RenderFamilyBackendKind::Mtoon :
+                dominant_idx == 3U ? RenderFamilyBackendKind::Poiyomi :
+                dominant_idx == 4U ? RenderFamilyBackendKind::Standard :
                                      RenderFamilyBackendKind::Common;
             out_info->family_backend_fallback_count = backend_fallback_count;
             CopyString(
@@ -1153,6 +1174,14 @@ void ResetRendererResources(RendererResources* renderer) {
         renderer->input_layout->Release();
         renderer->input_layout = nullptr;
     }
+    if (renderer->pixel_shader_standard != nullptr) {
+        renderer->pixel_shader_standard->Release();
+        renderer->pixel_shader_standard = nullptr;
+    }
+    if (renderer->pixel_shader_poiyomi != nullptr) {
+        renderer->pixel_shader_poiyomi->Release();
+        renderer->pixel_shader_poiyomi = nullptr;
+    }
     if (renderer->pixel_shader_mtoon != nullptr) {
         renderer->pixel_shader_mtoon->Release();
         renderer->pixel_shader_mtoon = nullptr;
@@ -1228,6 +1257,8 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         renderer->pixel_shader_common != nullptr &&
         renderer->pixel_shader_liltoon != nullptr &&
         renderer->pixel_shader_mtoon != nullptr &&
+        renderer->pixel_shader_poiyomi != nullptr &&
+        renderer->pixel_shader_standard != nullptr &&
         renderer->input_layout != nullptr && renderer->constant_buffer != nullptr &&
         renderer->raster_cull_back != nullptr && renderer->raster_cull_front != nullptr &&
         renderer->raster_cull_none != nullptr &&
@@ -1376,11 +1407,15 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  return out_color;\n"
         "}\n";
     const char* kPixelShaderLiltoonSrc = kPixelShaderCommonSrc;
+    const char* kPixelShaderPoiyomiSrc = kPixelShaderCommonSrc;
+    const char* kPixelShaderStandardSrc = kPixelShaderCommonSrc;
 
     ID3DBlob* vs_blob = nullptr;
     ID3DBlob* ps_common_blob = nullptr;
     ID3DBlob* ps_liltoon_blob = nullptr;
     ID3DBlob* ps_mtoon_blob = nullptr;
+    ID3DBlob* ps_poiyomi_blob = nullptr;
+    ID3DBlob* ps_standard_blob = nullptr;
     ID3DBlob* err_blob = nullptr;
     HRESULT hr = D3DCompile(
         kVertexShaderSrc,
@@ -1420,6 +1455,14 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         if (ps_mtoon_blob != nullptr) {
             ps_mtoon_blob->Release();
             ps_mtoon_blob = nullptr;
+        }
+        if (ps_poiyomi_blob != nullptr) {
+            ps_poiyomi_blob->Release();
+            ps_poiyomi_blob = nullptr;
+        }
+        if (ps_standard_blob != nullptr) {
+            ps_standard_blob->Release();
+            ps_standard_blob = nullptr;
         }
         if (err_blob != nullptr) {
             err_blob->Release();
@@ -1462,6 +1505,12 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     if (!compile_ps(kPixelShaderCommonSrc, sizeof(kPixelShaderCommonSrc) - 1U, kMtoonMacros, &ps_mtoon_blob)) {
         return false;
     }
+    if (!compile_ps(kPixelShaderPoiyomiSrc, std::strlen(kPixelShaderPoiyomiSrc), kNoMacros, &ps_poiyomi_blob)) {
+        return false;
+    }
+    if (!compile_ps(kPixelShaderStandardSrc, std::strlen(kPixelShaderStandardSrc), kNoMacros, &ps_standard_blob)) {
+        return false;
+    }
 
     hr = device->CreateVertexShader(vs_blob->GetBufferPointer(), vs_blob->GetBufferSize(), nullptr, &renderer->vertex_shader);
     if (FAILED(hr) || renderer->vertex_shader == nullptr) {
@@ -1492,6 +1541,24 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         nullptr,
         &renderer->pixel_shader_mtoon);
     if (FAILED(hr) || renderer->pixel_shader_mtoon == nullptr) {
+        release_compile_blobs();
+        return false;
+    }
+    hr = device->CreatePixelShader(
+        ps_poiyomi_blob->GetBufferPointer(),
+        ps_poiyomi_blob->GetBufferSize(),
+        nullptr,
+        &renderer->pixel_shader_poiyomi);
+    if (FAILED(hr) || renderer->pixel_shader_poiyomi == nullptr) {
+        release_compile_blobs();
+        return false;
+    }
+    hr = device->CreatePixelShader(
+        ps_standard_blob->GetBufferPointer(),
+        ps_standard_blob->GetBufferSize(),
+        nullptr,
+        &renderer->pixel_shader_standard);
+    if (FAILED(hr) || renderer->pixel_shader_standard == nullptr) {
         release_compile_blobs();
         return false;
     }
@@ -3859,7 +3926,9 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         material.backend_fallback_applied = false;
         material.backend_fallback_reason = "none";
         if (material.backend_selected != RenderFamilyBackendKind::Liltoon &&
-            material.backend_selected != RenderFamilyBackendKind::Mtoon) {
+            material.backend_selected != RenderFamilyBackendKind::Mtoon &&
+            material.backend_selected != RenderFamilyBackendKind::Poiyomi &&
+            material.backend_selected != RenderFamilyBackendKind::Standard) {
             material.backend_selected = RenderFamilyBackendKind::Common;
         }
         const bool family_supported = IsSupportedShaderFamilyKey(shader_family);
@@ -4661,12 +4730,16 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 return 1U;
             case RenderFamilyBackendKind::Mtoon:
                 return 2U;
+            case RenderFamilyBackendKind::Poiyomi:
+                return 3U;
+            case RenderFamilyBackendKind::Standard:
+                return 4U;
             case RenderFamilyBackendKind::Common:
             default:
                 return 0U;
         }
     };
-    std::array<FamilyDrawQueues, 3U> family_draws;
+    std::array<FamilyDrawQueues, 5U> family_draws;
     std::uint32_t frame_draw_calls = 0U;
     const float fov_deg = quality.fov_deg;
     const float tan_half_fov = std::tan(DirectX::XMConvertToRadians(fov_deg) * 0.5f);
@@ -5177,6 +5250,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             active_ps = renderer.pixel_shader_liltoon;
         } else if (backend_kind == RenderFamilyBackendKind::Mtoon && renderer.pixel_shader_mtoon != nullptr) {
             active_ps = renderer.pixel_shader_mtoon;
+        } else if (backend_kind == RenderFamilyBackendKind::Poiyomi && renderer.pixel_shader_poiyomi != nullptr) {
+            active_ps = renderer.pixel_shader_poiyomi;
+        } else if (backend_kind == RenderFamilyBackendKind::Standard && renderer.pixel_shader_standard != nullptr) {
+            active_ps = renderer.pixel_shader_standard;
         }
         device_ctx->PSSetShader(active_ps, nullptr, 0U);
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -5371,10 +5448,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         outline_pass_count +
         emission_pass_count +
         blend_pass_count;
-    const std::array<RenderFamilyBackendKind, 3U> backend_order = {
+    const std::array<RenderFamilyBackendKind, 5U> backend_order = {
         RenderFamilyBackendKind::Common,
         RenderFamilyBackendKind::Liltoon,
-        RenderFamilyBackendKind::Mtoon};
+        RenderFamilyBackendKind::Mtoon,
+        RenderFamilyBackendKind::Poiyomi,
+        RenderFamilyBackendKind::Standard};
     for (const auto backend_kind : backend_order) {
         const auto& q = family_draws[backend_index(backend_kind)];
         for (const auto& item : q.depth_draws) {
