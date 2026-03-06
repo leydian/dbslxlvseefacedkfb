@@ -9,13 +9,21 @@ param(
     [switch]$EnableNuGetMirrorBootstrap,
     [switch]$EnableMediapipeSanity,
     [switch]$EnableTrackingFuzz,
+    [switch]$EnableHostOnboardingStateSmoke,
     [switch]$EnableUnityXav2EnvBootstrap,
+    [switch]$EnableWinUiBlockerTriage,
+    [switch]$EnableXav2CorpusPrep,
+    [string]$Xav2CorpusSourceDir = "..",
+    [string]$Xav2CorpusOutputDir = ".\build\gate_corpus\xav2",
+    [int]$Xav2CorpusMinSampleCount = 10,
+    [switch]$Xav2CorpusIncludeBuildArtifacts,
     [switch]$EnableSpout2Interop,
     [switch]$EnableSpout2Strict,
     [switch]$RequireSpout2StrictContract,
     [switch]$EnableUnityXav2LtsGate = $true,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
+    [switch]$EnableOnboardingKpiCalibration,
     [switch]$RequireUnityXav2ForWpfOnly,
     [switch]$RequireUnityXav2ForFull = $true,
     [switch]$RequireOnboardingKpiForWpfOnly,
@@ -152,6 +160,33 @@ try {
         }))
     }
 
+    if ($EnableXav2CorpusPrep) {
+        $results.Add((Invoke-Step -Name "XAV2 gate corpus prepare" -Action {
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\xav2_prepare_gate_corpus.ps1",
+                "-SourceDir", $Xav2CorpusSourceDir,
+                "-OutputDir", $Xav2CorpusOutputDir,
+                "-MinSampleCount", "$Xav2CorpusMinSampleCount"
+            )
+            if ($Xav2CorpusIncludeBuildArtifacts) { $args += "-IncludeBuildArtifacts" }
+            & powershell @args
+        }))
+    }
+
+    if ($EnableOnboardingKpiCalibration) {
+        $results.Add((Invoke-Step -Name "Onboarding KPI calibration" -Action {
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\onboarding_kpi_calibrate.ps1",
+                "-TelemetryPath", $OnboardingTelemetryPath,
+                "-FloorThresholdPct", "$OnboardingWithin3MinSuccessRateThresholdPct",
+                "-MinSessionCountFloor", "$OnboardingMinSessionCount"
+            )
+            & powershell @args
+        }))
+    }
+
     if ($effectiveEnableMediapipeSanity) {
         $results.Add((Invoke-Step -Name "MediaPipe sidecar sanity" -Action {
             $args = @(
@@ -181,6 +216,12 @@ try {
         }))
     }
 
+    if ($EnableHostOnboardingStateSmoke) {
+        $results.Add((Invoke-Step -Name "Host onboarding state smoke" -Action {
+            & powershell -ExecutionPolicy Bypass -File .\tools\host_onboarding_state_smoke.ps1
+        }))
+    }
+
     if ($effectiveEnableTrackingFuzz) {
         $results.Add((Invoke-Step -Name "Tracking parser fuzz gate" -Action {
             $args = @(
@@ -203,6 +244,18 @@ try {
             & powershell @args
         }))
     }
+
+    if ($EnableWinUiBlockerTriage -and $IncludeWinUi) {
+        $results.Add((Invoke-Step -Name "WinUI blocker triage" -Action {
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\winui_blocker_triage.ps1",
+                "-Configuration", $Configuration
+            )
+            if ($NoRestore) { $args += "-NoRestore" }
+            & powershell @args
+        }))
+    }
 }
 finally {
     Pop-Location
@@ -219,7 +272,9 @@ $lines.Add("NoRestore: $NoRestore")
 $lines.Add("SkipNativeBuild: $SkipNativeBuild")
 $lines.Add("EnableHostE2E: $EnableHostE2E")
 $lines.Add("EnableTrackingFuzz: $EnableTrackingFuzz")
+$lines.Add("EnableHostOnboardingStateSmoke: $EnableHostOnboardingStateSmoke")
 $lines.Add("EnableWinUiMinRepro: $EnableWinUiMinRepro")
+$lines.Add("EnableWinUiBlockerTriage: $EnableWinUiBlockerTriage")
 $lines.Add("EnableNuGetMirrorBootstrap: $EnableNuGetMirrorBootstrap")
 $lines.Add("EnableMediapipeSanity: $EnableMediapipeSanity")
 $lines.Add("MediapipePythonExe: $(if ([string]::IsNullOrWhiteSpace($MediapipePythonExe)) { '<env:VSFCLONE_MEDIAPIPE_PYTHON>' } else { $MediapipePythonExe })")
@@ -228,12 +283,18 @@ $lines.Add("EffectiveEnableHostE2E: $effectiveEnableHostE2E")
 $lines.Add("EffectiveEnableTrackingFuzz: $effectiveEnableTrackingFuzz")
 $lines.Add("EffectiveEnableMediapipeSanity: $effectiveEnableMediapipeSanity")
 $lines.Add("EnableUnityXav2EnvBootstrap: $EnableUnityXav2EnvBootstrap")
+$lines.Add("EnableXav2CorpusPrep: $EnableXav2CorpusPrep")
+$lines.Add("Xav2CorpusSourceDir: $Xav2CorpusSourceDir")
+$lines.Add("Xav2CorpusOutputDir: $Xav2CorpusOutputDir")
+$lines.Add("Xav2CorpusMinSampleCount: $Xav2CorpusMinSampleCount")
+$lines.Add("Xav2CorpusIncludeBuildArtifacts: $Xav2CorpusIncludeBuildArtifacts")
 $lines.Add("EnableSpout2Interop: $EnableSpout2Interop")
 $lines.Add("EnableSpout2Strict: $EnableSpout2Strict")
 $lines.Add("RequireSpout2StrictContract: $RequireSpout2StrictContract")
 $lines.Add("EnableUnityXav2LtsGate: $EnableUnityXav2LtsGate")
 $lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
 $lines.Add("EnableXav2Parity: $EnableXav2Parity")
+$lines.Add("EnableOnboardingKpiCalibration: $EnableOnboardingKpiCalibration")
 $lines.Add("RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly")
 $lines.Add("RequireUnityXav2ForFull: $RequireUnityXav2ForFull")
 $lines.Add("RequireOnboardingKpiForWpfOnly: $RequireOnboardingKpiForWpfOnly")
@@ -259,9 +320,17 @@ $lines.Add("- build/reports/onboarding_kpi_summary.json")
 $lines.Add("- build/reports/host_e2e_gate_summary.txt")
 $lines.Add("- build/reports/tracking_parser_fuzz_gate_summary.txt")
 $lines.Add("- build/reports/winui_xaml_min_repro_summary.txt")
+$lines.Add("- build/reports/winui_xaml_min_repro_summary.json")
+$lines.Add("- build/reports/winui_blocker_triage_summary.txt")
+$lines.Add("- build/reports/winui_blocker_triage_summary.json")
 $lines.Add("- build/reports/nuget_mirror_bootstrap_summary.txt")
 $lines.Add("- build/reports/unity_xav2_env_bootstrap_summary.txt")
 $lines.Add("- build/reports/mediapipe_sidecar_sanity_summary.txt")
+$lines.Add("- build/reports/host_onboarding_state_smoke_summary.txt")
+$lines.Add("- build/reports/onboarding_kpi_calibration.txt")
+$lines.Add("- build/reports/onboarding_kpi_calibration.json")
+$lines.Add("- build/gate_corpus/xav2/prepare_summary.txt")
+$lines.Add("- build/gate_corpus/xav2/sample_manifest.json")
 $lines.Add("- build/reports/spout2_interop_gate_summary.txt")
 $lines.Add("- build/reports/unity_xav2_lts_gate_summary.txt")
 $lines.Add("- build/reports/unity_xav2_lts_gate_history.csv")

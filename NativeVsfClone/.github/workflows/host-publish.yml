@@ -9,6 +9,12 @@ on:
       - "tools/publish_hosts.ps1"
       - "tools/wpf_launch_smoke.ps1"
       - "tools/compare_winui_diag_manifest.ps1"
+      - "tools/winui_diag_matrix_summary.ps1"
+      - "tools/winui_xaml_min_repro.ps1"
+      - "tools/winui_blocker_triage.ps1"
+      - "tools/host_onboarding_state_smoke.ps1"
+      - "tools/onboarding_kpi_calibrate.ps1"
+      - "tools/xav2_prepare_gate_corpus.ps1"
       - "tools/run_quality_baseline.ps1"
       - "tools/vsfavatar_quality_gate.ps1"
       - "tools/vsfavatar_sample_report.ps1"
@@ -24,6 +30,12 @@ on:
       - "tools/publish_hosts.ps1"
       - "tools/wpf_launch_smoke.ps1"
       - "tools/compare_winui_diag_manifest.ps1"
+      - "tools/winui_diag_matrix_summary.ps1"
+      - "tools/winui_xaml_min_repro.ps1"
+      - "tools/winui_blocker_triage.ps1"
+      - "tools/host_onboarding_state_smoke.ps1"
+      - "tools/onboarding_kpi_calibrate.ps1"
+      - "tools/xav2_prepare_gate_corpus.ps1"
       - "tools/run_quality_baseline.ps1"
       - "tools/vsfavatar_quality_gate.ps1"
       - "tools/vsfavatar_sample_report.ps1"
@@ -91,6 +103,12 @@ jobs:
       - name: Publish Hosts (WPF-first)
         run: powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild
 
+      - name: Onboarding State Smoke (WPF/WinUI static parity)
+        run: powershell -ExecutionPolicy Bypass -File .\tools\host_onboarding_state_smoke.ps1
+
+      - name: Refresh Release Dashboard (Onboarding KPI state included)
+        run: powershell -ExecutionPolicy Bypass -File .\tools\release_gate_dashboard.ps1 -RequireOnboardingKpiForFull
+
       - name: Validate WPF Dist Artifacts
         run: |
           $wpfExe = Join-Path $PWD "dist\wpf\WpfHost.exe"
@@ -119,6 +137,9 @@ jobs:
             NativeVsfClone/dist/wpf
             NativeVsfClone/build/reports/host_publish_latest.txt
             NativeVsfClone/build/reports/wpf_launch_smoke_latest.txt
+            NativeVsfClone/build/reports/host_onboarding_state_smoke_summary.txt
+            NativeVsfClone/build/reports/release_gate_dashboard.txt
+            NativeVsfClone/build/reports/release_gate_dashboard.json
 
   publish-hosts-winui-diagnostics:
     needs: quality-baseline
@@ -183,6 +204,22 @@ jobs:
           "- preflight_failed_checks: $(([string]::Join(',', @($manifest.preflight.failed_checks))))" >> $env:GITHUB_STEP_SUMMARY
           "- nuget summary: enabled=$($manifest.nuget_probe.summary.enabled), reachable=$($manifest.nuget_probe.summary.reachable), unreachable=$($manifest.nuget_probe.summary.unreachable)" >> $env:GITHUB_STEP_SUMMARY
 
+      - name: WinUI XAML Minimal Repro (line-level diagnostics)
+        if: always()
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\winui_xaml_min_repro.ps1 -NoRestore
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "winui_xaml_min_repro failed as expected in blocked environments; summary artifacts still collected."
+          }
+
+      - name: WinUI Blocker Triage Summary
+        if: always()
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\winui_blocker_triage.ps1 -NoRestore
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "winui_blocker_triage returned non-zero; artifacts will still be uploaded."
+          }
+
       - name: Upload WinUI Diagnostic Outputs
         uses: actions/upload-artifact@v4
         if: always()
@@ -199,3 +236,9 @@ jobs:
             NativeVsfClone/build/reports/winui/winui_build_managed_diag.log
             NativeVsfClone/build/reports/winui/obj-dump
             NativeVsfClone/build/reports/winui_manifest_summary_*.txt
+            NativeVsfClone/build/reports/winui_xaml_min_repro_summary.txt
+            NativeVsfClone/build/reports/winui_xaml_min_repro_summary.json
+            NativeVsfClone/build/reports/winui_blocker_triage_summary.txt
+            NativeVsfClone/build/reports/winui_blocker_triage_summary.json
+            NativeVsfClone/build/reports/winui_manifest_matrix_summary_latest.txt
+            NativeVsfClone/build/reports/winui_manifest_matrix_summary_latest.json

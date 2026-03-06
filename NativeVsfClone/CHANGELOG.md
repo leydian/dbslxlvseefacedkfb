@@ -2,6 +2,74 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Release tooling implementation: WinUI triage + gate automation expansion
+
+### Summary
+
+Implemented an execution-focused release tooling uplift centered on WinUI blocker diagnosability and repeatable release-prep automation.
+
+This pass adds structured diagnostics, new orchestration scripts, release gate switch expansion, and CI artifact wiring.
+
+### Changed
+
+- WinUI minimal repro diagnostics (`tools/winui_xaml_min_repro.ps1`)
+  - added JSON output (`winui_xaml_min_repro_summary.json`)
+  - added line-level diagnostic parsing (`file:line:column`, code, message)
+  - added explicit `WMC9999Count` and `FirstDiagnostic` capture
+- WinUI matrix summarization (`tools/winui_diag_matrix_summary.ps1`)
+  - added default manifest auto-discovery mode
+  - added lane classification (`local/windows-latest/windows-2022/unknown`)
+  - added JSON output (`winui_manifest_matrix_summary_latest.json`)
+- New WinUI blocker triage orchestrator:
+  - `tools/winui_blocker_triage.ps1`
+  - produces consolidated triage summary/json from min repro + matrix diagnostics
+- New XAV2 corpus prep automation:
+  - `tools/xav2_prepare_gate_corpus.ps1`
+  - builds 10-sample corpus + manifest for strict gate baseline
+  - added output-dir recursion guard
+- New onboarding KPI calibration automation:
+  - `tools/onboarding_kpi_calibrate.ps1`
+  - computes observed KPI stats + recommended threshold/min-session policy
+- New cross-host onboarding smoke check:
+  - `tools/host_onboarding_state_smoke.ps1`
+  - validates WPF/WinUI actionability state wiring artifacts
+- Release gate wrapper expansion (`tools/release_readiness_gate.ps1`)
+  - added toggles:
+    - `EnableHostOnboardingStateSmoke`
+    - `EnableWinUiBlockerTriage`
+    - `EnableXav2CorpusPrep` (+ corpus options)
+    - `EnableOnboardingKpiCalibration`
+  - added corresponding artifact reporting lines
+- CI workflow integration (`.github/workflows/host-publish.yml`)
+  - added triggers for new scripts
+  - WPF lane now includes onboarding smoke + dashboard artifact uploads
+  - WinUI diagnostics lane now runs min-repro + blocker-triage and uploads new summary/json artifacts
+- Documentation updates
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_release_tooling_implementation_winui_triage_and_gate_automation.md`
+  - updated weekly docs index/summary:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- Script parse checks: PASS for all added/updated tooling scripts.
+- WinUI repro execution:
+  - `FailureClass=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999Count=2`
+  - first diagnostic path+line captured in summary/json
+- WinUI triage execution:
+  - blocker triage summary/json emitted successfully
+- XAV2 corpus preparation:
+  - `SampleCount=10`
+  - manifest emitted (`build/gate_corpus/xav2/sample_manifest.json`)
+- Onboarding state smoke:
+  - `Overall: PASS`
+- Dashboard refresh:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+  - `OnboardingKpiStatus: INSUFFICIENT_SAMPLES`
+
 ## 2026-03-06 - Tracking MediaPipe START_FAILED runtime remediation documentation + env pin procedure
 
 ### Summary
