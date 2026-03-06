@@ -8,6 +8,8 @@ param(
     [switch]$RequireUnityMiqRecentRiskZeroForFull = $true,
     [switch]$RequireOnboardingKpiForWpfOnly,
     [switch]$RequireOnboardingKpiForFull = $true,
+    [switch]$FailOnMissingInputsForWpfOnly,
+    [switch]$FailOnMissingInputsForFull = $true,
     [double]$OnboardingWithin3MinSuccessRateThresholdPct = 70.0,
     [int]$OnboardingMinSessionCount = 5,
     [string]$PolicyVersion = "2026-03-06.1"
@@ -323,6 +325,21 @@ $rows += [PSCustomObject]@{
 }
 
 $avatarRows = @($rows | Where-Object { $_.track -in @("VSFAvatar", "VRM", "VXAvatar") })
+$criticalTracks = @(
+    "VSFAvatar",
+    "VRM",
+    "VXAvatar",
+    "Host Publish (WPF)",
+    "Tracking HostE2E",
+    "Tracking Parser Fuzz",
+    "Tracking Mediapipe Sanity"
+)
+$criticalMissingRows = @($rows | Where-Object {
+    $_.track -in $criticalTracks -and
+    (Get-PassFailFromStatusLine -Line $_.status_line) -eq "MISSING"
+})
+$criticalMissingCount = $criticalMissingRows.Count
+
 $avatarAllPass = $true
 foreach ($r in $avatarRows) {
     if ((Get-PassFailFromStatusLine -Line $r.status_line) -ne "PASS") {
@@ -373,9 +390,11 @@ $wpfUnityRecentRiskRequirementMet = if ($RequireUnityMiqRecentRiskZeroForWpfOnly
 $fullUnityRecentRiskRequirementMet = if ($RequireUnityMiqRecentRiskZeroForFull) { -not $unityLtsRecentRisk } else { $true }
 $wpfOnboardingRequirementMet = if ($RequireOnboardingKpiForWpfOnly) { [bool]$onboardingKpiState.pass } else { $true }
 $fullOnboardingRequirementMet = if ($RequireOnboardingKpiForFull) { [bool]$onboardingKpiState.pass } else { $true }
+$wpfMissingInputRequirementMet = if ($FailOnMissingInputsForWpfOnly) { $criticalMissingCount -eq 0 } else { $true }
+$fullMissingInputRequirementMet = if ($FailOnMissingInputsForFull) { $criticalMissingCount -eq 0 } else { $true }
 
-$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $wpfUnityRequirementMet -and $wpfUnityRecentRiskRequirementMet -and $trackingContractAllPass -and $wpfOnboardingRequirementMet
-$fullReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and ($hostTrack.winui_state -eq "PASS") -and $fullUnityRequirementMet -and $fullUnityRecentRiskRequirementMet -and $trackingContractAllPass -and $fullOnboardingRequirementMet
+$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $wpfUnityRequirementMet -and $wpfUnityRecentRiskRequirementMet -and $trackingContractAllPass -and $wpfOnboardingRequirementMet -and $wpfMissingInputRequirementMet
+$fullReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and ($hostTrack.winui_state -eq "PASS") -and $fullUnityRequirementMet -and $fullUnityRecentRiskRequirementMet -and $trackingContractAllPass -and $fullOnboardingRequirementMet -and $fullMissingInputRequirementMet
 
 $wpfFailureReasons = [System.Collections.Generic.List[string]]::new()
 if (-not $avatarAllPass) { $wpfFailureReasons.Add("AVATAR_GATES_FAIL") }
@@ -384,6 +403,7 @@ if (-not $wpfUnityRequirementMet) { $wpfFailureReasons.Add("UNITY_MIQ_FAIL") }
 if (-not $wpfUnityRecentRiskRequirementMet) { $wpfFailureReasons.Add("UNITY_MIQ_RECENT_RISK") }
 if (-not $trackingContractAllPass) { $wpfFailureReasons.Add("TRACKING_CONTRACT_FAIL") }
 if (-not $wpfOnboardingRequirementMet) { $wpfFailureReasons.Add("ONBOARDING_KPI_FAIL") }
+if (-not $wpfMissingInputRequirementMet) { $wpfFailureReasons.Add("DASHBOARD_INPUTS_MISSING") }
 
 $fullFailureReasons = [System.Collections.Generic.List[string]]::new()
 if (-not $avatarAllPass) { $fullFailureReasons.Add("AVATAR_GATES_FAIL") }
@@ -393,6 +413,7 @@ if (-not $fullUnityRequirementMet) { $fullFailureReasons.Add("UNITY_MIQ_FAIL") }
 if (-not $fullUnityRecentRiskRequirementMet) { $fullFailureReasons.Add("UNITY_MIQ_RECENT_RISK") }
 if (-not $trackingContractAllPass) { $fullFailureReasons.Add("TRACKING_CONTRACT_FAIL") }
 if (-not $fullOnboardingRequirementMet) { $fullFailureReasons.Add("ONBOARDING_KPI_FAIL") }
+if (-not $fullMissingInputRequirementMet) { $fullFailureReasons.Add("DASHBOARD_INPUTS_MISSING") }
 
 $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("s")
@@ -421,6 +442,10 @@ $summary = [PSCustomObject]@{
         onboarding_kpi_min_session_count = [int]$onboardingKpiState.min_session_count
         onboarding_kpi_required_wpf_only = [bool]$RequireOnboardingKpiForWpfOnly
         onboarding_kpi_required_full = [bool]$RequireOnboardingKpiForFull
+        fail_on_missing_inputs_wpf_only = [bool]$FailOnMissingInputsForWpfOnly
+        fail_on_missing_inputs_full = [bool]$FailOnMissingInputsForFull
+        critical_missing_input_count = [int]$criticalMissingCount
+        critical_missing_inputs = @($criticalMissingRows | ForEach-Object { $_.track })
         host_mode = $hostTrack.mode
         host_wpf_pass = ($hostTrack.wpf_state -eq "PASS")
         host_winui_pass = ($hostTrack.winui_state -eq "PASS")
@@ -454,8 +479,12 @@ $lines += "Policy.RequireUnityMiqRecentRiskZeroForWpfOnly: $RequireUnityMiqRecen
 $lines += "Policy.RequireUnityMiqRecentRiskZeroForFull: $RequireUnityMiqRecentRiskZeroForFull"
 $lines += "Policy.RequireOnboardingKpiForWpfOnly: $RequireOnboardingKpiForWpfOnly"
 $lines += "Policy.RequireOnboardingKpiForFull: $RequireOnboardingKpiForFull"
+$lines += "Policy.FailOnMissingInputsForWpfOnly: $FailOnMissingInputsForWpfOnly"
+$lines += "Policy.FailOnMissingInputsForFull: $FailOnMissingInputsForFull"
 $lines += "Policy.OnboardingWithin3MinSuccessRateThresholdPct: $OnboardingWithin3MinSuccessRateThresholdPct"
 $lines += "Policy.OnboardingMinSessionCount: $OnboardingMinSessionCount"
+$lines += "CriticalMissingInputCount: $criticalMissingCount"
+$lines += "CriticalMissingInputs: $(if ($criticalMissingRows.Count -gt 0) { ($criticalMissingRows | ForEach-Object { $_.track }) -join ', ' } else { '<none>' })"
 $lines += "OnboardingKpiStatus: $($onboardingKpiState.status)"
 $lines += "OnboardingKpiDetail: $($onboardingKpiState.detail)"
 $lines += "UnityMiqLtsRecentRisk: $(if ($unityLtsRecentRisk) { 'YES' } else { 'NO' })"

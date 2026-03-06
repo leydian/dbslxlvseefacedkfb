@@ -80,6 +80,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -Use
 powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5
 powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick
 powershell -ExecutionPolicy Bypass -File .\tools\spout2_interop_gate.ps1 -RequireSpout2Configured
+powershell -ExecutionPolicy Bypass -File .\tools\wpf_user_regression_pack.ps1 -SkipNativeBuild -NoRestore
+powershell -ExecutionPolicy Bypass -File .\tools\release_dual_lane_gate.ps1 -SkipNativeBuild -NoRestore
+powershell -ExecutionPolicy Bypass -File .\tools\release_blocker_burndown.ps1
 ```
 
 ## Repository Map

@@ -6,12 +6,16 @@ on:
       - "unity/Packages/com.animiq.miq/**"
       - "tools/unity_lts_matrix.json"
       - "tools/unity_Miq_validate.ps1"
+      - "tools/unity_miq_gate_bundle.ps1"
+      - "tools/unity_project_lock_check.ps1"
       - "tools/Miq_compression_quality_gate.ps1"
       - "tools/Miq_parity_gate.ps1"
       - ".github/workflows/unity-miq-compat.yml"
       - "AnimiqCore/unity/Packages/com.animiq.miq/**"
       - "AnimiqCore/tools/unity_lts_matrix.json"
       - "AnimiqCore/tools/unity_Miq_validate.ps1"
+      - "AnimiqCore/tools/unity_miq_gate_bundle.ps1"
+      - "AnimiqCore/tools/unity_project_lock_check.ps1"
       - "AnimiqCore/tools/Miq_compression_quality_gate.ps1"
       - "AnimiqCore/tools/Miq_parity_gate.ps1"
       - "AnimiqCore/.github/workflows/unity-miq-compat.yml"
@@ -47,35 +51,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate Unity MIQ compatibility (${{ matrix.line }})
-        run: |
-          powershell -ExecutionPolicy Bypass -File .\tools\unity_Miq_validate.ps1 `
-            -UnityLine "${{ matrix.line }}" `
-            -UnityEditorPath "$env:UNITY_EDITOR_PATH" `
-            -UnityProjectPath "$env:UNITY_MIQ_PROJECT_PATH" `
-            -ExpectedUnityVersion "${{ matrix.expected_version }}"
-
-      - name: Run MIQ compression quality gate (${{ matrix.line }})
-        run: |
-          powershell -ExecutionPolicy Bypass -File .\tools\Miq_compression_quality_gate.ps1 `
-            -UnityLine "${{ matrix.line }}" `
-            -UnityEditorPath "$env:UNITY_EDITOR_PATH" `
-            -UnityProjectPath "$env:UNITY_MIQ_PROJECT_PATH" `
-            -ExpectedUnityVersion "${{ matrix.expected_version }}"
-
       - name: Build native avatar_tool for parity gate
         run: |
           cmake -S . -B .\build
           cmake --build .\build --config Release --target avatar_tool
 
-      - name: Run MIQ unity/native parity gate (${{ matrix.line }})
+      - name: Run Unity MIQ gate bundle (${{ matrix.line }})
         run: |
-          powershell -ExecutionPolicy Bypass -File .\tools\Miq_parity_gate.ps1 `
-            -AvatarToolPath ".\build\Release\avatar_tool.exe" `
+          powershell -ExecutionPolicy Bypass -File .\tools\unity_miq_gate_bundle.ps1 `
             -UnityLine "${{ matrix.line }}" `
+            -MatrixPath ".\tools\unity_lts_matrix.json" `
             -UnityEditorPath "$env:UNITY_EDITOR_PATH" `
             -UnityProjectPath "$env:UNITY_MIQ_PROJECT_PATH" `
-            -ExpectedUnityVersion "${{ matrix.expected_version }}"
+            -AvatarToolPath ".\build\Release\avatar_tool.exe" `
+            -ReportSuffix "${{ matrix.line }}"
 
       - name: Upload Unity compatibility reports (${{ matrix.line }})
         uses: actions/upload-artifact@v4

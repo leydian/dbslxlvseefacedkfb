@@ -11,6 +11,7 @@ on:
       - "tools/compare_winui_diag_manifest.ps1"
       - "tools/winui_diag_matrix_summary.ps1"
       - "tools/winui_xaml_min_repro.ps1"
+      - "tools/winui_env_fingerprint.ps1"
       - "tools/winui_blocker_triage.ps1"
       - "tools/host_onboarding_state_smoke.ps1"
       - "tools/onboarding_kpi_calibrate.ps1"
@@ -35,6 +36,7 @@ on:
       - "tools/compare_winui_diag_manifest.ps1"
       - "tools/winui_diag_matrix_summary.ps1"
       - "tools/winui_xaml_min_repro.ps1"
+      - "tools/winui_env_fingerprint.ps1"
       - "tools/winui_blocker_triage.ps1"
       - "tools/host_onboarding_state_smoke.ps1"
       - "tools/onboarding_kpi_calibrate.ps1"
@@ -218,6 +220,10 @@ jobs:
       - name: WinUI XAML Minimal Repro (line-level diagnostics)
         if: always()
         run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\winui_env_fingerprint.ps1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "winui_env_fingerprint failed; continuing to preserve repro artifacts."
+          }
           powershell -ExecutionPolicy Bypass -File .\tools\winui_xaml_min_repro.ps1 -NoRestore
           if ($LASTEXITCODE -ne 0) {
             Write-Host "winui_xaml_min_repro failed as expected in blocked environments; summary artifacts still collected."
@@ -249,6 +255,8 @@ jobs:
             AnimiqCore/build/reports/winui_manifest_summary_*.txt
             AnimiqCore/build/reports/winui_xaml_min_repro_summary.txt
             AnimiqCore/build/reports/winui_xaml_min_repro_summary.json
+            AnimiqCore/build/reports/winui_env_fingerprint.txt
+            AnimiqCore/build/reports/winui_env_fingerprint.json
             AnimiqCore/build/reports/winui_blocker_triage_summary.txt
             AnimiqCore/build/reports/winui_blocker_triage_summary.json
             AnimiqCore/build/reports/winui_manifest_matrix_summary_latest.txt

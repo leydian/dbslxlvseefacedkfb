@@ -110,6 +110,17 @@ if (-not (Test-Path -LiteralPath $AvatarToolPath)) {
     throw "avatar_tool not found: $AvatarToolPath"
 }
 
+Push-Location $repoRoot
+try {
+    & powershell -ExecutionPolicy Bypass -File .\tools\unity_project_lock_check.ps1 -UnityProjectPath $UnityProjectPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unity project lock preflight failed. Resolve lock and retry."
+    }
+}
+finally {
+    Pop-Location
+}
+
 New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 $summaryJsonPath = Join-Path $ReportDir "unity_miq_lts_gate_summary.json"
 $summaryTxtPath = Join-Path $ReportDir "unity_miq_lts_gate_summary.txt"

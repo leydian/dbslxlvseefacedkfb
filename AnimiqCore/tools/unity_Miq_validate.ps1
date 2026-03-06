@@ -98,6 +98,27 @@ if ([string]::IsNullOrWhiteSpace($ReportSuffix)) {
 
 New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
 
+$lockCheckJsonPath = Join-Path $ReportDir "unity_project_lock_check.json"
+$lockCheckTxtPath = Join-Path $ReportDir "unity_project_lock_check.txt"
+$lockCheckArgs = @(
+    "-ExecutionPolicy", "Bypass",
+    "-File", ".\tools\unity_project_lock_check.ps1",
+    "-UnityProjectPath", $UnityProjectPath,
+    "-OutputJson", $lockCheckJsonPath,
+    "-OutputTxt", $lockCheckTxtPath
+)
+Push-Location $repoRoot
+try {
+    & powershell @lockCheckArgs
+    $lockCheckExitCode = $LASTEXITCODE
+}
+finally {
+    Pop-Location
+}
+if ($lockCheckExitCode -ne 0) {
+    throw "Unity project lock preflight failed. See $lockCheckTxtPath"
+}
+
 $editModeLogPath = Join-Path $ReportDir "unity_miq_${ReportSuffix}_editmode.log"
 $editModeResultXmlPath = Join-Path $ReportDir "unity_miq_${ReportSuffix}_editmode_results.xml"
 $smokeLogPath = Join-Path $ReportDir "unity_miq_${ReportSuffix}_smoke.log"
@@ -171,7 +192,9 @@ $summaryLines = @(
     "editmode_log=$editModeLogPath",
     "editmode_results=$editModeResultXmlPath",
     "smoke_log=$smokeLogPath",
-    "smoke_report=$smokeReportPath"
+    "smoke_report=$smokeReportPath",
+    "project_lock_check_json=$lockCheckJsonPath",
+    "project_lock_check_txt=$lockCheckTxtPath"
 )
 $summaryLines | Set-Content -Path $summaryTxtPath -Encoding UTF8
 

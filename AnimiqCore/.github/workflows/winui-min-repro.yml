@@ -1,0 +1,58 @@
+name: winui-min-repro
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "host/WinUiHost/**"
+      - "tools/winui_xaml_min_repro.ps1"
+      - "tools/winui_env_fingerprint.ps1"
+      - ".github/workflows/winui-min-repro.yml"
+  pull_request:
+    paths:
+      - "host/WinUiHost/**"
+      - "tools/winui_xaml_min_repro.ps1"
+      - "tools/winui_env_fingerprint.ps1"
+      - ".github/workflows/winui-min-repro.yml"
+  schedule:
+    - cron: "40 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  min-repro:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
+    defaults:
+      run:
+        shell: powershell
+        working-directory: AnimiqCore
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Environment fingerprint
+        run: powershell -ExecutionPolicy Bypass -File .\tools\winui_env_fingerprint.ps1
+
+      - name: WinUI minimal repro
+        continue-on-error: true
+        run: powershell -ExecutionPolicy Bypass -File .\tools\winui_xaml_min_repro.ps1 -NoRestore
+
+      - name: Upload min repro artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: winui-min-repro-${{ matrix.os }}
+          if-no-files-found: warn
+          path: |
+            AnimiqCore/build/reports/winui_env_fingerprint.txt
+            AnimiqCore/build/reports/winui_env_fingerprint.json
+            AnimiqCore/build/reports/winui_xaml_min_repro_summary.txt
+            AnimiqCore/build/reports/winui_xaml_min_repro_summary.json
+            AnimiqCore/build/reports/winui/winui_min_repro_diag.log
+            AnimiqCore/build/reports/winui/winui_min_repro.binlog
+

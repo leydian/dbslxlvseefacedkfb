@@ -31,6 +31,7 @@ param(
     [double]$SoakMinSuccessRatio = 1.0,
     [double]$SoakMinPerSampleSuccessRatio = 1.0,
     [switch]$EnableOnboardingKpiCalibration,
+    [switch]$EnableDashboardInputGuard = $true,
     [switch]$RequireUnityMiqForWpfOnly,
     [switch]$RequireUnityMiqForFull = $true,
     [switch]$RequireUnityMiqRecentRiskZeroForWpfOnly,
@@ -151,6 +152,21 @@ try {
         }
     } else {
         Write-Host "[release-readiness] SKIP: Onboarding KPI summary"
+    }
+
+    if ($EnableDashboardInputGuard) {
+        $results.Add((Invoke-Step -Name "Release dashboard input guard" -Action {
+            $args = @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", ".\tools\release_dashboard_input_guard.ps1"
+            )
+            if ($IncludeWinUi) { $args += "-IncludeWinUi" }
+            if ($RequireUnityMiqForFull) { $args += "-RequireUnityMiqForFull" }
+            if ($RequireOnboardingKpiForFull) { $args += "-RequireOnboardingKpiForFull" }
+            & powershell @args
+        }))
+    } else {
+        Write-Host "[release-readiness] SKIP: Release dashboard input guard"
     }
 
     $results.Add((Invoke-Step -Name "Release gate dashboard refresh" -Action {
@@ -354,6 +370,7 @@ $lines.Add("SoakIterationsPerSample: $SoakIterationsPerSample")
 $lines.Add("SoakMinSuccessRatio: $SoakMinSuccessRatio")
 $lines.Add("SoakMinPerSampleSuccessRatio: $SoakMinPerSampleSuccessRatio")
 $lines.Add("EnableOnboardingKpiCalibration: $EnableOnboardingKpiCalibration")
+$lines.Add("EnableDashboardInputGuard: $EnableDashboardInputGuard")
 $lines.Add("RequireUnityMiqForWpfOnly: $RequireUnityMiqForWpfOnly")
 $lines.Add("RequireUnityMiqForFull: $RequireUnityMiqForFull")
 $lines.Add("RequireUnityMiqRecentRiskZeroForWpfOnly: $RequireUnityMiqRecentRiskZeroForWpfOnly")
@@ -386,6 +403,8 @@ $lines.Add("- build/reports/release_gate_dashboard.txt")
 $lines.Add("- build/reports/release_gate_dashboard.json")
 $lines.Add("- build/reports/release_ssot_check_summary.txt")
 $lines.Add("- build/reports/release_ssot_check_summary.json")
+$lines.Add("- build/reports/release_dashboard_input_guard.txt")
+$lines.Add("- build/reports/release_dashboard_input_guard.json")
 $lines.Add("- build/reports/onboarding_kpi_summary.txt")
 $lines.Add("- build/reports/onboarding_kpi_summary.json")
 $lines.Add("- build/reports/host_e2e_gate_summary.txt")

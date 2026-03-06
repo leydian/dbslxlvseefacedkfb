@@ -52,6 +52,10 @@ jobs:
             -MaxAllowedWorkingSetMbIncrease 250 `
             -MaxAllowedMemorySampleFailedCount 0
 
+      - name: Build Release Blocker Burndown
+        if: always()
+        run: powershell -ExecutionPolicy Bypass -File .\tools\release_blocker_burndown.ps1
+
       - name: Upload Nightly Stability Reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -64,4 +68,5 @@ jobs:
             AnimiqCore/build/reports/render_perf_gate_history.csv
             AnimiqCore/build/reports/memory_trend_gate_summary.txt
             AnimiqCore/build/reports/render_perf_history_refresh_skipped.txt
+            AnimiqCore/build/reports/release_blocker_burndown.md
 
