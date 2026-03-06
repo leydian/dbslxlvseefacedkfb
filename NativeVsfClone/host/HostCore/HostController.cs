@@ -1037,6 +1037,7 @@ public sealed partial class HostController
 
     private DiagnosticsSnapshot BuildSnapshot()
     {
+        RefreshTrackingDiagnosticsFromService();
         var firstBroadcastStartMs = TryGetLatestFirstBroadcastStartMs(out var latestMs) ? latestMs : -1.0;
         var firstBroadcastTimestamp = _firstBroadcastStartedUtc.HasValue
             ? _firstBroadcastStartedUtc.Value.ToString("O")
@@ -1055,6 +1056,20 @@ public sealed partial class HostController
             _runtimeDiagnostics,
             _sessionService.ActiveAvatarInfo,
             SessionState.LastRenderRc);
+    }
+
+    private void RefreshTrackingDiagnosticsFromService()
+    {
+        var next = _trackingInputService.GetDiagnostics();
+        if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
+            _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_", StringComparison.Ordinal) &&
+            string.IsNullOrWhiteSpace(next.LastErrorCode))
+        {
+            next = next with { LastErrorCode = _trackingDiagnostics.LastErrorCode };
+        }
+
+        _trackingDiagnostics = next;
+        ReconcileTrackingDiagnostics();
     }
 
     public (double LatestMs, double MedianMs, int SampleCount, string OutputKind, string StartedTimestampUtc) GetUiFlowTimingSnapshot()

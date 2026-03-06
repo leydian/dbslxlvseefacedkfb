@@ -748,6 +748,21 @@ public sealed class TrackingInputService : ITrackingInputService
                     break;
                 }
 
+                var socket = activeClient.Client;
+                if (!socket.Poll(ReceiveWatchdogPollMs * 1000, SelectMode.SelectRead))
+                {
+                    MarkReceiveTimeoutNoPacket();
+                    TryRebindIfacialSocketWhenNoPackets();
+                    continue;
+                }
+
+                if (socket.Available <= 0)
+                {
+                    MarkReceiveTimeoutNoPacket();
+                    TryRebindIfacialSocketWhenNoPackets();
+                    continue;
+                }
+
                 IPEndPoint remote = new(IPAddress.Any, 0);
                 var buffer = activeClient.Receive(ref remote);
                 result = new UdpReceiveResult(buffer, remote);
@@ -755,12 +770,6 @@ public sealed class TrackingInputService : ITrackingInputService
             catch (OperationCanceledException)
             {
                 break;
-            }
-            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut)
-            {
-                MarkReceiveTimeoutNoPacket();
-                TryRebindIfacialSocketWhenNoPackets();
-                continue;
             }
             catch (ObjectDisposedException)
             {
@@ -2272,6 +2281,14 @@ public sealed class TrackingInputService : ITrackingInputService
             return TryParseIfmJsonPayload(payload, updates, out formatName, out parseFailure);
         }
 
+        // iFacialMocap native text format: "key&value|key&value|...|=headRotX&val&headRotY&val&..."
+        if (TryParseIfmNativePacket(payload, updates))
+        {
+            formatName = ExtractIfmVersion(payload) == 2 ? "ifm-v2" : "ifm-v1";
+            parseFailure = PacketParseFailure.Unknown;
+            return true;
+        }
+
         return TryParseIfmDelimitedPayload(payload, updates, out formatName, out parseFailure);
     }
 
@@ -2434,6 +2451,56 @@ public sealed class TrackingInputService : ITrackingInputService
 
         parseFailure = matchedPair ? PacketParseFailure.NoMappedChannels : PacketParseFailure.IfmMalformed;
         return false;
+    }
+
+    private bool TryParseIfmNativePacket(string payload, List<KeyValuePair<string, float>> updates)
+    {
+        // Fast-fail: '&' is the key&value separator in the native format
+        if (!payload.Contains('&')) return false;
+
+        // Split blend section from head section at "|="
+        string blendSection = payload;
+        string? headSection = null;
+
+        var eqIdx = payload.IndexOf("|=", StringComparison.Ordinal);
+        if (eqIdx >= 0)
+        {
+            blendSection = payload[..eqIdx];
+            headSection = payload[(eqIdx + 2)..];
+        }
+        else if (payload.StartsWith('='))
+        {
+            blendSection = string.Empty;
+            headSection = payload[1..];
+        }
+
+        int count = 0;
+
+        // Blendshapes: "key&value" pairs separated by "|"
+        foreach (var field in blendSection.Split('|',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var amp = field.IndexOf('&');
+            if (amp <= 0 || amp == field.Length - 1) continue;
+            var key = field[..amp];
+            if (key.Equals("version", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!float.TryParse(field[(amp + 1)..], NumberStyles.Float, CultureInfo.InvariantCulture, out var val)) continue;
+            if (AddIfmUpdate(updates, key, val)) count++;
+        }
+
+        // Head section: "headRotX&-12.5&headRotY&3.2&headRotZ&1.1&headPosX&0&headPosY&0&headPosZ&0"
+        if (headSection is not null)
+        {
+            var tokens = headSection.Split('&',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (var i = 0; i + 1 < tokens.Length; i += 2)
+            {
+                if (!float.TryParse(tokens[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var val)) continue;
+                if (AddIfmUpdate(updates, tokens[i], val)) count++;
+            }
+        }
+
+        return count > 0;
     }
 
     private static int ExtractIfmVersion(string payload)
@@ -3717,10 +3784,10 @@ public sealed class TrackingInputService : ITrackingInputService
         float MinDenominator);
 
     private static readonly Regex IfmDelimitedPairRegex = new(
-        @"(?i)([A-Za-z][A-Za-z0-9_]{1,63})\s*[:=]\s*(-?\d+(?:\.\d+)?)",
+        @"(?i)([A-Za-z][A-Za-z0-9_]{1,63})\s*[:=\-]\s*(-?\d+(?:\.\d+)?)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex IfmVersionRegex = new(
-        @"(?i)\bversion\s*[:=]\s*(\d+)",
+        @"(?i)\bversion\s*[:=\-]\s*(\d+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);

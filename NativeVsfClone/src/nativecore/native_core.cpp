@@ -4938,6 +4938,15 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             HasLooseToken(pass_tokens, "castshadow") ||
             HasLooseToken(pass_tokens, "forwardadd") ||
             HasLooseToken(pass_tokens, "forward_add");
+        const bool base_only_pass_declared =
+            pass_declared &&
+            (HasLooseToken(pass_tokens, "base") ||
+             HasLooseToken(pass_tokens, "main") ||
+             HasLooseToken(pass_tokens, "forward")) &&
+            !has_depth_token &&
+            !has_shadow_token &&
+            !material.enable_outline_pass &&
+            !material.enable_emission_pass;
         material.enable_depth_pass = !pass_declared || has_depth_token;
         material.enable_shadow_pass = has_shadow_token;
         // Some XAV2 exports carry non-canonical pass strings. If every pass is
@@ -4992,6 +5001,13 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             material.enable_shadow_pass = false;
         } else if (!pass_declared && parity_family) {
             material.enable_shadow_pass = true;
+        } else if (avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+                   base_only_pass_declared &&
+                   parity_family) {
+            // Legacy XAV2 exports may declare only "base" pass flags even when
+            // Unity material has a valid shadow caster path. Infer shadow pass.
+            material.enable_shadow_pass = true;
+            fallback_reasons.push_back("xav2_pass_flags_base_only_shadow_inferred");
         }
         material.alpha_cutoff = payload.alpha_cutoff;
         material.double_sided = payload.double_sided;

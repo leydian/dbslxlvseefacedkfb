@@ -2,6 +2,47 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - IFM native text parse compatibility + tracking snapshot sync + XAV2 base-only shadow inference
+
+### Summary
+
+Resolved the live tracking failure mode where iFacial packets were received but rejected as parse failures due to payload-shape mismatch, and added native-side shadow inference hardening for base-only XAV2 pass declarations.
+
+### Changed
+
+- Tracking parser/runtime:
+  - `host/HostCore/TrackingInputService.cs`
+  - receive loop polling path refined (`Poll` + `Available` pre-check before receive)
+  - added IFM native text payload parser (`key&value|...` + optional `|=` head section)
+  - widened IFM delimited regex separators to include `-` (`key-value`)
+  - version token parsing widened to include `version-<n>`
+- Tracking diagnostics snapshot sync:
+  - `host/HostCore/HostController.cs`
+  - `BuildSnapshot()` now force-refreshes tracking diagnostics from service before publishing snapshot
+  - preserved `NC_SET_*` error continuity when service-level error field is empty
+- Native render shadow inference:
+  - `src/nativecore/native_core.cpp`
+  - for XAV2 parity-family materials with base-only pass declarations, shadow pass is inferred
+  - fallback reason added: `xav2_pass_flags_base_only_shadow_inferred`
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md`
+- Updated weekly index/summary:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - tracking report count updated to `11`
+  - nativecore report count updated to `4`
+
+### Verification
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build .\host\WpfHost\WpfHost.csproj -c Release --no-restore`: PASS
+- `tools/publish_hosts.ps1 -Configuration Release -RuntimeIdentifier win-x64 -NoRestore -RunWpfLaunchSmoke:$false`: PASS
+- runtime validation (operator repro):
+  - `format=ifm-v1`
+  - `packets=496`
+  - `parse_err=0`
+  - `conf=ifacial=0.98`
+
 ## 2026-03-06 - Release execution active round 4 (Unity lock blocker surfaced + WinUI split recheck)
 
 ### Summary
