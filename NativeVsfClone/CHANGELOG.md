@@ -2,6 +2,40 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Release execution active round 4 (Unity lock blocker surfaced + WinUI split recheck)
+
+### Summary
+
+Executed the immediate release action pass with explicit WinUI restore split and Unity/XAV2 gate recovery attempt using local Unity `2021.3.18f1` + matching project.
+
+### Changed
+
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_active_round4_unity_project_lock_and_winui_split.md`
+- Updated weekly index:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+- Updated weekly summary:
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - release report count updated to `8`
+
+### Verification
+
+- WinUI split recheck:
+  - `winui_xaml_min_repro` in both `NoRestore` and restore-enabled lanes converged to:
+    - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+    - `WMC9999` reproducible
+- Unity/XAV2 gates with explicit local paths:
+  - editor: `C:\Program Files\Unity\Hub\Editor\2021.3.18f1\Editor\Unity.exe`
+  - project: `D:\Unity\My project sdk 연구용`
+  - execution blocked by project lock:
+    - `Multiple Unity instances cannot open the same project`
+- baseline gates:
+  - `tools/host_e2e_gate.ps1 -SkipNativeBuild -NoRestore`: PASS
+  - `tools/tracking_parser_fuzz_gate.ps1`: PASS (after one transient file-lock retry)
+- dashboard remains:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+
 ## 2026-03-06 - Tracking receive watchdog/rebind + WPF visual refresh integration
 
 ### Summary

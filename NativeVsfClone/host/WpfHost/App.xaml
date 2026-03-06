@@ -5,12 +5,12 @@
        <FontFamily x:Key="Font.Body">Segoe UI Variable Text</FontFamily>
        <FontFamily x:Key="Font.Display">Segoe UI Variable Display</FontFamily>
 
-       <SolidColorBrush x:Key="Color.Surface" Color="#F0F4FF"/>
-       <SolidColorBrush x:Key="Color.SurfaceAlt" Color="#E8EDFF"/>
-       <SolidColorBrush x:Key="Color.Card" Color="#FAFBFF"/>
+       <SolidColorBrush x:Key="Color.Surface" Color="#F7F5FF"/>
+       <SolidColorBrush x:Key="Color.SurfaceAlt" Color="#EFEBFF"/>
+       <SolidColorBrush x:Key="Color.Card" Color="#FDFCFF"/>
        <SolidColorBrush x:Key="Color.CardStrong" Color="#FFFFFF"/>
-       <SolidColorBrush x:Key="Color.Border" Color="#E2E8F0"/>
-       <SolidColorBrush x:Key="Color.BorderStrong" Color="#CBD5E1"/>
+       <SolidColorBrush x:Key="Color.Border" Color="#ECE8F5"/>
+       <SolidColorBrush x:Key="Color.BorderStrong" Color="#D8D0EE"/>
        <SolidColorBrush x:Key="Color.Text" Color="#0F172A"/>
        <SolidColorBrush x:Key="Color.TextMuted" Color="#475569"/>
        <SolidColorBrush x:Key="Color.TextSubtle" Color="#94A3B8"/>
@@ -21,13 +21,13 @@
        <SolidColorBrush x:Key="Color.Success" Color="#059669"/>
        <SolidColorBrush x:Key="Color.Warning" Color="#D97706"/>
        <SolidColorBrush x:Key="Color.Error" Color="#DC2626"/>
-       <SolidColorBrush x:Key="Color.TabBg" Color="#F5F3FF"/>
+       <SolidColorBrush x:Key="Color.TabBg" Color="#F0EBFF"/>
        <SolidColorBrush x:Key="Color.TabActive" Color="#FFFFFF"/>
-       <SolidColorBrush x:Key="Color.NavRailBg" Color="#EEF0FF"/>
-       <SolidColorBrush x:Key="Color.NavItemBg" Color="#F5F7FF"/>
-       <SolidColorBrush x:Key="Color.NavItemActiveBg" Color="#FFFFFF"/>
-       <SolidColorBrush x:Key="Color.NavItemText" Color="#3B4668"/>
-       <SolidColorBrush x:Key="Color.NavItemActiveText" Color="#0F172A"/>
+       <SolidColorBrush x:Key="Color.NavRailBg" Color="#1C1040"/>
+       <SolidColorBrush x:Key="Color.NavItemBg" Color="#2D1F5E"/>
+       <SolidColorBrush x:Key="Color.NavItemActiveBg" Color="#5B21B6"/>
+       <SolidColorBrush x:Key="Color.NavItemText" Color="#A899D4"/>
+       <SolidColorBrush x:Key="Color.NavItemActiveText" Color="#F3F0FF"/>
        <SolidColorBrush x:Key="Color.OnboardingBarBg" Color="#EDE9FE"/>
        <SolidColorBrush x:Key="Color.OnboardingBarBorder" Color="#DDD6FE"/>
        <SolidColorBrush x:Key="Color.OnboardingBarTitle" Color="#2E1065"/>
@@ -67,8 +67,8 @@
        <SolidColorBrush x:Key="Color.DebugOverlayBg" Color="#EEFFFFFF"/>
        <SolidColorBrush x:Key="Color.DebugOverlayBorder" Color="#47627E"/>
        <SolidColorBrush x:Key="Color.DebugOverlayText" Color="#1A2530"/>
-       <SolidColorBrush x:Key="Color.StepComplete" Color="#059669"/>
-       <SolidColorBrush x:Key="Color.StepPending" Color="#94A3B8"/>
+       <SolidColorBrush x:Key="Color.StepComplete" Color="#10B981"/>
+       <SolidColorBrush x:Key="Color.StepPending" Color="#7C6FA8"/>
        <SolidColorBrush x:Key="Color.PanelBase" Color="#F3F7FD"/>
        <SolidColorBrush x:Key="Color.PanelElevated" Color="#FFFFFF"/>
        <SolidColorBrush x:Key="Color.PanelInset" Color="#EDF3FA"/>
@@ -79,6 +79,11 @@
        <SolidColorBrush x:Key="Color.LogAreaBorder" Color="#E2E8F0"/>
 
        <LinearGradientBrush x:Key="Brush.PrimaryGradient" StartPoint="0,0" EndPoint="1,1">
+           <GradientStop Color="#5B21B6" Offset="0"/>
+           <GradientStop Color="#7C3AED" Offset="1"/>
+       </LinearGradientBrush>
+
+       <LinearGradientBrush x:Key="Brush.NavActive" StartPoint="0,0" EndPoint="1,0">
            <GradientStop Color="#5B21B6" Offset="0"/>
            <GradientStop Color="#7C3AED" Offset="1"/>
        </LinearGradientBrush>
@@ -95,35 +100,42 @@
        </Style>
 
        <Style TargetType="GroupBox">
-           <Setter Property="Margin" Value="0,0,0,12"/>
+           <Setter Property="Margin" Value="0,0,0,16"/>
            <Setter Property="Padding" Value="0"/>
            <Setter Property="BorderThickness" Value="0"/>
            <Setter Property="FontFamily" Value="{StaticResource Font.Display}"/>
            <Setter Property="Template">
                <Setter.Value>
                    <ControlTemplate TargetType="GroupBox">
-                       <Border CornerRadius="12"
-                               Background="{DynamicResource Color.CardStrong}"
+                       <Border CornerRadius="16"
                                BorderBrush="{DynamicResource Color.Border}"
-                               BorderThickness="1">
-                           <Grid>
-                               <Border Width="4"
-                                       HorizontalAlignment="Left"
-                                       CornerRadius="12,0,0,12"
-                                       Background="{DynamicResource Brush.PrimaryGradient}"/>
-                               <StackPanel Margin="18,0,0,0">
-                                   <Border Padding="10,12,12,10"
-                                           BorderBrush="{DynamicResource Color.Border}"
-                                           BorderThickness="0,0,0,1">
-                                       <ContentPresenter ContentSource="Header"
-                                                         RecognizesAccessKey="True"
-                                                         TextBlock.FontWeight="SemiBold"
-                                                         TextBlock.FontSize="13"
-                                                         TextBlock.Foreground="{DynamicResource Color.Text}"/>
-                                   </Border>
-                                   <ContentPresenter Margin="10,10,12,12"/>
-                               </StackPanel>
-                           </Grid>
+                               BorderThickness="1"
+                               Background="{DynamicResource Color.CardStrong}">
+                           <Border.Effect>
+                               <DropShadowEffect Color="#7C3AED"
+                                                 BlurRadius="24"
+                                                 ShadowDepth="0"
+                                                 Opacity="0.07"/>
+                           </Border.Effect>
+                           <StackPanel>
+                               <Border CornerRadius="16,16,0,0"
+                                       Padding="16,12,16,12"
+                                       BorderBrush="{DynamicResource Color.Border}"
+                                       BorderThickness="0,0,0,1">
+                                   <Border.Background>
+                                       <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                           <GradientStop Color="#F5F0FF" Offset="0"/>
+                                           <GradientStop Color="#FDFCFF" Offset="1"/>
+                                       </LinearGradientBrush>
+                                   </Border.Background>
+                                   <ContentPresenter ContentSource="Header"
+                                                     RecognizesAccessKey="True"
+                                                     TextBlock.FontWeight="SemiBold"
+                                                     TextBlock.FontSize="13"
+                                                     TextBlock.Foreground="{DynamicResource Color.Text}"/>
+                               </Border>
+                               <ContentPresenter Margin="16,14,16,16"/>
+                           </StackPanel>
                        </Border>
                    </ControlTemplate>
                </Setter.Value>
@@ -134,25 +146,33 @@
            <Setter Property="Background" Value="{StaticResource Brush.PrimaryGradient}"/>
            <Setter Property="Foreground" Value="#FFFFFF"/>
            <Setter Property="BorderThickness" Value="0"/>
-           <Setter Property="Padding" Value="12,8"/>
+           <Setter Property="Padding" Value="14,9"/>
            <Setter Property="FontWeight" Value="SemiBold"/>
-           <Setter Property="MinHeight" Value="36"/>
+           <Setter Property="MinHeight" Value="38"/>
            <Setter Property="Cursor" Value="Hand"/>
            <Setter Property="Template">
                <Setter.Value>
                    <ControlTemplate TargetType="Button">
                        <Border x:Name="Root"
                                Background="{TemplateBinding Background}"
-                               CornerRadius="8"
+                               CornerRadius="10"
                                Padding="{TemplateBinding Padding}">
                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                        </Border>
                        <ControlTemplate.Triggers>
                            <Trigger Property="IsMouseOver" Value="True">
-                               <Setter TargetName="Root" Property="Opacity" Value="0.85"/>
+                               <Setter TargetName="Root" Property="Opacity" Value="0.92"/>
+                               <Setter TargetName="Root" Property="Effect">
+                                   <Setter.Value>
+                                       <DropShadowEffect Color="#6D28D9"
+                                                         BlurRadius="18"
+                                                         ShadowDepth="0"
+                                                         Opacity="0.45"/>
+                                   </Setter.Value>
+                               </Setter>
                            </Trigger>
                            <Trigger Property="IsPressed" Value="True">
-                               <Setter TargetName="Root" Property="Opacity" Value="0.70"/>
+                               <Setter TargetName="Root" Property="Opacity" Value="0.75"/>
                            </Trigger>
                            <Trigger Property="IsKeyboardFocused" Value="True">
                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Color.FocusRing}"/>
@@ -179,7 +199,7 @@
                                Background="{TemplateBinding Background}"
                                BorderBrush="{DynamicResource Color.Primary}"
                                BorderThickness="1.5"
-                               CornerRadius="8"
+                               CornerRadius="10"
                                Padding="{TemplateBinding Padding}">
                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                        </Border>
@@ -277,7 +297,7 @@
                                Background="{TemplateBinding Background}"
                                BorderBrush="{TemplateBinding BorderBrush}"
                                BorderThickness="{TemplateBinding BorderThickness}"
-                               CornerRadius="8">
+                               CornerRadius="10">
                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
                        </Border>
                        <ControlTemplate.Triggers>
@@ -405,18 +425,20 @@
        </Style>
 
        <Style TargetType="ProgressBar">
-           <Setter Property="Foreground" Value="{StaticResource Color.Primary}"/>
            <Setter Property="Background" Value="{StaticResource Color.SurfaceAlt}"/>
-           <Setter Property="Height" Value="8"/>
+           <Setter Property="Height" Value="6"/>
            <Setter Property="Template">
                <Setter.Value>
                    <ControlTemplate TargetType="ProgressBar">
-                       <Border CornerRadius="4"
-                               Background="{TemplateBinding Background}">
-                           <Border x:Name="PART_Indicator"
-                                   CornerRadius="4"
-                                   HorizontalAlignment="Left"
-                                   Background="{TemplateBinding Foreground}"/>
+                       <Border CornerRadius="3" Background="{TemplateBinding Background}">
+                           <Border x:Name="PART_Indicator" CornerRadius="3" HorizontalAlignment="Left">
+                               <Border.Background>
+                                   <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                       <GradientStop Color="#5B21B6" Offset="0"/>
+                                       <GradientStop Color="#7C3AED" Offset="1"/>
+                                   </LinearGradientBrush>
+                               </Border.Background>
+                           </Border>
                        </Border>
                    </ControlTemplate>
                </Setter.Value>

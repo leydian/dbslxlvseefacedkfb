@@ -80,6 +80,7 @@ Report list for this week.
 - [2026-03-06_release_execution_board_20.md](./2026-03-06_release_execution_board_20.md)
 - [2026-03-06_release_execution_active_round2.md](./2026-03-06_release_execution_active_round2.md)
 - [2026-03-06_release_execution_active_round3_wpf_only_hold_and_full_blockers.md](./2026-03-06_release_execution_active_round3_wpf_only_hold_and_full_blockers.md)
+- [2026-03-06_release_execution_active_round4_unity_project_lock_and_winui_split.md](./2026-03-06_release_execution_active_round4_unity_project_lock_and_winui_split.md)
 - [2026-03-06_release_execution_recheck_winui_unity_kpi_status.md](./2026-03-06_release_execution_recheck_winui_unity_kpi_status.md)
 - [2026-03-06_release_execution_followup.md](./2026-03-06_release_execution_followup.md)
 - [2026-03-06_release_gate_recovery_vsfavatar_mediapipe_unity_preflight.md](./2026-03-06_release_gate_recovery_vsfavatar_mediapipe_unity_preflight.md)

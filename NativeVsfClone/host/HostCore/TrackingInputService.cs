@@ -784,30 +784,34 @@ public sealed class TrackingInputService : ITrackingInputService
                 {
                 parseWatch.Stop();
                 UpdateParseStageMs(parseWatch.Elapsed.TotalMilliseconds);
+                var packetSig = BuildPacketSignature(result.Buffer);
+                var packetSigShort = BuildPacketSignatureShort(result.Buffer);
                 var parseErrors = _diagnostics.ParseErrors + 1;
                 var parseThresholdExceeded = parseErrors >= (ulong)_options.ParseErrorWarnThreshold;
                 var (sourceStatus, statusMessage, lastErrorCode) = parseFailure switch
                 {
                     PacketParseFailure.ProtocolMismatchVmc => (
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded:vmc" : "udp-parse-failed:vmc",
-                        "packet parse failed (likely VMC protocol input)",
-                        "TRACKING_PROTOCOL_MISMATCH_VMC"),
+                        $"packet parse failed (likely VMC protocol input) sig={packetSig}",
+                        $"TRACKING_PROTOCOL_MISMATCH_VMC[{packetSigShort}]"),
                     PacketParseFailure.UnsupportedTypeTag => (
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded:typetag" : "udp-parse-failed:typetag",
-                        "packet parse failed (unsupported OSC type tag)",
-                        "TRACKING_OSC_TYPE_UNSUPPORTED"),
+                        $"packet parse failed (unsupported OSC type tag) sig={packetSig}",
+                        $"TRACKING_OSC_TYPE_UNSUPPORTED[{packetSigShort}]"),
                     PacketParseFailure.IfmMalformed => (
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded:ifm-malformed" : "udp-parse-failed:ifm-malformed",
-                        "packet parse failed (malformed iFacial payload)",
-                        "TRACKING_IFM_MALFORMED"),
+                        $"packet parse failed (malformed iFacial payload) sig={packetSig}",
+                        $"TRACKING_IFM_MALFORMED[{packetSigShort}]"),
                     PacketParseFailure.IfmUnsupportedVersion => (
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded:ifm-version" : "udp-parse-failed:ifm-version",
-                        "packet parse failed (unsupported iFacial interface version)",
-                        "TRACKING_IFM_UNSUPPORTED_VERSION"),
+                        $"packet parse failed (unsupported iFacial interface version) sig={packetSig}",
+                        $"TRACKING_IFM_UNSUPPORTED_VERSION[{packetSigShort}]"),
                     _ => (
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded" : "udp-parse-failed",
-                        "packet parse failed",
-                        parseThresholdExceeded ? "TRACKING_PARSE_THRESHOLD_EXCEEDED" : "TRACKING_PARSE_FAILED"),
+                        $"packet parse failed sig={packetSig}",
+                        parseThresholdExceeded
+                            ? $"TRACKING_PARSE_THRESHOLD_EXCEEDED[{packetSigShort}]"
+                            : $"TRACKING_PARSE_FAILED[{packetSigShort}]"),
                 };
                 _diagnostics = _diagnostics with
                 {
@@ -868,6 +872,45 @@ public sealed class TrackingInputService : ITrackingInputService
                 };
             }
         }
+    }
+
+    private static string BuildPacketSignature(byte[] packet)
+    {
+        if (packet.Length == 0)
+        {
+            return "empty";
+        }
+
+        var take = Math.Min(packet.Length, 16);
+        var hex = Convert.ToHexString(packet, 0, take);
+        var asciiChars = new char[Math.Min(packet.Length, 32)];
+        for (var i = 0; i < asciiChars.Length; i++)
+        {
+            var b = packet[i];
+            asciiChars[i] = b >= 32 && b <= 126 ? (char)b : '.';
+        }
+
+        return $"len={packet.Length} hex={hex} ascii={new string(asciiChars)}";
+    }
+
+    private static string BuildPacketSignatureShort(byte[] packet)
+    {
+        if (packet.Length == 0)
+        {
+            return "L0";
+        }
+
+        var takeHex = Math.Min(packet.Length, 6);
+        var hex = Convert.ToHexString(packet, 0, takeHex);
+        var takeAscii = Math.Min(packet.Length, 8);
+        Span<char> ascii = stackalloc char[takeAscii];
+        for (var i = 0; i < takeAscii; i++)
+        {
+            var b = packet[i];
+            ascii[i] = b >= 32 && b <= 126 ? (char)b : '.';
+        }
+
+        return $"L{packet.Length}-H{hex}-A{new string(ascii)}";
     }
 
     private async Task ReceiveWatchdogLoopAsync(CancellationToken token)
