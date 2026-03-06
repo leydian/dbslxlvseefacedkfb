@@ -18,7 +18,7 @@
 - `avatar`: 2 reports
 - `platform`: 2 reports
 - `session`: 2 reports
-- `tracking`: 2 reports
+- `tracking`: 3 reports
 - `webcam`: 3 reports
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
@@ -77,6 +77,7 @@
 - Newly added: review `2026-03-06_shader_family_backend_split_poiyomi_standard.md` for poiyomi/standard backend dispatch expansion, 5-backend pass topology execution order, pipeline resource slot extension, and gate-verified safe fallback retention.
 - Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.
 - Newly added: review `2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md` for HybridAuto default routing, no-input watchdog diagnostics, and per-source packet-age/hint surfacing in WPF/WinUI.
+- Newly added: review `2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md` for webcam sidecar output/publish packaging guarantees, deterministic sidecar path resolution policy, and config-invalid operator hint hardening.
 - Newly added: review `2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md` for strict tracking-contract gating (HostE2E/Fuzz/MediaPipe sanity), explicit MediaPipe Python pinning policy, and release dashboard candidate decision alignment.
 - Newly added: review `2026-03-06_tracking_strict_runtime_venv_runbook.md` for project-local venv pinning standard, strict readiness wrapper execution flow, and failure-code triage runbook.
 - Newly added: review `2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md` for strict tracking runtime activation steps, fuzz-gate TFM compatibility fix, and tracking-contract PASS verification evidence.

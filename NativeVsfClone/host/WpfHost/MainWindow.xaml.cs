@@ -2683,7 +2683,7 @@ public partial class MainWindow : Window
             "TRACKING_PARSE_THRESHOLD_EXCEEDED" => " hint=parse errors exceeded threshold",
             "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
             "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
-            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid",
+            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
             "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
             "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
             "TRACKING_NO_ACTIVE_INPUT_SOURCE" => " hint=no active input source; start iFacial send or enable webcam runtime",

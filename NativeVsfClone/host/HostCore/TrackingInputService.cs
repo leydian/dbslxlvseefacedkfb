@@ -94,6 +94,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private UpperBodySmoothingProfile _upperBodySmoothing = UpperBodySmoothingProfile.Balanced;
     private float _upperBodyAlpha = 0.35f;
     private DateTimeOffset _lastUpperBodyPacketUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastUpperBodyOscPacketUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastUpperBodyWebcamPacketUtc = DateTimeOffset.MinValue;
     private float _rawLeftShoulderPitch;
     private float _rawRightShoulderPitch;
     private float _rawLeftUpperArmPitch;
@@ -104,6 +106,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _smoothedRightUpperArmPitch;
     private bool _hasSmoothedUpperBody;
     private double _upperBodyConfidence;
+    private string _upperBodyActiveSource = "none";
     private string _upperBodyStatus = "idle";
     private string _upperBodyLastError = string.Empty;
     private int _recenterStabilizeFramesRemaining;
@@ -276,6 +279,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 UpperBodyTrackingActive = false,
                 UpperBodyConfidence = 0.0,
                 UpperBodyPacketAgeMs = int.MaxValue,
+                UpperBodyActiveSource = "none",
                 UpperBodyStatus = _upperBodyEnabled ? "stopped" : "disabled",
                 UpperBodyLastError = string.Empty,
             };
@@ -361,6 +365,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 UpperBodyTrackingActive = _upperBodyEnabled && _upperBodyConfidence >= 0.12,
                 UpperBodyConfidence = _upperBodyConfidence,
                 UpperBodyPacketAgeMs = GetPacketAgeMs(_lastUpperBodyPacketUtc),
+                UpperBodyActiveSource = ResolveUpperBodyActiveSourceLabel(),
                 UpperBodyStatus = _upperBodyStatus,
                 UpperBodyLastError = _upperBodyLastError,
             };
@@ -396,16 +401,37 @@ public sealed class TrackingInputService : ITrackingInputService
                 return false;
             }
 
-            var ageMs = GetPacketAgeMs(_lastUpperBodyPacketUtc);
+            var preferred = ResolvePreferredUpperBodySource();
+            var ageMs = preferred switch
+            {
+                TrackingRuntimeSource.Ifacial => GetPacketAgeMs(_lastUpperBodyOscPacketUtc),
+                TrackingRuntimeSource.Webcam => GetPacketAgeMs(_lastUpperBodyWebcamPacketUtc),
+                _ => int.MaxValue,
+            };
+            if (ageMs == int.MaxValue || ageMs > _options.StaleTimeoutMs)
+            {
+                // Hybrid fallback: use alternate fresh upper-body source when preferred source has no data.
+                var fallback = preferred == TrackingRuntimeSource.Ifacial ? TrackingRuntimeSource.Webcam : TrackingRuntimeSource.Ifacial;
+                var fallbackAge = fallback == TrackingRuntimeSource.Ifacial
+                    ? GetPacketAgeMs(_lastUpperBodyOscPacketUtc)
+                    : GetPacketAgeMs(_lastUpperBodyWebcamPacketUtc);
+                if (fallbackAge <= _options.StaleTimeoutMs)
+                {
+                    preferred = fallback;
+                    ageMs = fallbackAge;
+                }
+            }
+
             if (ageMs == int.MaxValue)
             {
-                pose = TrackingUpperBodyPose.Neutral(int.MaxValue, "no-webcam-upper-body");
+                _upperBodyActiveSource = "none";
+                pose = TrackingUpperBodyPose.Neutral(int.MaxValue, "no-upper-body-source");
                 return false;
             }
 
             if (ageMs > _options.StaleTimeoutMs)
             {
-                // Decay to neutral when fresh webcam upper-body input is not available.
+                // Decay to neutral when fresh upper-body input is not available.
                 _smoothedLeftShoulderPitch = Ema(_smoothedLeftShoulderPitch, 0.0f, 0.18f);
                 _smoothedRightShoulderPitch = Ema(_smoothedRightShoulderPitch, 0.0f, 0.18f);
                 _smoothedLeftUpperArmPitch = Ema(_smoothedLeftUpperArmPitch, 0.0f, 0.18f);
@@ -413,6 +439,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 var hasResidual = HasUpperBodyResidual();
                 _upperBodyStatus = hasResidual ? "stale-decay" : "stale-neutral";
                 _upperBodyConfidence = Math.Clamp(_upperBodyConfidence * 0.82, 0.0, 1.0);
+                _upperBodyActiveSource = "none";
                 pose = new TrackingUpperBodyPose(
                     hasResidual,
                     _smoothedLeftShoulderPitch,
@@ -425,6 +452,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 return hasResidual;
             }
 
+            _upperBodyActiveSource = preferred == TrackingRuntimeSource.Ifacial ? "osc" : "webcam";
+            _lastUpperBodyPacketUtc = preferred == TrackingRuntimeSource.Ifacial ? _lastUpperBodyOscPacketUtc : _lastUpperBodyWebcamPacketUtc;
             pose = new TrackingUpperBodyPose(
                 _upperBodyConfidence >= 0.12,
                 _smoothedLeftShoulderPitch,
@@ -476,6 +505,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 UpperBodyTrackingActive = _upperBodyEnabled && _upperBodyConfidence >= 0.12,
                 UpperBodyConfidence = _upperBodyConfidence,
                 UpperBodyPacketAgeMs = GetPacketAgeMs(_lastUpperBodyPacketUtc),
+                UpperBodyActiveSource = ResolveUpperBodyActiveSourceLabel(),
                 UpperBodyStatus = _upperBodyStatus,
                 UpperBodyLastError = _upperBodyLastError,
             };
@@ -527,6 +557,8 @@ public sealed class TrackingInputService : ITrackingInputService
         _lastIfacialPacketUtc = DateTimeOffset.MinValue;
         _lastWebcamPacketUtc = DateTimeOffset.MinValue;
         _lastUpperBodyPacketUtc = DateTimeOffset.MinValue;
+        _lastUpperBodyOscPacketUtc = DateTimeOffset.MinValue;
+        _lastUpperBodyWebcamPacketUtc = DateTimeOffset.MinValue;
         _rawLeftShoulderPitch = 0.0f;
         _rawRightShoulderPitch = 0.0f;
         _rawLeftUpperArmPitch = 0.0f;
@@ -537,6 +569,7 @@ public sealed class TrackingInputService : ITrackingInputService
         _smoothedRightUpperArmPitch = 0.0f;
         _hasSmoothedUpperBody = false;
         _upperBodyConfidence = 0.0;
+        _upperBodyActiveSource = "none";
         _upperBodyStatus = _upperBodyEnabled ? "initializing" : "disabled";
         _upperBodyLastError = string.Empty;
         _activeRuntimeSource = TrackingRuntimeSource.None;
@@ -990,6 +1023,26 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private void UpdateUpperBodyPoseFromPacket(MediapipeFramePacket packet)
     {
+        var packetUtc = _lastWebcamPacketUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _lastWebcamPacketUtc;
+        UpdateUpperBodyPoseFromValues(
+            packet.LeftShoulderPitchDeg,
+            packet.RightShoulderPitchDeg,
+            packet.LeftUpperArmPitchDeg,
+            packet.RightUpperArmPitchDeg,
+            packet.UpperBodyConfidence,
+            packetUtc,
+            "webcam");
+    }
+
+    private void UpdateUpperBodyPoseFromValues(
+        float leftShoulderPitchDeg,
+        float rightShoulderPitchDeg,
+        float leftUpperArmPitchDeg,
+        float rightUpperArmPitchDeg,
+        float confidence,
+        DateTimeOffset packetUtc,
+        string sourceLabel)
+    {
         if (!_upperBodyEnabled)
         {
             _upperBodyStatus = "disabled";
@@ -997,10 +1050,10 @@ public sealed class TrackingInputService : ITrackingInputService
             return;
         }
 
-        _rawLeftShoulderPitch = ClampShoulderPitch(packet.LeftShoulderPitchDeg);
-        _rawRightShoulderPitch = ClampShoulderPitch(packet.RightShoulderPitchDeg);
-        _rawLeftUpperArmPitch = ClampUpperArmPitch(packet.LeftUpperArmPitchDeg);
-        _rawRightUpperArmPitch = ClampUpperArmPitch(packet.RightUpperArmPitchDeg);
+        _rawLeftShoulderPitch = ClampShoulderPitch(leftShoulderPitchDeg);
+        _rawRightShoulderPitch = ClampShoulderPitch(rightShoulderPitchDeg);
+        _rawLeftUpperArmPitch = ClampUpperArmPitch(leftUpperArmPitchDeg);
+        _rawRightUpperArmPitch = ClampUpperArmPitch(rightUpperArmPitchDeg);
 
         if (!_hasSmoothedUpperBody)
         {
@@ -1023,8 +1076,17 @@ public sealed class TrackingInputService : ITrackingInputService
         _smoothedLeftUpperArmPitch = ClampUpperArmPitch(_smoothedLeftUpperArmPitch * _upperBodyStrength);
         _smoothedRightUpperArmPitch = ClampUpperArmPitch(_smoothedRightUpperArmPitch * _upperBodyStrength);
 
-        _upperBodyConfidence = Math.Clamp(packet.UpperBodyConfidence, 0.0f, 1.0f);
-        _lastUpperBodyPacketUtc = _lastWebcamPacketUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _lastWebcamPacketUtc;
+        _upperBodyConfidence = Math.Clamp(confidence, 0.0f, 1.0f);
+        if (string.Equals(sourceLabel, "osc", StringComparison.Ordinal))
+        {
+            _lastUpperBodyOscPacketUtc = packetUtc;
+        }
+        else
+        {
+            _lastUpperBodyWebcamPacketUtc = packetUtc;
+        }
+        _lastUpperBodyPacketUtc = packetUtc;
+        _upperBodyActiveSource = sourceLabel;
         _upperBodyStatus = _upperBodyConfidence >= 0.12 ? "active" : "low-confidence";
         _upperBodyLastError = string.Empty;
     }
@@ -1068,28 +1130,14 @@ public sealed class TrackingInputService : ITrackingInputService
             pythonExe = "python";
         }
 
-        var scriptPath = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT");
+        var scriptPath = ResolveMediapipeSidecarScriptPath(out var searchedPaths);
         if (string.IsNullOrWhiteSpace(scriptPath))
-        {
-            var cwdCandidate = Path.Combine(Environment.CurrentDirectory, "tools", "mediapipe_webcam_sidecar.py");
-            if (File.Exists(cwdCandidate))
-            {
-                scriptPath = cwdCandidate;
-            }
-            else
-            {
-                var baseDirCandidate = Path.Combine(AppContext.BaseDirectory, "tools", "mediapipe_webcam_sidecar.py");
-                scriptPath = baseDirCandidate;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
         {
             return new MediapipeSidecarLaunchConfig(
                 false,
                 string.Empty,
                 string.Empty,
-                "mediapipe sidecar script not found. set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT to tools/mediapipe_webcam_sidecar.py");
+                $"mediapipe_webcam_sidecar.py not found. set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT to an absolute path. searched=[{string.Join(", ", searchedPaths)}]");
         }
 
         var cameraArg = string.IsNullOrWhiteSpace(_options.CameraDeviceKey) ? "0" : _options.CameraDeviceKey.Trim();
@@ -1097,6 +1145,31 @@ public sealed class TrackingInputService : ITrackingInputService
             CultureInfo.InvariantCulture,
             $"\"{scriptPath}\" --camera \"{cameraArg}\" --fps {_options.InferenceFpsCap}");
         return new MediapipeSidecarLaunchConfig(true, pythonExe, args, string.Empty);
+    }
+
+    private static string ResolveMediapipeSidecarScriptPath(out IReadOnlyList<string> searchedPaths)
+    {
+        var candidates = new List<string>(capacity: 4);
+        var envPath = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT");
+        if (!string.IsNullOrWhiteSpace(envPath))
+        {
+            candidates.Add(envPath.Trim());
+        }
+
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "tools", "mediapipe_webcam_sidecar.py"));
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "mediapipe_webcam_sidecar.py"));
+        candidates.Add(Path.Combine(Environment.CurrentDirectory, "tools", "mediapipe_webcam_sidecar.py"));
+        searchedPaths = candidates;
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return string.Empty;
     }
 
     private Process? StartMediapipeSidecar(MediapipeSidecarLaunchConfig launch)
@@ -1640,6 +1713,24 @@ public sealed class TrackingInputService : ITrackingInputService
             return true;
         }
 
+        if (tail is "upperbody" or "armspitch")
+        {
+            if (message.Values.Count < 4 ||
+                message.Values[0].Kind != OscValueKind.Float ||
+                message.Values[1].Kind != OscValueKind.Float ||
+                message.Values[2].Kind != OscValueKind.Float ||
+                message.Values[3].Kind != OscValueKind.Float)
+            {
+                return false;
+            }
+
+            updates.Add(new KeyValuePair<string, float>("leftshoulderpitch", message.Values[0].FloatValue));
+            updates.Add(new KeyValuePair<string, float>("rightshoulderpitch", message.Values[1].FloatValue));
+            updates.Add(new KeyValuePair<string, float>("leftupperarmpitch", message.Values[2].FloatValue));
+            updates.Add(new KeyValuePair<string, float>("rightupperarmpitch", message.Values[3].FloatValue));
+            return true;
+        }
+
         return false;
     }
 
@@ -1683,6 +1774,11 @@ public sealed class TrackingInputService : ITrackingInputService
             return false;
         }
 
+        if (IsUpperBodyChannel(normalized))
+        {
+            return ApplyUpperBodyMappedValue(normalized, value);
+        }
+
         _expressionCache[normalized] = value;
         switch (normalized)
         {
@@ -1723,6 +1819,44 @@ public sealed class TrackingInputService : ITrackingInputService
                 _expressionCache[normalized] = ApplyAdaptiveCalibration(normalized, Clamp01(value));
                 return true;
         }
+    }
+
+    private bool ApplyUpperBodyMappedValue(string normalizedKey, float value)
+    {
+        switch (normalizedKey)
+        {
+            case "leftshoulderpitch":
+            case "lshoulderpitch":
+                _rawLeftShoulderPitch = value;
+                break;
+            case "rightshoulderpitch":
+            case "rshoulderpitch":
+                _rawRightShoulderPitch = value;
+                break;
+            case "leftupperarmpitch":
+            case "lupperarmpitch":
+            case "lupparmpitch":
+                _rawLeftUpperArmPitch = value;
+                break;
+            case "rightupperarmpitch":
+            case "rupperarmpitch":
+            case "rupparmpitch":
+                _rawRightUpperArmPitch = value;
+                break;
+            default:
+                return false;
+        }
+
+        var packetUtc = DateTimeOffset.UtcNow;
+        UpdateUpperBodyPoseFromValues(
+            _rawLeftShoulderPitch,
+            _rawRightShoulderPitch,
+            _rawLeftUpperArmPitch,
+            _rawRightUpperArmPitch,
+            1.0f,
+            packetUtc,
+            "osc");
+        return true;
     }
 
     private float ApplyAdaptiveCalibration(string key, float value)
@@ -2033,6 +2167,41 @@ public sealed class TrackingInputService : ITrackingInputService
         };
     }
 
+    private TrackingRuntimeSource ResolvePreferredUpperBodySource()
+    {
+        return _options.SourceType switch
+        {
+            TrackingSourceType.OscIfacial => TrackingRuntimeSource.Ifacial,
+            TrackingSourceType.WebcamMediapipe => TrackingRuntimeSource.Webcam,
+            _ => _activeRuntimeSource,
+        };
+    }
+
+    private string ResolveUpperBodyActiveSourceLabel()
+    {
+        if (!_upperBodyEnabled)
+        {
+            return "none";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_upperBodyActiveSource))
+        {
+            return _upperBodyActiveSource;
+        }
+
+        var oscAge = GetPacketAgeMs(_lastUpperBodyOscPacketUtc);
+        var webcamAge = GetPacketAgeMs(_lastUpperBodyWebcamPacketUtc);
+        if (oscAge <= _options.StaleTimeoutMs && oscAge <= webcamAge)
+        {
+            return "osc";
+        }
+        if (webcamAge <= _options.StaleTimeoutMs)
+        {
+            return "webcam";
+        }
+        return "none";
+    }
+
     private void ApplySmoothing()
     {
         if (!_hasSmoothedFrame)
@@ -2218,6 +2387,21 @@ public sealed class TrackingInputService : ITrackingInputService
             UpperBodySmoothingProfile.Stable => 0.24f,
             _ => 0.38f,
         };
+    }
+
+    private static bool IsUpperBodyChannel(string normalizedKey)
+    {
+        return normalizedKey is
+            "leftshoulderpitch" or
+            "rightshoulderpitch" or
+            "leftupperarmpitch" or
+            "rightupperarmpitch" or
+            "lshoulderpitch" or
+            "rshoulderpitch" or
+            "lupperarmpitch" or
+            "rupperarmpitch" or
+            "lupparmpitch" or
+            "rupparmpitch";
     }
 
     private bool HasUpperBodyResidual()

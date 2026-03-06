@@ -31,7 +31,7 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherQueueTimer _uiRefreshTimer;
     private readonly DispatcherQueueTimer _resizeTimer;
     private readonly DispatcherQueueTimer _renderApplyTimer;
-    private const float DragPixelsPerYawDegree = 6.0f;
+    private const float DragPixelsPerYawDegree = 3.0f;
     private const float WheelNotchFovStep = 1.0f;
     private bool _isSyncingRenderUi;
     private bool _isSyncingPresetUi;
@@ -749,7 +749,7 @@ public sealed partial class MainWindow : Window
             "TRACKING_PARSE_THRESHOLD_EXCEEDED" => " hint=parse errors exceeded threshold",
             "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
             "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
-            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid",
+            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
             "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
             "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
             "TRACKING_NO_ACTIVE_INPUT_SOURCE" => " hint=no active input source; start iFacial send or enable webcam runtime",
@@ -1352,7 +1352,7 @@ public sealed partial class MainWindow : Window
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
@@ -1555,7 +1555,7 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, active_source={tracking.ActiveSource}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, upper_active={tracking.UpperBodyTrackingActive}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, active_source={tracking.ActiveSource}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -1582,12 +1582,15 @@ public sealed partial class MainWindow : Window
             avatarSb.AppendLine($"CriticalWarningCount: {info.CriticalWarningCount}");
             avatarSb.AppendLine($"MaterialDiagCount: {info.MaterialDiagCount}");
             avatarSb.AppendLine($"MaterialModes: opaque={info.OpaqueMaterialCount}, mask={info.MaskMaterialCount}, blend={info.BlendMaterialCount}");
+            avatarSb.AppendLine($"MaterialParityMismatchCount: {info.MaterialParityMismatchCount}");
+            avatarSb.AppendLine($"TextureResolveAmbiguousCount: {info.TextureResolveAmbiguousCount}");
             avatarSb.AppendLine($"LastWarningCode: {NormalizeDiagField(info.LastWarningCode)}");
             avatarSb.AppendLine($"LastWarningSeverity: {NormalizeDiagField(info.LastWarningSeverity)}");
             avatarSb.AppendLine($"LastWarningCategory: {NormalizeDiagField(info.LastWarningCategory)}");
             avatarSb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
             avatarSb.AppendLine($"LastMaterialDiag: {info.LastMaterialDiag}");
+            avatarSb.AppendLine($"MaterialParityLastMismatch: {NormalizeDiagField(info.MaterialParityLastMismatch)}");
             avatarSb.AppendLine($"LastRenderPassSummary: {NormalizeDiagField(info.LastRenderPassSummary)}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }

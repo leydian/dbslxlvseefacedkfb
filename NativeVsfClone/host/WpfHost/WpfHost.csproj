@@ -13,6 +13,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HostCore\HostCore.csproj" />
+    <None Include="..\..\tools\mediapipe_webcam_sidecar.py"
+          Link="tools\mediapipe_webcam_sidecar.py"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="CopyNativeCore" AfterTargets="Build">

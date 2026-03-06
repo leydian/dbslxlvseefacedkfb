@@ -2,6 +2,47 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking webcam sidecar packaging + path resolution hardening
+
+### Summary
+
+Fixed `Start tracking failed: InvalidArgument` in webcam tracking startup when
+the MediaPipe sidecar script path could not be resolved at runtime.
+The change preserves fail-fast validation policy, while making runtime outputs
+and diagnostics deterministic.
+
+### Changed
+
+- Sidecar packaging guarantees:
+  - `host/WpfHost/WpfHost.csproj`
+  - `host/WinUiHost/WinUiHost.csproj`
+  - Added `tools/mediapipe_webcam_sidecar.py` as content with:
+    - `CopyToOutputDirectory=PreserveNewest`
+    - `CopyToPublishDirectory=PreserveNewest`
+- Sidecar path resolution hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - Added ordered resolver:
+    1. `VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT`
+    2. `AppContext.BaseDirectory/tools/mediapipe_webcam_sidecar.py`
+    3. `AppContext.BaseDirectory/mediapipe_webcam_sidecar.py`
+    4. `Environment.CurrentDirectory/tools/mediapipe_webcam_sidecar.py`
+  - Config-invalid error now includes searched paths and explicit env-var guidance.
+- Operator hint update:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `TRACKING_MEDIAPIPE_CONFIG_INVALID` hint now explicitly references
+    `mediapipe_webcam_sidecar.py` and `VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT`.
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md`
+  - updated weekly `INDEX.md` and `SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- output verification:
+  - `host/WpfHost/bin/Release/net8.0-windows10.0.19041.0/win-x64/tools/mediapipe_webcam_sidecar.py` exists
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL at existing WinUI baseline (`XamlCompiler.exe` / `MSB3073`)
+
 ## 2026-03-06 - WPF dark theme coverage and contrast fix
 
 ### Summary
