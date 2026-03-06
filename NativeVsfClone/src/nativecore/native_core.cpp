@@ -2719,8 +2719,8 @@ bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
     // Per-mesh collapse guards will reject unsafe posed output.
     if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
         if (avatar_pkg.source_ext == ".vrm") {
-            // Keep VRM-derived XAV2 on bind-pose vertices for now.
-            // Mixed per-mesh static skinning outcomes can desync face/hair/body alignment.
+            // Keep VRM-derived XAV2 on bind-pose vertices by default.
+            // Mixed per-mesh static skinning outcomes can desynchronize face/hair/body placement.
             return false;
         }
         return !avatar_pkg.skin_payloads.empty() && !avatar_pkg.skeleton_payloads.empty();
@@ -6188,6 +6188,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 const float focus_min = avatar_bmin.y + safe_extent_y * 0.42f;
                 const float focus_max = avatar_bmin.y + safe_extent_y * 0.82f;
                 focus_y = std::max(focus_min, std::min(focus_max, focus_y));
+                if (it->second.source_ext == ".vrm") {
+                    const float vrm_focus_from_cluster = robust_cy + safe_extent_y * 0.06f;
+                    focus_y = focus_y * 0.25f + vrm_focus_from_cluster * 0.75f;
+                    const float vrm_focus_min = avatar_bmin.y + safe_extent_y * 0.48f;
+                    const float vrm_focus_max = avatar_bmin.y + safe_extent_y * 0.76f;
+                    focus_y = std::max(vrm_focus_min, std::min(vrm_focus_max, focus_y));
+                }
             } else {
                 focus_y = focus_from_bounds;
             }
@@ -6254,16 +6261,20 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::uint32_t mesh_detached_outlier_skipped_count = 0U;
         std::uint32_t mesh_detached_cluster_skipped_count = 0U;
         std::uint32_t mesh_extreme_detached_cluster_skipped_count = 0U;
+        std::uint32_t mesh_vrm_origin_detached_cluster_skipped_count = 0U;
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         std::vector<std::string> detached_mesh_names;
         const bool is_xav2_avatar = it->second.source_type == AvatarSourceType::Xav2;
+        const bool is_vrm_origin_xav2 = is_xav2_avatar && it->second.source_ext == ".vrm";
         const bool skip_xav2_outlier_draws =
             is_xav2_avatar &&
             ResolveXav2OutlierDrawPolicy() == Xav2OutlierDrawPolicy::SkipDraw;
+        const bool skip_vrm_origin_bounds_excluded_draws =
+            is_vrm_origin_xav2;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
-            if (skip_xav2_outlier_draws &&
+            if ((skip_xav2_outlier_draws || skip_vrm_origin_bounds_excluded_draws) &&
                 mesh_index < preview_bounds_excluded.size() &&
                 preview_bounds_excluded[mesh_index] != 0U) {
                 ++mesh_bounds_outlier_draw_skipped_count;
@@ -6293,6 +6304,23 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 emax <= extreme_detached_cluster_size_cap;
             if (extreme_detached_cluster) {
                 ++mesh_extreme_detached_cluster_skipped_count;
+                if (detached_mesh_names.size() < 6U) {
+                    detached_mesh_names.push_back(mesh.mesh_name.empty() ? std::to_string(mesh_index) : mesh.mesh_name);
+                }
+                continue;
+            }
+            const float vrm_origin_detached_cluster_threshold =
+                std::max(1.4f, median_center_dist * 2.8f);
+            const float vrm_origin_detached_cluster_size_cap =
+                std::max(1.8f, median_extent * 3.2f);
+            const bool vrm_origin_detached_cluster =
+                is_vrm_origin_xav2 &&
+                std::isfinite(robust_dist) &&
+                robust_dist > vrm_origin_detached_cluster_threshold &&
+                std::isfinite(emax) &&
+                emax <= vrm_origin_detached_cluster_size_cap;
+            if (vrm_origin_detached_cluster) {
+                ++mesh_vrm_origin_detached_cluster_skipped_count;
                 if (detached_mesh_names.size() < 6U) {
                     detached_mesh_names.push_back(mesh.mesh_name.empty() ? std::to_string(mesh_index) : mesh.mesh_name);
                 }
@@ -6444,6 +6472,23 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED");
             }
         }
+        if (mesh_vrm_origin_detached_cluster_skipped_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED: meshes=" << mesh_vrm_origin_detached_cluster_skipped_count;
+                if (!detached_mesh_names.empty()) {
+                    warning << ", names=";
+                    for (std::size_t i = 0U; i < detached_mesh_names.size(); ++i) {
+                        if (i > 0U) {
+                            warning << "|";
+                        }
+                        warning << detached_mesh_names[i];
+                    }
+                }
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED");
+            }
+        }
         if (mesh_detached_cluster_skipped_count > 0U) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
@@ -6490,6 +6535,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             auto preview_it = g_state.avatar_preview_debug.find(handle);
             if (preview_it != g_state.avatar_preview_debug.end() && !preview_it->second.empty()) {
                 preview_it->second += ", extreme_detached_skipped=" + std::to_string(mesh_extreme_detached_cluster_skipped_count);
+            }
+        }
+        if (mesh_vrm_origin_detached_cluster_skipped_count > 0U) {
+            auto preview_it = g_state.avatar_preview_debug.find(handle);
+            if (preview_it != g_state.avatar_preview_debug.end() && !preview_it->second.empty()) {
+                preview_it->second += ", vrm_origin_detached_skipped=" + std::to_string(mesh_vrm_origin_detached_cluster_skipped_count);
             }
         }
     }

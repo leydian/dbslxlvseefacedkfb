@@ -315,6 +315,9 @@ Additional runtime hardening was applied after parity fixes to address legacy/ed
   - Safety override:
     - even in `autofit_only`, extremely detached small clusters are skipped from draw to avoid
       visible face/hair/accessory separation artifacts.
+  - VRM-origin XAV2 guard:
+    - meshes excluded by preview bounds filter are also skipped in draw to suppress persistent
+      detached floating clusters in runtime preview/output.
   - Added detached cluster filtering using robust center statistics (median-based) to suppress
     floating accessory clusters that corrupt framing.
   - Related warning codes:
@@ -322,6 +325,7 @@ Additional runtime hardening was applied after parity fixes to address legacy/ed
     - `XAV2_DETACHED_MESH_OUTLIER_SKIPPED`
     - `XAV2_DETACHED_CLUSTER_SKIPPED`
     - `XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED`
+    - `XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED`
 
 - AutoFit bust framing stability:
   - `focus_y` in `AutoFitBust` now blends bounds-derived and robust-center-derived anchors for XAV2,

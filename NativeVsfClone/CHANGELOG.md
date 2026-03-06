@@ -2,6 +2,48 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 VRM-origin detached-cluster draw hotfix + bust focus retune
+
+### Summary
+
+Applied a targeted follow-up runtime hotfix for VRM-origin XAV2 avatars that still showed detached floating face/hair clusters and unstable bust framing after the previous outlier/autofit stabilization pass.
+
+### Changed
+
+- Runtime render/autofit follow-up:
+  - `src/nativecore/native_core.cpp`
+  - VRM-origin static skinning policy rollback:
+    - `sourceExt=.vrm` path now remains bind-pose default again (`SKINNING_STATIC_DISABLED` policy retained)
+  - VRM-origin outlier draw hardening:
+    - meshes excluded by preview-bounds filter are also skipped in draw path for VRM-origin XAV2
+  - added dedicated VRM-origin detached-cluster skip gate:
+    - skip when `robust_dist > max(1.4, median_center_dist * 2.8)`
+    - and `emax <= max(1.8, median_extent * 3.2)`
+  - new warning code:
+    - `XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED`
+  - VRM-origin bust focus retune in `AutoFitBust`:
+    - stronger robust-center pull blend (`0.25/0.75`)
+    - clamp window tightened to `[0.48 * extent_y, 0.76 * extent_y]` relative to `avatar_bmin.y`
+  - preview diagnostics extended:
+    - `vrm_origin_detached_skipped`
+- Docs synchronized:
+  - `docs/formats/xav2.md`
+    - corrected VRM-origin static skinning statement back to bind-pose default
+    - added warning contract entry for `XAV2_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED`
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_xav2_vrm_origin_detached_cluster_hotfix.md`
+  - updated weekly rollups:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md` (`xav2` report count `29 -> 30`)
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- runtime deployment sync:
+  - copied `build/Release/nativecore.dll` -> `dist/wpf/nativecore.dll` after stopping `WpfHost.exe`
+  - SHA256 parity confirmed between build and dist runtime modules
+- `NativeVsfClone/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작10-2.xav2" --dump-warnings-limit=50`: PASS (`Compat: full`)
+
 ## 2026-03-06 - iFacial key-alias expansion for IFM left/right variants and prefixed channels
 
 ### Summary
