@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Diagnostics.CodeAnalysis;
 
 namespace HostCore;
@@ -720,6 +721,14 @@ public sealed class TrackingInputService : ITrackingInputService
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded:typetag" : "udp-parse-failed:typetag",
                         "packet parse failed (unsupported OSC type tag)",
                         "TRACKING_OSC_TYPE_UNSUPPORTED"),
+                    PacketParseFailure.IfmMalformed => (
+                        parseThresholdExceeded ? "udp-parse-threshold-exceeded:ifm-malformed" : "udp-parse-failed:ifm-malformed",
+                        "packet parse failed (malformed iFacial payload)",
+                        "TRACKING_IFM_MALFORMED"),
+                    PacketParseFailure.IfmUnsupportedVersion => (
+                        parseThresholdExceeded ? "udp-parse-threshold-exceeded:ifm-version" : "udp-parse-failed:ifm-version",
+                        "packet parse failed (unsupported iFacial interface version)",
+                        "TRACKING_IFM_UNSUPPORTED_VERSION"),
                     _ => (
                         parseThresholdExceeded ? "udp-parse-threshold-exceeded" : "udp-parse-failed",
                         "packet parse failed",
@@ -1679,6 +1688,10 @@ public sealed class TrackingInputService : ITrackingInputService
 
         if (!TryParseOscMessage(packet, out var message, out parseFailure))
         {
+            if (TryParseIfmPacket(packet, out updates, out formatName, out parseFailure))
+            {
+                return true;
+            }
             if (parseFailure == PacketParseFailure.Unknown && LooksLikeVmcPacket(packet))
             {
                 parseFailure = PacketParseFailure.ProtocolMismatchVmc;
@@ -1985,6 +1998,278 @@ public sealed class TrackingInputService : ITrackingInputService
 
         return address.StartsWith("/VMC/", StringComparison.OrdinalIgnoreCase) ||
                address.StartsWith("VMC/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryParseIfmPacket(
+        byte[] packet,
+        out List<KeyValuePair<string, float>> updates,
+        out string formatName,
+        out PacketParseFailure parseFailure)
+    {
+        updates = new List<KeyValuePair<string, float>>();
+        formatName = "unknown";
+        parseFailure = PacketParseFailure.Unknown;
+
+        if (packet.Length == 0)
+        {
+            parseFailure = PacketParseFailure.EmptyPacket;
+            return false;
+        }
+
+        var payload = Encoding.UTF8.GetString(packet).Trim('\0', ' ', '\r', '\n', '\t');
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            parseFailure = PacketParseFailure.IfmMalformed;
+            return false;
+        }
+
+        if (payload[0] == '{' || payload[0] == '[')
+        {
+            return TryParseIfmJsonPayload(payload, updates, out formatName, out parseFailure);
+        }
+
+        return TryParseIfmDelimitedPayload(payload, updates, out formatName, out parseFailure);
+    }
+
+    private bool TryParseIfmJsonPayload(
+        string payload,
+        List<KeyValuePair<string, float>> updates,
+        out string formatName,
+        out PacketParseFailure parseFailure)
+    {
+        formatName = "ifm-v1";
+        parseFailure = PacketParseFailure.Unknown;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                var values = doc.RootElement.EnumerateArray().ToArray();
+                if (values.Length < Arkit52Channels.CanonicalOrder.Count)
+                {
+                    parseFailure = PacketParseFailure.IfmMalformed;
+                    return false;
+                }
+
+                for (var i = 0; i < Arkit52Channels.CanonicalOrder.Count; i++)
+                {
+                    if (values[i].ValueKind != JsonValueKind.Number || !values[i].TryGetSingle(out var value))
+                    {
+                        continue;
+                    }
+
+                    AddIfmUpdate(updates, Arkit52Channels.CanonicalOrder[i], value);
+                }
+
+                if (updates.Count == 0)
+                {
+                    parseFailure = PacketParseFailure.NoMappedChannels;
+                    return false;
+                }
+
+                formatName = "ifm-v2";
+                return true;
+            }
+
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                parseFailure = PacketParseFailure.IfmMalformed;
+                return false;
+            }
+
+            var root = doc.RootElement;
+            var version = ExtractIfmVersion(root);
+            if (version > 2)
+            {
+                parseFailure = PacketParseFailure.IfmUnsupportedVersion;
+                return false;
+            }
+
+            formatName = version == 2 ? "ifm-v2" : "ifm-v1";
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (prop.Value.ValueKind == JsonValueKind.Number && prop.Value.TryGetSingle(out var value))
+                {
+                    AddIfmUpdate(updates, prop.Name, value);
+                    continue;
+                }
+
+                if (prop.Value.ValueKind == JsonValueKind.Object &&
+                    prop.Name.Equals("blendshapes", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var shape in prop.Value.EnumerateObject())
+                    {
+                        if (shape.Value.ValueKind != JsonValueKind.Number || !shape.Value.TryGetSingle(out var shapeValue))
+                        {
+                            continue;
+                        }
+
+                        AddIfmUpdate(updates, shape.Name, shapeValue);
+                    }
+                }
+            }
+
+            if (updates.Count == 0)
+            {
+                parseFailure = PacketParseFailure.NoMappedChannels;
+                return false;
+            }
+            return true;
+        }
+        catch (JsonException)
+        {
+            parseFailure = PacketParseFailure.IfmMalformed;
+            return false;
+        }
+    }
+
+    private bool TryParseIfmDelimitedPayload(
+        string payload,
+        List<KeyValuePair<string, float>> updates,
+        out string formatName,
+        out PacketParseFailure parseFailure)
+    {
+        formatName = "ifm-v1";
+        parseFailure = PacketParseFailure.Unknown;
+
+        var matchedPair = false;
+        var ifmVersion = ExtractIfmVersion(payload);
+        if (ifmVersion > 2)
+        {
+            parseFailure = PacketParseFailure.IfmUnsupportedVersion;
+            return false;
+        }
+
+        foreach (Match match in IfmDelimitedPairRegex.Matches(payload))
+        {
+            var key = match.Groups[1].Value;
+            if (key.Equals("version", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!float.TryParse(match.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            {
+                continue;
+            }
+
+            matchedPair = true;
+            AddIfmUpdate(updates, key, value);
+        }
+
+        if (!matchedPair)
+        {
+            var tokens = payload.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i + 1 < tokens.Length; i += 2)
+            {
+                if (!float.TryParse(tokens[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+                {
+                    continue;
+                }
+
+                if (tokens[i].Equals("version", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                matchedPair = true;
+                AddIfmUpdate(updates, tokens[i], value);
+            }
+        }
+
+        if (ifmVersion == 2)
+        {
+            formatName = "ifm-v2";
+        }
+
+        if (updates.Count > 0)
+        {
+            return true;
+        }
+
+        parseFailure = matchedPair ? PacketParseFailure.NoMappedChannels : PacketParseFailure.IfmMalformed;
+        return false;
+    }
+
+    private static int ExtractIfmVersion(string payload)
+    {
+        var versionMatch = IfmVersionRegex.Match(payload);
+        if (!versionMatch.Success)
+        {
+            return 1;
+        }
+
+        return int.TryParse(versionMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var version)
+            ? version
+            : 1;
+    }
+
+    private static int ExtractIfmVersion(JsonElement root)
+    {
+        if (!root.TryGetProperty("version", out var element))
+        {
+            return 1;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var versionNumber))
+        {
+            return versionNumber;
+        }
+
+        if (element.ValueKind == JsonValueKind.String &&
+            int.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out versionNumber))
+        {
+            return versionNumber;
+        }
+
+        return 1;
+    }
+
+    private static bool AddIfmUpdate(List<KeyValuePair<string, float>> updates, string rawKey, float value)
+    {
+        if (!TryNormalizeIfmKey(rawKey, out var normalized))
+        {
+            return false;
+        }
+
+        updates.Add(new KeyValuePair<string, float>(normalized, value));
+        return true;
+    }
+
+    private static bool TryNormalizeIfmKey(string rawKey, [NotNullWhen(true)] out string? normalizedKey)
+    {
+        normalizedKey = null;
+        var normalized = NormalizeKey(rawKey);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        normalizedKey = normalized switch
+        {
+            "blinkl" or "blinkleft" or "eyecloseleft" => "eyeblinkleft",
+            "blinkr" or "blinkright" or "eyecloseright" => "eyeblinkright",
+            "mouthopen" or "visemeaa" or "aa" => "jawopen",
+            "headrotx" or "headrotationx" or "rotationx" => "headyaw",
+            "headroty" or "headrotationy" or "rotationy" => "headpitch",
+            "headrotz" or "headrotationz" or "rotationz" => "headroll",
+            "leftshoulder" => "leftshoulderpitch",
+            "rightshoulder" => "rightshoulderpitch",
+            "leftupperarm" => "leftupperarmpitch",
+            "rightupperarm" => "rightupperarmpitch",
+            _ => normalized,
+        };
+
+        if (Arkit52Channels.NormalizedSet.Contains(normalizedKey) ||
+            normalizedKey is "headyaw" or "headpitch" or "headroll" or "headposx" or "headposy" or "headposz" or
+                "leftshoulderpitch" or "rightshoulderpitch" or "leftupperarmpitch" or "rightupperarmpitch")
+        {
+            return true;
+        }
+
+        normalizedKey = null;
+        return false;
     }
 
     private bool TryExtractFormatA(OscMessage message, List<KeyValuePair<string, float>> updates)
@@ -3161,6 +3446,13 @@ public sealed class TrackingInputService : ITrackingInputService
         float SteadyAlpha,
         float MinDenominator);
 
+    private static readonly Regex IfmDelimitedPairRegex = new(
+        @"(?i)([A-Za-z][A-Za-z0-9_]{1,63})\s*[:=]\s*(-?\d+(?:\.\d+)?)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex IfmVersionRegex = new(
+        @"(?i)\bversion\s*[:=]\s*(\d+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);
     private readonly record struct OscValue(OscValueKind Kind, float FloatValue, string StringValue);
     private enum TrackingRuntimeSource
@@ -3184,5 +3476,7 @@ public sealed class TrackingInputService : ITrackingInputService
         UnsupportedTypeTag = 3,
         ProtocolMismatchVmc = 4,
         NoMappedChannels = 5,
+        IfmMalformed = 6,
+        IfmUnsupportedVersion = 7,
     }
 }

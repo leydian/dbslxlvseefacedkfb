@@ -17,6 +17,8 @@ public static class TrackingErrorHintCatalog
             "TRACKING_PARSE_FAILED" => " hint=packet parse failed; verify iFacialMocap send mode and port",
             "TRACKING_PROTOCOL_MISMATCH_VMC" => " hint=received VMC packets; switch sender to iFacialMocap OSC mode",
             "TRACKING_OSC_TYPE_UNSUPPORTED" => " hint=OSC type tag unsupported; disable non-iFacial stream or VMC extensions",
+            "TRACKING_IFM_MALFORMED" => " hint=malformed iFacial packet; try iFacial interface v1/v2 and disable non-OSC relay",
+            "TRACKING_IFM_UNSUPPORTED_VERSION" => " hint=unsupported iFacial interface version; switch to v1 or v2",
             "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
             "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
             "TRACKING_SOURCE_SWITCH_THRASH" => " hint=source switching too frequently; stabilize network/light or lock source temporarily",

@@ -62,3 +62,58 @@ File: `host/HostCore/TrackingErrorHintCatalog.cs`
 - Faster diagnosis of iFacial stream incompatibility cases.
 - Reduced false-negative parse failures in mixed OSC setups.
 - Clear in-app direction to correct sender mode/stream configuration without deep log forensics.
+
+---
+
+## Follow-up (2026-03-06): IFM v1/v2 Compatibility Fallback
+
+### Why this follow-up was needed
+- In field logs, `source_status=udp-parse-failed`, `format=unknown`, and `TRACKING_PARSE_FAILED` were observed while iFacialMocap was confirmed active and network reachability was otherwise healthy.
+- Comparative runtime behavior showed VSeeFace receiving from iFacialMocap successfully in IFM mode, indicating a payload-shape compatibility gap rather than a pure network/bind issue.
+
+### What was implemented
+File: `host/HostCore/TrackingInputService.cs`
+
+1) IFM parse fallback in `TryParsePacket(...)`
+- Existing OSC-first behavior is preserved.
+- When `TryParseOscMessage(...)` fails, parser now attempts IFM decoding before returning a hard parse failure.
+
+2) IFM payload support (v1 + v2)
+- Added fallback parser paths for:
+  - JSON object payloads (including nested `blendshapes` object),
+  - JSON array payloads (mapped by `Arkit52Channels.CanonicalOrder`),
+  - delimited textual key/value payloads (`key=value`, `key:value`, CSV key/value pairs).
+- Runtime format labeling extended with:
+  - `ifm-v1`
+  - `ifm-v2`
+
+3) IFM key normalization and alias mapping
+- Added canonicalization for common IFM aliases:
+  - `blinkl` / `blinkleft` -> `eyeblinkleft`
+  - `blinkr` / `blinkright` -> `eyeblinkright`
+  - `mouthopen` / `visemeaa` / `aa` -> `jawopen`
+  - `headrotation*` aliases -> `headyaw/headpitch/headroll`
+- Mapping is constrained to known ARKit channels + supported pose channels to avoid accidental noise ingestion.
+
+4) New IFM-specific parse diagnostics
+- Added parse-failure categories:
+  - `IfmMalformed`
+  - `IfmUnsupportedVersion`
+- Receive-loop status/error mappings added:
+  - `udp-parse-failed:ifm-malformed` -> `TRACKING_IFM_MALFORMED`
+  - `udp-parse-failed:ifm-version` -> `TRACKING_IFM_UNSUPPORTED_VERSION`
+
+5) UI-facing hint enrichment
+File: `host/HostCore/TrackingErrorHintCatalog.cs`
+- Added explicit remediation hints for:
+  - `TRACKING_IFM_MALFORMED`
+  - `TRACKING_IFM_UNSUPPORTED_VERSION`
+
+### Compatibility and risk notes
+- OSC behavior is intentionally left intact; IFM is additive fallback, not replacement.
+- VMC mismatch detection (`TRACKING_PROTOCOL_MISMATCH_VMC`) remains unchanged.
+- No public API contract changes were introduced for host UI; diagnostics surface through existing fields.
+
+### Verification (follow-up slice)
+- `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`
+- Result: `0 warnings`, `0 errors`.
