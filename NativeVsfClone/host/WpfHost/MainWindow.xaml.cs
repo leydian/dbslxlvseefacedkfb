@@ -3154,6 +3154,7 @@ public partial class MainWindow : Window
         {
             ControlsColumn.Width = new GridLength(0.0);
             SplitterColumn.Width = new GridLength(0.0);
+            ControlPanelFrame.Visibility = Visibility.Collapsed;
             ControlPanelScrollViewer.Visibility = Visibility.Collapsed;
             LeftRailPanel.Visibility = Visibility.Collapsed;
             MainGridSplitter.Visibility = Visibility.Collapsed;
@@ -3166,8 +3167,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        ControlsColumn.Width = new GridLength(680.0);
+        ControlsColumn.Width = new GridLength(640.0);
         SplitterColumn.Width = new GridLength(14.0);
+        ControlPanelFrame.Visibility = Visibility.Visible;
         ControlPanelScrollViewer.Visibility = Visibility.Visible;
         LeftRailPanel.Visibility = Visibility.Visible;
         MainGridSplitter.Visibility = Visibility.Visible;

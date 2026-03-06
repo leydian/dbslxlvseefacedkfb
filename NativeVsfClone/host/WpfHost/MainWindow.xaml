@@ -4,12 +4,25 @@
         xmlns:local="clr-namespace:WpfHost"
         Title="VsfClone Host (WPF)" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
     <Window.Resources>
+        <LinearGradientBrush x:Key="Brush.AppBackdrop" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#F6FAFF" Offset="0.0"/>
+            <GradientStop Color="#EAF2FB" Offset="0.55"/>
+            <GradientStop Color="#E4EDF8" Offset="1.0"/>
+        </LinearGradientBrush>
+
+        <Style x:Key="SectionCardStyle" TargetType="GroupBox" BasedOn="{StaticResource {x:Type GroupBox}}">
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Color.BorderStrong}"/>
+            <Setter Property="Background" Value="{DynamicResource Color.CardStrong}"/>
+        </Style>
+
         <Style x:Key="NavRailButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource Color.NavItemBg}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource Color.Border}"/>
             <Setter Property="Foreground" Value="{DynamicResource Color.NavItemText}"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Padding" Value="11,7"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
             <Setter Property="MinWidth" Value="124"/>
             <Style.Triggers>
@@ -18,17 +31,18 @@
                     <Setter Property="BorderThickness" Value="2"/>
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Opacity" Value="0.95"/>
+                    <Setter Property="Opacity" Value="0.96"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
     </Window.Resources>
     <Grid Margin="14">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="ControlsColumn" Width="680" />
+            <ColumnDefinition x:Name="ControlsColumn" Width="640" />
             <ColumnDefinition x:Name="SplitterColumn" Width="14" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
+        <Border Grid.ColumnSpan="3" Background="{StaticResource Brush.AppBackdrop}" CornerRadius="12" />
 
         <Grid Grid.Column="0">
             <Grid.ColumnDefinitions>
@@ -46,7 +60,13 @@
                     Padding="10">
                 <StackPanel>
                     <TextBlock Text="작업공간" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
-                    <TextBlock Text="빠른 제어" Margin="0,4,0,12" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="빠른 제어" Margin="0,4,0,8" FontSize="18" FontWeight="SemiBold"/>
+                    <Border Background="{DynamicResource Color.CardStrong}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="권장 흐름" FontWeight="SemiBold" FontSize="12"/>
+                            <TextBlock Text="세션 -> 아바타 -> 출력" Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource Color.TextMuted}"/>
+                        </StackPanel>
+                    </Border>
                     <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="시작하기" Click="NavGettingStarted_Click" ToolTip="Ctrl+1"/>
                     <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="세션/아바타" Click="NavSessionAvatar_Click" ToolTip="Ctrl+2"/>
                     <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="렌더 설정" Click="NavRender_Click" ToolTip="Ctrl+3"/>
@@ -60,9 +80,10 @@
 
             <Border Grid.Column="1" Background="{DynamicResource Color.BorderStrong}" CornerRadius="3"/>
 
-            <ScrollViewer x:Name="ControlPanelScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <Border x:Name="ControlPanelFrame" Grid.Column="2" Background="{DynamicResource Color.Card}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="10" Padding="10">
+            <ScrollViewer x:Name="ControlPanelScrollViewer" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,0,2">
-                <GroupBox x:Name="ModeGroup" Header="화면 설정" Margin="0,0,0,8">
+                <GroupBox x:Name="ModeGroup" Style="{StaticResource SectionCardStyle}" Header="화면 설정" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="기본은 초급 보기입니다. 고급 보기를 켜면 운영/진단 메뉴가 열립니다." TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
                         <WrapPanel>
@@ -74,7 +95,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="QuickActionsGroup" Header="시작하기" Margin="0,0,0,8">
+                <GroupBox x:Name="QuickActionsGroup" Style="{StaticResource SectionCardStyle}" Header="시작하기" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="처음에는 이 3단계만 따라오면 됩니다: 세션 시작 -> 아바타 불러오기 -> 출력 시작" TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
                         <Border Background="{DynamicResource Color.OnboardingBarBg}" BorderBrush="{DynamicResource Color.OnboardingBarBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
@@ -152,7 +173,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="SessionGroup" Header="1) 세션" Margin="0,0,0,8">
+                <GroupBox x:Name="SessionGroup" Style="{StaticResource SectionCardStyle}" Header="1) 세션" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="세션 시작/종료를 제어합니다." TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
                         <WrapPanel>
@@ -162,7 +183,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="AvatarGroup" Header="2) 아바타" Margin="0,0,0,8">
+                <GroupBox x:Name="AvatarGroup" Style="{StaticResource SectionCardStyle}" Header="2) 아바타" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="아바타 파일 경로" FontWeight="SemiBold"/>
                         <DockPanel Margin="0,4,0,8">
@@ -208,7 +229,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="RenderGroup" Header="3) 화면" Margin="0,0,0,8">
+                <GroupBox x:Name="RenderGroup" Style="{StaticResource SectionCardStyle}" Header="3) 화면" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
@@ -421,7 +442,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="OutputsGroup" Header="4) 출력">
+                <GroupBox x:Name="OutputsGroup" Style="{StaticResource SectionCardStyle}" Header="4) 출력">
                     <StackPanel Margin="8">
                         <TextBlock Text="화면 출력" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
@@ -461,7 +482,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="TrackingGroup" Header="5) 트래킹 입력" Margin="0,8,0,0">
+                <GroupBox x:Name="TrackingGroup" Style="{StaticResource SectionCardStyle}" Header="5) 트래킹 입력" Margin="0,8,0,0">
                     <StackPanel Margin="8">
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
@@ -551,7 +572,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox x:Name="PlatformOpsGroup" Header="6) 운영/진단" Margin="0,8,0,0">
+                <GroupBox x:Name="PlatformOpsGroup" Style="{StaticResource SectionCardStyle}" Header="6) 운영/진단" Margin="0,8,0,0">
                     <StackPanel Margin="8">
                         <WrapPanel Margin="0,0,0,8">
                             <Button x:Name="RunPreflightButton" Content="사전 점검 실행" Click="RunPreflight_Click" Margin="0,0,8,0" MinWidth="112"/>
@@ -628,6 +649,7 @@
                 </GroupBox>
             </StackPanel>
             </ScrollViewer>
+            </Border>
         </Grid>
 
         <GridSplitter x:Name="MainGridSplitter" Grid.Column="1" Width="14" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource Color.Splitter}" />
