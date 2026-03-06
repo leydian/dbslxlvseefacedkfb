@@ -10,11 +10,9 @@ Last updated: 2026-03-06
 - public package metadata now includes repository/documentation/changelog links
 - UPM samples are now bundled under `Samples~`
 - compatibility contract expanded to gate-backed Unity LTS matrix:
-  - official (phase 1):
-    - `2021-lts` (`2021.3.18f1`)
-    - `2022-lts` (`2022.3.62f1`)
-  - candidate (phase 2 target):
-    - `2023-lts` (`2023.2.20f1`)
+  - `2021-lts` (`2021.3.18f1`)
+  - `2022-lts` (`2022.3.62f1`)
+  - `2023-lts` (`2023.2.20f1`)
 
 ## API usage status
 

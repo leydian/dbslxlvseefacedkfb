@@ -130,6 +130,16 @@ $rows += [PSCustomObject]@{
     source_file = $mediapipeSanity
 }
 
+$unityLtsGateJson = Join-Path $ReportDir "unity_xav2_lts_gate_summary.json"
+$unityLtsSummary = $null
+if (Test-Path $unityLtsGateJson) {
+    try {
+        $unityLtsSummary = Get-Content -Raw -Path $unityLtsGateJson | ConvertFrom-Json
+    } catch {
+        $unityLtsSummary = $null
+    }
+}
+
 $unityValidationSummary = Join-Path $ReportDir "unity_xav2_validation_summary.txt"
 $unityStatus = Get-KeyValueFromFile -Path $unityValidationSummary -Prefix "overall_status="
 if ([string]::IsNullOrWhiteSpace($unityStatus)) {
@@ -142,10 +152,20 @@ $rows += [PSCustomObject]@{
 }
 
 $unityLtsGate = Join-Path $ReportDir "unity_xav2_lts_gate_summary.txt"
+$unityLtsOverallLine = if ($unityLtsSummary -ne $null) { [string]$unityLtsSummary.overall } else { Get-StatusFromFile -Path $unityLtsGate -Pattern "Overall:" }
 $rows += [PSCustomObject]@{
-    track = "Unity XAV2 LTS Gate"
-    status_line = Get-StatusFromFile -Path $unityLtsGate -Pattern "Overall:"
+    track = "Unity XAV2 LTS Gate (Overall)"
+    status_line = $unityLtsOverallLine
     source_file = $unityLtsGate
+}
+if ($unityLtsSummary -ne $null -and $unityLtsSummary.line_status -ne $null) {
+    foreach ($lineRow in $unityLtsSummary.line_status) {
+        $rows += [PSCustomObject]@{
+            track = "Unity XAV2 LTS Line [$($lineRow.line)]"
+            status_line = "overall=$($lineRow.overall), validate=$($lineRow.validate), parity=$($lineRow.parity), compression=$($lineRow.compression)"
+            source_file = $unityLtsGateJson
+        }
+    }
 }
 
 $compressionGate = Join-Path $ReportDir "xav2_compression_quality_gate_summary.txt"
@@ -204,7 +224,8 @@ foreach ($r in $avatarRows) {
 }
 
 $unityPass = [string]::Equals($unityStatus, "PASS", [System.StringComparison]::OrdinalIgnoreCase)
-$unityLtsPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Unity XAV2 LTS Gate" }) | Select-Object -First 1).status_line)) -eq "PASS"
+$unityLtsState = Get-PassFailFromStatusLine -Line $unityLtsOverallLine
+$unityLtsPass = $unityLtsState -eq "PASS"
 $compressionPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Compression Quality" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $parityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Unity/Native Parity" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $trackingHostE2EPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking HostE2E" }) | Select-Object -First 1).status_line)) -eq "PASS"
@@ -212,7 +233,11 @@ $trackingFuzzPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { 
 $trackingMediapipeSanityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking Mediapipe Sanity" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $trackingContractAllPass = $trackingHostE2EPass -and $trackingFuzzPass -and $trackingMediapipeSanityPass
 
-$unityXav2AllPass = if ($unityLtsPass) { $true } else { $unityPass -and $compressionPass -and $parityPass }
+$unityXav2AllPass = switch ($unityLtsState) {
+    "PASS" { $true }
+    "FAIL" { $false }
+    default { $unityPass -and $compressionPass -and $parityPass }
+}
 $wpfUnityRequirementMet = if ($RequireUnityXav2ForWpfOnly) { $unityXav2AllPass } else { $true }
 $fullUnityRequirementMet = if ($RequireUnityXav2ForFull) { $unityXav2AllPass } else { $true }
 

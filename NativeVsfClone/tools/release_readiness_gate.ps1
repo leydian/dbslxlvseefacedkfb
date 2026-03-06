@@ -13,7 +13,7 @@ param(
     [switch]$EnableSpout2Interop,
     [switch]$EnableSpout2Strict,
     [switch]$RequireSpout2StrictContract,
-    [switch]$EnableUnityXav2LtsGate,
+    [switch]$EnableUnityXav2LtsGate = $true,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
     [switch]$RequireUnityXav2ForWpfOnly,
@@ -233,6 +233,8 @@ $lines.Add("- build/reports/unity_xav2_env_bootstrap_summary.txt")
 $lines.Add("- build/reports/mediapipe_sidecar_sanity_summary.txt")
 $lines.Add("- build/reports/spout2_interop_gate_summary.txt")
 $lines.Add("- build/reports/unity_xav2_lts_gate_summary.txt")
+$lines.Add("- build/reports/unity_xav2_lts_gate_history.csv")
+$lines.Add("- build/reports/unity_xav2_lts_kpi_summary.txt")
 $lines.Add("- build/reports/xav2_compression_quality_gate_summary.txt")
 $lines.Add("- build/reports/xav2_parity_gate_summary.txt")
 
