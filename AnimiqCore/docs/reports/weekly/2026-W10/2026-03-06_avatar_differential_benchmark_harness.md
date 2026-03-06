@@ -34,6 +34,16 @@ Added capabilities:
 - `tools/vseeface_observation_ingest.ps1`
   - ingests per-sample VSeeFace JSON rows into canonical observation file
   - emits auto-generated `rows[]` keyed by sample `id`
+- `tools/avatar_benchmark_corpus_validate.ps1`
+  - validates fixed corpus manifest (`exists/extension/duplicate-id/min-sample`)
+  - hard-fails on missing files to prevent false `P0` inflation
+- `tools/avatar_benchmark_corpus_snapshot.ps1`
+  - snapshots real local `.vrm/.miq` files into a fixed manifest
+  - emits normalized sample schema for reproducible trend runs
+- `tools/avatar_error_reduction_loop.ps1`
+  - runs `corpus_validate -> differential benchmark` in rounds
+  - emits trend summary (`round -> P0/P1/P2/PASS`)
+  - supports stop-on-`P0=0` and stop-on-consecutive-`P0=0` target
 
 ## avatar_tool Contract Extension
 
@@ -53,6 +63,8 @@ Executed:
 - `vseeface_managed_probe.ps1` -> PASS (`build/reports/vseeface_managed_probe.*`)
 - `avatar_engine_differential_benchmark.ps1` -> PASS (`build/reports/avatar_differential_benchmark_summary.*`)
 - `vseeface_observation_ingest.ps1` -> PASS (`build/reports/vseeface_observations.generated.json`)
+- `avatar_benchmark_corpus_validate.ps1` -> PASS on local fixed corpus (`MinSamples=1` validation run)
+- `avatar_error_reduction_loop.ps1` -> PASS (`RoundsRequested/Executed=5/3`, consecutive-`P0=0` target `3/3`)
 
 Observed differential result on current example set:
 
@@ -102,6 +114,10 @@ Observed differential result on current example set:
 - `build/reports/avatar_differential_error_taxonomy.json`
 - `build/reports/avatar_parity_dashboard.md`
 - `build/reports/avatar_tool_fail_test.json`
+- `build/reports/avatar_error_reduction_local/trend_summary.json`
+- `build/reports/avatar_error_reduction_local/trend_summary.txt`
+- `build/reports/avatar_error_reduction_snapshot/trend_summary.json`
+- `build/reports/avatar_error_reduction_snapshot/trend_summary.txt`
 
 ## v1.1 Expansion (Strict Parity)
 
@@ -119,6 +135,20 @@ Observed differential result on current example set:
   - Post-load quality gap -> `P1`.
   - Warning debt over threshold -> `P2`.
   - Otherwise `PASS`.
+
+## v1.2 Continuous Reduction Loop
+
+- Added fixed-corpus gate before benchmark execution:
+  - reject missing-path/unsupported-extension/duplicate-id rows,
+  - enforce minimum sample count for trend comparability (default target: 30; local smoke uses `MinSamples=1`).
+- Added corpus snapshot generator:
+  - collects real local VRM/MIQ files into a deterministic benchmark manifest (`max sample cap` + extension filter).
+- Added iterative reduction runner:
+  - executes benchmark by round,
+  - records per-round `P0/P1/P2/PASS`,
+  - optionally exits early when `P0=0` (`-StopWhenP0Zero`),
+  - optionally exits on consecutive `P0=0` streak (`-StopWhenConsecutiveP0Zero -ConsecutiveP0ZeroTarget=<N>`).
+- This prevents noisy regression signals from invalid corpus states and enables deterministic error-reduction tracking over time.
 
 ## Notes
 

@@ -43,6 +43,23 @@ function To-BoolOrNull {
     return [bool]$Value
 }
 
+function Normalize-Extensions {
+    param([string[]]$Extensions)
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($raw in $Extensions) {
+        if ($null -eq $raw) {
+            continue
+        }
+        foreach ($part in ("$raw" -split ",")) {
+            $e = $part.Trim().TrimStart(".").ToLowerInvariant()
+            if (-not [string]::IsNullOrWhiteSpace($e)) {
+                $set.Add($e) | Out-Null
+            }
+        }
+    }
+    return @($set)
+}
+
 function Increment-Map {
     param([hashtable]$Map, [string]$Key, [int]$Delta = 1)
     if ([string]::IsNullOrWhiteSpace($Key)) {
@@ -75,6 +92,11 @@ if (-not (Test-Path $ManifestPath)) {
 }
 if (-not (Test-Path $AvatarToolPath)) {
     throw "AvatarToolPath not found: $AvatarToolPath"
+}
+
+$SupportedExtensions = Normalize-Extensions -Extensions $SupportedExtensions
+if ($SupportedExtensions.Count -eq 0) {
+    throw "SupportedExtensions must not be empty"
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
