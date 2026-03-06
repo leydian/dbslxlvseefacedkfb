@@ -308,7 +308,10 @@ Additional runtime hardening was applied after parity fixes to address legacy/ed
     (`dx_row_major` when `sourceExt=.vrm`) instead of forcing glTF path.
 
 - Outlier mesh handling consistency:
-  - Meshes excluded by preview bounds filter are now also excluded in draw phase.
+  - Meshes excluded by preview bounds filter are used for AutoFit framing stability.
+  - Draw exclusion policy is runtime-configurable via `VSFCLONE_XAV2_OUTLIER_DRAW_POLICY`:
+    - `autofit_only` (default): exclude only from AutoFit bounds/focus, keep draw.
+    - `skip_draw`: also exclude outlier meshes during draw (legacy behavior).
   - Added detached cluster filtering using robust center statistics (median-based) to suppress
     floating accessory clusters that corrupt framing.
   - Related warning codes:

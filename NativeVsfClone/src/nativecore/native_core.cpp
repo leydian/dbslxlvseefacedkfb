@@ -2583,6 +2583,34 @@ bool ShouldAutoDetectXav2SkinningConvention() {
     return token == "1" || token == "true" || token == "yes" || token == "on";
 }
 
+enum class Xav2OutlierDrawPolicy {
+    AutoFitOnly = 0,
+    SkipDraw,
+};
+
+Xav2OutlierDrawPolicy ResolveXav2OutlierDrawPolicy() {
+    static const Xav2OutlierDrawPolicy policy = []() {
+        const char* raw = std::getenv("VSFCLONE_XAV2_OUTLIER_DRAW_POLICY");
+        if (raw == nullptr) {
+            return Xav2OutlierDrawPolicy::AutoFitOnly;
+        }
+        std::string token(raw);
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (token == "skip_draw" || token == "skip-draw" ||
+            token == "1" || token == "true" || token == "yes" || token == "on") {
+            return Xav2OutlierDrawPolicy::SkipDraw;
+        }
+        if (token == "autofit_only" || token == "autofit-only" ||
+            token == "0" || token == "false" || token == "no" || token == "off") {
+            return Xav2OutlierDrawPolicy::AutoFitOnly;
+        }
+        return Xav2OutlierDrawPolicy::AutoFitOnly;
+    }();
+    return policy;
+}
+
 void SanitizeTrackingFrame(NcTrackingFrame* frame) {
     if (frame == nullptr) {
         return;
@@ -5942,13 +5970,18 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         std::vector<std::string> detached_mesh_names;
+        const bool skip_xav2_outlier_draws =
+            it->second.source_type == AvatarSourceType::Xav2 &&
+            ResolveXav2OutlierDrawPolicy() == Xav2OutlierDrawPolicy::SkipDraw;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
-            if (mesh_index < preview_bounds_excluded.size() && preview_bounds_excluded[mesh_index] != 0U) {
+            if (skip_xav2_outlier_draws &&
+                mesh_index < preview_bounds_excluded.size() &&
+                preview_bounds_excluded[mesh_index] != 0U) {
                 ++mesh_bounds_outlier_draw_skipped_count;
                 continue;
             }
-            if (it->second.source_type == AvatarSourceType::Xav2) {
+            if (skip_xav2_outlier_draws) {
                 const float ex = std::max(mesh.bounds_max.x - mesh.bounds_min.x, 0.0f);
                 const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
                 const float ez = std::max(mesh.bounds_max.z - mesh.bounds_min.z, 0.0f);
