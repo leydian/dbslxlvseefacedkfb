@@ -28,7 +28,8 @@ public sealed record DiagnosticsModel(
     bool RuntimePathMatch,
     bool RuntimeModuleStaleVsBuildOutput,
     string RuntimePathWarningCode,
-    string RuntimeTimestampWarningCode)
+    string RuntimeTimestampWarningCode,
+    string MemorySampleStatus)
 {
     public static DiagnosticsModel Empty =>
         new(
@@ -55,9 +56,23 @@ public sealed record DiagnosticsModel(
             false,
             false,
             "HOST_RUNTIME_PATH_UNKNOWN",
+            "none",
             "none");
 
     public static DiagnosticsModel FromNative(in NcRuntimeStats stats, in NcSpoutDiagnostics spout)
+    {
+        return FromNative(
+            stats,
+            spout,
+            memoryOverride: null,
+            memorySampleStatus: null);
+    }
+
+    public static DiagnosticsModel FromNative(
+        in NcRuntimeStats stats,
+        in NcSpoutDiagnostics spout,
+        (float WorkingSetMb, float PrivateMb)? memoryOverride,
+        string? memorySampleStatus)
     {
         var nativeCorePath = NativeCoreInterop.GetLoadedNativeCorePath();
         var nativeCoreTimestampUtc = NativeCoreInterop.GetLoadedNativeCoreTimestampUtc();
@@ -87,15 +102,27 @@ public sealed record DiagnosticsModel(
                 : "HOST_RUNTIME_MISMATCH_DIST_EXPECTED";
         var workingSetMb = 0.0f;
         var privateMb = 0.0f;
-        try
+        var resolvedMemorySampleStatus = string.IsNullOrWhiteSpace(memorySampleStatus)
+            ? "ok"
+            : memorySampleStatus.Trim().ToLowerInvariant();
+        if (memoryOverride.HasValue)
         {
-            using var process = Process.GetCurrentProcess();
-            workingSetMb = (float)(process.WorkingSet64 / (1024.0 * 1024.0));
-            privateMb = (float)(process.PrivateMemorySize64 / (1024.0 * 1024.0));
+            workingSetMb = memoryOverride.Value.WorkingSetMb;
+            privateMb = memoryOverride.Value.PrivateMb;
         }
-        catch
+        else
         {
-            // Keep zeros if process metrics collection fails.
+            try
+            {
+                using var process = Process.GetCurrentProcess();
+                workingSetMb = (float)(process.WorkingSet64 / (1024.0 * 1024.0));
+                privateMb = (float)(process.PrivateMemorySize64 / (1024.0 * 1024.0));
+            }
+            catch
+            {
+                // Keep zeros if process metrics collection fails.
+                resolvedMemorySampleStatus = "failed";
+            }
         }
 
         return new DiagnosticsModel(
@@ -122,7 +149,8 @@ public sealed record DiagnosticsModel(
             RuntimePathMatch: pathMatch,
             RuntimeModuleStaleVsBuildOutput: staleVsBuild,
             RuntimePathWarningCode: warningCode,
-            RuntimeTimestampWarningCode: timestampWarningCode);
+            RuntimeTimestampWarningCode: timestampWarningCode,
+            MemorySampleStatus: resolvedMemorySampleStatus);
     }
 
     public static DiagnosticsModel Capture()

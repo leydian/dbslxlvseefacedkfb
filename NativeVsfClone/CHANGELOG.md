@@ -2,6 +2,55 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Host perf hotpath optimization + metrics provenance contract update
+
+### Summary
+
+Implemented a host/runtime performance hardening slice focused on reducing frame-loop overhead and improving performance evidence reliability without changing default feature behavior.
+
+### Changed
+
+- HostCore frame-path optimization:
+  - `host/HostCore/PlatformFeatures.cs`
+    - `FrameMetric` converted to `readonly record struct` to reduce per-frame heap allocations.
+    - metric contract expanded with:
+      - `measurement_source`
+      - `measurement_session_id`
+      - `memory_sample_status`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - rolling metric capture now stamps metric provenance/session and memory sample status.
+    - queue trim logic simplified to single overflow dequeue (bounded behavior retained).
+    - adaptive quality window path now checks cooldown before expensive window materialization/sort.
+    - CSV export header extended for provenance/status columns.
+  - `host/HostCore/DiagnosticsModel.cs`
+    - `DiagnosticsModel` expanded with `MemorySampleStatus`.
+    - added overload to accept pre-sampled memory values (`working_set_mb`, `private_mb`).
+  - `host/HostCore/HostController.cs`
+    - runtime diagnostics path now reuses already-sampled memory values from host controller state instead of re-querying process memory every capture.
+- Tooling/operational evidence updates:
+  - `tools/render_perf_gate.ps1`
+    - added optional parsing/summaries for:
+      - source/session column presence
+      - live/other/unknown source counts
+      - session count
+      - memory sample status counts (`ok/stale/failed/unknown`)
+  - `tools/release_gate_dashboard.ps1`
+    - dashboard now surfaces:
+      - `Render Perf (Live Tick Samples)`
+      - `Render Perf (Memory Sample Failures)`
+  - `tools/publish_hosts.ps1`
+    - added pre-publish dist cleanup (`Clear-DistDirectory`) for WPF/WinUI output folders to avoid stale artifact carryover in size telemetry.
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_host_perf_hotpath_and_metrics_contract_update.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+- `tools/render_perf_gate.ps1` execution (format/contract validation run): PASS
+- `tools/release_gate_dashboard.ps1` execution: PASS (new perf trust-signal rows present)
+
 ## 2026-03-06 - XAV2 static skinning regression recovery (safe default-off policy)
 
 ### Summary

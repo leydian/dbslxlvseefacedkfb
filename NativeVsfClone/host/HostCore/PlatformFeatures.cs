@@ -102,7 +102,7 @@ public sealed record SessionPersistenceModel(
         LastUpdatedUtc: DateTimeOffset.UtcNow);
 }
 
-public sealed record FrameMetric(
+public readonly record struct FrameMetric(
     DateTimeOffset TimestampUtc,
     float FrameMs,
     float GpuFrameMs,
@@ -114,7 +114,10 @@ public sealed record FrameMetric(
     bool OscActive,
     float WorkingSetMb,
     float PrivateMb,
-    string AutoQualityStep);
+    string AutoQualityStep,
+    string MeasurementSource,
+    string MeasurementSessionId,
+    string MemorySampleStatus);
 
 public sealed record TelemetrySettings(
     bool OptIn,

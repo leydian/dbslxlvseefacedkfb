@@ -172,6 +172,16 @@ $rows += [PSCustomObject]@{
     source_file = $renderPerfGate
 }
 $rows += [PSCustomObject]@{
+    track = "Render Perf (Live Tick Samples)"
+    status_line = "LiveTickSamples: $(Get-KeyValueFromFile -Path $renderPerfGate -Prefix 'LiveTickSamples:')"
+    source_file = $renderPerfGate
+}
+$rows += [PSCustomObject]@{
+    track = "Render Perf (Memory Sample Failures)"
+    status_line = "MemorySampleFailedCount: $(Get-KeyValueFromFile -Path $renderPerfGate -Prefix 'MemorySampleFailedCount:')"
+    source_file = $renderPerfGate
+}
+$rows += [PSCustomObject]@{
     track = "Host Dist (WPF MB)"
     status_line = "WPFDistMb: $(Get-KeyValueFromFile -Path $hostReport -Prefix 'WPF dist size mb:')"
     source_file = $hostReport
@@ -218,6 +228,7 @@ $summary = [PSCustomObject]@{
         tracking_parser_fuzz_pass = $trackingFuzzPass
         tracking_mediapipe_sanity_pass = $trackingMediapipeSanityPass
         tracking_contract_all_pass = $trackingContractAllPass
+        release_candidate_tracking = $trackingContractAllPass
         release_candidate_wpf_only = $wpfReleaseCandidate
         release_candidate_full = $fullReleaseCandidate
     }
@@ -236,6 +247,7 @@ $lines += "Release Gate Dashboard"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
 $lines += "Policy.RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly"
 $lines += "Policy.RequireUnityXav2ForFull: $RequireUnityXav2ForFull"
+$lines += "TrackingContractCandidate: $(if ($trackingContractAllPass) { 'PASS' } else { 'FAIL' })"
 $lines += "ReleaseCandidateWpfOnly: $(if ($wpfReleaseCandidate) { 'PASS' } else { 'FAIL' })"
 $lines += "ReleaseCandidateFull: $(if ($fullReleaseCandidate) { 'PASS' } else { 'FAIL' })"
 $lines += ""

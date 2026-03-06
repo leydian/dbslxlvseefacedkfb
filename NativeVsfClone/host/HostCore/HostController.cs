@@ -1044,7 +1044,11 @@ public sealed partial class HostController
     private void CaptureRuntimeDiagnostics(in NcRuntimeStats stats)
     {
         _ = NativeCoreInterop.nc_get_spout_diagnostics(out var spout);
-        _runtimeDiagnostics = DiagnosticsModel.FromNative(stats, spout);
+        _runtimeDiagnostics = DiagnosticsModel.FromNative(
+            stats,
+            spout,
+            memoryOverride: (_lastWorkingSetMb, _lastPrivateMb),
+            memorySampleStatus: _lastMemorySampleStatus);
         _lastRuntimeCaptureUtc = DateTimeOffset.UtcNow;
     }
 

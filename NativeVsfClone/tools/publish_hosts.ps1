@@ -74,6 +74,16 @@ function Get-DirectorySizeMb {
     return [Math]::Round(($sum / 1MB), 2)
 }
 
+function Clear-DistDirectory {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 function Invoke-CMakeCommand {
     param(
         [Parameter(Mandatory = $true)][string[]]$Args,
@@ -1079,6 +1089,7 @@ $wpfPublishFailed = $false
 $wpfPublishErrorText = ""
 try {
     Write-Step "Publishing WPF host to dist/wpf..."
+    Clear-DistDirectory -Path $wpfDist
     $wpfPublishArgs = @(
         "publish",
         $wpfProject,
@@ -1185,6 +1196,7 @@ if ($IncludeWinUi) {
     }
     try {
         Write-Step "Publishing WinUI host to dist/winui..."
+        Clear-DistDirectory -Path $winUiDist
         $winUiPublishArgs = @(
             "publish",
             $winUiProject,

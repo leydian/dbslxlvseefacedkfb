@@ -20,6 +20,8 @@ public sealed partial class HostController
     private readonly AutoQualityPolicyStore _autoQualityStore = new();
     private readonly TelemetryService _telemetry = new();
     private readonly Queue<FrameMetric> _rollingMetrics = new();
+    private readonly string _metricsSessionId = Guid.NewGuid().ToString("N");
+    private const string MeasurementSourceLiveTick = "live_tick";
     private const int RollingMetricCapacity = 1800;
     private DateTimeOffset _lastAutoQualityAdjustUtc = DateTimeOffset.MinValue;
     private int _highFrameCount;
@@ -28,6 +30,7 @@ public sealed partial class HostController
     private DateTimeOffset _lastProcessMemorySampleUtc = DateTimeOffset.MinValue;
     private float _lastWorkingSetMb;
     private float _lastPrivateMb;
+    private string _lastMemorySampleStatus = "none";
     private CancellationTokenSource? _loadCancellation;
     private Task<NcResultCode>? _activeLoadTask;
     private Task<NcResultCode>? _activeLoadWorkerTask;
@@ -589,7 +592,7 @@ public sealed partial class HostController
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("timestamp_utc,frame_ms,gpu_frame_ms,cpu_frame_ms,material_resolve_ms,pass_count,render_ready_avatar_count,spout_active,osc_active,working_set_mb,private_mb,auto_quality_step");
+        sb.AppendLine("timestamp_utc,frame_ms,gpu_frame_ms,cpu_frame_ms,material_resolve_ms,pass_count,render_ready_avatar_count,spout_active,osc_active,working_set_mb,private_mb,auto_quality_step,measurement_source,measurement_session_id,memory_sample_status");
         foreach (var item in _rollingMetrics)
         {
             sb.AppendLine(
@@ -606,7 +609,10 @@ public sealed partial class HostController
                     item.OscActive.ToString(),
                     item.WorkingSetMb.ToString("F3", CultureInfo.InvariantCulture),
                     item.PrivateMb.ToString("F3", CultureInfo.InvariantCulture),
-                    item.AutoQualityStep));
+                    item.AutoQualityStep,
+                    item.MeasurementSource,
+                    item.MeasurementSessionId,
+                    item.MemorySampleStatus));
         }
 
         File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
@@ -1004,8 +1010,11 @@ public sealed partial class HostController
             stats.OscActive != 0U,
             _lastWorkingSetMb,
             _lastPrivateMb,
-            GetCurrentAutoQualityStepName()));
-        while (_rollingMetrics.Count > RollingMetricCapacity)
+            GetCurrentAutoQualityStepName(),
+            MeasurementSourceLiveTick,
+            _metricsSessionId,
+            _lastMemorySampleStatus));
+        if (_rollingMetrics.Count > RollingMetricCapacity)
         {
             _ = _rollingMetrics.Dequeue();
         }
@@ -1067,6 +1076,10 @@ public sealed partial class HostController
         var now = DateTimeOffset.UtcNow;
         if ((now - _lastProcessMemorySampleUtc) < TimeSpan.FromMilliseconds(500))
         {
+            if (_lastMemorySampleStatus == "none")
+            {
+                _lastMemorySampleStatus = "stale";
+            }
             return;
         }
 
@@ -1076,15 +1089,24 @@ public sealed partial class HostController
             using var proc = Process.GetCurrentProcess();
             _lastWorkingSetMb = (float)(proc.WorkingSet64 / (1024.0 * 1024.0));
             _lastPrivateMb = (float)(proc.PrivateMemorySize64 / (1024.0 * 1024.0));
+            _lastMemorySampleStatus = "ok";
         }
         catch
         {
             // Keep last known values if process metrics sampling is unavailable.
+            _lastMemorySampleStatus = _lastWorkingSetMb > 0.0f || _lastPrivateMb > 0.0f
+                ? "stale"
+                : "failed";
         }
     }
 
     private void ApplyAdaptiveAutoQualityFromWindow()
     {
+        if ((DateTimeOffset.UtcNow - _lastAutoQualityAdjustUtc) < TimeSpan.FromSeconds(_autoQualityPolicy.CooldownSeconds))
+        {
+            return;
+        }
+
         var windowCount = Math.Clamp(_autoQualityPolicy.WindowSampleCount, 120, RollingMetricCapacity);
         var recent = _rollingMetrics
             .Reverse()
@@ -1102,11 +1124,6 @@ public sealed partial class HostController
         var dropRatio = dropCount / (double)recent.Length;
         var currentProfile = (_sessionPersistence.LastProfileName ?? "quality").Trim().ToLowerInvariant();
         var currentStep = GetAutoQualityStep(currentProfile);
-
-        if ((DateTimeOffset.UtcNow - _lastAutoQualityAdjustUtc) < TimeSpan.FromSeconds(_autoQualityPolicy.CooldownSeconds))
-        {
-            return;
-        }
 
         var shouldDegrade = p95 > _autoQualityPolicy.DegradeP95FrameMs || dropRatio > _autoQualityPolicy.DegradeDropRatio;
         var shouldRecover = p95 < _autoQualityPolicy.RecoverP95FrameMs && dropRatio < _autoQualityPolicy.RecoverDropRatio;

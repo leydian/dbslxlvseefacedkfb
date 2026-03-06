@@ -77,9 +77,27 @@ if ($rows.Count -lt $MinSamples) {
     throw "insufficient samples: $($rows.Count) (required >= $MinSamples)"
 }
 
+$hasMeasurementSourceColumn = $false
+$hasMeasurementSessionColumn = $false
+$hasMemorySampleStatusColumn = $false
+if ($rows.Count -gt 0) {
+    $firstRowProperties = @($rows[0].PSObject.Properties.Name)
+    $hasMeasurementSourceColumn = $firstRowProperties -contains "measurement_source"
+    $hasMeasurementSessionColumn = $firstRowProperties -contains "measurement_session_id"
+    $hasMemorySampleStatusColumn = $firstRowProperties -contains "memory_sample_status"
+}
+
 $values = [System.Collections.Generic.List[double]]::new()
 $privateValues = [System.Collections.Generic.List[double]]::new()
 $workingSetValues = [System.Collections.Generic.List[double]]::new()
+$liveTickSamples = 0
+$otherSourceSamples = 0
+$unknownSourceSamples = 0
+$memorySampleOkCount = 0
+$memorySampleStaleCount = 0
+$memorySampleFailedCount = 0
+$memorySampleUnknownCount = 0
+$measurementSessions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 foreach ($r in $rows) {
     $v = 0.0
     if ([double]::TryParse("$($r.frame_ms)", [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$v)) {
@@ -94,6 +112,34 @@ foreach ($r in $rows) {
     $wv = 0.0
     if ([double]::TryParse("$($r.working_set_mb)", [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$wv)) {
         $workingSetValues.Add($wv)
+    }
+
+    if ($hasMeasurementSourceColumn) {
+        $source = "$($r.measurement_source)".Trim().ToLowerInvariant()
+        if ($source -eq "live_tick") {
+            $liveTickSamples++
+        } elseif ([string]::IsNullOrWhiteSpace($source)) {
+            $unknownSourceSamples++
+        } else {
+            $otherSourceSamples++
+        }
+    }
+
+    if ($hasMeasurementSessionColumn) {
+        $sessionId = "$($r.measurement_session_id)".Trim()
+        if (-not [string]::IsNullOrWhiteSpace($sessionId)) {
+            $null = $measurementSessions.Add($sessionId)
+        }
+    }
+
+    if ($hasMemorySampleStatusColumn) {
+        $memoryStatus = "$($r.memory_sample_status)".Trim().ToLowerInvariant()
+        switch ($memoryStatus) {
+            "ok" { $memorySampleOkCount++ }
+            "stale" { $memorySampleStaleCount++ }
+            "failed" { $memorySampleFailedCount++ }
+            default { $memorySampleUnknownCount++ }
+        }
     }
 }
 if ($values.Count -lt $MinSamples) {
@@ -138,6 +184,17 @@ $summaryLines.Add("AvgPrivateMb: $([Math]::Round($avgPrivateMb, 3))")
 $summaryLines.Add("P95PrivateMb: $([Math]::Round($p95PrivateMb, 3))")
 $summaryLines.Add("AvgWorkingSetMb: $([Math]::Round($avgWorkingSetMb, 3))")
 $summaryLines.Add("P95WorkingSetMb: $([Math]::Round($p95WorkingSetMb, 3))")
+$summaryLines.Add("MeasurementSourceColumnPresent: $hasMeasurementSourceColumn")
+$summaryLines.Add("MeasurementSessionColumnPresent: $hasMeasurementSessionColumn")
+$summaryLines.Add("MemorySampleStatusColumnPresent: $hasMemorySampleStatusColumn")
+$summaryLines.Add("LiveTickSamples: $liveTickSamples")
+$summaryLines.Add("OtherSourceSamples: $otherSourceSamples")
+$summaryLines.Add("UnknownSourceSamples: $unknownSourceSamples")
+$summaryLines.Add("MeasurementSessionCount: $($measurementSessions.Count)")
+$summaryLines.Add("MemorySampleOkCount: $memorySampleOkCount")
+$summaryLines.Add("MemorySampleStaleCount: $memorySampleStaleCount")
+$summaryLines.Add("MemorySampleFailedCount: $memorySampleFailedCount")
+$summaryLines.Add("MemorySampleUnknownCount: $memorySampleUnknownCount")
 $summaryLines.Add("")
 $summaryLines.Add("Gate Results")
 $summaryLines.Add("- GateP95 (p95 <= $MaxP95FrameMs): $(if ($gateP95) { 'PASS' } else { 'FAIL' })")

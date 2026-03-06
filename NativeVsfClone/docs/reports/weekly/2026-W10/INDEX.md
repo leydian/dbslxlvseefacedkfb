@@ -70,6 +70,7 @@ Report list for this week.
 - [2026-03-06_arkit52_strict_full_support_pipeline.md](./2026-03-06_arkit52_strict_full_support_pipeline.md)
 - [2026-03-06_arkit52_quality_refinement_hybrid_fallback.md](./2026-03-06_arkit52_quality_refinement_hybrid_fallback.md)
 - [2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md](./2026-03-06_consumer_wpf_flow_and_tracking_schema_update.md)
+- [2026-03-06_host_perf_hotpath_and_metrics_contract_update.md](./2026-03-06_host_perf_hotpath_and_metrics_contract_update.md)
 - [2026-03-06_host_pose_tracking_refinement_execution.md](./2026-03-06_host_pose_tracking_refinement_execution.md)
 - [2026-03-06_ifacialmocap_direct_tracking.md](./2026-03-06_ifacialmocap_direct_tracking.md)
 - [2026-03-06_native_secondary_motion_v1_runtime.md](./2026-03-06_native_secondary_motion_v1_runtime.md)
