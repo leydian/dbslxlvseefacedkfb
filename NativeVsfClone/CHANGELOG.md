@@ -98,6 +98,7 @@ official-line all-pass blocking policy into release readiness telemetry.
   - updated `tools/run_quality_baseline.ps1` with `-EnableUnityXav2LtsGate`
   - updated `tools/release_readiness_gate.ps1` with `-EnableUnityXav2LtsGate`
   - updated `tools/release_gate_dashboard.ps1` to surface `Unity XAV2 LTS Gate` and prefer matrix gate signal for Unity XAV2 pass status
+  - dashboard now surfaces recent-pass-rate risk signal from `unity_xav2_lts_kpi_summary.json`
 - Documentation alignment:
   - updated package README + public compatibility/migration docs to unified official model:
     - official: `2021-lts`, `2022-lts`, `2023-lts`

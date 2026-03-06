@@ -30,6 +30,7 @@ official-line blocking policy and release dashboard integration.
   - added `Unity XAV2 LTS Gate` row
   - release decision now hard-fails Unity XAV2 status when LTS gate is `FAIL`
   - fallback to legacy single-line signals only when LTS gate is missing/unknown
+  - added recent-pass-rate risk signal sourced from `unity_xav2_lts_kpi_summary.json`
 
 ## Documentation Updates
 

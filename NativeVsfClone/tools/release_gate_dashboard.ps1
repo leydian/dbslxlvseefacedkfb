@@ -139,6 +139,15 @@ if (Test-Path $unityLtsGateJson) {
         $unityLtsSummary = $null
     }
 }
+$unityLtsKpiJson = Join-Path $ReportDir "unity_xav2_lts_kpi_summary.json"
+$unityLtsKpiSummary = $null
+if (Test-Path $unityLtsKpiJson) {
+    try {
+        $unityLtsKpiSummary = Get-Content -Raw -Path $unityLtsKpiJson | ConvertFrom-Json
+    } catch {
+        $unityLtsKpiSummary = $null
+    }
+}
 
 $unityValidationSummary = Join-Path $ReportDir "unity_xav2_validation_summary.txt"
 $unityStatus = Get-KeyValueFromFile -Path $unityValidationSummary -Prefix "overall_status="
@@ -164,6 +173,15 @@ if ($unityLtsSummary -ne $null -and $unityLtsSummary.line_status -ne $null) {
             track = "Unity XAV2 LTS Line [$($lineRow.line)]"
             status_line = "overall=$($lineRow.overall), validate=$($lineRow.validate), parity=$($lineRow.parity), compression=$($lineRow.compression)"
             source_file = $unityLtsGateJson
+        }
+    }
+}
+if ($unityLtsKpiSummary -ne $null -and $unityLtsKpiSummary.rows -ne $null) {
+    foreach ($kpiRow in $unityLtsKpiSummary.rows) {
+        $rows += [PSCustomObject]@{
+            track = "Unity XAV2 LTS KPI [$($kpiRow.line)]"
+            status_line = "recent_rate=$($kpiRow.recent_pass_rate_pct)%, total_rate=$($kpiRow.pass_rate_pct)%, samples=$($kpiRow.samples_total)"
+            source_file = $unityLtsKpiJson
         }
     }
 }
@@ -238,6 +256,27 @@ $unityXav2AllPass = switch ($unityLtsState) {
     "FAIL" { $false }
     default { $unityPass -and $compressionPass -and $parityPass }
 }
+
+$unityLtsRecentRisk = $false
+$unityLtsRecentRiskLines = @()
+if ($unityLtsKpiSummary -ne $null -and $unityLtsKpiSummary.rows -ne $null) {
+    $officialLines = @()
+    if ($unityLtsSummary -ne $null -and $unityLtsSummary.official_lines -ne $null) {
+        $officialLines = @($unityLtsSummary.official_lines)
+    } elseif ($unityLtsKpiSummary.rows -ne $null) {
+        $officialLines = @($unityLtsKpiSummary.rows | ForEach-Object { $_.line })
+    }
+    foreach ($line in $officialLines) {
+        $row = ($unityLtsKpiSummary.rows | Where-Object { $_.line -eq $line } | Select-Object -First 1)
+        if ($null -eq $row) { continue }
+        $recentRate = [double]$row.recent_pass_rate_pct
+        if ($recentRate -lt 100.0) {
+            $unityLtsRecentRisk = $true
+            $unityLtsRecentRiskLines += "${line}:$recentRate"
+        }
+    }
+}
+
 $wpfUnityRequirementMet = if ($RequireUnityXav2ForWpfOnly) { $unityXav2AllPass } else { $true }
 $fullUnityRequirementMet = if ($RequireUnityXav2ForFull) { $unityXav2AllPass } else { $true }
 
@@ -250,6 +289,8 @@ $summary = [PSCustomObject]@{
         avatar_gates_all_pass = $avatarAllPass
         unity_xav2_validate_pass = $unityPass
         unity_xav2_lts_gate_pass = $unityLtsPass
+        unity_xav2_lts_recent_risk = $unityLtsRecentRisk
+        unity_xav2_lts_recent_risk_lines = $unityLtsRecentRiskLines
         xav2_compression_quality_pass = $compressionPass
         xav2_unity_native_parity_pass = $parityPass
         unity_xav2_all_pass = $unityXav2AllPass
@@ -281,6 +322,8 @@ $lines += "Release Gate Dashboard"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
 $lines += "Policy.RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly"
 $lines += "Policy.RequireUnityXav2ForFull: $RequireUnityXav2ForFull"
+$lines += "UnityXav2LtsRecentRisk: $(if ($unityLtsRecentRisk) { 'YES' } else { 'NO' })"
+$lines += "UnityXav2LtsRecentRiskLines: $(if ($unityLtsRecentRiskLines.Count -gt 0) { $unityLtsRecentRiskLines -join ', ' } else { '<none>' })"
 $lines += "TrackingContractCandidate: $(if ($trackingContractAllPass) { 'PASS' } else { 'FAIL' })"
 $lines += "ReleaseCandidateWpfOnly: $(if ($wpfReleaseCandidate) { 'PASS' } else { 'FAIL' })"
 $lines += "ReleaseCandidateFull: $(if ($fullReleaseCandidate) { 'PASS' } else { 'FAIL' })"

@@ -4,7 +4,7 @@
 - This summary groups weekly changes by domain.
 
 ## Highlights
-- `xav2`: 27 reports
+- `xav2`: 28 reports
 - `host`: 13 reports
 - `ui`: 9 reports
 - `vsfavatar`: 8 reports
@@ -73,6 +73,7 @@
 - Newly added: review `2026-03-06_xav2_pass_flags_and_tracking_strict_followup.md` for XAV2 all-pass-disabled fail-safe base-pass recovery, strict tracking wrapper skip-switch passthrough, and refreshed VRM GateK/GateL evidence fields.
 - Newly added: review `2026-03-06_xav2_public_sdk_packaging_v100.md` for external SDK packaging baseline (`v1.0.0`), public contract docs rollout, legal/notice artifacts, UPM sample onboarding, and package release-gate coverage.
 - Newly added: review `2026-03-06_xav2_unity_lts_matrix_gate_policy.md` for Unity LTS matrix orchestration, 3-line official all-pass blocking policy, release dashboard hard-fail integration, and unified official support contract alignment.
+- Newly added: review `2026-03-06_xav2_lts_kpi_risk_signal_and_dashboard_failclosed.md` for unified 3-line official defaults, dashboard fail-closed Unity verdicting, and recent-pass-rate risk signal integration.
 - Newly added: review `2026-03-06_shader_family_backend_split_liltoon_mtoon.md` for backend-owned liltoon/mtoon pass-graph dispatch, per-family pixel-shader split, safe common-backend fallback policy, and `NcAvatarInfo` backend diagnostics fields.
 - Newly added: review `2026-03-06_shader_family_backend_split_poiyomi_standard.md` for poiyomi/standard backend dispatch expansion, 5-backend pass topology execution order, pipeline resource slot extension, and gate-verified safe fallback retention.
 - Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.
