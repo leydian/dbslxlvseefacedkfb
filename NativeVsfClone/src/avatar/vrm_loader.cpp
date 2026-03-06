@@ -2744,7 +2744,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     } else if (!AreMatrix4x4NearlyEqual(mesh_first_node_global[mesh_index], node_transform)) {
                         mesh_node_transform_conflict[mesh_index] = true;
                     }
-                    if (!mesh_node_transform_conflict[mesh_index] && !IsIdentityMatrix4x4(mesh_first_node_global[mesh_index])) {
+                    if (!IsIdentityMatrix4x4(mesh_first_node_global[mesh_index])) {
                         mesh_node_transforms[mesh_index] = mesh_first_node_global[mesh_index];
                         mesh_has_node_transform[mesh_index] = true;
                     } else {
@@ -3497,9 +3497,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                             std::array<float, 16U> mesh_global_for_skin = MakeIdentityMatrix4x4();
                             std::array<float, 16U> mesh_inv_for_skin = MakeIdentityMatrix4x4();
                             if (!has_node_transform_applied &&
-                                mesh_i < mesh_node_transforms.size() &&
-                                mesh_i < mesh_node_transform_conflict.size() &&
-                                !mesh_node_transform_conflict[mesh_i]) {
+                                mesh_i < mesh_node_transforms.size()) {
                                 mesh_global_for_skin = mesh_node_transforms[mesh_i];
                                 if (!TryInvertMatrix4x4(mesh_global_for_skin, &mesh_inv_for_skin)) {
                                     mesh_inv_for_skin = MakeIdentityMatrix4x4();
@@ -3696,11 +3694,15 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             ", conflictMeshes=" + std::to_string(skinned_transform_conflict_mesh_count));
         pkg.warnings.push_back("W_SKIN: VRM_SKIN_SPACE: mesh");
         pkg.warnings.push_back("W_SKIN: VRM_SKINNING_CONVENTION: globalJoint*inverseBind");
+        pkg.skinning_matrix_convention = SkinningMatrixConvention::DxRowMajor;
+        pkg.skin_space_basis = "mesh_local";
+        pkg.skinning_auto_corrected_meshes = skinned_transform_injected_mesh_count;
+        pkg.skinning_conflict_resolved_meshes = skinned_transform_conflict_mesh_count;
         if (skinned_transform_conflict_mesh_count > 0U) {
             pkg.warnings.push_back(
-                "W_NODE: VRM_NODE_TRANSFORM_SKIN_FALLBACK: meshes=" +
+                "W_NODE: VRM_NODE_TRANSFORM_SKIN_AUTOCORRECTED: meshes=" +
                 std::to_string(skinned_transform_conflict_mesh_count));
-            pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIN_FALLBACK");
+            pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIN_AUTOCORRECTED");
         }
         if (skinned_payload_failed > 0U) {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");

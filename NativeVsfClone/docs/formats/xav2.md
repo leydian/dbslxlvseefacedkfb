@@ -29,12 +29,22 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 - `schemaVersion`: uint (`1`)
 - `exporterVersion`: string
 - `skinningMatrixConvention`: string (`dx_row_major|gltf_column_major`)
+- `skinSpaceBasis`: string (`mesh_local|unknown`)
+- `skinningAutoCorrectedMeshes`: uint
+- `skinningConflictResolvedMeshes`: uint
 - `hasSkinning`: bool
 - `hasBlendShapes`: bool
 - `physicsSchemaVersion`: uint (`1`)
 - `physicsSource`: string (`none|vrm|vrc|mixed`)
 - `hasSpringBones`: bool
 - `hasPhysBones`: bool
+
+`skinningMatrixConvention` runtime default policy:
+- If missing/unknown on XAV2, runtime uses `dx_row_major`.
+- Auto-detect is disabled by default and can be enabled only for diagnostics with
+  `VSFCLONE_XAV2_ENABLE_CONVENTION_AUTODETECT=1`.
+- Legacy XAV2 without `skinSpaceBasis=mesh_local` may use compatibility auto-detect
+  at load time to preserve old assets.
 
 ## TLV Section Header
 
@@ -246,3 +256,40 @@ Notes:
   - `W_STAGE` is treated as lifecycle telemetry and is not accumulated into `warning_codes[]`.
   - generic payload notes without stable code token are not accumulated into `warning_codes[]`.
   - `*_PARTIAL` compatibility notes are kept in `warnings[]` but excluded from `warning_codes[]`.
+
+## 2026-03-06 Runtime Parity Fix Summary
+
+This update resolves a set of XAV2 runtime parity regressions observed with VRM-derived avatars.
+
+- Material alpha parity:
+  - Root cause: runtime alpha heuristics could override XAV2 payload `alpha_mode` (example: `OPAQUE -> MASK`).
+  - Fix: for XAV2, runtime now trusts payload `alpha_mode` when present and does not re-promote via heuristic path.
+  - Validation target:
+    - `MaterialParityMismatchCount = 0`
+    - `MaterialParityLastMismatch = none`
+
+- Typed material schema drift:
+  - Root cause: `vrm_to_xav2` could emit typed payload body as legacy layout while manifest advertised `typed-v3`.
+  - Fix:
+    - exporter normalizes typed schema version to `>= v3` for XAV2 typed sections.
+    - loader typed section parsing is made order-stable by deferring material-typed decode until after manifest options are known.
+  - Validation target:
+    - no `XAV2_MATERIAL_TYPED_SCHEMA_CONFLICT` warning for newly exported assets.
+
+- Preview facing direction (front/back):
+  - Root cause: preview yaw policy treated all XAV2 as fixed `0deg`, which can show back-facing view for VRM-derived exports.
+  - Fix:
+    - XAV2 loader stores manifest `sourceExt`.
+    - runtime applies `180deg` preview yaw automatically for `sourceExt=.vrm`.
+  - Validation target (`LastRenderPassSummary`):
+    - `applied_preview_yaw_deg=180`
+    - `preview_yaw_reason=xav2_vrm_source_180`
+
+- Added diagnostics surfaced through host/native interop:
+  - `material_parity_mismatch_count`
+  - `texture_resolve_ambiguous_count`
+  - `material_parity_last_mismatch`
+
+Operational note:
+- Runtime DLL replacement alone does not rewrite existing `.xav2` payloads.
+- To pick up typed schema normalization fixes, re-export VRM to XAV2 with updated `vrm_to_xav2`.

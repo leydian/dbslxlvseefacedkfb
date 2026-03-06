@@ -35,6 +35,7 @@ constexpr std::uint16_t kSectionPhysBonePayload = 0x0019U;
 constexpr std::uint16_t kSectionPhysicsColliderPayload = 0x001AU;
 constexpr std::uint16_t kSectionFlagPayloadCompressedLz4 = 0x0001U;
 constexpr std::uint16_t kSectionFlagKnownMask = kSectionFlagPayloadCompressedLz4;
+constexpr std::uint32_t kTypedParseConflictFeatureFlag = 0x80000000U;
 
 std::string ToLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -641,6 +642,34 @@ std::optional<bool> ExtractBoolField(const std::string& json, const std::string&
     return std::nullopt;
 }
 
+std::optional<std::uint32_t> ExtractUIntField(const std::string& json, const std::string& key) {
+    const std::string token = "\"" + key + "\"";
+    const std::size_t key_pos = json.find(token);
+    if (key_pos == std::string::npos) {
+        return std::nullopt;
+    }
+    const std::size_t colon = json.find(':', key_pos + token.size());
+    if (colon == std::string::npos) {
+        return std::nullopt;
+    }
+    std::size_t i = colon + 1U;
+    while (i < json.size() && std::isspace(static_cast<unsigned char>(json[i])) != 0) {
+        ++i;
+    }
+    if (i >= json.size() || !std::isdigit(static_cast<unsigned char>(json[i]))) {
+        return std::nullopt;
+    }
+    std::uint64_t value = 0U;
+    while (i < json.size() && std::isdigit(static_cast<unsigned char>(json[i])) != 0) {
+        value = value * 10U + static_cast<std::uint64_t>(json[i] - '0');
+        if (value > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            return std::nullopt;
+        }
+        ++i;
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
 bool ParseSkeletonPosePayloadSection(
     const std::vector<std::uint8_t>& bytes,
     std::size_t payload_offset,
@@ -986,36 +1015,43 @@ bool ParseMaterialTypedParamsSection(
     }
     cursor += 2U;
 
-    MaterialRenderPayload parsed_payload = *out_payload;
+    MaterialRenderPayload parsed_v2 = *out_payload;
+    parsed_v2.typed_schema_version = 2U;
+    parsed_v2.material_param_encoding = "typed-v2";
+    const bool parsed_as_v2 = parse_typed_body(cursor, *first_u16, &parsed_v2);
+
+    MaterialRenderPayload parsed_schema = *out_payload;
+    bool parsed_as_schema = false;
+    if (*first_u16 >= 3U) {
+        const std::uint16_t schema_version = *first_u16;
+        std::size_t schema_cursor = cursor;
+        const auto float_count = ReadU16Le(bytes, schema_cursor);
+        if (float_count) {
+            schema_cursor += 2U;
+            parsed_schema.typed_schema_version = schema_version;
+            parsed_schema.material_param_encoding = "typed-v" + std::to_string(schema_version);
+            parsed_as_schema = parse_typed_body(schema_cursor, *float_count, &parsed_schema);
+        }
+    }
+
+    MaterialRenderPayload parsed_payload;
     bool parsed = false;
-
-    if (prefer_typed_v3 && *first_u16 >= 3U) {
-        const std::uint16_t schema_version = *first_u16;
-        std::size_t schema_cursor = cursor;
-        const auto float_count = ReadU16Le(bytes, schema_cursor);
-        if (float_count) {
-            schema_cursor += 2U;
-            parsed_payload.typed_schema_version = schema_version;
-            parsed_payload.material_param_encoding = "typed-v" + std::to_string(schema_version);
-            parsed = parse_typed_body(schema_cursor, *float_count, &parsed_payload);
+    if (parsed_as_v2 && parsed_as_schema) {
+        parsed_payload = prefer_typed_v3 ? parsed_schema : parsed_v2;
+        const bool equivalent_shape =
+            parsed_v2.typed_float_params.size() == parsed_schema.typed_float_params.size() &&
+            parsed_v2.typed_color_params.size() == parsed_schema.typed_color_params.size() &&
+            parsed_v2.typed_texture_params.size() == parsed_schema.typed_texture_params.size();
+        if (!equivalent_shape) {
+            parsed_payload.feature_flags |= kTypedParseConflictFeatureFlag;
         }
-    }
-
-    if (!parsed) {
-        parsed_payload.typed_schema_version = 2U;
-        parsed_payload.material_param_encoding = "typed-v2";
-        parsed = parse_typed_body(cursor, *first_u16, &parsed_payload);
-    }
-    if (!parsed && (!prefer_typed_v3) && *first_u16 >= 3U) {
-        const std::uint16_t schema_version = *first_u16;
-        std::size_t schema_cursor = cursor;
-        const auto float_count = ReadU16Le(bytes, schema_cursor);
-        if (float_count) {
-            schema_cursor += 2U;
-            parsed_payload.typed_schema_version = schema_version;
-            parsed_payload.material_param_encoding = "typed-v" + std::to_string(schema_version);
-            parsed = parse_typed_body(schema_cursor, *float_count, &parsed_payload);
-        }
+        parsed = true;
+    } else if (parsed_as_schema) {
+        parsed_payload = parsed_schema;
+        parsed = true;
+    } else if (parsed_as_v2) {
+        parsed_payload = parsed_v2;
+        parsed = true;
     }
     if (!parsed) {
         return false;
@@ -1241,6 +1277,9 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     if (const auto display_name = ExtractStringField(manifest, "displayName"); display_name && !display_name->empty()) {
         pkg.display_name = *display_name;
     }
+    if (const auto source_ext = ExtractStringField(manifest, "sourceExt"); source_ext && !source_ext->empty()) {
+        pkg.source_ext = ToLower(*source_ext);
+    }
     PushWarning(&pkg, "W_STAGE: parse");
 
     pkg.parser_stage = "resolve";
@@ -1261,6 +1300,15 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     if (const auto convention = ExtractStringField(manifest, "skinningMatrixConvention"); convention && !convention->empty()) {
         pkg.skinning_matrix_convention = ParseSkinningMatrixConvention(*convention);
     }
+    if (const auto skin_space = ExtractStringField(manifest, "skinSpaceBasis"); skin_space && !skin_space->empty()) {
+        pkg.skin_space_basis = *skin_space;
+    }
+    if (const auto corrected = ExtractUIntField(manifest, "skinningAutoCorrectedMeshes")) {
+        pkg.skinning_auto_corrected_meshes = *corrected;
+    }
+    if (const auto resolved = ExtractUIntField(manifest, "skinningConflictResolvedMeshes")) {
+        pkg.skinning_conflict_resolved_meshes = *resolved;
+    }
     const bool expects_blendshapes = ExtractBoolField(manifest, "hasBlendShapes").value_or(false);
     const bool expects_springbones = ExtractBoolField(manifest, "hasSpringBones").value_or(false);
     const bool expects_physbones = ExtractBoolField(manifest, "hasPhysBones").value_or(false);
@@ -1278,6 +1326,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     std::unordered_map<std::string, MaterialRenderPayload> material_sections;
     std::unordered_map<std::string, std::string> material_params_sections;
     std::unordered_map<std::string, MaterialRenderPayload> material_typed_sections;
+    std::vector<std::vector<std::uint8_t>> material_typed_section_payloads;
     std::unordered_map<std::string, SkinRenderPayload> skin_sections;
     std::unordered_map<std::string, SkeletonRenderPayload> skeleton_pose_sections;
     std::unordered_map<std::string, SkeletonRigPayload> skeleton_rig_sections;
@@ -1373,24 +1422,9 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             material_params_sections[NormalizeRefKey(material_name)] = std::move(params_json);
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionMaterialTypedParams) {
-            MaterialRenderPayload typed_payload;
-            if (!ParseMaterialTypedParamsSection(
-                    section_payload,
-                    0U,
-                    section_payload.size(),
-                    manifest_material_param_encoding == "typed-v3" || manifest_material_param_encoding == "typed-v4",
-                    &typed_payload)) {
-                pkg.primary_error_code = "XAV2_MATERIAL_TYPED_SCHEMA_INVALID";
-                PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
-                return core::Result<AvatarPackage>::Ok(pkg);
-            }
-            if (!IsSupportedShaderFamily(typed_payload.shader_family)) {
-                PushWarning(
-                    &pkg,
-                    "W_PARSE: XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY: material=" + typed_payload.name +
-                        ", family=" + typed_payload.shader_family);
-            }
-            material_typed_sections[NormalizeRefKey(typed_payload.name)] = std::move(typed_payload);
+            // Parse typed params after section scan so manifest encoding preference
+            // is applied deterministically regardless of section order.
+            material_typed_section_payloads.push_back(std::move(section_payload));
             ++pkg.format_decoded_section_count;
         } else if (*type == kSectionSkinPayload) {
             SkinRenderPayload skin_payload;
@@ -1473,6 +1507,29 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         }
 
         cursor = section_end;
+    }
+
+    const bool manifest_prefers_typed_v3_plus =
+        manifest_material_param_encoding == "typed-v3" || manifest_material_param_encoding == "typed-v4";
+    for (const auto& typed_section_payload : material_typed_section_payloads) {
+        MaterialRenderPayload typed_payload;
+        if (!ParseMaterialTypedParamsSection(
+                typed_section_payload,
+                0U,
+                typed_section_payload.size(),
+                manifest_prefers_typed_v3_plus,
+                &typed_payload)) {
+            pkg.primary_error_code = "XAV2_MATERIAL_TYPED_SCHEMA_INVALID";
+            PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
+            return core::Result<AvatarPackage>::Ok(pkg);
+        }
+        if (!IsSupportedShaderFamily(typed_payload.shader_family)) {
+            PushWarning(
+                &pkg,
+                "W_PARSE: XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY: material=" + typed_payload.name +
+                    ", family=" + typed_payload.shader_family);
+        }
+        material_typed_sections[NormalizeRefKey(typed_payload.name)] = std::move(typed_payload);
     }
 
     pkg.parser_stage = "payload";
@@ -1562,9 +1619,20 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             !payload.typed_float_params.empty() ||
             !payload.typed_color_params.empty() ||
             !payload.typed_texture_params.empty();
-        if (!has_typed || payload.material_param_encoding != "typed-v4" || payload.typed_schema_version < 4U) {
+        if (!has_typed) {
             payload.material_param_encoding = "typed-v4";
             payload.typed_schema_version = 4U;
+        }
+        const bool manifest_prefers_v3_plus =
+            manifest_material_param_encoding == "typed-v3" || manifest_material_param_encoding == "typed-v4";
+        const bool decoded_is_v3_plus = payload.typed_schema_version >= 3U;
+        if (manifest_prefers_v3_plus != decoded_is_v3_plus ||
+            (payload.feature_flags & kTypedParseConflictFeatureFlag) != 0U) {
+            PushWarning(
+                &pkg,
+                "W_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_CONFLICT: material=" + payload.name +
+                    ", manifestEncoding=" + manifest_material_param_encoding +
+                    ", decodedEncoding=" + payload.material_param_encoding);
         }
         if (payload.shader_variant.empty()) {
             payload.shader_variant = "default";
@@ -1604,6 +1672,30 @@ core::Result<AvatarPackage> Xav2Loader::Load(
                 payload.typed_texture_params.push_back(std::move(base_tex));
             }
         }
+        MaterialDiagnosticsEntry diag;
+        diag.material_name = payload.name;
+        diag.alpha_mode = payload.alpha_mode.empty() ? "OPAQUE" : payload.alpha_mode;
+        diag.alpha_source = "xav2.payload";
+        diag.alpha_cutoff = payload.alpha_cutoff;
+        diag.double_sided = payload.double_sided;
+        diag.has_mtoon_binding = payload.shader_family == "mtoon" || payload.shader_family == "liltoon";
+        diag.has_base_texture = !payload.base_color_texture_name.empty();
+        for (const auto& t : payload.typed_texture_params) {
+            const auto slot = ToLower(t.slot);
+            if (slot == "base" || slot == "main" || slot == "_maintex" || slot == "_basemap") {
+                diag.has_base_texture = true;
+            } else if (slot == "normal" || slot == "_bumpmap") {
+                diag.has_normal_texture = true;
+            } else if (slot == "emission" || slot == "_emissionmap") {
+                diag.has_emission_texture = true;
+            } else if (slot == "rim" || slot == "_rimtex") {
+                diag.has_rim_texture = true;
+            }
+        }
+        diag.typed_float_param_count = static_cast<std::uint32_t>(payload.typed_float_params.size());
+        diag.typed_color_param_count = static_cast<std::uint32_t>(payload.typed_color_params.size());
+        diag.typed_texture_param_count = static_cast<std::uint32_t>(payload.typed_texture_params.size());
+        pkg.material_diagnostics.push_back(std::move(diag));
         pkg.material_payloads.push_back(std::move(payload));
     }
 

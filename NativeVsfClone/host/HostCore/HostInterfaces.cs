@@ -142,6 +142,7 @@ public sealed record TrackingDiagnostics(
     bool UpperBodyTrackingActive = false,
     double UpperBodyConfidence = 0.0,
     int UpperBodyPacketAgeMs = int.MaxValue,
+    string UpperBodyActiveSource = "none",
     string UpperBodyStatus = "idle",
     string UpperBodyLastError = "");
 

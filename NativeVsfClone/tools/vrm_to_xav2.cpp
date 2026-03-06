@@ -346,7 +346,16 @@ std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg, CliOptions
     out += ",\"textureRefs\":";
     AppendStringArrayJson(&out, texture_refs);
     out += ",\"strictShaderSet\":[\"Standard\",\"MToon\",\"lilToon\",\"Poiyomi\",\"potatoon\",\"realtoon\"],";
-    out += "\"skinningMatrixConvention\":\"dx_row_major\",";
+    std::string skinning_convention = "dx_row_major";
+    if (pkg.skinning_matrix_convention == vsfclone::avatar::SkinningMatrixConvention::GltfColumnMajor) {
+        skinning_convention = "gltf_column_major";
+    } else if (pkg.skinning_matrix_convention == vsfclone::avatar::SkinningMatrixConvention::Unknown) {
+        skinning_convention = "unknown";
+    }
+    out += "\"skinningMatrixConvention\":\"" + skinning_convention + "\",";
+    out += "\"skinSpaceBasis\":\"" + EscapeJson(pkg.skin_space_basis.empty() ? "unknown" : pkg.skin_space_basis) + "\",";
+    out += "\"skinningAutoCorrectedMeshes\":" + std::to_string(pkg.skinning_auto_corrected_meshes) + ",";
+    out += "\"skinningConflictResolvedMeshes\":" + std::to_string(pkg.skinning_conflict_resolved_meshes) + ",";
     out += "\"hasSkinning\":" + BoolJson(!pkg.skin_payloads.empty()) + ",";
     out += "\"hasBlendShapes\":" + BoolJson(!pkg.blendshape_payloads.empty()) + ",";
     out += "\"hasSpringBones\":" + BoolJson(!pkg.springbone_payloads.empty()) + ",";
@@ -429,7 +438,12 @@ bool BuildMaterialTypedParamsSection(const vsfclone::avatar::MaterialRenderPaylo
         return false;
     }
     AppendU32Le(out, mat.feature_flags);
-    const std::uint16_t schema_version = mat.typed_schema_version == 0U ? 3U : mat.typed_schema_version;
+    std::uint16_t schema_version = mat.typed_schema_version;
+    if (schema_version < 3U) {
+        // XAV2 typed payloads are emitted in v3+ layout. Older source tags
+        // (e.g. VRM loader typed-v1) must be normalized to avoid manifest/payload drift.
+        schema_version = 3U;
+    }
     if (schema_version >= 3U) {
         AppendU16Le(out, schema_version);
     }

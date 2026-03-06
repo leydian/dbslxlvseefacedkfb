@@ -233,9 +233,13 @@ struct AvatarPackage {
     AvatarSourceType source_type = AvatarSourceType::Unknown;
     AvatarCompatLevel compat_level = AvatarCompatLevel::Unknown;
     SkinningMatrixConvention skinning_matrix_convention = SkinningMatrixConvention::Unknown;
+    std::string skin_space_basis = "unknown";
+    std::uint32_t skinning_auto_corrected_meshes = 0;
+    std::uint32_t skinning_conflict_resolved_meshes = 0;
     std::string parser_stage;
     std::string primary_error_code;
     std::string source_path;
+    std::string source_ext;
     std::string display_name;
     std::vector<MeshAssetSummary> meshes;
     std::vector<MaterialAssetSummary> materials;

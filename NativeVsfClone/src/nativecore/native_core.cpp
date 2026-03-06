@@ -305,6 +305,7 @@ std::mutex g_mutex;
 const char* RenderQualityModeName(std::uint32_t quality_profile);
 std::vector<std::string> TokenizeLooseFlags(std::string text);
 bool HasLooseToken(const std::vector<std::string>& tokens, const char* token);
+std::string NormalizeShaderFamilyKey(const std::string& shader_family);
 
 void CopyString(char* dst, std::size_t dst_size, const std::string& src) {
     if (dst == nullptr || dst_size == 0U) {
@@ -741,10 +742,17 @@ int PreviewYawDegreesForAvatarPackage(const AvatarPackage& pkg, const char** rea
         *reason_out = "default";
     }
     const int base = PreviewYawDegreesForAvatarSource(pkg.source_type);
+    if (pkg.source_type == AvatarSourceType::Xav2 && pkg.source_ext == ".vrm") {
+        if (reason_out != nullptr) {
+            *reason_out = "xav2_vrm_source_180";
+        }
+        return 180;
+    }
     if (pkg.source_type != AvatarSourceType::Vrm) {
         return base;
     }
     if (HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_FALLBACK") ||
+        HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_AUTOCORRECTED") ||
         HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_BYPASS") ||
         HasWarningCode(pkg, "VRM_NODE_TRANSFORM_CONFLICT") ||
         HasWarningCode(pkg, "VRM_MESH_MULTI_NODE_REF")) {
@@ -848,6 +856,28 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
     }
     CopyString(out_info->selected_family_backend, sizeof(out_info->selected_family_backend), "common");
     CopyString(out_info->active_passes, sizeof(out_info->active_passes), "none");
+    CopyString(out_info->material_parity_last_mismatch, sizeof(out_info->material_parity_last_mismatch), "none");
+    auto has_typed_slot = [](const avatar::MaterialRenderPayload& payload, const std::initializer_list<const char*> slots) {
+        for (const auto& param : payload.typed_texture_params) {
+            std::string normalized = param.slot;
+            std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            for (const char* slot : slots) {
+                if (slot == nullptr) {
+                    continue;
+                }
+                std::string key(slot);
+                std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if (normalized == key) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
 #if defined(_WIN32)
     {
         const auto material_it = g_state.renderer.avatar_materials.find(handle);
@@ -908,7 +938,113 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
             CopyString(out_info->active_passes, sizeof(out_info->active_passes), pass_value);
         }
     }
+    {
+        const auto material_it = g_state.renderer.avatar_materials.find(handle);
+        if (material_it != g_state.renderer.avatar_materials.end()) {
+            const auto& gpu_materials = material_it->second;
+            const std::size_t compare_count = std::min(gpu_materials.size(), pkg.material_payloads.size());
+            for (std::size_t i = 0U; i < compare_count; ++i) {
+                const auto& payload = pkg.material_payloads[i];
+                const auto& material = gpu_materials[i];
+                auto upper = [](std::string s) {
+                    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+                        return static_cast<char>(std::toupper(c));
+                    });
+                    return s;
+                };
+                const bool expect_base =
+                    !payload.base_color_texture_name.empty() ||
+                    has_typed_slot(payload, {"base", "main", "_MainTex", "_BaseMap"});
+                const bool expect_normal = has_typed_slot(payload, {"normal", "_BumpMap"});
+                const bool expect_rim = has_typed_slot(payload, {"rim", "_RimTex"});
+                const bool expect_emission = has_typed_slot(payload, {"emission", "_EmissionMap"});
+                const bool expect_matcap = has_typed_slot(payload, {"matcap", "_MatCapTex", "_MatCapTexture"});
+                const bool expect_uv_mask = has_typed_slot(payload, {"uvAnimationMask", "_UvAnimMaskTex"});
+                const std::array<std::pair<const char*, std::pair<bool, bool>>, 6U> checks = {{
+                    {"base", {expect_base, material.base_color_srv != nullptr}},
+                    {"normal", {expect_normal, material.normal_srv != nullptr}},
+                    {"rim", {expect_rim, material.rim_srv != nullptr}},
+                    {"emission", {expect_emission, material.emission_srv != nullptr}},
+                    {"matcap", {expect_matcap, material.matcap_srv != nullptr}},
+                    {"uvAnimationMask", {expect_uv_mask, material.uv_anim_mask_srv != nullptr}},
+                }};
+                for (const auto& check : checks) {
+                    const bool expected = check.second.first;
+                    const bool bound = check.second.second;
+                    if (expected == bound) {
+                        continue;
+                    }
+                    ++out_info->material_parity_mismatch_count;
+                    std::ostringstream mismatch;
+                    mismatch << "material=" << payload.name
+                             << ", slot=" << check.first
+                             << ", expected=" << (expected ? "1" : "0")
+                             << ", bound=" << (bound ? "1" : "0");
+                    CopyString(
+                        out_info->material_parity_last_mismatch,
+                        sizeof(out_info->material_parity_last_mismatch),
+                        mismatch.str());
+                }
+                const std::string payload_alpha = upper(payload.alpha_mode.empty() ? "OPAQUE" : payload.alpha_mode);
+                const std::string gpu_alpha = upper(material.alpha_mode.empty() ? "OPAQUE" : material.alpha_mode);
+                if (payload_alpha != gpu_alpha) {
+                    ++out_info->material_parity_mismatch_count;
+                    std::ostringstream mismatch;
+                    mismatch << "material=" << payload.name
+                             << ", field=alpha_mode, payload=" << payload_alpha
+                             << ", gpu=" << gpu_alpha;
+                    CopyString(
+                        out_info->material_parity_last_mismatch,
+                        sizeof(out_info->material_parity_last_mismatch),
+                        mismatch.str());
+                }
+                const std::string payload_family = NormalizeShaderFamilyKey(payload.shader_family);
+                const std::string gpu_family = NormalizeShaderFamilyKey(material.shader_family);
+                if (payload_family != gpu_family) {
+                    ++out_info->material_parity_mismatch_count;
+                    std::ostringstream mismatch;
+                    mismatch << "material=" << payload.name
+                             << ", field=shader_family, payload=" << payload_family
+                             << ", gpu=" << gpu_family;
+                    CopyString(
+                        out_info->material_parity_last_mismatch,
+                        sizeof(out_info->material_parity_last_mismatch),
+                        mismatch.str());
+                }
+                if (payload.double_sided != material.double_sided) {
+                    ++out_info->material_parity_mismatch_count;
+                    std::ostringstream mismatch;
+                    mismatch << "material=" << payload.name
+                             << ", field=double_sided, payload=" << (payload.double_sided ? "1" : "0")
+                             << ", gpu=" << (material.double_sided ? "1" : "0");
+                    CopyString(
+                        out_info->material_parity_last_mismatch,
+                        sizeof(out_info->material_parity_last_mismatch),
+                        mismatch.str());
+                }
+            }
+            if (gpu_materials.size() != pkg.material_payloads.size()) {
+                ++out_info->material_parity_mismatch_count;
+                std::ostringstream mismatch;
+                mismatch << "material_count_mismatch: payload=" << pkg.material_payloads.size()
+                         << ", gpu=" << gpu_materials.size();
+                CopyString(
+                    out_info->material_parity_last_mismatch,
+                    sizeof(out_info->material_parity_last_mismatch),
+                    mismatch.str());
+            }
+        }
+    }
 #endif
+    for (const auto& warning_code : pkg.warning_codes) {
+        std::string lowered = warning_code;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (lowered == "xav2_material_texture_ambiguous" || lowered == "vrm_material_texture_ambiguous") {
+            ++out_info->texture_resolve_ambiguous_count;
+        }
+    }
     CopyString(out_info->display_name, sizeof(out_info->display_name), pkg.display_name);
     CopyString(out_info->source_path, sizeof(out_info->source_path), pkg.source_path);
     CopyString(
@@ -2418,6 +2554,30 @@ bool ShouldUseConservativeXav2MaterialPath() {
     return token == "1" || token == "true" || token == "yes" || token == "on";
 }
 
+bool ShouldAllowXav2TextureAliasFallback() {
+    const char* raw = std::getenv("VSFCLONE_XAV2_ALLOW_TEXTURE_ALIAS_FALLBACK");
+    if (raw == nullptr) {
+        return false;
+    }
+    std::string token(raw);
+    std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return token == "1" || token == "true" || token == "yes" || token == "on";
+}
+
+bool ShouldAutoDetectXav2SkinningConvention() {
+    const char* raw = std::getenv("VSFCLONE_XAV2_ENABLE_CONVENTION_AUTODETECT");
+    if (raw == nullptr) {
+        return false;
+    }
+    std::string token(raw);
+    std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return token == "1" || token == "true" || token == "yes" || token == "on";
+}
+
 void SanitizeTrackingFrame(NcTrackingFrame* frame) {
     if (frame == nullptr) {
         return;
@@ -2950,10 +3110,18 @@ bool BuildGpuMeshForPayload(
     SkinningMatrixConvention* out_selected_convention,
     bool* out_ambiguous_convention,
     bool* collapse_guard_triggered,
+    bool* out_normals_generated,
+    bool* out_normals_generation_failed,
     ID3D11Device* device,
     GpuMeshResource* out_mesh) {
     if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty() || payload.indices.empty()) {
         return false;
+    }
+    if (out_normals_generated != nullptr) {
+        *out_normals_generated = false;
+    }
+    if (out_normals_generation_failed != nullptr) {
+        *out_normals_generation_failed = false;
     }
     const std::uint32_t src_stride = payload.vertex_stride >= 12U ? payload.vertex_stride : 12U;
     if ((payload.vertex_blob.size() % src_stride) != 0U) {
@@ -2968,13 +3136,14 @@ bool BuildGpuMeshForPayload(
     // XAV2 exporter layout is fixed: pos3(0) + normal3(12) + uv2(24) + tangent4(32).
     // Keep strict UV offset to avoid false-positive heuristic matches.
     const std::uint32_t uv_offset = (src_stride >= 32U) ? 24U : 12U;
+    const bool src_has_normals = src_stride >= 24U;
     for (std::uint32_t i = 0U; i < vertex_count; ++i) {
         const std::size_t base = static_cast<std::size_t>(i) * src_stride;
         gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base, src + base + 12U);
-        if (src_stride >= 24U) {
+        if (src_has_normals) {
             gpu_vertex_blob.insert(gpu_vertex_blob.end(), src + base + 12U, src + base + 24U);
         } else {
-            const std::array<float, 3U> nrm_up = {0.0f, 1.0f, 0.0f};
+            const std::array<float, 3U> nrm_up = {0.0f, 0.0f, 0.0f};
             const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(nrm_up.data());
             gpu_vertex_blob.insert(gpu_vertex_blob.end(), nrm_bytes, nrm_bytes + 12U);
         }
@@ -2987,6 +3156,76 @@ bool BuildGpuMeshForPayload(
             const std::array<float, 2U> uv_zero = {0.0f, 0.0f};
             const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uv_zero.data());
             gpu_vertex_blob.insert(gpu_vertex_blob.end(), uv_bytes, uv_bytes + 8U);
+        }
+    }
+    if (!src_has_normals) {
+        std::vector<float> normal_accum(static_cast<std::size_t>(vertex_count) * 3U, 0.0f);
+        bool triangle_seen = false;
+        for (std::size_t i = 0U; i + 2U < payload.indices.size(); i += 3U) {
+            const std::uint32_t ia = payload.indices[i];
+            const std::uint32_t ib = payload.indices[i + 1U];
+            const std::uint32_t ic = payload.indices[i + 2U];
+            if (ia >= vertex_count || ib >= vertex_count || ic >= vertex_count) {
+                continue;
+            }
+            triangle_seen = true;
+            auto read_pos = [&](std::uint32_t vi, float* x, float* y, float* z) {
+                const std::size_t base = static_cast<std::size_t>(vi) * 32U;
+                std::memcpy(x, gpu_vertex_blob.data() + base, sizeof(float));
+                std::memcpy(y, gpu_vertex_blob.data() + base + 4U, sizeof(float));
+                std::memcpy(z, gpu_vertex_blob.data() + base + 8U, sizeof(float));
+            };
+            float ax = 0.0f, ay = 0.0f, az = 0.0f;
+            float bx = 0.0f, by = 0.0f, bz = 0.0f;
+            float cx = 0.0f, cy = 0.0f, cz = 0.0f;
+            read_pos(ia, &ax, &ay, &az);
+            read_pos(ib, &bx, &by, &bz);
+            read_pos(ic, &cx, &cy, &cz);
+            const float ux = bx - ax;
+            const float uy = by - ay;
+            const float uz = bz - az;
+            const float vx = cx - ax;
+            const float vy = cy - ay;
+            const float vz = cz - az;
+            const float nx = uy * vz - uz * vy;
+            const float ny = uz * vx - ux * vz;
+            const float nz = ux * vy - uy * vx;
+            auto accum = [&](std::uint32_t vi) {
+                const std::size_t nbase = static_cast<std::size_t>(vi) * 3U;
+                normal_accum[nbase] += nx;
+                normal_accum[nbase + 1U] += ny;
+                normal_accum[nbase + 2U] += nz;
+            };
+            accum(ia);
+            accum(ib);
+            accum(ic);
+        }
+        if (triangle_seen) {
+            for (std::uint32_t i = 0U; i < vertex_count; ++i) {
+                const std::size_t nbase = static_cast<std::size_t>(i) * 3U;
+                float nx = normal_accum[nbase];
+                float ny = normal_accum[nbase + 1U];
+                float nz = normal_accum[nbase + 2U];
+                const float len = std::sqrt(nx * nx + ny * ny + nz * nz);
+                if (len > 1e-6f) {
+                    nx /= len;
+                    ny /= len;
+                    nz /= len;
+                } else {
+                    nx = 0.0f;
+                    ny = 1.0f;
+                    nz = 0.0f;
+                }
+                const std::size_t base = static_cast<std::size_t>(i) * 32U + 12U;
+                std::memcpy(gpu_vertex_blob.data() + base, &nx, sizeof(float));
+                std::memcpy(gpu_vertex_blob.data() + base + 4U, &ny, sizeof(float));
+                std::memcpy(gpu_vertex_blob.data() + base + 8U, &nz, sizeof(float));
+            }
+            if (out_normals_generated != nullptr) {
+                *out_normals_generated = true;
+            }
+        } else if (out_normals_generation_failed != nullptr) {
+            *out_normals_generation_failed = true;
         }
     }
 
@@ -3074,22 +3313,23 @@ bool BuildGpuMeshForPayload(
         const auto post_stats = compute_position_stats(gpu_vertex_blob);
         const float pre_extent = std::max(0.0001f, pre_stats.extent_max);
         const float post_extent = post_stats.extent_max;
+        const bool tiny_mesh = vertex_count < 96U || pre_extent < 0.06f;
         // Guard against plausible-but-wrong skinning matrices that stay finite
         // but inflate bounds massively (common when matrix convention mismatches).
         const bool exploded_extent = post_extent > (pre_extent * 20.0f);
         const bool exploded_abs = post_stats.max_abs > std::max(200.0f, pre_stats.max_abs * 20.0f);
         // Guard against collapsed pose output where vertices are squashed into
         // a thin tube or near-point cloud due to bad skeleton conventions.
-        const bool collapsed_extent = skinning_applied && post_extent < (pre_extent * 0.20f);
+        const bool collapsed_extent = skinning_applied && !tiny_mesh && post_extent < (pre_extent * 0.20f);
         const float pre_min_extent = std::max(0.0001f, pre_stats.extent_min);
         const float post_min_extent = std::max(0.0001f, post_stats.extent_min);
-        const bool collapsed_axis = skinning_applied && post_min_extent < (pre_min_extent * 0.15f);
+        const bool collapsed_axis = skinning_applied && !tiny_mesh && post_min_extent < (pre_min_extent * 0.15f);
         const float pre_aspect = pre_extent / pre_min_extent;
         const float post_aspect = post_extent / post_min_extent;
-        const bool tube_aspect_spike = skinning_applied && post_aspect > std::max(pre_aspect * 3.0f, 18.0f);
+        const bool tube_aspect_spike = skinning_applied && !tiny_mesh && post_aspect > std::max(pre_aspect * 3.0f, 18.0f);
         const float post_axis_min = std::min(post_stats.extent_x, std::min(post_stats.extent_y, post_stats.extent_z));
         const float post_axis_max = std::max(0.0001f, post_stats.extent_max);
-        const bool tube_axis_ratio = skinning_applied && (post_axis_min / post_axis_max) < 0.06f;
+        const bool tube_axis_ratio = skinning_applied && !tiny_mesh && (post_axis_min / post_axis_max) < 0.06f;
         const float pre_volume =
             std::max(0.0001f, pre_stats.extent_x) *
             std::max(0.0001f, pre_stats.extent_y) *
@@ -3099,12 +3339,12 @@ bool BuildGpuMeshForPayload(
             std::max(0.0001f, post_stats.extent_y) *
             std::max(0.0001f, post_stats.extent_z);
         const float volume_ratio = post_volume / pre_volume;
-        const bool collapsed_volume = skinning_applied && volume_ratio < 0.08f;
-        const bool exploded_volume = skinning_applied && volume_ratio > 25.0f;
-        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume || exploded_volume) {
-            if (collapsed_extent && collapse_guard_triggered != nullptr) {
-                *collapse_guard_triggered = true;
-            } else if ((collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume) && collapse_guard_triggered != nullptr) {
+        const bool collapsed_volume = skinning_applied && !tiny_mesh && volume_ratio < 0.08f;
+        const bool exploded_volume = skinning_applied && !tiny_mesh && volume_ratio > 25.0f;
+        // Keep XAV2 meshes coherent: only reject truly catastrophic outputs.
+        // Shape-collapse heuristics can desync per-mesh poses and create floating parts.
+        if (!post_stats.finite || exploded_extent || exploded_abs || exploded_volume) {
+            if (collapse_guard_triggered != nullptr) {
                 *collapse_guard_triggered = true;
             }
             gpu_vertex_blob = bind_pose_blob;
@@ -3217,6 +3457,118 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
 
     std::vector<GpuMeshResource> meshes;
     meshes.reserve(avatar_pkg.mesh_payloads.size());
+    SkinningMatrixConvention avatar_skinning_convention = avatar_pkg.skinning_matrix_convention;
+    bool avatar_skinning_convention_locked = avatar_skinning_convention != SkinningMatrixConvention::Unknown;
+    const bool is_legacy_xav2_without_basis =
+        avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+        avatar_pkg.skinning_matrix_convention == SkinningMatrixConvention::Unknown &&
+        NormalizeRefKey(avatar_pkg.skin_space_basis) != "mesh_local";
+    const bool allow_xav2_autodetect =
+        avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+        (ShouldAutoDetectXav2SkinningConvention() || is_legacy_xav2_without_basis);
+    if (avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+        avatar_skinning_convention == SkinningMatrixConvention::Unknown &&
+        !allow_xav2_autodetect) {
+        avatar_skinning_convention = SkinningMatrixConvention::DxRowMajor;
+        avatar_skinning_convention_locked = true;
+    }
+    if (is_legacy_xav2_without_basis && !ShouldAutoDetectXav2SkinningConvention()) {
+        avatar_skinning_convention = SkinningMatrixConvention::GltfColumnMajor;
+        avatar_skinning_convention_locked = true;
+    }
+    bool avatar_skinning_convention_ambiguous = false;
+    if (!avatar_skinning_convention_locked && static_skinning_enabled && allow_xav2_autodetect) {
+        struct ProbeTarget {
+            const avatar::MeshRenderPayload* payload = nullptr;
+            const avatar::SkinRenderPayload* skin = nullptr;
+            const avatar::SkeletonRenderPayload* skeleton = nullptr;
+            std::uint32_t vertex_count = 0U;
+        };
+        std::vector<ProbeTarget> probes;
+        probes.reserve(8U);
+        for (const auto& payload : avatar_pkg.mesh_payloads) {
+            const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
+            if (skin_it == skin_by_mesh.end()) {
+                continue;
+            }
+            const auto skeleton_it = skeleton_by_mesh.find(NormalizeMeshKey(payload.name));
+            if (skeleton_it == skeleton_by_mesh.end()) {
+                continue;
+            }
+            if (!IsValidSkeletonPosePayload(*skin_it->second, *skeleton_it->second)) {
+                continue;
+            }
+            const std::uint32_t src_stride = payload.vertex_stride >= 12U ? payload.vertex_stride : 12U;
+            if (payload.vertex_blob.empty() || (payload.vertex_blob.size() % src_stride) != 0U) {
+                continue;
+            }
+            const std::uint32_t vertex_count = static_cast<std::uint32_t>(payload.vertex_blob.size() / src_stride);
+            probes.push_back(ProbeTarget{&payload, skin_it->second, skeleton_it->second, vertex_count});
+        }
+        std::sort(probes.begin(), probes.end(), [](const ProbeTarget& a, const ProbeTarget& b) {
+            return a.vertex_count > b.vertex_count;
+        });
+        if (probes.size() > 5U) {
+            probes.resize(5U);
+        }
+        std::uint64_t vote_dx = 0U;
+        std::uint64_t vote_gltf = 0U;
+        bool any_ambiguous = false;
+        for (const auto& probe : probes) {
+            if (probe.payload == nullptr || probe.skin == nullptr || probe.skeleton == nullptr || probe.vertex_count == 0U) {
+                continue;
+            }
+            std::vector<std::uint8_t> probe_gpu_vertex_blob;
+            probe_gpu_vertex_blob.reserve(static_cast<std::size_t>(probe.vertex_count) * 32U);
+            const std::uint32_t src_stride = probe.payload->vertex_stride >= 12U ? probe.payload->vertex_stride : 12U;
+            const auto* src = probe.payload->vertex_blob.data();
+            for (std::uint32_t i = 0U; i < probe.vertex_count; ++i) {
+                const std::size_t base = static_cast<std::size_t>(i) * src_stride;
+                probe_gpu_vertex_blob.insert(probe_gpu_vertex_blob.end(), src + base, src + base + 12U);
+                if (src_stride >= 24U) {
+                    probe_gpu_vertex_blob.insert(probe_gpu_vertex_blob.end(), src + base + 12U, src + base + 24U);
+                } else {
+                    constexpr std::array<std::uint8_t, 12U> nrm_bytes = {
+                        0U, 0U, 0U, 0U, 0U, 0U, 128U, 63U, 0U, 0U, 0U, 0U};
+                    probe_gpu_vertex_blob.insert(probe_gpu_vertex_blob.end(), nrm_bytes.begin(), nrm_bytes.end());
+                }
+                if (src_stride >= 32U) {
+                    probe_gpu_vertex_blob.insert(
+                        probe_gpu_vertex_blob.end(),
+                        src + base + 24U,
+                        src + base + 32U);
+                } else {
+                    constexpr std::array<std::uint8_t, 8U> uv_bytes = {0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U};
+                    probe_gpu_vertex_blob.insert(probe_gpu_vertex_blob.end(), uv_bytes.begin(), uv_bytes.end());
+                }
+            }
+            SkinningMatrixConvention selected = SkinningMatrixConvention::Unknown;
+            bool ambiguous = false;
+            if (ApplyStaticSkinningToVertexBlob(
+                    &probe_gpu_vertex_blob,
+                    32U,
+                    *probe.skin,
+                    probe.skeleton,
+                    SkinningMatrixConvention::Unknown,
+                    &selected,
+                    &ambiguous) &&
+                selected != SkinningMatrixConvention::Unknown) {
+                if (selected == SkinningMatrixConvention::GltfColumnMajor) {
+                    vote_gltf += static_cast<std::uint64_t>(probe.vertex_count);
+                } else {
+                    vote_dx += static_cast<std::uint64_t>(probe.vertex_count);
+                }
+                any_ambiguous = any_ambiguous || ambiguous;
+            }
+        }
+        if (vote_dx > 0U || vote_gltf > 0U) {
+            avatar_skinning_convention = vote_gltf > vote_dx
+                ? SkinningMatrixConvention::GltfColumnMajor
+                : SkinningMatrixConvention::DxRowMajor;
+            avatar_skinning_convention_locked = true;
+            avatar_skinning_convention_ambiguous = any_ambiguous || (vote_dx == vote_gltf);
+        }
+    }
     for (const auto& payload : avatar_pkg.mesh_payloads) {
         GpuMeshResource mesh {};
         const avatar::SkinRenderPayload* skin_payload = nullptr;
@@ -3225,6 +3577,8 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         SkinningMatrixConvention selected_skinning_convention = SkinningMatrixConvention::Unknown;
         bool ambiguous_skinning_convention = false;
         bool collapse_guard_triggered = false;
+        bool normals_generated = false;
+        bool normals_generation_failed = false;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
         if (static_skinning_enabled && !bypass_vrm_static_skinning && skin_it != skin_by_mesh.end()) {
             const auto check = ValidateSkinPayload(payload, *skin_it->second);
@@ -3277,12 +3631,14 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                 payload,
                 skin_payload,
                 skeleton_payload,
-                avatar_pkg.skinning_matrix_convention,
+                avatar_skinning_convention_locked ? avatar_skinning_convention : avatar_pkg.skinning_matrix_convention,
                 static_skinning_enabled,
                 force_static_skinning_fallback,
                 &selected_skinning_convention,
                 &ambiguous_skinning_convention,
                 &collapse_guard_triggered,
+                &normals_generated,
+                &normals_generation_failed,
                 device,
                 &mesh)) {
             for (auto& created : meshes) {
@@ -3290,26 +3646,27 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
             }
             return false;
         }
+        if (!avatar_skinning_convention_locked &&
+            selected_skinning_convention != SkinningMatrixConvention::Unknown) {
+            avatar_skinning_convention = selected_skinning_convention;
+            avatar_skinning_convention_locked = true;
+        }
+        if (ambiguous_skinning_convention) {
+            avatar_skinning_convention_ambiguous = allow_xav2_autodetect;
+        }
         if (static_skinning_enabled && skin_payload != nullptr && skeleton_payload != nullptr) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
                 std::ostringstream warning;
                 warning << "W_RENDER: SKINNING_MATRIX_CONVENTION_SELECTED: mesh=" << payload.name
                         << ", selected=" << SkinningMatrixConventionName(selected_skinning_convention)
-                        << ", hint=" << SkinningMatrixConventionName(avatar_pkg.skinning_matrix_convention);
+                        << ", hint=" << SkinningMatrixConventionName(avatar_skinning_convention_locked
+                                                                      ? avatar_skinning_convention
+                                                                      : avatar_pkg.skinning_matrix_convention);
                 PushAvatarWarningUnique(
                     &avatar_it->second,
                     warning.str(),
                     "SKINNING_MATRIX_CONVENTION_SELECTED");
-                if (ambiguous_skinning_convention) {
-                    std::ostringstream ambiguous;
-                    ambiguous << "W_RENDER: XAV2_SKINNING_CONVENTION_AMBIGUOUS: mesh=" << payload.name
-                              << ", selected=" << SkinningMatrixConventionName(selected_skinning_convention);
-                    PushAvatarWarningUnique(
-                        &avatar_it->second,
-                        ambiguous.str(),
-                        "XAV2_SKINNING_CONVENTION_AMBIGUOUS");
-                }
             }
         }
         if (collapse_guard_triggered) {
@@ -3324,7 +3681,41 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                     "XAV2_SKINNING_COLLAPSE_GUARD");
             }
         }
+        if (normals_generated) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_NORMALS_GENERATED: mesh=" << payload.name;
+                PushAvatarWarningUnique(
+                    &avatar_it->second,
+                    warning.str(),
+                    "XAV2_NORMALS_GENERATED");
+            }
+        } else if (normals_generation_failed) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_NORMALS_GENERATION_FAILED: mesh=" << payload.name;
+                PushAvatarWarningUnique(
+                    &avatar_it->second,
+                    warning.str(),
+                    "XAV2_NORMALS_GENERATION_FAILED");
+            }
+        }
         meshes.push_back(mesh);
+    }
+    if (allow_xav2_autodetect && avatar_skinning_convention_ambiguous) {
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            std::ostringstream warning;
+            warning << "W_RENDER: XAV2_SKINNING_CONVENTION_AMBIGUOUS: selected="
+                    << SkinningMatrixConventionName(avatar_skinning_convention)
+                    << ", scope=avatar_locked";
+            PushAvatarWarningUnique(
+                &avatar_it->second,
+                warning.str(),
+                "XAV2_SKINNING_CONVENTION_AMBIGUOUS");
+        }
     }
     renderer->avatar_meshes[handle] = std::move(meshes);
     return true;
@@ -3357,6 +3748,19 @@ bool ApplyArmPoseToAvatar(
     }
     if (avatar_pkg.skin_payloads.empty() || avatar_pkg.skeleton_payloads.empty() || avatar_pkg.skeleton_rig_payloads.empty()) {
         return true;
+    }
+    SkinningMatrixConvention arm_pose_convention_hint = avatar_pkg.skinning_matrix_convention;
+    const bool legacy_xav2_unknown_basis =
+        avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+        arm_pose_convention_hint == SkinningMatrixConvention::Unknown &&
+        NormalizeRefKey(avatar_pkg.skin_space_basis) != "mesh_local";
+    if (legacy_xav2_unknown_basis && !ShouldAutoDetectXav2SkinningConvention()) {
+        arm_pose_convention_hint = SkinningMatrixConvention::GltfColumnMajor;
+    }
+    if (avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+        arm_pose_convention_hint == SkinningMatrixConvention::Unknown &&
+        !ShouldAutoDetectXav2SkinningConvention()) {
+        arm_pose_convention_hint = SkinningMatrixConvention::DxRowMajor;
     }
 
     std::unordered_map<std::string, const avatar::SkinRenderPayload*> skin_by_mesh;
@@ -3519,7 +3923,7 @@ bool ApplyArmPoseToAvatar(
                 mesh.vertex_stride,
                 *skin_payload,
                 &posed_skeleton,
-                avatar_pkg.skinning_matrix_convention,
+                arm_pose_convention_hint,
                 nullptr,
                 nullptr)) {
             continue;
@@ -3549,23 +3953,13 @@ bool ApplyArmPoseToAvatar(
         const float volume_ratio = post_volume / pre_volume;
         const bool collapsed_volume = volume_ratio < 0.08f;
         const bool exploded_volume = volume_ratio > 25.0f;
-        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume || exploded_volume) {
+        if (!post_stats.finite || exploded_extent || exploded_abs || exploded_volume) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
-                if (collapsed_extent || collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume) {
-                    std::ostringstream warning;
-                    warning << "W_RENDER: XAV2_SKINNING_COLLAPSE_GUARD: mesh=" << mesh.mesh_name
-                            << ", posed mesh rejected; keep bind pose.";
-                    PushAvatarWarningUnique(
-                        &avatar_it->second,
-                        warning.str(),
-                        "XAV2_SKINNING_COLLAPSE_GUARD");
-                } else {
-                    PushAvatarWarningUnique(
-                        &avatar_it->second,
-                        "W_RENDER: XAV2_SKINNING_EXTENT_GUARD: posed mesh rejected; keep bind pose.",
-                        "XAV2_SKINNING_EXTENT_GUARD");
-                }
+                PushAvatarWarningUnique(
+                    &avatar_it->second,
+                    "W_RENDER: XAV2_SKINNING_EXTENT_GUARD: posed mesh rejected; keep bind pose.",
+                    "XAV2_SKINNING_EXTENT_GUARD");
             }
             posed_vertices = mesh.bind_pose_vertex_blob;
         }
@@ -4180,6 +4574,7 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         const avatar::TextureRenderPayload* payload = nullptr;
         TextureMatchStage stage = TextureMatchStage::Missing;
     };
+    const bool allow_xav2_texture_alias_fallback = ShouldAllowXav2TextureAliasFallback();
     auto resolve_texture_payload = [&](const std::string& texture_ref) -> TextureResolveResult {
         TextureResolveResult out {};
         if (texture_ref.empty()) {
@@ -4213,17 +4608,19 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                 out.stage = TextureMatchStage::Normalized;
                 return out;
             }
-            const std::string basename = drop_extension(ExtractTerminalToken(key));
-            if (!basename.empty()) {
-                const auto it = textures_by_basename.find(basename);
-                if (it != textures_by_basename.end()) {
-                    if (it->second == nullptr) {
-                        out.stage = TextureMatchStage::Ambiguous;
+            if (allow_xav2_texture_alias_fallback) {
+                const std::string basename = drop_extension(ExtractTerminalToken(key));
+                if (!basename.empty()) {
+                    const auto it = textures_by_basename.find(basename);
+                    if (it != textures_by_basename.end()) {
+                        if (it->second == nullptr) {
+                            out.stage = TextureMatchStage::Ambiguous;
+                            return out;
+                        }
+                        out.payload = it->second;
+                        out.stage = TextureMatchStage::Basename;
                         return out;
                     }
-                    out.payload = it->second;
-                    out.stage = TextureMatchStage::Basename;
-                    return out;
                 }
             }
         }
@@ -4238,6 +4635,9 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         const char* unresolved_texture_code = is_vrm_source
             ? "VRM_MATERIAL_TEXTURE_UNRESOLVED"
             : "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
+        const char* ambiguous_texture_code = is_vrm_source
+            ? "VRM_MATERIAL_TEXTURE_AMBIGUOUS"
+            : "XAV2_MATERIAL_TEXTURE_AMBIGUOUS";
         std::vector<std::string> fallback_reasons;
         const std::string shader_family = NormalizeShaderFamilyKey(payload.shader_family);
         material.shader_family = shader_family;
@@ -4302,7 +4702,13 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         if (!payload.alpha_mode.empty() && CanonicalizeAlphaMode(payload.alpha_mode) != ToUpperAscii(payload.alpha_mode)) {
             fallback_reasons.push_back("alpha_mode_defaulted");
         }
-        material.alpha_mode = ResolveAlphaMode(payload);
+        if (avatar_pkg.source_type == AvatarSourceType::Xav2 && !payload.alpha_mode.empty()) {
+            // XAV2 payload alpha_mode is already normalized by loader-side parity logic.
+            // Trust payload to avoid runtime heuristic drift (e.g. OPAQUE -> MASK).
+            material.alpha_mode = CanonicalizeAlphaMode(payload.alpha_mode);
+        } else {
+            material.alpha_mode = ResolveAlphaMode(payload);
+        }
         const std::string resolved_alpha_mode = ToUpperAscii(material.alpha_mode);
         const bool alpha_allows_depth = resolved_alpha_mode != "BLEND";
         const bool parity_family =
@@ -4458,13 +4864,14 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_base_ref) {
                 unresolved_base_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
+                const char* warning_code = tex_res.stage == TextureMatchStage::Ambiguous ? ambiguous_texture_code : unresolved_texture_code;
+                warning << "W_RENDER: " << warning_code << ": material=" << payload.name
                         << ", slot=base, ref=" << base_texture_ref
                         << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
+                    avatar_it->second.warning_codes.push_back(warning_code);
                 }
             } else {
                 unresolved_base_texture = true;
@@ -4485,13 +4892,14 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_normal_ref) {
                 unresolved_normal_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
+                const char* warning_code = tex_res.stage == TextureMatchStage::Ambiguous ? ambiguous_texture_code : unresolved_texture_code;
+                warning << "W_RENDER: " << warning_code << ": material=" << payload.name
                         << ", slot=normal, ref=" << normal_texture_ref
                         << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
+                    avatar_it->second.warning_codes.push_back(warning_code);
                 }
             } else {
                 unresolved_normal_texture = true;
@@ -4510,13 +4918,14 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_rim_ref) {
                 unresolved_rim_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
+                const char* warning_code = tex_res.stage == TextureMatchStage::Ambiguous ? ambiguous_texture_code : unresolved_texture_code;
+                warning << "W_RENDER: " << warning_code << ": material=" << payload.name
                         << ", slot=rim, ref=" << rim_texture_ref
                         << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
+                    avatar_it->second.warning_codes.push_back(warning_code);
                 }
             } else {
                 unresolved_rim_texture = true;
@@ -4534,13 +4943,14 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_emission_ref) {
                 unresolved_emission_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
+                const char* warning_code = tex_res.stage == TextureMatchStage::Ambiguous ? ambiguous_texture_code : unresolved_texture_code;
+                warning << "W_RENDER: " << warning_code << ": material=" << payload.name
                         << ", slot=emission, ref=" << emission_texture_ref
                         << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
+                    avatar_it->second.warning_codes.push_back(warning_code);
                 }
             } else {
                 unresolved_emission_texture = true;
@@ -4560,13 +4970,14 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_matcap_ref) {
                 unresolved_matcap_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
+                const char* warning_code = tex_res.stage == TextureMatchStage::Ambiguous ? ambiguous_texture_code : unresolved_texture_code;
+                warning << "W_RENDER: " << warning_code << ": material=" << payload.name
                         << ", slot=matcap, ref=" << matcap_texture_ref
                         << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
+                    avatar_it->second.warning_codes.push_back(warning_code);
                 }
             } else {
                 unresolved_matcap_texture = true;
@@ -4584,13 +4995,14 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             } else if (has_typed_uv_mask_ref) {
                 unresolved_uv_mask_texture = true;
                 std::ostringstream warning;
-                warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
+                const char* warning_code = tex_res.stage == TextureMatchStage::Ambiguous ? ambiguous_texture_code : unresolved_texture_code;
+                warning << "W_RENDER: " << warning_code << ": material=" << payload.name
                         << ", slot=uvAnimationMask, ref=" << uv_anim_mask_ref
                         << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
-                    avatar_it->second.warning_codes.push_back(unresolved_texture_code);
+                    avatar_it->second.warning_codes.push_back(warning_code);
                 }
             } else {
                 unresolved_uv_mask_texture = true;
@@ -5351,13 +5763,48 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float extent_x = std::max(avatar_bmax.x - avatar_bmin.x, 0.0001f);
         const float extent_y = std::max(avatar_bmax.y - avatar_bmin.y, 0.0001f);
         const float extent_z = std::max(avatar_bmax.z - avatar_bmin.z, 0.0001f);
-        const float max_extent = std::max(extent_x, std::max(extent_y, extent_z));
+        const float min_extent = std::max(0.0001f, std::min(extent_x, std::min(extent_y, extent_z)));
+        const float aspect_ratio = std::max(extent_x, std::max(extent_y, extent_z)) / min_extent;
+        bool autofit_degenerate = false;
+        if (it->second.source_type == AvatarSourceType::Xav2) {
+            autofit_degenerate = aspect_ratio > 30.0f || extent_y < 0.05f;
+        }
+        if (autofit_degenerate) {
+            DirectX::XMFLOAT3 all_bmin = {
+                std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max()};
+            DirectX::XMFLOAT3 all_bmax = {
+                -std::numeric_limits<float>::max(),
+                -std::numeric_limits<float>::max(),
+                -std::numeric_limits<float>::max()};
+            std::size_t all_count = 0U;
+            for (const auto& m : mesh_it->second) {
+                all_bmin.x = std::min(all_bmin.x, m.bounds_min.x);
+                all_bmin.y = std::min(all_bmin.y, m.bounds_min.y);
+                all_bmin.z = std::min(all_bmin.z, m.bounds_min.z);
+                all_bmax.x = std::max(all_bmax.x, m.bounds_max.x);
+                all_bmax.y = std::max(all_bmax.y, m.bounds_max.y);
+                all_bmax.z = std::max(all_bmax.z, m.bounds_max.z);
+                ++all_count;
+            }
+            if (all_count > 0U) {
+                avatar_bmin = all_bmin;
+                avatar_bmax = all_bmax;
+                included_bounds_mesh_count = all_count;
+                near_origin_bounds_used = false;
+            }
+        }
+        const float safe_extent_x = std::max(avatar_bmax.x - avatar_bmin.x, 0.0001f);
+        const float safe_extent_y = std::max(avatar_bmax.y - avatar_bmin.y, 0.0001f);
+        const float safe_extent_z = std::max(avatar_bmax.z - avatar_bmin.z, 0.0001f);
+        const float max_extent = std::max(safe_extent_x, std::max(safe_extent_y, safe_extent_z));
         float fit_scale = 1.4f / max_extent;
         if (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_FULL || quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST) {
             const float fit_basis_height =
                 (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
-                    ? std::max(extent_y * 0.58f, 0.0001f)
-                    : extent_y;
+                    ? std::max(safe_extent_y * 0.58f, 0.0001f)
+                    : safe_extent_y;
             const float desired = quality.framing_target;
             fit_scale = (desired * 2.0f * camera_distance * std::max(0.01f, tan_half_fov)) / fit_basis_height;
         }
@@ -5370,7 +5817,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cz = (avatar_bmin.z + avatar_bmax.z) * 0.5f;
         const float focus_y =
             (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
-                ? (avatar_bmin.y + extent_y * (0.68f + quality.headroom * 0.2f))
+                ? (avatar_bmin.y + safe_extent_y * (0.68f + quality.headroom * 0.2f))
                 : cy;
         // Keep preview centered even if multiple handles are present.
         // Host UI currently operates in single-avatar mode, and slot offsets
@@ -5379,12 +5826,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float preview_yaw_override = PreviewYawRadiansForAvatarPackage(it->second, nullptr);
         {
             std::ostringstream preview_debug;
-            preview_debug << "extent=(" << extent_x << "/" << extent_y << "/" << extent_z
+            preview_debug << "extent=(" << safe_extent_x << "/" << safe_extent_y << "/" << safe_extent_z
                           << "), fit_scale=" << fit_scale
                           << ", center=(" << cx << "/" << cy << "/" << cz << ")"
                           << ", bounds_meshes=" << included_bounds_mesh_count
                           << "/" << mesh_it->second.size()
                           << ", bounds_excluded=" << excluded_bounds_mesh_count
+                          << ", autofit_degenerate=" << (autofit_degenerate ? "1" : "0")
                           << ", near_origin=" << (near_origin_bounds_used ? "1" : "0")
                           << ", preview_yaw_deg=" << PreviewYawDegreesForAvatarPackage(it->second, nullptr);
             if (!excluded_mesh_names.empty()) {

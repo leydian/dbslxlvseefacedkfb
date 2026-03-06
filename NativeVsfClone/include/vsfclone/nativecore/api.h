@@ -103,6 +103,9 @@ typedef struct NcAvatarInfo {
     uint32_t family_backend_fallback_count;
     char selected_family_backend[32];
     char active_passes[128];
+    uint32_t material_parity_mismatch_count;
+    uint32_t texture_resolve_ambiguous_count;
+    char material_parity_last_mismatch[256];
 } NcAvatarInfo;
 
 typedef struct NcExpressionInfo {

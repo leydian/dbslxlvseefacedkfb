@@ -142,6 +142,10 @@ public struct NcAvatarInfo
     public string SelectedFamilyBackend;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
     public string ActivePasses;
+    public uint MaterialParityMismatchCount;
+    public uint TextureResolveAmbiguousCount;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+    public string MaterialParityLastMismatch;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
