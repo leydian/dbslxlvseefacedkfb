@@ -2,6 +2,184 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Shader family backend split (liltoon/mtoon) with safe fallback
+
+### Summary
+
+Implemented a renderer topology split where shader-family backends now own pass graph execution paths.
+This round introduces concrete backend dispatch for `liltoon` and `mtoon`, keeps unsupported/incomplete families on a safe shared path, and exposes backend selection/fallback diagnostics through native API contracts.
+
+### Changed
+
+- Native renderer backend architecture:
+  - `src/nativecore/native_core.cpp`
+  - added backend kind model:
+    - `common`
+    - `liltoon`
+    - `mtoon`
+  - material runtime now records:
+    - requested backend
+    - selected backend
+    - fallback-applied flag/reason
+- Per-family pass graph ownership in runtime draw scheduling:
+  - replaced single global draw queues with backend-scoped queues:
+    - `depth`
+    - `shadow`
+    - `base` (opaque/mask/blend)
+    - `outline`
+    - `emission`
+  - execution order now iterates by backend and applies pass graph per backend.
+- Shader pipeline split:
+  - renderer resource slots expanded to:
+    - `pixel_shader_common`
+    - `pixel_shader_liltoon`
+    - `pixel_shader_mtoon`
+  - runtime draw path binds pixel shader by selected backend.
+  - mtoon backend compiles from dedicated macro path (`FAMILY_MTOON`) to separate shading branch behavior.
+- Material backend fallback policy:
+  - `liltoon/mtoon` request path is honored when backend is available.
+  - non-target/unsupported paths stay on `common`.
+  - conservative XAV2 material mode forces `common` and emits backend fallback diagnostics.
+  - added warning codes:
+    - `XAV2_FAMILY_BACKEND_FALLBACK`
+    - `VRM_FAMILY_BACKEND_FALLBACK`
+- API diagnostics contract expansion:
+  - `include/vsfclone/nativecore/api.h`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `NcAvatarInfo` now includes:
+    - `family_backend_fallback_count`
+    - `selected_family_backend`
+    - `active_passes`
+  - `FillAvatarInfo` populates backend dominance, fallback count, and active pass summary.
+  - render pass summary string now includes backend diagnostics fields.
+
+### Verification
+
+- Native build:
+  - `cmake --build NativeVsfClone/build --config Release --target nativecore`
+  - result: PASS (`nativecore.dll` produced)
+- Host solution build:
+  - `dotnet build NativeVsfClone/host/HostApps.sln -c Release`
+  - result: non-zero return in this shell without compile diagnostics
+  - note: `msbuild` command is not available in current shell PATH, so host-wide verification should be rerun in a VS Developer Command Prompt.
+
+## 2026-03-06 - Tracking full-contract strict gate + MediaPipe Python pinning
+
+### Summary
+
+Implemented a strict tracking readiness contract to move from partial tracking confidence to full-path certainty.
+This slice makes MediaPipe Python runtime selection explicit, promotes tracking gates to release-critical checks, and surfaces unified tracking contract status in the release dashboard.
+
+### Changed
+
+- MediaPipe sidecar sanity hardening:
+  - `tools/mediapipe_sidecar_sanity.ps1`
+  - Python executable resolution order:
+    - `-PythonExe` CLI argument
+    - `VSFCLONE_MEDIAPIPE_PYTHON` environment variable
+    - legacy fallback (`python`) only when explicit pinning is not required
+  - added strict switch:
+    - `-RequireExplicitPythonExe` (fails when no explicit Python runtime is provided)
+  - summary now records:
+    - `PythonExe`, `PythonSource`, `RequireExplicitPythonExe`
+    - explicit failure reason for missing Python pin
+- Release readiness strict tracking contract:
+  - `tools/release_readiness_gate.ps1`
+  - added tracking strict-policy controls:
+    - `-DisableStrictTrackingContract` (opt-out)
+    - `-EnableTrackingFuzz`
+    - `-MediapipePythonExe`
+  - default behavior now enables and requires all three tracking checks:
+    - `MediaPipe sidecar sanity`
+    - `Host E2E gate`
+    - `Tracking parser fuzz gate`
+  - summary now records strict/effective flags and Python pin source intent.
+- Release dashboard tracking contract visibility:
+  - `tools/release_gate_dashboard.ps1`
+  - added tracking rows:
+    - `Tracking HostE2E`
+    - `Tracking Parser Fuzz`
+    - `Tracking Mediapipe Sanity`
+  - release candidate decisions (`WpfOnly`, `Full`) now require tracking contract all-pass.
+  - retained Unity/XAV2 policy switches for WPF/Full decision paths.
+- Operator repro guidance update:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - diagnostics repro commands now include strict readiness example with explicit `VSFCLONE_MEDIAPIPE_PYTHON`.
+
+### Verification
+
+- Script command resolution check:
+  - `mediapipe_sidecar_sanity.ps1`: OK
+  - `release_readiness_gate.ps1`: OK
+  - `release_gate_dashboard.ps1`: OK
+- Dashboard execution:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\release_gate_dashboard.ps1`: PASS
+  - output includes tracking rows and contract-driven candidate status.
+- Readiness behavior checks:
+  - `-DisableStrictTrackingContract` run: PASS (baseline publish/dashboard only)
+  - strict default run: FAIL as expected when Python pin missing
+    - `python_source: missing`
+    - `python_executable: FAIL (missing explicit python executable...)`
+
+### Notes
+
+- This change intentionally fails strict readiness when MediaPipe runtime pinning is not configured, to prevent false-green release readiness for webcam/hybrid tracking paths.
+
+## 2026-03-06 - XAV2 static skinning auto-mode recovery for broken mesh deformation
+
+### Summary
+
+Implemented a targeted runtime recovery for "XAV2 avatar appears torn/collapsed" cases by introducing an auto-mode static skinning policy in native render mesh build path.  
+This change keeps explicit operator override semantics (`on/off`) while making the default behavior safer for XAV2 assets that contain valid skin/skeleton payloads.
+
+### Why this change was needed
+
+- Observed runtime state showed:
+  - `Format: XAV2`
+  - `SkinPayloads > 0`, `SkeletonPayloads > 0`
+  - warning `W_RENDER: SKINNING_STATIC_DISABLED`
+- Existing guardrail had static skinning default-off, which prevented destructive rewrites in risky cases but also left some XAV2 assets rendered from non-deformed bind-position vertex blobs.
+- Result: visible mesh breakage for specific XAV2 assets despite successful load (`Compat: full`, `PrimaryError: NONE`).
+
+### Changed
+
+- Native static skinning policy refactor (`src/nativecore/native_core.cpp`):
+  - Added explicit env mode parsing for `VSFCLONE_XAV2_ENABLE_STATIC_SKINNING`:
+    - force-on: `1|true|yes|on`
+    - force-off: `0|false|no|off`
+    - auto: unset or `auto` (and unknown tokens fall back to auto)
+  - Added mesh-build policy function that resolves effective static skinning state per avatar package.
+  - In `auto` mode:
+    - XAV2 enables static skinning when both `skin_payloads` and `skeleton_payloads` are present.
+    - non-XAV2 remains conservative (off by default).
+- Mesh build pipeline wiring:
+  - `BuildGpuMeshForPayload(...)` now receives `enable_static_skinning` from caller policy.
+  - Removed redundant in-function env re-checks; caller-provided decision is now single source of truth.
+  - Fallback application path now keys off `enable_static_skinning && force_static_skinning_fallback`.
+- Render warning behavior remains deterministic:
+  - `SKINNING_STATIC_DISABLED` is still emitted when skin payload exists but effective policy is off.
+  - under default auto mode for valid XAV2 skin/skeleton payloads, this warning should no longer occur.
+
+### Scope and non-goals
+
+- Included:
+  - XAV2 mesh deformation recovery in default runtime behavior.
+  - Operator override compatibility via existing env var.
+- Not changed:
+  - arm-pose runtime path policy (`ApplyArmPoseToAvatar`) remains explicitly gated by `ShouldApplyExperimentalStaticSkinning()`.
+  - physics runtime simulation support status (still reported separately as missing feature when applicable).
+
+### Verification
+
+- Build:
+  - `cmake --build NativeVsfClone/build --config Release --target nativecore avatar_tool` -> PASS
+- Loader smoke:
+  - `NativeVsfClone/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"` -> PASS
+  - load result remained healthy (`Compat: full`, `PrimaryError: NONE`, parser stage `runtime-ready`)
+- Runtime contract check:
+  - default behavior now computes static skinning ON for XAV2 with both skin and skeleton payload presence.
+  - explicit `VSFCLONE_XAV2_ENABLE_STATIC_SKINNING=0` still disables skinning globally.
+
 ## 2026-03-06 - XAV2 typed-v4 canonical material contract + depth/shadow pass slice
 
 ### Summary

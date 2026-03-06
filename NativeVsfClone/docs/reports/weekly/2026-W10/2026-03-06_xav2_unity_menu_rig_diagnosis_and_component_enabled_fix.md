@@ -28,6 +28,15 @@
 - README updates:
   - Added new diagnosis menu entry.
   - Added short rig diagnosis workflow and interpretation guidance.
+- Runtime outlier isolation hardening (`native_core.cpp`):
+  - Added a per-mesh preview exclusion set for XAV2.
+  - Excludes mesh from both AutoFit bounds and draw passes when center/bounds are cluster outliers.
+  - Keeps fallback behavior when all candidates are excluded to avoid empty-frame failure.
+  - Adds warning code `XAV2_BOUNDS_OUTLIER_EXCLUDED` and includes excluded mesh names in preview debug text.
+  - Extends preview debug summary with `bounds_excluded` count and sampled names.
+- Diagnosis menu stability:
+  - Removed aggressive diagnostic asset root deletion prior to import.
+  - Added progress bar/cancel flow and exception-safe fallback report generation.
 
 ## Verification Summary
 - Native baseline check on target sample:
@@ -47,6 +56,7 @@
 - Unity Editor runtime verification (menu visibility and import dialog flow) must be confirmed in local Unity project session after script recompilation.
 - Strict/Fallback diagnosis output quality depends on source file warning quality and rig diagnostic population.
 - Existing unrelated working-tree changes were intentionally not altered.
+- Export-time strict gate hardening is still pending; current mitigation primarily protects runtime rendering path.
 
 ## Next Steps
 1. In Unity, run `Diagnose Rig (Strict/Fallback)...` on the failing `.xav2` and capture summary output.
