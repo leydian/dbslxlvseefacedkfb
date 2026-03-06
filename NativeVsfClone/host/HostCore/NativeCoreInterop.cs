@@ -137,6 +137,11 @@ public struct NcAvatarInfo
     public string ParityFallbackReason;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
     public string QualityMode;
+    public uint FamilyBackendFallbackCount;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+    public string SelectedFamilyBackend;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+    public string ActivePasses;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]

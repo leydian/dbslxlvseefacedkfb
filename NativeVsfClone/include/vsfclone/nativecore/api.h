@@ -100,6 +100,9 @@ typedef struct NcAvatarInfo {
     char variant_id[64];
     char parity_fallback_reason[256];
     char quality_mode[16];
+    uint32_t family_backend_fallback_count;
+    char selected_family_backend[32];
+    char active_passes[128];
 } NcAvatarInfo;
 
 typedef struct NcExpressionInfo {
