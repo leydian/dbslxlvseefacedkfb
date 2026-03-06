@@ -11,12 +11,12 @@
 - `r01`: 4 reports
 - `vxavatar`: 4 reports
 - `wpf`: 16 reports
-- `release`: 3 reports
+- `release`: 4 reports
 - `vrm`: 14 reports
 - `winui`: 3 reports
 - `workspace`: 3 reports
 - `avatar`: 2 reports
-- `platform`: 2 reports
+- `platform`: 3 reports
 - `session`: 2 reports
 - `tracking`: 4 reports
 - `webcam`: 3 reports
@@ -47,6 +47,8 @@
 
 ## Next Steps
 - Pick three key reports and review promotion to long-term references.
+- Newly added: review `2026-03-06_platform_10persona_action_plan_evaluation.md` for 10-persona scoring, P1/P2 action mapping, and owner/window alignment.
+- Newly added: review `2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md` for onboarding KPI fail-closed gate policy and error remediation contract wiring.
 - Newly added: review `2026-03-06_completion_90pct_execution_update.md` for board-status closure evidence, verification results, and remaining WinUI blocker classification.
 - Newly added: review `2026-03-06_vrm_runtime_metrics_v2_api.md` for runtime quality metric adoption and gate integration.
 - Newly added: review `2026-03-06_webcam_device_enumeration_and_tracking_refresh.md` for Windows camera enumeration contract, index-key sidecar compatibility, and WPF/WinUI refresh/fallback behavior.

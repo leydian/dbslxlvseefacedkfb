@@ -35,6 +35,7 @@ Domain-level report navigation hub.
 - [2026-03-02_nativecore_render_quality_api_sync.md](./weekly/2026-W10/2026-03-02_nativecore_render_quality_api_sync.md)
 
 ## platform
+- [2026-03-06_platform_10persona_action_plan_evaluation.md](./weekly/2026-W10/2026-03-06_platform_10persona_action_plan_evaluation.md)
 - [2026-03-05_platform_persona_requirements_reassessment.md](./weekly/2026-W10/2026-03-05_platform_persona_requirements_reassessment.md)
 - [2026-03-05_platform_persona_requirements_review.md](./weekly/2026-W10/2026-03-05_platform_persona_requirements_review.md)
 
@@ -48,6 +49,7 @@ Domain-level report navigation hub.
 - [2026-03-06_release_automation_execution_update.md](./weekly/2026-W10/2026-03-06_release_automation_execution_update.md)
 - [2026-03-06_release_execution_board_20.md](./weekly/2026-W10/2026-03-06_release_execution_board_20.md)
 - [2026-03-06_release_execution_followup.md](./weekly/2026-W10/2026-03-06_release_execution_followup.md)
+- [2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md](./weekly/2026-W10/2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md)
 
 ## runtime
 - [2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md](./weekly/2026-W10/2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md)

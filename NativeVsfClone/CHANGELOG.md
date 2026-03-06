@@ -2,6 +2,51 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - 10-persona action plan artifacts + onboarding KPI release gate policy
+
+### Summary
+
+Implemented the execution slice from the 10-persona platform plan that can be shipped immediately:
+
+- added 10-persona action-plan evaluation artifacts
+- wired onboarding KPI threshold policy into release gate dashboard/readiness flow
+- formalized error-code to remediation to repro-command troubleshooting contract
+
+### Changed
+
+- Release gate dashboard (`tools/release_gate_dashboard.ps1`):
+  - added onboarding KPI policy parameters:
+    - `RequireOnboardingKpiForWpfOnly`
+    - `RequireOnboardingKpiForFull` (default `true`)
+    - `OnboardingWithin3MinSuccessRateThresholdPct` (default `70.0`)
+    - `OnboardingMinSessionCount` (default `5`)
+  - reads `build/reports/onboarding_kpi_summary.json`
+  - surfaces `Onboarding KPI Gate` row and gate-summary fields
+  - supports fail-closed onboarding KPI requirement in:
+    - `ReleaseCandidateWpfOnly`
+    - `ReleaseCandidateFull`
+- Release readiness gate (`tools/release_readiness_gate.ps1`):
+  - added onboarding KPI options and summary fields
+  - added optional `Onboarding KPI summary` step using `tools/onboarding_kpi_summary.ps1`
+  - forwards onboarding KPI policy to dashboard refresh call
+  - includes onboarding KPI artifacts in summary contract
+- Public troubleshooting contract:
+  - updated `docs/public/error-codes.md`
+  - added host troubleshooting action flow:
+    - `ErrorCode/WarningCodes` 확인 -> 조치 -> diagnostics bundle -> `repro_commands.txt` 재실행
+  - added common host tracking/runtime error guidance entries
+- Persona/report artifacts:
+  - added `docs/reports/persona_evaluation_schema.md`
+  - added `docs/reports/weekly/2026-W10/2026-03-06_platform_10persona_action_plan_evaluation.md`
+  - added `docs/reports/weekly/2026-W10/2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md`
+  - updated report indexes and weekly summary references
+
+### Verification
+
+- PowerShell parse validation:
+  - `tools/release_gate_dashboard.ps1`: PASS
+  - `tools/release_readiness_gate.ps1`: PASS
+
 ## 2026-03-06 - Tracking local IPv4 hint + persistent hide toggle (WPF/WinUI)
 
 ### Summary

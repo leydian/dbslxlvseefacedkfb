@@ -3,7 +3,11 @@ param(
     [string]$OutputJson = ".\build\reports\release_gate_dashboard.json",
     [string]$OutputTxt = ".\build\reports\release_gate_dashboard.txt",
     [switch]$RequireUnityXav2ForWpfOnly,
-    [switch]$RequireUnityXav2ForFull = $true
+    [switch]$RequireUnityXav2ForFull = $true,
+    [switch]$RequireOnboardingKpiForWpfOnly,
+    [switch]$RequireOnboardingKpiForFull = $true,
+    [double]$OnboardingWithin3MinSuccessRateThresholdPct = 70.0,
+    [int]$OnboardingMinSessionCount = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +35,65 @@ function Get-PassFailFromStatusLine {
     if ($Line -match "\bFAIL\b") { return "FAIL" }
     if ($Line -eq "MISSING") { return "MISSING" }
     return "UNKNOWN"
+}
+
+function Get-OnboardingKpiState {
+    param(
+        [string]$Path,
+        [double]$ThresholdPct,
+        [int]$MinSessionCount
+    )
+
+    if (-not (Test-Path $Path)) {
+        return [ordered]@{
+            status = "MISSING"
+            detail = "onboarding KPI summary missing"
+            session_count = 0
+            within_3min_success_rate_pct = 0.0
+            threshold_pct = $ThresholdPct
+            min_session_count = $MinSessionCount
+            pass = $false
+        }
+    }
+
+    try {
+        $json = Get-Content -Raw -Path $Path | ConvertFrom-Json
+    } catch {
+        return [ordered]@{
+            status = "INVALID"
+            detail = "onboarding KPI summary parse failed"
+            session_count = 0
+            within_3min_success_rate_pct = 0.0
+            threshold_pct = $ThresholdPct
+            min_session_count = $MinSessionCount
+            pass = $false
+        }
+    }
+
+    $sessionCount = 0
+    $successRate = 0.0
+    if ($null -ne $json.session_count) {
+        $sessionCount = [int]$json.session_count
+    }
+    if ($null -ne $json.within_3min_success_rate_pct) {
+        $successRate = [double]$json.within_3min_success_rate_pct
+    }
+
+    $hasEnoughSamples = $sessionCount -ge $MinSessionCount
+    $ratePass = $successRate -ge $ThresholdPct
+    $pass = $hasEnoughSamples -and $ratePass
+    $status = if ($pass) { "PASS" } elseif (-not $hasEnoughSamples) { "INSUFFICIENT_SAMPLES" } else { "FAIL" }
+    $detail = "sessions=$sessionCount, success_rate_pct=$successRate, threshold_pct=$ThresholdPct, min_sessions=$MinSessionCount"
+
+    return [ordered]@{
+        status = $status
+        detail = $detail
+        session_count = $sessionCount
+        within_3min_success_rate_pct = $successRate
+        threshold_pct = $ThresholdPct
+        min_session_count = $MinSessionCount
+        pass = $pass
+    }
 }
 
 function Get-HostTrackState {
@@ -232,6 +295,18 @@ $rows += [PSCustomObject]@{
     source_file = $hostReport
 }
 
+$onboardingKpiPath = Join-Path $ReportDir "onboarding_kpi_summary.json"
+$onboardingKpiState = Get-OnboardingKpiState `
+    -Path $onboardingKpiPath `
+    -ThresholdPct $OnboardingWithin3MinSuccessRateThresholdPct `
+    -MinSessionCount $OnboardingMinSessionCount
+
+$rows += [PSCustomObject]@{
+    track = "Onboarding KPI Gate"
+    status_line = "$($onboardingKpiState.status): $($onboardingKpiState.detail)"
+    source_file = $onboardingKpiPath
+}
+
 $avatarRows = @($rows | Where-Object { $_.track -in @("VSFAvatar", "VRM", "VXAvatar") })
 $avatarAllPass = $true
 foreach ($r in $avatarRows) {
@@ -279,9 +354,11 @@ if ($unityLtsKpiSummary -ne $null -and $unityLtsKpiSummary.rows -ne $null) {
 
 $wpfUnityRequirementMet = if ($RequireUnityXav2ForWpfOnly) { $unityXav2AllPass } else { $true }
 $fullUnityRequirementMet = if ($RequireUnityXav2ForFull) { $unityXav2AllPass } else { $true }
+$wpfOnboardingRequirementMet = if ($RequireOnboardingKpiForWpfOnly) { [bool]$onboardingKpiState.pass } else { $true }
+$fullOnboardingRequirementMet = if ($RequireOnboardingKpiForFull) { [bool]$onboardingKpiState.pass } else { $true }
 
-$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $wpfUnityRequirementMet -and $trackingContractAllPass
-$fullReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and ($hostTrack.winui_state -eq "PASS") -and $fullUnityRequirementMet -and $trackingContractAllPass
+$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $wpfUnityRequirementMet -and $trackingContractAllPass -and $wpfOnboardingRequirementMet
+$fullReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and ($hostTrack.winui_state -eq "PASS") -and $fullUnityRequirementMet -and $trackingContractAllPass -and $fullOnboardingRequirementMet
 
 $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("s")
@@ -296,6 +373,15 @@ $summary = [PSCustomObject]@{
         unity_xav2_all_pass = $unityXav2AllPass
         unity_xav2_required_wpf_only = [bool]$RequireUnityXav2ForWpfOnly
         unity_xav2_required_full = [bool]$RequireUnityXav2ForFull
+        onboarding_kpi_path = $onboardingKpiPath
+        onboarding_kpi_status = $onboardingKpiState.status
+        onboarding_kpi_pass = [bool]$onboardingKpiState.pass
+        onboarding_kpi_session_count = [int]$onboardingKpiState.session_count
+        onboarding_within_3min_success_rate_pct = [double]$onboardingKpiState.within_3min_success_rate_pct
+        onboarding_kpi_threshold_pct = [double]$onboardingKpiState.threshold_pct
+        onboarding_kpi_min_session_count = [int]$onboardingKpiState.min_session_count
+        onboarding_kpi_required_wpf_only = [bool]$RequireOnboardingKpiForWpfOnly
+        onboarding_kpi_required_full = [bool]$RequireOnboardingKpiForFull
         host_mode = $hostTrack.mode
         host_wpf_pass = ($hostTrack.wpf_state -eq "PASS")
         host_winui_pass = ($hostTrack.winui_state -eq "PASS")
@@ -322,6 +408,12 @@ $lines += "Release Gate Dashboard"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
 $lines += "Policy.RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly"
 $lines += "Policy.RequireUnityXav2ForFull: $RequireUnityXav2ForFull"
+$lines += "Policy.RequireOnboardingKpiForWpfOnly: $RequireOnboardingKpiForWpfOnly"
+$lines += "Policy.RequireOnboardingKpiForFull: $RequireOnboardingKpiForFull"
+$lines += "Policy.OnboardingWithin3MinSuccessRateThresholdPct: $OnboardingWithin3MinSuccessRateThresholdPct"
+$lines += "Policy.OnboardingMinSessionCount: $OnboardingMinSessionCount"
+$lines += "OnboardingKpiStatus: $($onboardingKpiState.status)"
+$lines += "OnboardingKpiDetail: $($onboardingKpiState.detail)"
 $lines += "UnityXav2LtsRecentRisk: $(if ($unityLtsRecentRisk) { 'YES' } else { 'NO' })"
 $lines += "UnityXav2LtsRecentRiskLines: $(if ($unityLtsRecentRiskLines.Count -gt 0) { $unityLtsRecentRiskLines -join ', ' } else { '<none>' })"
 $lines += "TrackingContractCandidate: $(if ($trackingContractAllPass) { 'PASS' } else { 'FAIL' })"

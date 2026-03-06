@@ -18,6 +18,12 @@ param(
     [switch]$EnableXav2Parity,
     [switch]$RequireUnityXav2ForWpfOnly,
     [switch]$RequireUnityXav2ForFull = $true,
+    [switch]$RequireOnboardingKpiForWpfOnly,
+    [switch]$RequireOnboardingKpiForFull = $true,
+    [double]$OnboardingWithin3MinSuccessRateThresholdPct = 70.0,
+    [int]$OnboardingMinSessionCount = 5,
+    [string]$OnboardingTelemetryPath = ".\build\reports\telemetry_latest.json",
+    [switch]$SkipOnboardingKpiSummary,
     [switch]$SkipVersionContractCheck,
     [switch]$SkipQualityBaseline,
     [switch]$DisableStrictTrackingContract,
@@ -107,6 +113,19 @@ try {
         & powershell @args
     }))
 
+    if (-not $SkipOnboardingKpiSummary) {
+        $resolvedTelemetryPath = Resolve-AbsolutePath -Path $OnboardingTelemetryPath -BaseDirectory $repoRoot
+        if (Test-Path -LiteralPath $resolvedTelemetryPath) {
+            $results.Add((Invoke-Step -Name "Onboarding KPI summary" -Action {
+                & powershell -ExecutionPolicy Bypass -File .\tools\onboarding_kpi_summary.ps1 -TelemetryPath $resolvedTelemetryPath
+            }))
+        } else {
+            Write-Host "[release-readiness] SKIP: Onboarding KPI summary (telemetry missing: $resolvedTelemetryPath)"
+        }
+    } else {
+        Write-Host "[release-readiness] SKIP: Onboarding KPI summary"
+    }
+
     $results.Add((Invoke-Step -Name "Release gate dashboard refresh" -Action {
         $args = @(
             "-ExecutionPolicy", "Bypass",
@@ -114,6 +133,10 @@ try {
         )
         if ($RequireUnityXav2ForWpfOnly) { $args += "-RequireUnityXav2ForWpfOnly" }
         if ($RequireUnityXav2ForFull) { $args += "-RequireUnityXav2ForFull" }
+        if ($RequireOnboardingKpiForWpfOnly) { $args += "-RequireOnboardingKpiForWpfOnly" }
+        if ($RequireOnboardingKpiForFull) { $args += "-RequireOnboardingKpiForFull" }
+        $args += @("-OnboardingWithin3MinSuccessRateThresholdPct", "$OnboardingWithin3MinSuccessRateThresholdPct")
+        $args += @("-OnboardingMinSessionCount", "$OnboardingMinSessionCount")
         & powershell @args
     }))
 
@@ -213,6 +236,12 @@ $lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
 $lines.Add("EnableXav2Parity: $EnableXav2Parity")
 $lines.Add("RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly")
 $lines.Add("RequireUnityXav2ForFull: $RequireUnityXav2ForFull")
+$lines.Add("RequireOnboardingKpiForWpfOnly: $RequireOnboardingKpiForWpfOnly")
+$lines.Add("RequireOnboardingKpiForFull: $RequireOnboardingKpiForFull")
+$lines.Add("OnboardingWithin3MinSuccessRateThresholdPct: $OnboardingWithin3MinSuccessRateThresholdPct")
+$lines.Add("OnboardingMinSessionCount: $OnboardingMinSessionCount")
+$lines.Add("OnboardingTelemetryPath: $OnboardingTelemetryPath")
+$lines.Add("SkipOnboardingKpiSummary: $SkipOnboardingKpiSummary")
 $lines.Add("DurationSec: $durationSec")
 $lines.Add("")
 $lines.Add("Steps:")
@@ -225,6 +254,8 @@ $lines.Add("- build/reports/quality_baseline_summary.txt")
 $lines.Add("- build/reports/host_publish_latest.txt")
 $lines.Add("- build/reports/release_gate_dashboard.txt")
 $lines.Add("- build/reports/release_gate_dashboard.json")
+$lines.Add("- build/reports/onboarding_kpi_summary.txt")
+$lines.Add("- build/reports/onboarding_kpi_summary.json")
 $lines.Add("- build/reports/host_e2e_gate_summary.txt")
 $lines.Add("- build/reports/tracking_parser_fuzz_gate_summary.txt")
 $lines.Add("- build/reports/winui_xaml_min_repro_summary.txt")
