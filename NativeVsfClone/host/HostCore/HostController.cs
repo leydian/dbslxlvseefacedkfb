@@ -36,7 +36,7 @@ public sealed partial class HostController
     private DateTimeOffset _lastOutputRecoveryAttemptUtc = DateTimeOffset.MinValue;
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
-    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
+    private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.HybridAuto, "idle");
     private List<PoseBoneUiOffset> _poseOffsets = BuildDefaultPoseOffsets();
     private string _lastTrackingFormat = "unknown";
     private ulong _lastTrackingParseErrors;
@@ -1188,8 +1188,8 @@ public sealed partial class HostController
         {
             "ultra-parity" => (uint)NcRenderQualityProfile.UltraParity,
             "quality" => (uint)NcRenderQualityProfile.Balanced,
-            "stability" => (uint)NcRenderQualityProfile.Balanced,
-            "performance" => (uint)NcRenderQualityProfile.Balanced,
+            "stability" => (uint)NcRenderQualityProfile.FastFallback,
+            "performance" => (uint)NcRenderQualityProfile.FastFallback,
             _ => (uint)NcRenderQualityProfile.Default,
         };
     }

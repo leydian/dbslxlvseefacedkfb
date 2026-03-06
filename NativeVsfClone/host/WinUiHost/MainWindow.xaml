@@ -240,6 +240,7 @@
                         <TextBox Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Source" VerticalAlignment="Center" Margin="0,8,0,0"/>
                         <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
+                            <x:String>Auto (OSC + Webcam)</x:String>
                             <x:String>OSC (iFacialMocap)</x:String>
                             <x:String>Webcam (MediaPipe)</x:String>
                         </ComboBox>

@@ -2,6 +2,64 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking HybridAuto default + no-input watchdog diagnostics + WPF/WinUI hint hardening
+
+### Summary
+
+Implemented a tracking operability hardening pass for "avatar loaded but tracking not moving" failures by introducing a default hybrid source mode, explicit no-input watchdog diagnostics, and clearer source-age/error hint surfacing in host UIs.
+
+### Changed
+
+- Tracking contract/default update:
+  - `host/HostCore/HostInterfaces.cs`
+    - added `TrackingSourceType.HybridAuto`
+    - extended `TrackingDiagnostics` with:
+      - `IfacialPacketAgeMs`
+      - `WebcamPacketAgeMs`
+  - `host/HostCore/PlatformFeatures.cs`
+    - session default tracking source now `HybridAuto`
+    - normalization fallback default aligned to `HybridAuto`
+  - `host/HostCore/HostController.cs`
+    - initial tracking diagnostics default source aligned to `HybridAuto`
+- Tracking runtime behavior hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - added startup no-input watchdog (`NoActiveInputWarnDelayMs=3000`)
+  - added explicit no-input/runtime warning codes:
+    - `TRACKING_NO_ACTIVE_INPUT_SOURCE`
+    - `TRACKING_IFACIAL_NO_PACKET`
+    - `TRACKING_WEBCAM_RUNTIME_UNAVAILABLE`
+    - `TRACKING_WEBCAM_NO_FRAME`
+  - added per-source packet-age diagnostics publication (`ifacial/webcam`)
+  - source mode behavior made explicit:
+    - `OscIfacial`: OSC-only consumption
+    - `WebcamMediapipe`: webcam-only consumption
+    - `HybridAuto`: OSC primary + webcam fallback/arbitration
+  - tracking stop path now normalizes inactive active-source to `none`
+- WPF/WinUI operator surface update:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - tracking source selector now includes:
+    - `Auto (OSC + Webcam)`
+    - `OSC (iFacialMocap)`
+    - `Webcam (MediaPipe)`
+  - start/config mapping + session restore mapping updated for 3-way source selection
+  - tracking status text now prints:
+    - `ifacial_age`
+    - `webcam_age`
+  - tracking hint mapper now covers new no-input/runtime-unavailable warning codes
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 --no-restore`: FAIL in current environment baseline (`MSB3073`, `XamlCompiler.exe`)
+
 ## 2026-03-06 - XAV2 Standard/MToon strict parity expansion
 
 ### Summary

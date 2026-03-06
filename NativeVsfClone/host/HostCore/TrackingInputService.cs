@@ -12,6 +12,7 @@ public sealed class TrackingInputService : ITrackingInputService
 {
     private const ushort DefaultListenPort = 49983;
     private const int DefaultStaleTimeoutMs = 500;
+    private const int NoActiveInputWarnDelayMs = 3000;
     private const int CalibrationWarmupFrames = 90;
     private const int LatencySampleWindow = 240;
 
@@ -22,8 +23,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
-    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced);
-    private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.OscIfacial, "idle");
+    private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced);
+    private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.HybridAuto, "idle");
 
     private DateTimeOffset _lastPacketUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _lastFpsSampleUtc = DateTimeOffset.MinValue;
@@ -89,6 +90,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _poseAdaptiveMaxAlpha = 0.52f;
     private float _poseAdaptiveGain = 0.024f;
     private int _recenterStabilizeFramesRemaining;
+    private DateTimeOffset _trackingStartedUtc = DateTimeOffset.MinValue;
+    private bool _webcamRuntimeUnavailable;
 
     public NcResultCode Start(TrackingStartOptions options)
     {
@@ -118,6 +121,8 @@ public sealed class TrackingInputService : ITrackingInputService
             ApplyLatencyProfileTuning(_options.LatencyProfile);
             ApplyPoseFilterTuning(_options.PoseFilterProfile, _options.PoseDeadbandDeg);
             ResetRuntimeState();
+            _trackingStartedUtc = DateTimeOffset.UtcNow;
+            _webcamRuntimeUnavailable = false;
 
             if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
             {
@@ -166,30 +171,44 @@ public sealed class TrackingInputService : ITrackingInputService
             _diagnostics = _diagnostics with
             {
                 IsActive = true,
-                SourceType = TrackingSourceType.OscIfacial,
+                SourceType = _options.SourceType,
                 SourceStatus = $"udp-listening:{_options.ListenPort}",
                 StatusMessage = $"listening:{_options.ListenPort}",
                 ActiveSource = "ifacial",
                 ConfidenceSummary = BuildConfidenceSummary(),
             };
 
-            // Start webcam sidecar as fallback path, but do not fail OSC start when unavailable.
+            if (_options.SourceType != TrackingSourceType.HybridAuto)
+            {
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = "ifacial-active",
+                    StatusMessage = $"listening:{_options.ListenPort}",
+                };
+                return NcResultCode.Ok;
+            }
+
+            // Hybrid mode: start webcam sidecar as fallback path, but do not fail start when unavailable.
             var fallbackRc = InitializeWebcamRuntime();
             if (fallbackRc == NcResultCode.Ok)
             {
                 _ = Task.Run(() => WebcamLoopAsync(_cts.Token));
                 _diagnostics = _diagnostics with
                 {
+                    IsActive = true,
                     SourceStatus = "ifacial-active:webcam-fallback-ready",
                     StatusMessage = $"listening:{_options.ListenPort}; fallback=webcam-ready",
                 };
             }
             else
             {
+                _webcamRuntimeUnavailable = true;
                 _diagnostics = _diagnostics with
                 {
+                    IsActive = true,
                     SourceStatus = "ifacial-active:webcam-fallback-unavailable",
                     StatusMessage = $"listening:{_options.ListenPort}; fallback=webcam-unavailable",
+                    LastErrorCode = "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE",
                 };
             }
             return NcResultCode.Ok;
@@ -216,6 +235,7 @@ public sealed class TrackingInputService : ITrackingInputService
             _udpClient = null;
             _receiveTask = null;
             DisposeWebcamRuntime();
+            _activeRuntimeSource = TrackingRuntimeSource.None;
             _diagnostics = _diagnostics with
             {
                 IsActive = false,
@@ -224,6 +244,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 SourceStatus = "stopped",
                 StatusMessage = "stopped",
                 ActiveSource = "none",
+                IfacialPacketAgeMs = int.MaxValue,
+                WebcamPacketAgeMs = int.MaxValue,
                 ConfidenceSummary = BuildConfidenceSummary(),
             };
             return NcResultCode.Ok;
@@ -270,6 +292,8 @@ public sealed class TrackingInputService : ITrackingInputService
             var ageMs = _lastPacketUtc == DateTimeOffset.MinValue
                 ? int.MaxValue
                 : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - _lastPacketUtc).TotalMilliseconds);
+            var ifacialAgeMs = GetPacketAgeMs(_lastIfacialPacketUtc);
+            var webcamAgeMs = GetPacketAgeMs(_lastWebcamPacketUtc);
             var stale = ageMs > _options.StaleTimeoutMs;
             EvaluateSourceArbitration(ageMs);
             submitWatch.Stop();
@@ -287,8 +311,10 @@ public sealed class TrackingInputService : ITrackingInputService
                 InferenceMsAvg = _smoothedInferenceMs,
                 SourceStatus = stale ? "stale-reset-to-neutral" : _diagnostics.SourceStatus,
                 StatusMessage = stale ? "stale (reset to neutral)" : _diagnostics.StatusMessage,
-                ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                ActiveSource = _diagnostics.IsActive ? ToActiveSourceLabel(_activeRuntimeSource) : "none",
                 FallbackCount = _fallbackCount,
+                IfacialPacketAgeMs = ifacialAgeMs,
+                WebcamPacketAgeMs = webcamAgeMs,
                 CalibrationState = _calibrationState,
                 ConfidenceSummary = BuildConfidenceSummary(),
                 LatencyAvgMs = _latencyAvgMs,
@@ -302,6 +328,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 PoseFilterProfile = _options.PoseFilterProfile,
                 PoseDeadbandDeg = _poseDeadbandDeg,
             };
+            ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
 
             frame = stale ? BuildNeutralFrame() : _lastOutputFrame;
             return true;
@@ -330,6 +357,8 @@ public sealed class TrackingInputService : ITrackingInputService
             var ageMs = _lastPacketUtc == DateTimeOffset.MinValue
                 ? int.MaxValue
                 : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - _lastPacketUtc).TotalMilliseconds);
+            var ifacialAgeMs = GetPacketAgeMs(_lastIfacialPacketUtc);
+            var webcamAgeMs = GetPacketAgeMs(_lastWebcamPacketUtc);
             var stale = ageMs > _options.StaleTimeoutMs;
             EvaluateSourceArbitration(ageMs);
             _diagnostics = _diagnostics with
@@ -340,8 +369,10 @@ public sealed class TrackingInputService : ITrackingInputService
                 CaptureFps = _smoothedCaptureFps,
                 InferenceMsAvg = _smoothedInferenceMs,
                 SourceType = _options.SourceType,
-                ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
+                ActiveSource = _diagnostics.IsActive ? ToActiveSourceLabel(_activeRuntimeSource) : "none",
                 FallbackCount = _fallbackCount,
+                IfacialPacketAgeMs = ifacialAgeMs,
+                WebcamPacketAgeMs = webcamAgeMs,
                 CalibrationState = _calibrationState,
                 ConfidenceSummary = BuildConfidenceSummary(),
                 LatencyAvgMs = _latencyAvgMs,
@@ -355,6 +386,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 PoseFilterProfile = _options.PoseFilterProfile,
                 PoseDeadbandDeg = _poseDeadbandDeg,
             };
+            ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
             return _diagnostics;
         }
     }
@@ -413,6 +445,8 @@ public sealed class TrackingInputService : ITrackingInputService
         _latestMediapipeError = string.Empty;
         _lastMediapipeFrameId = 0;
         _recenterStabilizeFramesRemaining = 0;
+        _trackingStartedUtc = DateTimeOffset.MinValue;
+        _webcamRuntimeUnavailable = false;
         _diagnostics = new TrackingDiagnostics(
             true,
             "unknown",
@@ -810,10 +844,10 @@ public sealed class TrackingInputService : ITrackingInputService
                 InputFps = _smoothedInputFps,
                 CaptureFps = _smoothedCaptureFps,
                 InferenceMsAvg = _smoothedInferenceMs,
-                SourceStatus = _options.SourceType == TrackingSourceType.OscIfacial
+                SourceStatus = _options.SourceType == TrackingSourceType.HybridAuto
                     ? BuildWebcamSourceStatus("fallback-active")
                     : BuildWebcamSourceStatus("receiving"),
-                StatusMessage = _options.SourceType == TrackingSourceType.OscIfacial
+                StatusMessage = _options.SourceType == TrackingSourceType.HybridAuto
                     ? "receiving:webcam-mediapipe (fallback)"
                     : "receiving:webcam-mediapipe",
                 ModelSchemaOk = true,
@@ -1596,6 +1630,11 @@ public sealed class TrackingInputService : ITrackingInputService
             _activeRuntimeSource = TrackingRuntimeSource.Webcam;
             return;
         }
+        if (_options.SourceType == TrackingSourceType.OscIfacial)
+        {
+            _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
+            return;
+        }
 
         if (_options.SourceLockMode == TrackingSourceLockMode.IfacialLocked)
         {
@@ -1664,6 +1703,10 @@ public sealed class TrackingInputService : ITrackingInputService
         {
             return false;
         }
+        if (_options.SourceType == TrackingSourceType.OscIfacial)
+        {
+            return true;
+        }
 
         if (_options.SourceLockMode == TrackingSourceLockMode.IfacialLocked)
         {
@@ -1681,6 +1724,10 @@ public sealed class TrackingInputService : ITrackingInputService
         if (_options.SourceType == TrackingSourceType.WebcamMediapipe)
         {
             return true;
+        }
+        if (_options.SourceType == TrackingSourceType.OscIfacial)
+        {
+            return false;
         }
 
         if (_options.SourceLockMode == TrackingSourceLockMode.IfacialLocked)
@@ -1719,6 +1766,85 @@ public sealed class TrackingInputService : ITrackingInputService
         return string.Create(
             CultureInfo.InvariantCulture,
             $"ifacial={ifacialConfidence:F2},webcam={webcamConfidence:F2}");
+    }
+
+    private static int GetPacketAgeMs(DateTimeOffset packetUtc)
+    {
+        return packetUtc == DateTimeOffset.MinValue
+            ? int.MaxValue
+            : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - packetUtc).TotalMilliseconds);
+    }
+
+    private void ApplyNoInputWarningIfNeeded(int ifacialAgeMs, int webcamAgeMs)
+    {
+        if (!_diagnostics.IsActive)
+        {
+            return;
+        }
+
+        var hasIfacial = ifacialAgeMs != int.MaxValue;
+        var hasWebcam = webcamAgeMs != int.MaxValue;
+        var elapsedMs = _trackingStartedUtc == DateTimeOffset.MinValue
+            ? 0
+            : (int)Math.Max(0.0, (DateTimeOffset.UtcNow - _trackingStartedUtc).TotalMilliseconds);
+
+        if ((hasIfacial || hasWebcam) && IsNoInputWarningCode(_diagnostics.LastErrorCode))
+        {
+            _diagnostics = _diagnostics with { LastErrorCode = string.Empty };
+        }
+
+        if (elapsedMs < NoActiveInputWarnDelayMs)
+        {
+            return;
+        }
+
+        var warningCode = string.Empty;
+        switch (_options.SourceType)
+        {
+            case TrackingSourceType.OscIfacial:
+                if (!hasIfacial)
+                {
+                    warningCode = "TRACKING_IFACIAL_NO_PACKET";
+                }
+                break;
+            case TrackingSourceType.WebcamMediapipe:
+                if (!hasWebcam)
+                {
+                    warningCode = _webcamRuntimeUnavailable
+                        ? "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE"
+                        : "TRACKING_WEBCAM_NO_FRAME";
+                }
+                break;
+            case TrackingSourceType.HybridAuto:
+                if (!hasIfacial && !hasWebcam)
+                {
+                    warningCode = _webcamRuntimeUnavailable
+                        ? "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE"
+                        : "TRACKING_NO_ACTIVE_INPUT_SOURCE";
+                }
+                break;
+        }
+
+        if (string.IsNullOrWhiteSpace(warningCode))
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_diagnostics.LastErrorCode) &&
+            !IsNoInputWarningCode(_diagnostics.LastErrorCode))
+        {
+            return;
+        }
+
+        _diagnostics = _diagnostics with { LastErrorCode = warningCode };
+    }
+
+    private static bool IsNoInputWarningCode(string code)
+    {
+        return string.Equals(code, "TRACKING_NO_ACTIVE_INPUT_SOURCE", StringComparison.Ordinal) ||
+               string.Equals(code, "TRACKING_IFACIAL_NO_PACKET", StringComparison.Ordinal) ||
+               string.Equals(code, "TRACKING_WEBCAM_NO_FRAME", StringComparison.Ordinal) ||
+               string.Equals(code, "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE", StringComparison.Ordinal);
     }
 
     private static string ToActiveSourceLabel(TrackingRuntimeSource source)

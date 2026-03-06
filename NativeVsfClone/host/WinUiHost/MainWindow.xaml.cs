@@ -549,9 +549,12 @@ public sealed partial class MainWindow : Window
         }
         dropWarnThreshold = Math.Clamp(dropWarnThreshold, 1, 10000);
 
-        var sourceType = TrackingSourceComboBox.SelectedIndex == 1
-            ? TrackingSourceType.WebcamMediapipe
-            : TrackingSourceType.OscIfacial;
+        var sourceType = TrackingSourceComboBox.SelectedIndex switch
+        {
+            2 => TrackingSourceType.WebcamMediapipe,
+            1 => TrackingSourceType.OscIfacial,
+            _ => TrackingSourceType.HybridAuto,
+        };
 
         var settings = _controller.GetTrackingInputSettings();
         var cameraKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key
@@ -643,6 +646,10 @@ public sealed partial class MainWindow : Window
             "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid",
             "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
             "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
+            "TRACKING_NO_ACTIVE_INPUT_SOURCE" => " hint=no active input source; start iFacial send or enable webcam runtime",
+            "TRACKING_IFACIAL_NO_PACKET" => " hint=no iFacial packet received",
+            "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE" => " hint=webcam runtime unavailable (python/mediapipe not ready)",
+            "TRACKING_WEBCAM_NO_FRAME" => " hint=webcam runtime started but no frame",
             _ when lastErrorCode.StartsWith("NC_SET_TRACKING_FRAME_", StringComparison.Ordinal) => " hint=native tracking submit failed",
             _ when lastErrorCode.StartsWith("NC_SET_EXPRESSION_WEIGHTS_", StringComparison.Ordinal) => " hint=native expression submit failed",
             _ => string.Empty,
@@ -1233,7 +1240,7 @@ public sealed partial class MainWindow : Window
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
 
         SessionStatusText.Text = $"Session: {statusText.SessionText}";
         AvatarStatusText.Text = $"Avatar: {statusText.AvatarText}";
@@ -1632,7 +1639,12 @@ public sealed partial class MainWindow : Window
         OscBindPortTextBox.Text = session.OscBindPort.ToString(CultureInfo.InvariantCulture);
         OscPublishAddressTextBox.Text = session.OscPublishAddress;
         TrackingPortTextBox.Text = session.Tracking.ListenPort.ToString(CultureInfo.InvariantCulture);
-        TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType == TrackingSourceType.WebcamMediapipe ? 1 : 0;
+        TrackingSourceComboBox.SelectedIndex = session.Tracking.SourceType switch
+        {
+            TrackingSourceType.WebcamMediapipe => 2,
+            TrackingSourceType.OscIfacial => 1,
+            _ => 0,
+        };
         TrackingInferenceFpsTextBox.Text = session.Tracking.InferenceFpsCap.ToString(CultureInfo.InvariantCulture);
         TrackingParseWarnThresholdTextBox.Text = session.Tracking.ParseErrorWarnThreshold.ToString(CultureInfo.InvariantCulture);
         TrackingDropWarnThresholdTextBox.Text = session.Tracking.DroppedPacketWarnThreshold.ToString(CultureInfo.InvariantCulture);

@@ -92,7 +92,7 @@ public sealed record SessionPersistenceModel(
         OscBindPort: 39539,
         OscPublishAddress: "127.0.0.1:39540",
         Sidecar: new SidecarSettings("sidecar", string.Empty, 15000, false),
-        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
+        Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced),
         RecentAvatars: Array.Empty<RecentAvatarEntry>(),
         LastProfileName: "quality",
         UiMode: "beginner",
@@ -189,7 +189,7 @@ public sealed class SessionStateStore
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f),
                     RecentAvatars: Array.Empty<RecentAvatarEntry>(),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
@@ -239,14 +239,14 @@ public sealed class SessionStateStore
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.OscIfacial, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
         var stale = Math.Clamp(value.StaleTimeoutMs <= 0 ? 500 : value.StaleTimeoutMs, 50, 5000);
         var sourceType = Enum.IsDefined(typeof(TrackingSourceType), value.SourceType)
             ? value.SourceType
-            : TrackingSourceType.OscIfacial;
+            : TrackingSourceType.HybridAuto;
         var sourceLockMode = Enum.IsDefined(typeof(TrackingSourceLockMode), value.SourceLockMode)
             ? value.SourceLockMode
             : TrackingSourceLockMode.Auto;

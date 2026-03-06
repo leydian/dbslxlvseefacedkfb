@@ -310,7 +310,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Pitch" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" x:Name="PosePitchSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
+                                    <Slider Grid.Column="1" x:Name="PosePitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PosePitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <Grid Margin="0,0,0,8">
@@ -320,7 +320,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Yaw" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" x:Name="PoseYawSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
+                                    <Slider Grid.Column="1" x:Name="PoseYawSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PoseYawValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <Grid Margin="0,0,0,8">
@@ -330,7 +330,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Roll" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" x:Name="PoseRollSlider" Minimum="-45" Maximum="45" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
+                                    <Slider Grid.Column="1" x:Name="PoseRollSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="PoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="PoseRollValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <TextBlock Text="Arm Pitch (팔 올림/내림)" FontWeight="SemiBold" Margin="0,0,0,6"/>
@@ -341,7 +341,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Both" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" x:Name="ArmBothPitchSlider" Minimum="-90" Maximum="90" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
+                                    <Slider Grid.Column="1" x:Name="ArmBothPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="ArmBothPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <Grid Margin="0,0,0,8">
@@ -351,7 +351,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Left Arm" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" x:Name="ArmLeftPitchSlider" Minimum="-90" Maximum="90" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
+                                    <Slider Grid.Column="1" x:Name="ArmLeftPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="ArmLeftPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <Grid Margin="0,0,0,8">
@@ -361,7 +361,7 @@
                                         <ColumnDefinition Width="50"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="Right Arm" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" x:Name="ArmRightPitchSlider" Minimum="-90" Maximum="90" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
+                                    <Slider Grid.Column="1" x:Name="ArmRightPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="ArmPoseSlider_ValueChanged"/>
                                     <TextBlock Grid.Column="2" x:Name="ArmRightPitchValueText" Text="0" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
                                 <WrapPanel Margin="0,0,0,8">
@@ -477,6 +477,7 @@
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Source" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
+                                <ComboBoxItem Content="Auto (OSC + Webcam)"/>
                                 <ComboBoxItem Content="OSC (iFacialMocap)"/>
                                 <ComboBoxItem Content="Webcam (MediaPipe)"/>
                             </ComboBox>
@@ -644,7 +645,10 @@
                     </DockPanel>
                 </TabItem>
                 <TabItem Header="아바타 (Avatar)">
-                    <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                    <DockPanel>
+                        <Button Content="아바타 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyAvatar_Click"/>
+                        <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                    </DockPanel>
                 </TabItem>
                 <TabItem Header="로그 (Logs)">
                     <DockPanel>

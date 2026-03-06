@@ -47,6 +47,7 @@ public enum TrackingSourceType
 {
     OscIfacial = 0,
     WebcamMediapipe = 1,
+    HybridAuto = 2,
 }
 
 public enum TrackingSourceLockMode
@@ -125,7 +126,9 @@ public sealed record TrackingDiagnostics(
     string Arkit52MissingKeys = "",
     string Arkit52TopMissingKeys = "",
     double Arkit52QualityScore = 0.0,
-    double Arkit52QualityStageMs = 0.0);
+    double Arkit52QualityStageMs = 0.0,
+    int IfacialPacketAgeMs = int.MaxValue,
+    int WebcamPacketAgeMs = int.MaxValue);
 
 public interface ITrackingInputService
 {
