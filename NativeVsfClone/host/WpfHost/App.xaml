@@ -40,6 +40,35 @@
         <SolidColorBrush x:Key="Color.StatusBarBorder" Color="#546E88"/>
         <SolidColorBrush x:Key="Color.StatusBarLabel" Color="#D7E5F3"/>
         <SolidColorBrush x:Key="Color.StatusBarValue" Color="#F4FAFF"/>
+        <SolidColorBrush x:Key="Color.PanelInfoBg" Color="#F3F7FD"/>
+        <SolidColorBrush x:Key="Color.PanelInfoBorder" Color="#D7E3F2"/>
+        <SolidColorBrush x:Key="Color.PanelInfoText" Color="#35516B"/>
+        <SolidColorBrush x:Key="Color.PanelInfoAltBg" Color="#EDF3FA"/>
+        <SolidColorBrush x:Key="Color.PanelInfoAltBorder" Color="#CAD8E8"/>
+        <SolidColorBrush x:Key="Color.PanelInfoAltText" Color="#243548"/>
+        <SolidColorBrush x:Key="Color.PanelSuccessBg" Color="#EEF6EF"/>
+        <SolidColorBrush x:Key="Color.PanelSuccessBorder" Color="#BFDCC2"/>
+        <SolidColorBrush x:Key="Color.PanelSuccessTitle" Color="#1E5130"/>
+        <SolidColorBrush x:Key="Color.PanelSuccessText" Color="#2C6A3F"/>
+        <SolidColorBrush x:Key="Color.PanelWarningBg" Color="#FFF8EE"/>
+        <SolidColorBrush x:Key="Color.PanelWarningBorder" Color="#F3D2A7"/>
+        <SolidColorBrush x:Key="Color.PanelWarningText" Color="#7C4012"/>
+        <SolidColorBrush x:Key="Color.PanelErrorBg" Color="#FFF6F6"/>
+        <SolidColorBrush x:Key="Color.PanelErrorBorder" Color="#F0B7B7"/>
+        <SolidColorBrush x:Key="Color.PanelErrorText" Color="#7F1D1D"/>
+        <SolidColorBrush x:Key="Color.ValidationErrorText" Color="#B03030"/>
+        <SolidColorBrush x:Key="Color.CardSoftBg" Color="#F5F9FE"/>
+        <SolidColorBrush x:Key="Color.CardSoftBorder" Color="#D7E0EA"/>
+        <SolidColorBrush x:Key="Color.CardSoftBorderStrong" Color="#CCD8E6"/>
+        <SolidColorBrush x:Key="Color.Splitter" Color="#B9C8DB"/>
+        <SolidColorBrush x:Key="Color.OverlayHintBg" Color="#D0101720"/>
+        <SolidColorBrush x:Key="Color.OverlayHintBorder" Color="#5A7088"/>
+        <SolidColorBrush x:Key="Color.OverlayHintText" Color="#E8F0F8"/>
+        <SolidColorBrush x:Key="Color.DebugOverlayBg" Color="#EEFFFFFF"/>
+        <SolidColorBrush x:Key="Color.DebugOverlayBorder" Color="#47627E"/>
+        <SolidColorBrush x:Key="Color.DebugOverlayText" Color="#1A2530"/>
+        <SolidColorBrush x:Key="Color.StepComplete" Color="#227842"/>
+        <SolidColorBrush x:Key="Color.StepPending" Color="#35516B"/>
 
         <Thickness x:Key="Spacing.ControlPadding">10,6</Thickness>
         <Thickness x:Key="Spacing.InputPadding">8,5</Thickness>

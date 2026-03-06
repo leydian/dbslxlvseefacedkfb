@@ -39,7 +39,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _resizeTimer = new();
     private readonly DispatcherTimer _renderApplyTimer = new();
     private readonly Stopwatch _frameTimer = Stopwatch.StartNew();
-    private const float DragPixelsPerYawDegree = 6.0f;
+    private const float DragPixelsPerYawDegree = 3.0f;
     private const float WheelNotchFovStep = 1.0f;
     private bool _isSyncingRenderUi;
     private bool _isSyncingPoseUi;
@@ -1927,7 +1927,7 @@ public partial class MainWindow : Window
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -2163,7 +2163,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -2193,12 +2193,15 @@ public partial class MainWindow : Window
             avatarSb.AppendLine($"FamilyBackendFallbackCount: {info.FamilyBackendFallbackCount}");
             avatarSb.AppendLine($"SelectedFamilyBackend: {NormalizeDiagField(info.SelectedFamilyBackend)}");
             avatarSb.AppendLine($"ActivePasses: {NormalizeDiagField(info.ActivePasses)}");
+            avatarSb.AppendLine($"MaterialParityMismatchCount: {info.MaterialParityMismatchCount}");
+            avatarSb.AppendLine($"TextureResolveAmbiguousCount: {info.TextureResolveAmbiguousCount}");
             avatarSb.AppendLine($"LastWarningCode: {ResolveWarningCode(info)}");
             avatarSb.AppendLine($"LastWarningSeverity: {NormalizeDiagField(info.LastWarningSeverity)}");
             avatarSb.AppendLine($"LastWarningCategory: {NormalizeDiagField(info.LastWarningCategory)}");
             avatarSb.AppendLine($"ExpressionSummary: {info.LastExpressionSummary}");
             avatarSb.AppendLine($"LastWarning: {info.LastWarning}");
             avatarSb.AppendLine($"LastMaterialDiag: {info.LastMaterialDiag}");
+            avatarSb.AppendLine($"MaterialParityLastMismatch: {NormalizeDiagField(info.MaterialParityLastMismatch)}");
             avatarSb.AppendLine($"LastRenderPassSummary: {NormalizeDiagField(info.LastRenderPassSummary)}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
         }
@@ -2834,6 +2837,35 @@ public partial class MainWindow : Window
             SetBrush("Color.StatusBarBorder", "#35506C");
             SetBrush("Color.StatusBarLabel", "#AFC2D8");
             SetBrush("Color.StatusBarValue", "#F2F8FF");
+            SetBrush("Color.PanelInfoBg", "#1A2C40");
+            SetBrush("Color.PanelInfoBorder", "#32506D");
+            SetBrush("Color.PanelInfoText", "#C2D8EE");
+            SetBrush("Color.PanelInfoAltBg", "#1A2A3C");
+            SetBrush("Color.PanelInfoAltBorder", "#334E6A");
+            SetBrush("Color.PanelInfoAltText", "#D3E3F4");
+            SetBrush("Color.PanelSuccessBg", "#163224");
+            SetBrush("Color.PanelSuccessBorder", "#2F6A4B");
+            SetBrush("Color.PanelSuccessTitle", "#B9EBCF");
+            SetBrush("Color.PanelSuccessText", "#A3DDBE");
+            SetBrush("Color.PanelWarningBg", "#3A2A16");
+            SetBrush("Color.PanelWarningBorder", "#7A5730");
+            SetBrush("Color.PanelWarningText", "#F2D2A6");
+            SetBrush("Color.PanelErrorBg", "#3A1D22");
+            SetBrush("Color.PanelErrorBorder", "#7C3A44");
+            SetBrush("Color.PanelErrorText", "#F5C1C7");
+            SetBrush("Color.ValidationErrorText", "#FF9FA9");
+            SetBrush("Color.CardSoftBg", "#16293D");
+            SetBrush("Color.CardSoftBorder", "#34506D");
+            SetBrush("Color.CardSoftBorderStrong", "#47668A");
+            SetBrush("Color.Splitter", "#3B5776");
+            SetBrush("Color.OverlayHintBg", "#B30A1524");
+            SetBrush("Color.OverlayHintBorder", "#6C89A7");
+            SetBrush("Color.OverlayHintText", "#F0F7FF");
+            SetBrush("Color.DebugOverlayBg", "#E61A2B3D");
+            SetBrush("Color.DebugOverlayBorder", "#5E7D9C");
+            SetBrush("Color.DebugOverlayText", "#EAF3FE");
+            SetBrush("Color.StepComplete", "#70D996");
+            SetBrush("Color.StepPending", "#B7CBE0");
             ThemeToggleButton.Content = "Light Theme";
         }
         else
@@ -2869,6 +2901,35 @@ public partial class MainWindow : Window
             SetBrush("Color.StatusBarBorder", "#546E88");
             SetBrush("Color.StatusBarLabel", "#D7E5F3");
             SetBrush("Color.StatusBarValue", "#F4FAFF");
+            SetBrush("Color.PanelInfoBg", "#F3F7FD");
+            SetBrush("Color.PanelInfoBorder", "#D7E3F2");
+            SetBrush("Color.PanelInfoText", "#35516B");
+            SetBrush("Color.PanelInfoAltBg", "#EDF3FA");
+            SetBrush("Color.PanelInfoAltBorder", "#CAD8E8");
+            SetBrush("Color.PanelInfoAltText", "#243548");
+            SetBrush("Color.PanelSuccessBg", "#EEF6EF");
+            SetBrush("Color.PanelSuccessBorder", "#BFDCC2");
+            SetBrush("Color.PanelSuccessTitle", "#1E5130");
+            SetBrush("Color.PanelSuccessText", "#2C6A3F");
+            SetBrush("Color.PanelWarningBg", "#FFF8EE");
+            SetBrush("Color.PanelWarningBorder", "#F3D2A7");
+            SetBrush("Color.PanelWarningText", "#7C4012");
+            SetBrush("Color.PanelErrorBg", "#FFF6F6");
+            SetBrush("Color.PanelErrorBorder", "#F0B7B7");
+            SetBrush("Color.PanelErrorText", "#7F1D1D");
+            SetBrush("Color.ValidationErrorText", "#B03030");
+            SetBrush("Color.CardSoftBg", "#F5F9FE");
+            SetBrush("Color.CardSoftBorder", "#D7E0EA");
+            SetBrush("Color.CardSoftBorderStrong", "#CCD8E6");
+            SetBrush("Color.Splitter", "#B9C8DB");
+            SetBrush("Color.OverlayHintBg", "#D0101720");
+            SetBrush("Color.OverlayHintBorder", "#5A7088");
+            SetBrush("Color.OverlayHintText", "#E8F0F8");
+            SetBrush("Color.DebugOverlayBg", "#EEFFFFFF");
+            SetBrush("Color.DebugOverlayBorder", "#47627E");
+            SetBrush("Color.DebugOverlayText", "#1A2530");
+            SetBrush("Color.StepComplete", "#227842");
+            SetBrush("Color.StepPending", "#35516B");
             ThemeToggleButton.Content = "Dark Theme";
         }
     }
@@ -2983,9 +3044,9 @@ public partial class MainWindow : Window
 
         var animation = new DoubleAnimation
         {
-            From = 0.82,
+            From = 0.94,
             To = 1.0,
-            Duration = TimeSpan.FromMilliseconds(140),
+            Duration = TimeSpan.FromMilliseconds(90),
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
         };
         ControlPanelScrollViewer.BeginAnimation(OpacityProperty, animation, HandoffBehavior.SnapshotAndReplace);
@@ -3009,7 +3070,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        ControlsColumn.Width = new GridLength(560.0);
+        ControlsColumn.Width = new GridLength(680.0);
         SplitterColumn.Width = new GridLength(14.0);
         ControlPanelScrollViewer.Visibility = Visibility.Visible;
         LeftRailPanel.Visibility = Visibility.Visible;
@@ -3045,12 +3106,11 @@ public partial class MainWindow : Window
         OpenDiagnosticsFromHintButton.Visibility = beginner ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private static void SetOnboardingStepState(TextBlock target, bool completed)
+    private void SetOnboardingStepState(TextBlock target, bool completed)
     {
         target.Text = completed ? "완료" : "다음 단계";
-        target.Foreground = completed
-            ? new SolidColorBrush(Color.FromRgb(34, 120, 66))
-            : new SolidColorBrush(Color.FromRgb(53, 81, 107));
+        var resourceKey = completed ? "Color.StepComplete" : "Color.StepPending";
+        target.Foreground = (Brush)FindResource(resourceKey);
     }
 
     private void RevealDiagnosticsForFailure(string source)

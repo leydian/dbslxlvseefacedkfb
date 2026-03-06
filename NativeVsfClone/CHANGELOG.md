@@ -2,6 +2,40 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - WPF dark theme coverage and contrast fix
+
+### Summary
+
+Completed a WPF dark-theme consistency pass by removing remaining hardcoded color usage in the main host window and routing all affected regions through semantic resource tokens. This resolves partial theme application and low-visibility text areas reported in dark mode.
+
+### Changed
+
+- WPF theme token expansion:
+  - `host/WpfHost/App.xaml`
+    - added semantic `Color.*` brushes for:
+      - info/success/warning/error panels
+      - validation text
+      - soft card surfaces/borders
+      - splitter and overlays
+      - onboarding step states
+- Main window color tokenization:
+  - `host/WpfHost/MainWindow.xaml`
+    - replaced hardcoded hex colors with `DynamicResource` keys across onboarding/status/recovery/validation/overlay/splitter areas
+    - removed remaining color islands that were not updated by runtime theme toggle
+- Runtime theme synchronization:
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - expanded `ApplyThemeResources()` to set light/dark values for all newly introduced semantic keys
+    - updated onboarding step visual state to use resource keys (`Color.StepComplete`, `Color.StepPending`) instead of direct brush allocation
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_wpf_dark_theme_coverage_and_contrast_fix.md`
+  - updated weekly `INDEX.md` and `SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Debug`: PASS (`0 warnings`, `0 errors`)
+- static scan confirmed no hardcoded hex color usage remains in `MainWindow.xaml`
+- `MainWindow.xaml` `Color.*` resource references validated against `App.xaml` definitions
+
 ## 2026-03-06 - XAV2 Unity LTS matrix gate policy integration
 
 ### Summary
