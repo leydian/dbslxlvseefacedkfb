@@ -47,6 +47,7 @@
 
 ## Next Steps
 - Pick three key reports and review promotion to long-term references.
+- Newly added: review `2026-03-06_completion_90pct_execution_update.md` for board-status closure evidence, verification results, and remaining WinUI blocker classification.
 - Newly added: review `2026-03-06_vrm_runtime_metrics_v2_api.md` for runtime quality metric adoption and gate integration.
 - Newly added: review `2026-03-06_webcam_device_enumeration_and_tracking_refresh.md` for Windows camera enumeration contract, index-key sidecar compatibility, and WPF/WinUI refresh/fallback behavior.
 - Newly added: review `2026-03-06_vrm_springbone_mtoon_runtime_refinement.md` for SpringBone solver and MToon advanced runtime uplift validation notes.

@@ -57,8 +57,9 @@ Status legend:
     Status: `DONE`  
     Current: native submit failures are preserved through tick diagnostics (`NC_SET_TRACKING_FRAME_*`, `NC_SET_EXPRESSION_WEIGHTS_*`) and surfaced with host-side hint text in WPF/WinUI status rows
 
-12. Webcam ONNX source from placeholder to real inference  
-    Status: `TODO`
+12. Webcam tracking source from placeholder to real runtime inference  
+    Status: `DONE`  
+    Current: ONNX track is superseded by MediaPipe runtime integration in host tracking path; placeholder loop has been removed and webcam runtime is now active-source capable with diagnostics (`capture_fps`, `infer_ms`, `model_schema_ok`, `last_error_code`)
 
 13. Render performance numeric gate (`frame time`, drop rate)  
     Status: `DONE`  
@@ -69,12 +70,12 @@ Status legend:
     Automation: `tools/avatar_load_soak_gate.ps1`
 
 15. Cross-layer error code contract unification (doc/code/UI)  
-    Status: `IN_PROGRESS`  
-    Current: host UI now maps major tracking/native error codes to actionable hint text; remaining work is full docs/contract sweep across non-tracking domains
+    Status: `DONE`  
+    Current: tracking error hint mapping has been centralized into `host/HostCore/TrackingErrorHintCatalog.cs` and both WPF/WinUI hosts now consume a single shared mapping contract
 
 16. `.xav2` typed-v2 negative/edge validation expansion  
-    Status: `IN_PROGRESS`  
-    Current: unsupported shader-family warning + strict missing-required-param failure tests added; broader edge matrix expansion remains
+    Status: `DONE`  
+    Current: runtime test matrix now includes typed-v2 strict-missing-required-param failure, typed-v2 unsupported-shader fail-policy failure, and typed-v2 schema-invalid(strict) failure coverage
 
 17. Session schema migration regression (`v1/v2/v3 -> v4`)  
     Status: `DONE`  

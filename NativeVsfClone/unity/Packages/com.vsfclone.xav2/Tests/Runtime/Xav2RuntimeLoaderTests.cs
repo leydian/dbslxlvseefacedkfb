@@ -159,6 +159,81 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
+        public void TryLoad_TypedMaterialParamsV2_MissingBaseColor_Strict_Fails()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedSchemaVersion: 2,
+                    typedIncludeBaseColor: false));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { StrictValidation = true });
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.StrictValidationFailed));
+                Assert.That(diagnostics.Warnings.Exists(w => w.Contains("XAV2_MATERIAL_TYPED_MISSING_REQUIRED_PARAM")), Is.True);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialParamsV2_UnsupportedShaderFamily_FailPolicy_Fails()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedSchemaVersion: 2,
+                    typedShaderFamilyOverride: "unsupported-family"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { ShaderPolicy = Xav2ShaderPolicy.Fail });
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.ParityContractViolation));
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialParamsV2_InvalidTrailingData_Strict_Fails()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedSchemaVersion: 2,
+                    typedAppendTrailingJunk: true));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions { StrictValidation = true });
+                Assert.That(ok, Is.False);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.StrictValidationFailed));
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_MATERIAL_TYPED_SCHEMA_INVALID"));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
         public void TryLoad_TypedMaterialTextureRefMissing_Warns()
         {
             var path = WriteTempFile(BuildValidXav2Bytes(addTypedMaterialSection: true, unresolvedTypedTextureRef: true));
@@ -746,7 +821,8 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool truncateCompressedEnvelope = false,
             ushort typedSchemaVersion = 3,
             bool addPhysicsSections = false,
-            bool missingPhysicsColliderRef = false)
+            bool missingPhysicsColliderRef = false,
+            bool typedAppendTrailingJunk = false)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms, Encoding.UTF8, true);
@@ -820,6 +896,7 @@ namespace VsfClone.Xav2.Runtime.Tests
                         typedIncludeBaseColor,
                         typedIncludeAdvancedEntries,
                         typedSchemaVersion,
+                        typedAppendTrailingJunk,
                         unresolvedTypedTextureRef
                             ? "texture_missing_typed"
                             : (typedBaseTextureRefOverride ?? textureRefName)));
@@ -921,6 +998,7 @@ namespace VsfClone.Xav2.Runtime.Tests
             bool includeBaseColor,
             bool includeAdvancedEntries,
             ushort schemaVersion,
+            bool appendTrailingJunk,
             string baseTextureRef)
         {
             using var ms = new MemoryStream();
@@ -971,6 +1049,11 @@ namespace VsfClone.Xav2.Runtime.Tests
             {
                 WriteSizedString(bw, "matcap");
                 WriteSizedString(bw, baseTextureRef);
+            }
+
+            if (appendTrailingJunk)
+            {
+                bw.Write((byte)0xA5);
             }
 
             return ms.ToArray();
