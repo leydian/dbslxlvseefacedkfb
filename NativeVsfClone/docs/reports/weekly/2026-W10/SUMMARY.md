@@ -11,7 +11,7 @@
 - `r01`: 4 reports
 - `vxavatar`: 4 reports
 - `wpf`: 16 reports
-- `release`: 8 reports
+- `release`: 9 reports
 - `vrm`: 14 reports
 - `winui`: 3 reports
 - `workspace`: 3 reports
@@ -105,6 +105,7 @@
 - Newly added: review `2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md` for iFacial native/delimited text parser compatibility expansion (`key&value`, `key-value`), snapshot-time tracking diagnostics sync, and XAV2 base-only shadow-pass inference behavior.
 - Newly added: review `2026-03-06_winui_ui_token_alignment_and_badge_consistency_refine.md` for WinUI onboarding/step semantic token expansion, actionability badge resource-driven READY/BLOCKED styling, and remaining environment-dependent XAML compiler verification risk.
 - Newly added: review `2026-03-06_release_tooling_implementation_winui_triage_and_gate_automation.md` for WinUI line-level blocker triage automation, release gate orchestration expansion, XAV2 10-sample corpus preparation, onboarding KPI calibration utility, and host-publish CI artifact wiring updates.
+- Newly added: review `2026-03-06_release_roi_execution_hardening.md` for release dashboard SSOT hardening, FPS-budget/per-sample gate policy wiring, and diagnostics manifest reproducibility metadata.
 - Newly added: review `2026-03-06_vsfavatar_preview_output_policy_and_render_gate_split.md` for VSFAvatar placeholder preview/output split policy, `VSF_ALLOW_VSF_PLACEHOLDER_RENDER` scope, and render-gate split metrics (`output_readiness`, `placeholder_dependency`).
 - Newly added: review `2026-03-06_host_perf_hotpath_and_metrics_contract_update.md` for frame-loop allocation reduction, metrics provenance/memory-sample contract expansion, and dist publish hygiene updates.
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.

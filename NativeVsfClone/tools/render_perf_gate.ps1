@@ -2,11 +2,13 @@ param(
     [string]$MetricsCsvPath = "",
     [string]$MetricsDir = ".\build\reports",
     [string]$SummaryPath = ".\build\reports\render_perf_gate_summary.txt",
-    [ValidateSet("realtime-stable", "legacy", "aggressive", "ultra-parity")]
+    [ValidateSet("realtime-stable", "legacy", "aggressive", "ultra-parity", "desktop-60", "desktop-30")]
     [string]$Profile = "realtime-stable",
+    [int]$TargetFps = 0,
     [double]$MaxP95FrameMs = 20.0,
     [double]$MaxP99FrameMs = 28.0,
     [double]$MaxFrameDropRatio = 0.02,
+    [double]$MinLiveTickSampleRatio = 0.0,
     [double]$MaxPrivateMb = 0.0,
     [double]$MaxWorkingSetMb = 0.0,
     [double]$DropFrameThresholdMs = 33.3,
@@ -16,6 +18,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $profileDefaults = switch ($Profile) {
+    "desktop-60" { @{ MaxP95FrameMs = 20.0; MaxP99FrameMs = 28.0; MaxFrameDropRatio = 0.02; DropFrameThresholdMs = 33.3 } }
+    "desktop-30" { @{ MaxP95FrameMs = 38.0; MaxP99FrameMs = 50.0; MaxFrameDropRatio = 0.03; DropFrameThresholdMs = 50.0 } }
     "aggressive" { @{ MaxP95FrameMs = 16.7; MaxP99FrameMs = 24.0; MaxFrameDropRatio = 0.01 } }
     "ultra-parity" { @{ MaxP95FrameMs = 16.7; MaxP99FrameMs = 20.0; MaxFrameDropRatio = 0.01 } }
     "legacy" { @{ MaxP95FrameMs = 33.0; MaxP99FrameMs = 50.0; MaxFrameDropRatio = 0.05 } }
@@ -30,6 +34,21 @@ if (-not $PSBoundParameters.ContainsKey("MaxP99FrameMs")) {
 }
 if (-not $PSBoundParameters.ContainsKey("MaxFrameDropRatio")) {
     $MaxFrameDropRatio = [double]$profileDefaults.MaxFrameDropRatio
+}
+if (-not $PSBoundParameters.ContainsKey("DropFrameThresholdMs") -and $profileDefaults.ContainsKey("DropFrameThresholdMs")) {
+    $DropFrameThresholdMs = [double]$profileDefaults.DropFrameThresholdMs
+}
+if ($TargetFps -gt 0) {
+    $frameBudget = 1000.0 / [double]$TargetFps
+    if (-not $PSBoundParameters.ContainsKey("MaxP95FrameMs")) {
+        $MaxP95FrameMs = [Math]::Round(($frameBudget * 1.2), 3)
+    }
+    if (-not $PSBoundParameters.ContainsKey("MaxP99FrameMs")) {
+        $MaxP99FrameMs = [Math]::Round(($frameBudget * 1.7), 3)
+    }
+    if (-not $PSBoundParameters.ContainsKey("DropFrameThresholdMs")) {
+        $DropFrameThresholdMs = [Math]::Round(($frameBudget * 2.0), 3)
+    }
 }
 
 function Resolve-AbsolutePath {
@@ -154,6 +173,11 @@ $avg = ($sorted | Measure-Object -Average).Average
 $max = ($sorted | Measure-Object -Maximum).Maximum
 $dropCount = @($sorted | Where-Object { $_ -gt $DropFrameThresholdMs }).Count
 $dropRatio = [Math]::Round(($dropCount / [double]$sorted.Count), 6)
+if ($hasMeasurementSourceColumn) {
+    $liveTickRatio = [Math]::Round(($liveTickSamples / [double]$sorted.Count), 6)
+} else {
+    $liveTickRatio = 0.0
+}
 $avgPrivateMb = if ($privateValues.Count -gt 0) { ($privateValues | Measure-Object -Average).Average } else { 0.0 }
 $p95PrivateMb = if ($privateValues.Count -gt 0) { Get-Percentile -SortedValues @($privateValues | Sort-Object) -Percent 95 } else { 0.0 }
 $avgWorkingSetMb = if ($workingSetValues.Count -gt 0) { ($workingSetValues | Measure-Object -Average).Average } else { 0.0 }
@@ -162,15 +186,17 @@ $p95WorkingSetMb = if ($workingSetValues.Count -gt 0) { Get-Percentile -SortedVa
 $gateP95 = $p95 -le $MaxP95FrameMs
 $gateP99 = $p99 -le $MaxP99FrameMs
 $gateDrop = $dropRatio -le $MaxFrameDropRatio
+$gateLiveTick = ($MinLiveTickSampleRatio -le 0.0) -or (-not $hasMeasurementSourceColumn) -or ($liveTickRatio -ge $MinLiveTickSampleRatio)
 $gatePrivate = ($MaxPrivateMb -le 0.0) -or ($privateValues.Count -eq 0) -or ($p95PrivateMb -le $MaxPrivateMb)
 $gateWorkingSet = ($MaxWorkingSetMb -le 0.0) -or ($workingSetValues.Count -eq 0) -or ($p95WorkingSetMb -le $MaxWorkingSetMb)
-$overall = $gateP95 -and $gateP99 -and $gateDrop -and $gatePrivate -and $gateWorkingSet
+$overall = $gateP95 -and $gateP99 -and $gateDrop -and $gateLiveTick -and $gatePrivate -and $gateWorkingSet
 
 $summaryLines = [System.Collections.Generic.List[string]]::new()
 $summaryLines.Add("Render Performance Gate Summary")
 $summaryLines.Add("Generated: $(Get-Date -Format o)")
 $summaryLines.Add("MetricsCsv: $resolvedCsv")
 $summaryLines.Add("Profile: $Profile")
+$summaryLines.Add("TargetFps: $TargetFps")
 $summaryLines.Add("SampleCount: $($sorted.Count)")
 $summaryLines.Add("AvgFrameMs: $([Math]::Round($avg, 3))")
 $summaryLines.Add("P50FrameMs: $([Math]::Round($p50, 3))")
@@ -180,6 +206,7 @@ $summaryLines.Add("MaxFrameMs: $([Math]::Round($max, 3))")
 $summaryLines.Add("DropFrameThresholdMs: $DropFrameThresholdMs")
 $summaryLines.Add("DropFrameCount: $dropCount")
 $summaryLines.Add("DropFrameRatio: $dropRatio")
+$summaryLines.Add("LiveTickSampleRatio: $liveTickRatio")
 $summaryLines.Add("AvgPrivateMb: $([Math]::Round($avgPrivateMb, 3))")
 $summaryLines.Add("P95PrivateMb: $([Math]::Round($p95PrivateMb, 3))")
 $summaryLines.Add("AvgWorkingSetMb: $([Math]::Round($avgWorkingSetMb, 3))")
@@ -200,6 +227,7 @@ $summaryLines.Add("Gate Results")
 $summaryLines.Add("- GateP95 (p95 <= $MaxP95FrameMs): $(if ($gateP95) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- GateP99 (p99 <= $MaxP99FrameMs): $(if ($gateP99) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- GateDrop (drop_ratio <= $MaxFrameDropRatio): $(if ($gateDrop) { 'PASS' } else { 'FAIL' })")
+$summaryLines.Add("- GateLiveTick (live_tick_ratio >= $MinLiveTickSampleRatio, disabled when <=0 or no column): $(if ($gateLiveTick) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- GatePrivate (p95_private_mb <= $MaxPrivateMb, disabled when <=0 or no column): $(if ($gatePrivate) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- GateWorkingSet (p95_working_set_mb <= $MaxWorkingSetMb, disabled when <=0 or no column): $(if ($gateWorkingSet) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- Overall: $(if ($overall) { 'PASS' } else { 'FAIL' })")

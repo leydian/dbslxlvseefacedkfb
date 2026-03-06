@@ -7,7 +7,8 @@ param(
     [switch]$RequireOnboardingKpiForWpfOnly,
     [switch]$RequireOnboardingKpiForFull = $true,
     [double]$OnboardingWithin3MinSuccessRateThresholdPct = 70.0,
-    [int]$OnboardingMinSessionCount = 5
+    [int]$OnboardingMinSessionCount = 5,
+    [string]$PolicyVersion = "2026-03-06.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -295,6 +296,18 @@ $rows += [PSCustomObject]@{
     source_file = $hostReport
 }
 
+$releaseReadinessSummary = Join-Path $ReportDir "release_readiness_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "Release Readiness Policy (RenderPerfProfile)"
+    status_line = Get-KeyValueFromFile -Path $releaseReadinessSummary -Prefix "RenderPerfProfile:"
+    source_file = $releaseReadinessSummary
+}
+$rows += [PSCustomObject]@{
+    track = "Release Readiness Policy (SoakMinSuccessRatio)"
+    status_line = Get-KeyValueFromFile -Path $releaseReadinessSummary -Prefix "SoakMinSuccessRatio:"
+    source_file = $releaseReadinessSummary
+}
+
 $onboardingKpiPath = Join-Path $ReportDir "onboarding_kpi_summary.json"
 $onboardingKpiState = Get-OnboardingKpiState `
     -Path $onboardingKpiPath `
@@ -363,6 +376,7 @@ $fullReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -a
 $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("s")
     gate_summary = [ordered]@{
+        policy_version = $PolicyVersion
         avatar_gates_all_pass = $avatarAllPass
         unity_xav2_validate_pass = $unityPass
         unity_xav2_lts_gate_pass = $unityLtsPass
@@ -406,6 +420,7 @@ $summary | ConvertTo-Json -Depth 5 | Set-Content -Path $OutputJson
 $lines = @()
 $lines += "Release Gate Dashboard"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
+$lines += "Policy.Version: $PolicyVersion"
 $lines += "Policy.RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly"
 $lines += "Policy.RequireUnityXav2ForFull: $RequireUnityXav2ForFull"
 $lines += "Policy.RequireOnboardingKpiForWpfOnly: $RequireOnboardingKpiForWpfOnly"

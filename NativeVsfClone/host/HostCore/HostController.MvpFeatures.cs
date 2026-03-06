@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Windows.Devices.Enumeration;
@@ -390,6 +391,7 @@ public sealed partial class HostController
         var onboardingKpiPath = Path.Combine(tempDir, "onboarding_kpi_summary.txt");
         var reproCommandsPath = Path.Combine(tempDir, "repro_commands.txt");
         var environmentPath = Path.Combine(tempDir, "environment_snapshot.json");
+        var manifestPath = Path.Combine(tempDir, "diagnostics_manifest.json");
 
         File.WriteAllText(snapshotPath, JsonSerializer.Serialize(LastSnapshot, FeatureJsonOptions), Encoding.UTF8);
         File.WriteAllText(logsPath, string.Join(Environment.NewLine, LogEntries.Select(x => $"{x.TimestampUtc:O} [{x.Source}] {x.ResultCode} {x.Message}")), Encoding.UTF8);
@@ -400,6 +402,18 @@ public sealed partial class HostController
         File.WriteAllText(onboardingKpiPath, BuildOnboardingKpiSummary(), Encoding.UTF8);
         File.WriteAllText(reproCommandsPath, BuildDiagnosticsReproCommands(), Encoding.UTF8);
         File.WriteAllText(environmentPath, JsonSerializer.Serialize(BuildEnvironmentSnapshot(), FeatureJsonOptions), Encoding.UTF8);
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(
+                BuildDiagnosticsManifest(
+                    telemetryPath,
+                    snapshotPath,
+                    preflightPath,
+                    environmentPath,
+                    reproCommandsPath,
+                    onboardingKpiPath),
+                FeatureJsonOptions),
+            Encoding.UTF8);
 
         var zipPath = Path.Combine(root, $"diagnostics_bundle_{timestamp}.zip");
         if (File.Exists(zipPath))
@@ -433,13 +447,48 @@ public sealed partial class HostController
         sb.AppendLine();
         sb.AppendLine("# Release dashboard / readiness");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_gate_dashboard.ps1");
-        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1");
+        sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1 -RenderPerfProfile desktop-60 -SoakIterationsPerSample 10 -SoakMinSuccessRatio 1.0 -SoakMinPerSampleSuccessRatio 1.0");
         sb.AppendLine("# Strict tracking contract requires explicit MediaPipe python via env or -MediapipePythonExe");
-        sb.AppendLine("$env:VSFCLONE_MEDIAPIPE_PYTHON='C:\\\\path\\\\to\\\\python.exe'; powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1");
+        sb.AppendLine("$env:VSFCLONE_MEDIAPIPE_PYTHON='C:\\\\path\\\\to\\\\python.exe'; powershell -ExecutionPolicy Bypass -File .\\tools\\release_readiness_gate.ps1 -RenderPerfProfile desktop-60");
         sb.AppendLine();
         sb.AppendLine("# Onboarding KPI summary from telemetry export");
         sb.AppendLine("powershell -ExecutionPolicy Bypass -File .\\tools\\onboarding_kpi_summary.ps1 -TelemetryPath .\\build\\reports\\telemetry_latest.json");
         return sb.ToString();
+    }
+
+    private object BuildDiagnosticsManifest(
+        string telemetryPath,
+        string snapshotPath,
+        string preflightPath,
+        string environmentPath,
+        string reproCommandsPath,
+        string onboardingKpiPath)
+    {
+        var avatarPath = _sessionPersistence.AvatarPath ?? string.Empty;
+        var parserMode = _sessionPersistence.Sidecar.ParserMode ?? string.Empty;
+        return new
+        {
+            manifest_version = "2",
+            generated_utc = DateTimeOffset.UtcNow.ToString("O"),
+            gate_contract_version = "release-readiness-v2",
+            session = new
+            {
+                metrics_session_id = _metricsSessionId,
+                ui_mode = _sessionPersistence.UiMode,
+                parser_mode = parserMode,
+                last_profile_name = _sessionPersistence.LastProfileName,
+                avatar_path_sha256 = ComputeStringSha256(avatarPath),
+            },
+            files = new
+            {
+                telemetry_sha256 = ComputeFileSha256OrEmpty(telemetryPath),
+                snapshot_sha256 = ComputeFileSha256OrEmpty(snapshotPath),
+                preflight_sha256 = ComputeFileSha256OrEmpty(preflightPath),
+                environment_sha256 = ComputeFileSha256OrEmpty(environmentPath),
+                repro_commands_sha256 = ComputeFileSha256OrEmpty(reproCommandsPath),
+                onboarding_kpi_sha256 = ComputeFileSha256OrEmpty(onboardingKpiPath),
+            },
+        };
     }
 
     private string BuildOnboardingKpiSummary()
@@ -582,6 +631,7 @@ public sealed partial class HostController
             ["VSF_PARSER_MODE"] = Environment.GetEnvironmentVariable("VSF_PARSER_MODE"),
             ["VSF_SIDECAR_PATH"] = Environment.GetEnvironmentVariable("VSF_SIDECAR_PATH"),
             ["VSF_SIDECAR_TIMEOUT_MS"] = Environment.GetEnvironmentVariable("VSF_SIDECAR_TIMEOUT_MS"),
+            ["VSFCLONE_MEDIAPIPE_PYTHON"] = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_PYTHON"),
             ["DOTNET_ROOT"] = Environment.GetEnvironmentVariable("DOTNET_ROOT"),
             ["PATH"] = Environment.GetEnvironmentVariable("PATH"),
         };
@@ -606,6 +656,39 @@ public sealed partial class HostController
             },
             environment = envSubset,
         };
+    }
+
+    private static string ComputeFileSha256OrEmpty(string path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return string.Empty;
+            }
+
+            using var sha = SHA256.Create();
+            using var stream = File.OpenRead(path);
+            var hash = sha.ComputeHash(stream);
+            return Convert.ToHexString(hash);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string ComputeStringSha256(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        using var sha = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var hash = sha.ComputeHash(bytes);
+        return Convert.ToHexString(hash);
     }
 
     public string ExportRollingMetricsCsv(string outputPath)

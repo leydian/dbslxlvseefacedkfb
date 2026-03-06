@@ -23,6 +23,13 @@ param(
     [switch]$EnableUnityXav2LtsGate = $true,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
+    [ValidateSet("realtime-stable", "legacy", "aggressive", "ultra-parity", "desktop-60", "desktop-30")]
+    [string]$RenderPerfProfile = "desktop-60",
+    [int]$RenderPerfTargetFps = 0,
+    [double]$RenderPerfMinLiveTickSampleRatio = 0.0,
+    [int]$SoakIterationsPerSample = 10,
+    [double]$SoakMinSuccessRatio = 1.0,
+    [double]$SoakMinPerSampleSuccessRatio = 1.0,
     [switch]$EnableOnboardingKpiCalibration,
     [switch]$RequireUnityXav2ForWpfOnly,
     [switch]$RequireUnityXav2ForFull = $true,
@@ -79,6 +86,7 @@ $strictTrackingContract = -not $DisableStrictTrackingContract
 $effectiveEnableMediapipeSanity = $EnableMediapipeSanity -or $strictTrackingContract
 $effectiveEnableHostE2E = $EnableHostE2E -or $strictTrackingContract
 $effectiveEnableTrackingFuzz = $EnableTrackingFuzz -or $strictTrackingContract
+$fatalError = $null
 
 Push-Location $repoRoot
 try {
@@ -102,6 +110,14 @@ try {
             if ($EnableSpout2Strict) { $args += "-EnableSpout2Strict" }
             if ($RequireSpout2StrictContract) { $args += "-RequireSpout2StrictContract" }
             if ($EnableUnityXav2LtsGate) { $args += "-EnableUnityXav2LtsGate" }
+            $args += @("-RenderPerfProfile", $RenderPerfProfile)
+            $args += @("-RenderPerfMinLiveTickSampleRatio", "$RenderPerfMinLiveTickSampleRatio")
+            $args += @("-SoakIterationsPerSample", "$SoakIterationsPerSample")
+            $args += @("-SoakMinSuccessRatio", "$SoakMinSuccessRatio")
+            $args += @("-SoakMinPerSampleSuccessRatio", "$SoakMinPerSampleSuccessRatio")
+            if ($RenderPerfTargetFps -gt 0) {
+                $args += @("-RenderPerfTargetFps", "$RenderPerfTargetFps")
+            }
             & powershell @args
         }))
     } else {
@@ -257,8 +273,30 @@ try {
         }))
     }
 }
+catch {
+    $fatalError = $_
+}
 finally {
     Pop-Location
+}
+
+$dashboardJsonPath = Join-Path $repoRoot "build\reports\release_gate_dashboard.json"
+$dashboardReleaseCandidateWpfOnly = "UNKNOWN"
+$dashboardReleaseCandidateFull = "UNKNOWN"
+$dashboardTrackingContract = "UNKNOWN"
+if (Test-Path -LiteralPath $dashboardJsonPath) {
+    try {
+        $dashboard = Get-Content -Raw -Path $dashboardJsonPath | ConvertFrom-Json
+        if ($null -ne $dashboard.gate_summary) {
+            $dashboardReleaseCandidateWpfOnly = if ([bool]$dashboard.gate_summary.release_candidate_wpf_only) { "PASS" } else { "FAIL" }
+            $dashboardReleaseCandidateFull = if ([bool]$dashboard.gate_summary.release_candidate_full) { "PASS" } else { "FAIL" }
+            $dashboardTrackingContract = if ([bool]$dashboard.gate_summary.tracking_contract_all_pass) { "PASS" } else { "FAIL" }
+        }
+    } catch {
+        $dashboardReleaseCandidateWpfOnly = "INVALID_JSON"
+        $dashboardReleaseCandidateFull = "INVALID_JSON"
+        $dashboardTrackingContract = "INVALID_JSON"
+    }
 }
 
 $durationSec = [int]((Get-Date) - $started).TotalSeconds
@@ -294,6 +332,12 @@ $lines.Add("RequireSpout2StrictContract: $RequireSpout2StrictContract")
 $lines.Add("EnableUnityXav2LtsGate: $EnableUnityXav2LtsGate")
 $lines.Add("EnableXav2CompressionQuality: $EnableXav2CompressionQuality")
 $lines.Add("EnableXav2Parity: $EnableXav2Parity")
+$lines.Add("RenderPerfProfile: $RenderPerfProfile")
+$lines.Add("RenderPerfTargetFps: $RenderPerfTargetFps")
+$lines.Add("RenderPerfMinLiveTickSampleRatio: $RenderPerfMinLiveTickSampleRatio")
+$lines.Add("SoakIterationsPerSample: $SoakIterationsPerSample")
+$lines.Add("SoakMinSuccessRatio: $SoakMinSuccessRatio")
+$lines.Add("SoakMinPerSampleSuccessRatio: $SoakMinPerSampleSuccessRatio")
 $lines.Add("EnableOnboardingKpiCalibration: $EnableOnboardingKpiCalibration")
 $lines.Add("RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly")
 $lines.Add("RequireUnityXav2ForFull: $RequireUnityXav2ForFull")
@@ -303,7 +347,14 @@ $lines.Add("OnboardingWithin3MinSuccessRateThresholdPct: $OnboardingWithin3MinSu
 $lines.Add("OnboardingMinSessionCount: $OnboardingMinSessionCount")
 $lines.Add("OnboardingTelemetryPath: $OnboardingTelemetryPath")
 $lines.Add("SkipOnboardingKpiSummary: $SkipOnboardingKpiSummary")
+$lines.Add("DashboardJsonPath: $dashboardJsonPath")
+$lines.Add("DashboardTrackingContract: $dashboardTrackingContract")
+$lines.Add("DashboardReleaseCandidateWpfOnly: $dashboardReleaseCandidateWpfOnly")
+$lines.Add("DashboardReleaseCandidateFull: $dashboardReleaseCandidateFull")
 $lines.Add("DurationSec: $durationSec")
+if ($null -ne $fatalError) {
+    $lines.Add("FatalError: $($fatalError.Exception.Message)")
+}
 $lines.Add("")
 $lines.Add("Steps:")
 foreach ($r in $results) {
@@ -340,3 +391,8 @@ $lines.Add("- build/reports/xav2_parity_gate_summary.txt")
 
 $lines | Set-Content -Path $resolvedSummaryPath -Encoding UTF8
 Write-Host "[release-readiness] Summary: $resolvedSummaryPath"
+
+if ($null -ne $fatalError) {
+    Write-Error "[release-readiness] FAILED: $($fatalError.Exception.Message)"
+    exit 1
+}

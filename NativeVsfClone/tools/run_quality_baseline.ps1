@@ -18,6 +18,13 @@ param(
     [switch]$EnableUnityXav2LtsGate = $true,
     [switch]$EnableXav2CompressionQuality,
     [switch]$EnableXav2Parity,
+    [ValidateSet("realtime-stable", "legacy", "aggressive", "ultra-parity", "desktop-60", "desktop-30")]
+    [string]$RenderPerfProfile = "desktop-60",
+    [int]$RenderPerfTargetFps = 0,
+    [double]$RenderPerfMinLiveTickSampleRatio = 0.0,
+    [int]$SoakIterationsPerSample = 10,
+    [double]$SoakMinSuccessRatio = 1.0,
+    [double]$SoakMinPerSampleSuccessRatio = 1.0,
     [string]$SummaryPath = ".\build\reports\quality_baseline_summary.txt"
 )
 
@@ -88,15 +95,29 @@ if ($EnableVsfTrend) {
 }
 
 if ($EnableRenderPerf) {
+    $renderCmdParts = @(
+        "powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1",
+        "-Profile $RenderPerfProfile",
+        "-MinLiveTickSampleRatio $RenderPerfMinLiveTickSampleRatio"
+    )
+    if ($RenderPerfTargetFps -gt 0) {
+        $renderCmdParts += "-TargetFps $RenderPerfTargetFps"
+    }
     $results.Add((Invoke-Gate `
         -Name "Render performance numeric gate" `
-        -Command "powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1"))
+        -Command ($renderCmdParts -join " ")))
 }
 
 if ($EnableSoak) {
+    $soakCmdParts = @(
+        "powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1",
+        "-IterationsPerSample $SoakIterationsPerSample",
+        "-MinSuccessRatio $SoakMinSuccessRatio",
+        "-MinPerSampleSuccessRatio $SoakMinPerSampleSuccessRatio"
+    )
     $results.Add((Invoke-Gate `
         -Name "Avatar load soak gate" `
-        -Command "powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1"))
+        -Command ($soakCmdParts -join " ")))
 }
 
 if ($EnableSessionMigration) {
@@ -169,6 +190,12 @@ $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("Quality Baseline Summary")
 $lines.Add("Generated: $(Get-Date -Format s)")
 $lines.Add("Overall: $overallStatus")
+$lines.Add("RenderPerfProfile: $RenderPerfProfile")
+$lines.Add("RenderPerfTargetFps: $RenderPerfTargetFps")
+$lines.Add("RenderPerfMinLiveTickSampleRatio: $RenderPerfMinLiveTickSampleRatio")
+$lines.Add("SoakIterationsPerSample: $SoakIterationsPerSample")
+$lines.Add("SoakMinSuccessRatio: $SoakMinSuccessRatio")
+$lines.Add("SoakMinPerSampleSuccessRatio: $SoakMinPerSampleSuccessRatio")
 $lines.Add("")
 $lines.Add("Results:")
 foreach ($result in $results) {

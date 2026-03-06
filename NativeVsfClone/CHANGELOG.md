@@ -2,6 +2,58 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Release ROI execution hardening (SSOT + budgeted gates + diagnostics manifest)
+
+### Summary
+
+Implemented a high-ROI stabilization slice focused on release decision consistency, stricter performance/soak regression detection, and reproducible diagnostics packaging.
+
+### Changed
+
+- Release gate orchestration and summary hardening:
+  - `tools/release_readiness_gate.ps1`
+  - added policy passthrough for render/soak gate controls
+  - fail-safe summary emission on fatal step failure
+  - summary now mirrors dashboard candidate states from `release_gate_dashboard.json`
+- Release dashboard policy traceability:
+  - `tools/release_gate_dashboard.ps1`
+  - added `PolicyVersion` and policy snapshot rows
+  - `gate_summary.policy_version` exported in dashboard JSON
+- Render performance gate refinement:
+  - `tools/render_perf_gate.ps1`
+  - added `desktop-60` / `desktop-30` profiles
+  - added `TargetFps` budget derivation path
+  - added `MinLiveTickSampleRatio` provenance gate
+- Soak gate regression sensitivity uplift:
+  - `tools/avatar_load_soak_gate.ps1`
+  - added `MinPerSampleSuccessRatio`
+  - per-sample first-failure evidence captured in summary
+- Quality baseline orchestration wiring:
+  - `tools/run_quality_baseline.ps1`
+  - passes render/soak policy parameters and records them in baseline summary
+- Diagnostics bundle reproducibility metadata:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added `diagnostics_manifest.json` with session fingerprint + artifact SHA256 fields
+  - environment snapshot now includes `VSFCLONE_MEDIAPIPE_PYTHON`
+  - repro commands updated with explicit release-readiness policy arguments
+- Documentation:
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_release_roi_execution_hardening.md`
+  - weekly rollups updated:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- Script syntax checks: PASS
+  - `tools/render_perf_gate.ps1`
+  - `tools/run_quality_baseline.ps1`
+  - `tools/avatar_load_soak_gate.ps1`
+  - `tools/release_readiness_gate.ps1`
+  - `tools/release_gate_dashboard.ps1`
+- Build checks: PASS
+  - `dotnet build host/HostCore/HostCore.csproj -c Release -nologo` (`0 warnings`, `0 errors`)
+
 ## 2026-03-06 - VRM-origin XAV2 hair/face desync root-cause isolation and policy lock
 
 ### Summary
