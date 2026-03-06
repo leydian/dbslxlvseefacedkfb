@@ -24,6 +24,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private readonly object _sync = new();
     private readonly Dictionary<string, float> _expressionCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, float> _expressionSnapshot = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _ifmAcceptedKeyCounts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _ifmDroppedKeyCounts = new(StringComparer.OrdinalIgnoreCase);
 
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
@@ -448,6 +450,8 @@ public sealed class TrackingInputService : ITrackingInputService
                 SourceSwitchCooldownRemainingMs = _sourceSwitchCooldownUntilUtc <= now
                     ? 0
                     : Math.Max(0, (int)(_sourceSwitchCooldownUntilUtc - now).TotalMilliseconds),
+                IfmAcceptedKeySample = BuildIfmKeySampleSummary(mapped: true),
+                IfmDroppedKeySample = BuildIfmKeySampleSummary(mapped: false),
             };
             ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
             ApplySourceSwitchWarningIfNeeded(now);
@@ -618,6 +622,8 @@ public sealed class TrackingInputService : ITrackingInputService
     {
         _expressionCache.Clear();
         _expressionSnapshot.Clear();
+        _ifmAcceptedKeyCounts.Clear();
+        _ifmDroppedKeyCounts.Clear();
         _rawFrame = BuildNeutralFrame();
         _smoothedFrame = BuildNeutralFrame();
         _lastOutputFrame = BuildNeutralFrame();
@@ -2537,15 +2543,58 @@ public sealed class TrackingInputService : ITrackingInputService
         return 1;
     }
 
-    private static bool AddIfmUpdate(List<KeyValuePair<string, float>> updates, string rawKey, float value)
+    private bool AddIfmUpdate(List<KeyValuePair<string, float>> updates, string rawKey, float value)
     {
         if (!TryNormalizeIfmKey(rawKey, out var normalized))
         {
+            RecordIfmKey(rawKey, mapped: false);
             return false;
         }
 
+        RecordIfmKey(rawKey, mapped: true);
         updates.Add(new KeyValuePair<string, float>(normalized, value));
         return true;
+    }
+
+    private void RecordIfmKey(string rawKey, bool mapped)
+    {
+        var normalizedRaw = NormalizeKey(rawKey);
+        if (string.IsNullOrWhiteSpace(normalizedRaw))
+        {
+            return;
+        }
+
+        const int maxDistinctKeys = 256;
+        var target = mapped ? _ifmAcceptedKeyCounts : _ifmDroppedKeyCounts;
+        if (!target.TryGetValue(normalizedRaw, out var count))
+        {
+            if (target.Count >= maxDistinctKeys)
+            {
+                return;
+            }
+
+            target[normalizedRaw] = 1;
+            return;
+        }
+
+        target[normalizedRaw] = count + 1;
+    }
+
+    private string BuildIfmKeySampleSummary(bool mapped, int topN = 5)
+    {
+        var source = mapped ? _ifmAcceptedKeyCounts : _ifmDroppedKeyCounts;
+        if (source.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            ",",
+            source
+                .OrderByDescending(static pair => pair.Value)
+                .ThenBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Take(Math.Max(1, topN))
+                .Select(static pair => $"{pair.Key}:{pair.Value}"));
     }
 
     private static bool TryNormalizeIfmKey(string rawKey, [NotNullWhen(true)] out string? normalizedKey)
@@ -3879,6 +3928,7 @@ public sealed class TrackingInputService : ITrackingInputService
             "mouthpress",
             "mouthlowerdown",
             "mouthupperup",
+            "browouterup",
             "nosesneer",
         },
         StringComparer.OrdinalIgnoreCase);

@@ -2,6 +2,46 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - IFM key-sample telemetry surface + browOuterUp alias completion (50/52 -> 52/52 path)
+
+### Summary
+
+Added operator-visible IFM key diagnostics so unmapped sender keys can be identified directly from host status text, and closed a remaining ARKit52 gap by expanding left/right alias coverage for `browOuterUp*` variants.
+
+### Changed
+
+- Tracking diagnostics contract expansion:
+  - `host/HostCore/HostInterfaces.cs`
+  - `TrackingDiagnostics` fields added:
+    - `IfmAcceptedKeySample`
+    - `IfmDroppedKeySample`
+- IFM key telemetry capture/runtime wiring:
+  - `host/HostCore/TrackingInputService.cs`
+  - tracks normalized IFM raw-key frequency in two buckets:
+    - accepted (mapped)
+    - dropped (unmapped)
+  - samples top keys as `key:count` summary strings for diagnostics surfacing
+  - reset lifecycle includes telemetry dictionaries
+  - alias stem completion:
+    - added `browouterup` to left/right compact-expansion stem set
+- WPF/WinUI status visibility:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - tracking status/runtime text now includes:
+    - `ifm_keys_ok=...`
+    - `ifm_keys_drop=...`
+
+### Verification
+
+- `dotnet build D:\dbslxlvseefacedkfb\NativeVsfClone\host\HostCore\HostCore.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+- `dotnet build D:\dbslxlvseefacedkfb\NativeVsfClone\host\WpfHost\WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+- Runtime evidence (WPF diagnostics snapshot):
+  - before alias completion:
+    - `arkit52=50/52`
+    - `ifm_keys_drop` included `browouterupl`, `browouterupr`
+  - after alias completion build:
+    - expected path to full ARKit coverage under same sender payload shape
+
 ## 2026-03-06 - XAV2 VRM-origin detached-cluster draw hotfix + bust focus retune
 
 ### Summary

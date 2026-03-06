@@ -148,7 +148,9 @@ public sealed record TrackingDiagnostics(
     string UpperBodyLastError = "",
     int RecentSourceSwitchCount = 0,
     string LastSourceSwitchReason = "",
-    int SourceSwitchCooldownRemainingMs = 0);
+    int SourceSwitchCooldownRemainingMs = 0,
+    string IfmAcceptedKeySample = "",
+    string IfmDroppedKeySample = "");
 
 public readonly record struct TrackingUpperBodyPose(
     bool IsValid,
