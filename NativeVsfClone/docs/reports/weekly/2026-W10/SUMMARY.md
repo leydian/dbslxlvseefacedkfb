@@ -28,6 +28,23 @@
 - `spout2`: 1 reports
 - `vxa2`: 1 reports
 
+## Documentation Optimization Update (2026-03-06)
+- Quality gate status: `PASS` (`docs_quality_gate.ps1`)
+- Verified checks:
+- broken `docs/INDEX.md` links `0`
+- missing weekly `INDEX.md`/`SUMMARY.md` `0`
+- invalid canonical names `0`
+- legacy stubs missing map `0`
+- legacy stubs with invalid target `0`
+- legacy map rows with missing target `0`
+- UTF-8 invalid files `0`
+- Structural cleanup completed:
+- `docs/reports/legacy-map.md` rebuilt to current canonical/legacy/archive mapping (`114` entries)
+- legacy report redirects normalized (required `New location` + `Archived original snapshot` link contract)
+- archive snapshots backfilled under `docs/archive/reports-legacy/` for missing legacy snapshots (`22` files)
+- Weekly canonical doc normalization:
+- `2026-03-06_wpf_render_only_mode_toggle.md` re-encoded to valid UTF-8 for gate compatibility
+
 ## Next Steps
 - Pick three key reports and review promotion to long-term references.
 - Newly added: review `2026-03-06_vrm_runtime_metrics_v2_api.md` for runtime quality metric adoption and gate integration.

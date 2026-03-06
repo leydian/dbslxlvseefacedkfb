@@ -27,8 +27,8 @@ Behavior:
 - Added `RenderOnlyToggle_Click` handler.
 - Added `PreviewKeyDown` handler on window; `F11` toggles render-only mode.
 - Button caption switches dynamically:
-  - `렌더 전용 모드 (F11)`
-  - `일반 UI 복귀 (F11)`
+  - `���� ���� ��� (F11)`
+  - `�Ϲ� UI ���� (F11)`
 - Toggle button is disabled while host operation is busy to avoid layout transitions during critical operations.
 
 ### 2) Render-only layout switching
@@ -74,7 +74,7 @@ Behavior:
 
 - Added `RenderOnlyHintOverlay` over render area.
 - On entering render-only mode, overlay is shown with:
-  - `렌더 전용 모드 (Render-only) · F11로 UI 복귀`
+  - `���� ���� ��� (Render-only) �� F11�� UI ����`
 - Hint auto-hides after 3 seconds (`RenderOnlyHintDuration`).
 - Hint remains hidden outside render-only mode.
 
