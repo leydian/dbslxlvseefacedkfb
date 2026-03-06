@@ -212,6 +212,54 @@ SkinningMatrixConvention ParseSkinningMatrixConvention(const std::string& raw) {
     return SkinningMatrixConvention::Unknown;
 }
 
+AxisDirection ParseAxisDirection(const std::string& raw) {
+    const std::string key = ToLower(raw);
+    if (key == "+x" || key == "posx" || key == "x+") {
+        return AxisDirection::PosX;
+    }
+    if (key == "-x" || key == "negx" || key == "x-") {
+        return AxisDirection::NegX;
+    }
+    if (key == "+y" || key == "posy" || key == "y+") {
+        return AxisDirection::PosY;
+    }
+    if (key == "-y" || key == "negy" || key == "y-") {
+        return AxisDirection::NegY;
+    }
+    if (key == "+z" || key == "posz" || key == "z+") {
+        return AxisDirection::PosZ;
+    }
+    if (key == "-z" || key == "negz" || key == "z-") {
+        return AxisDirection::NegZ;
+    }
+    return AxisDirection::Unknown;
+}
+
+CoordinateHandedness ParseCoordinateHandedness(const std::string& raw) {
+    const std::string key = ToLower(raw);
+    if (key == "left" || key == "left_handed" || key == "left-handed" || key == "lh") {
+        return CoordinateHandedness::LeftHanded;
+    }
+    if (key == "right" || key == "right_handed" || key == "right-handed" || key == "rh") {
+        return CoordinateHandedness::RightHanded;
+    }
+    return CoordinateHandedness::Unknown;
+}
+
+TransformConfidence ParseTransformConfidence(const std::string& raw) {
+    const std::string key = ToLower(raw);
+    if (key == "low") {
+        return TransformConfidence::Low;
+    }
+    if (key == "medium") {
+        return TransformConfidence::Medium;
+    }
+    if (key == "high") {
+        return TransformConfidence::High;
+    }
+    return TransformConfidence::Unknown;
+}
+
 HumanoidBoneId ToHumanoidBoneId(const std::string& bone_name_raw) {
     std::string key;
     key.reserve(bone_name_raw.size());
@@ -778,6 +826,41 @@ std::optional<std::uint32_t> ExtractUIntField(const std::string& json, const std
         ++i;
     }
     return static_cast<std::uint32_t>(value);
+}
+
+std::optional<std::int32_t> ExtractIntField(const std::string& json, const std::string& key) {
+    const auto quoted_key = "\"" + key + "\"";
+    const auto key_pos = json.find(quoted_key);
+    if (key_pos == std::string::npos) {
+        return std::nullopt;
+    }
+    const auto colon_pos = json.find(':', key_pos + quoted_key.size());
+    if (colon_pos == std::string::npos) {
+        return std::nullopt;
+    }
+    std::size_t value_pos = colon_pos + 1U;
+    while (value_pos < json.size() && std::isspace(static_cast<unsigned char>(json[value_pos])) != 0) {
+        ++value_pos;
+    }
+    if (value_pos >= json.size()) {
+        return std::nullopt;
+    }
+    std::size_t end_pos = value_pos;
+    if (json[end_pos] == '-' || json[end_pos] == '+') {
+        ++end_pos;
+    }
+    while (end_pos < json.size() && std::isdigit(static_cast<unsigned char>(json[end_pos])) != 0) {
+        ++end_pos;
+    }
+    if (end_pos == value_pos || (end_pos == value_pos + 1U && (json[value_pos] == '-' || json[value_pos] == '+'))) {
+        return std::nullopt;
+    }
+    try {
+        const int value = std::stoi(json.substr(value_pos, end_pos - value_pos));
+        return static_cast<std::int32_t>(value);
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 bool ParseSkeletonPosePayloadSection(
@@ -1357,6 +1440,11 @@ core::Result<AvatarPackage> MiqLoader::Load(
     pkg.primary_error_code = "NONE";
     pkg.source_path = path;
     pkg.display_name = fs::path(path).stem().string();
+    pkg.asset_forward_axis = AxisDirection::NegZ;
+    pkg.asset_up_axis = AxisDirection::PosY;
+    pkg.asset_handedness = CoordinateHandedness::RightHanded;
+    pkg.transform_confidence = TransformConfidence::Medium;
+    pkg.recommended_preview_yaw_deg = 0;
 
     std::size_t header_size = 0U;
     if (bytes.size() >= 4U && bytes[0] == 'M' && bytes[1] == 'I' && bytes[2] == 'Q' && bytes[3] == '2') {
@@ -1402,6 +1490,9 @@ core::Result<AvatarPackage> MiqLoader::Load(
     }
     if (const auto source_ext = ExtractStringField(manifest, "sourceExt"); source_ext && !source_ext->empty()) {
         pkg.source_ext = ToLower(*source_ext);
+        if (pkg.source_ext == ".vrm") {
+            pkg.recommended_preview_yaw_deg = 180;
+        }
     }
     PushWarning(&pkg, "W_STAGE: parse");
 
@@ -1425,12 +1516,29 @@ core::Result<AvatarPackage> MiqLoader::Load(
     }
     if (const auto skin_space = ExtractStringField(manifest, "skinSpaceBasis"); skin_space && !skin_space->empty()) {
         pkg.skin_space_basis = *skin_space;
+        pkg.mesh_space_basis = *skin_space;
     }
     if (const auto corrected = ExtractUIntField(manifest, "skinningAutoCorrectedMeshes")) {
         pkg.skinning_auto_corrected_meshes = *corrected;
     }
     if (const auto resolved = ExtractUIntField(manifest, "skinningConflictResolvedMeshes")) {
         pkg.skinning_conflict_resolved_meshes = *resolved;
+    }
+    if (const auto axis = ExtractStringField(manifest, "assetForwardAxis"); axis && !axis->empty()) {
+        pkg.asset_forward_axis = ParseAxisDirection(*axis);
+    }
+    if (const auto axis = ExtractStringField(manifest, "assetUpAxis"); axis && !axis->empty()) {
+        pkg.asset_up_axis = ParseAxisDirection(*axis);
+    }
+    if (const auto handedness = ExtractStringField(manifest, "assetHandedness"); handedness && !handedness->empty()) {
+        pkg.asset_handedness = ParseCoordinateHandedness(*handedness);
+    }
+    if (const auto confidence = ExtractStringField(manifest, "transformConfidence"); confidence && !confidence->empty()) {
+        pkg.transform_confidence = ParseTransformConfidence(*confidence);
+    }
+    if (const auto recommended_yaw = ExtractIntField(manifest, "recommendedPreviewYawDeg")) {
+        const int clamped = std::max(-180, std::min(180, *recommended_yaw));
+        pkg.recommended_preview_yaw_deg = static_cast<std::int32_t>(clamped);
     }
     const bool expects_blendshapes = ExtractBoolField(manifest, "hasBlendShapes").value_or(false);
     const bool expects_springbones = ExtractBoolField(manifest, "hasSpringBones").value_or(false);

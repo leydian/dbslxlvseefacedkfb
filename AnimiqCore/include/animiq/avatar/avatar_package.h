@@ -34,6 +34,29 @@ enum class SkinningMatrixConvention : std::uint8_t {
     DxRowMajor,
 };
 
+enum class AxisDirection : std::uint8_t {
+    Unknown = 0,
+    PosX,
+    NegX,
+    PosY,
+    NegY,
+    PosZ,
+    NegZ,
+};
+
+enum class CoordinateHandedness : std::uint8_t {
+    Unknown = 0,
+    LeftHanded,
+    RightHanded,
+};
+
+enum class TransformConfidence : std::uint8_t {
+    Unknown = 0,
+    Low,
+    Medium,
+    High,
+};
+
 struct MeshAssetSummary {
     std::string name;
     std::uint32_t vertex_count = 0;
@@ -234,6 +257,12 @@ struct AvatarPackage {
     AvatarCompatLevel compat_level = AvatarCompatLevel::Unknown;
     SkinningMatrixConvention skinning_matrix_convention = SkinningMatrixConvention::Unknown;
     std::string skin_space_basis = "unknown";
+    std::string mesh_space_basis = "unknown";
+    AxisDirection asset_forward_axis = AxisDirection::Unknown;
+    AxisDirection asset_up_axis = AxisDirection::Unknown;
+    CoordinateHandedness asset_handedness = CoordinateHandedness::Unknown;
+    std::int32_t recommended_preview_yaw_deg = 0;
+    TransformConfidence transform_confidence = TransformConfidence::Unknown;
     std::uint32_t skinning_auto_corrected_meshes = 0;
     std::uint32_t skinning_conflict_resolved_meshes = 0;
     std::string parser_stage;

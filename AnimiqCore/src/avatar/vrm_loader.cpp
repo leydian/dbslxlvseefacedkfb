@@ -2609,6 +2609,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     pkg.primary_error_code = "NONE";
     pkg.source_path = path;
     pkg.display_name = fs::path(path).stem().string();
+    pkg.asset_forward_axis = AxisDirection::NegZ;
+    pkg.asset_up_axis = AxisDirection::PosY;
+    pkg.asset_handedness = CoordinateHandedness::RightHanded;
+    pkg.mesh_space_basis = "mesh_local";
+    pkg.recommended_preview_yaw_deg = 180;
+    pkg.transform_confidence = TransformConfidence::Medium;
 
     std::vector<std::uint8_t> file_bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     GlbChunk json_chunk;
@@ -3706,6 +3712,24 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
         }
         if (skinned_payload_failed > 0U) {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
+        }
+    }
+    {
+        const bool has_transform_uncertainty =
+            multi_ref_mesh_count > 0U ||
+            node_transform_conflict_mesh_count > 0U ||
+            skinned_payload_failed > 0U;
+        const bool has_skinned_transform_activity =
+            skinned_primitive_count > 0U &&
+            transformed_mesh_count > 0U;
+        if (has_transform_uncertainty || has_skinned_transform_activity) {
+            pkg.recommended_preview_yaw_deg = 180;
+            pkg.transform_confidence = has_transform_uncertainty
+                ? TransformConfidence::Low
+                : TransformConfidence::Medium;
+        } else {
+            pkg.recommended_preview_yaw_deg = 0;
+            pkg.transform_confidence = TransformConfidence::High;
         }
     }
     if (pkg.mesh_payloads.empty()) {

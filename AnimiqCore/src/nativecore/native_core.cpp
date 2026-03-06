@@ -41,6 +41,7 @@ using animiq::avatar::AvatarPackage;
 using animiq::avatar::AvatarSourceType;
 using animiq::avatar::ExpressionState;
 using animiq::avatar::SkinningMatrixConvention;
+using animiq::avatar::TransformConfidence;
 
 #if defined(_WIN32)
 struct WindowRenderState {
@@ -768,6 +769,19 @@ const char* AvatarSourceTypeName(AvatarSourceType source_type) {
     }
 }
 
+const char* TransformConfidenceName(TransformConfidence confidence) {
+    switch (confidence) {
+        case TransformConfidence::Low:
+            return "low";
+        case TransformConfidence::Medium:
+            return "medium";
+        case TransformConfidence::High:
+            return "high";
+        default:
+            return "unknown";
+    }
+}
+
 int PreviewYawDegreesForAvatarSource(AvatarSourceType source_type) {
     // Runtime preview yaw is the single source-of-truth for front-view alignment.
     if (source_type == AvatarSourceType::Miq) {
@@ -784,57 +798,28 @@ float PreviewYawRadiansForAvatarSource(AvatarSourceType source_type) {
     return static_cast<float>(PreviewYawDegreesForAvatarSource(source_type)) * (kPi / 180.0f);
 }
 
-bool HasWarningCode(const AvatarPackage& pkg, const char* code) {
-    if (code == nullptr || *code == '\0') {
-        return false;
-    }
-    std::string needle(code);
-    std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    for (const auto& item : pkg.warning_codes) {
-        std::string lowered = item;
-        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        if (lowered == needle) {
-            return true;
-        }
-    }
-    return false;
-}
-
 int PreviewYawDegreesForAvatarPackage(const AvatarPackage& pkg, const char** reason_out) {
     if (reason_out != nullptr) {
         *reason_out = "default";
     }
-    const int base = PreviewYawDegreesForAvatarSource(pkg.source_type);
+    if (pkg.transform_confidence != TransformConfidence::Unknown &&
+        pkg.recommended_preview_yaw_deg >= -180 &&
+        pkg.recommended_preview_yaw_deg <= 180) {
+        if (reason_out != nullptr) {
+            *reason_out = "contract_recommended";
+        }
+        return std::max(-180, std::min(180, static_cast<int>(pkg.recommended_preview_yaw_deg)));
+    }
     if (pkg.source_type == AvatarSourceType::Miq && pkg.source_ext == ".vrm") {
         if (reason_out != nullptr) {
-            *reason_out = "miq_vrm_source_180";
+            *reason_out = "legacy_miq_vrm_source_180";
         }
         return 180;
     }
-    if (pkg.source_type != AvatarSourceType::Vrm) {
-        return base;
+    if (reason_out != nullptr) {
+        *reason_out = "legacy_source_default";
     }
-    if (HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_FALLBACK") ||
-        HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_AUTOCORRECTED") ||
-        HasWarningCode(pkg, "VRM_NODE_TRANSFORM_SKIN_BYPASS") ||
-        HasWarningCode(pkg, "VRM_NODE_TRANSFORM_CONFLICT") ||
-        HasWarningCode(pkg, "VRM_MESH_MULTI_NODE_REF")) {
-        if (reason_out != nullptr) {
-            *reason_out = "vrm_auto_fallback_180";
-        }
-        return 180;
-    }
-    if (HasWarningCode(pkg, "VRM_NODE_TRANSFORM_APPLIED") && !pkg.skin_payloads.empty()) {
-        if (reason_out != nullptr) {
-            *reason_out = "vrm_node_transform_applied_180";
-        }
-        return 180;
-    }
-    return base;
+    return PreviewYawDegreesForAvatarSource(pkg.source_type);
 }
 
 float PreviewYawRadiansForAvatarPackage(const AvatarPackage& pkg, const char** reason_out) {
@@ -1169,6 +1154,8 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         pass_summary << "format=" << AvatarSourceTypeName(pkg.source_type)
                      << ", applied_preview_yaw_deg=" << applied_preview_yaw
                      << ", preview_yaw_reason=" << yaw_reason
+                     << ", contract_preview_yaw_deg=" << pkg.recommended_preview_yaw_deg
+                     << ", transform_confidence=" << TransformConfidenceName(pkg.transform_confidence)
                      << ", quality_mode=" << out_info->quality_mode
                      << ", backend=" << out_info->selected_family_backend
                      << ", active_passes=" << out_info->active_passes

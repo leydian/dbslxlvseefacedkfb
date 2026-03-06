@@ -2,6 +2,68 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Avatar coordinate contract unification (VRM/MIQ yaw stabilization)
+
+### Summary
+
+Implemented a contract-first orientation handoff between loaders and native runtime to reduce recurring front/back and detached-part instability that could arise from warning-driven preview-yaw heuristics.
+
+Primary outcomes:
+
+- `AvatarPackage` now carries explicit coordinate contract fields,
+- VRM/MIQ loaders now set recommended preview yaw + transform confidence directly,
+- native runtime preview yaw resolver now uses package contract first (warning inference removed from primary path),
+- runtime pass summary now surfaces contract yaw/confidence for operator diagnostics.
+
+### Changed
+
+- Package contract model:
+  - `include/animiq/avatar/avatar_package.h`
+  - added:
+    - `AxisDirection`
+    - `CoordinateHandedness`
+    - `TransformConfidence`
+    - `mesh_space_basis`
+    - `asset_forward_axis`
+    - `asset_up_axis`
+    - `asset_handedness`
+    - `recommended_preview_yaw_deg`
+    - `transform_confidence`
+- MIQ loader contract population:
+  - `src/avatar/Miq_loader.cpp`
+  - default contract initialization for MIQ load path
+  - manifest parsing support for:
+    - `assetForwardAxis`
+    - `assetUpAxis`
+    - `assetHandedness`
+    - `transformConfidence`
+    - `recommendedPreviewYawDeg`
+  - `skinSpaceBasis` mirrored into `mesh_space_basis`
+  - added signed int extractor helper for recommended yaw
+- VRM loader contract population:
+  - `src/avatar/vrm_loader.cpp`
+  - explicit VRM contract defaults set during package init
+  - loader-stage transform certainty now determines:
+    - `recommended_preview_yaw_deg` (`0` or `180`)
+    - `transform_confidence` (`high|medium|low`)
+- Native runtime yaw resolver migration:
+  - `src/nativecore/native_core.cpp`
+  - removed warning-code based yaw branch logic from primary path
+  - `PreviewYawDegreesForAvatarPackage(...)` now prioritizes package contract
+  - diagnostics pass summary adds:
+    - `contract_preview_yaw_deg`
+    - `transform_confidence`
+
+### Verification
+
+- build:
+  - `cmake --build AnimiqCore/build_plan_impl --config Release --target avatar_tool nativecore`: PASS
+- gate:
+  - `powershell -ExecutionPolicy Bypass -File AnimiqCore/tools/vrm_quality_gate.ps1 -SampleDir sample -AvatarToolPath AnimiqCore/build_plan_impl/Release/avatar_tool.exe -Profile fixed5`: PASS (`Overall: PASS`)
+- spot checks:
+  - `avatar_tool sample/개인작10-2.vrm --dump-warnings-limit=80`: PASS (`Compat: full`, `ParserStage: runtime-ready`)
+  - `avatar_tool 개인작10-2.miq --dump-warnings-limit=40`: PASS (`Compat: full`, `ParserStage: runtime-ready`)
+
 ## 2026-03-06 - MIQ legacy header compatibility hotfix + WPF redeploy
 
 ### Summary

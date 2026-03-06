@@ -118,3 +118,4 @@
 - Newly added: review `2026-03-06_runtime_common_cause_triage_classifier_and_wpf_surface.md` for post-load common-cause classifier priority (`runtime mismatch` -> `NC_SET_*` -> `payload/policy`), one-shot `CommonCauseTriage` log emission, and WPF runtime diagnostics surfacing.
 - Newly added: review `2026-03-06_animiq_rebrand_and_miq_migration.md` for workspace-wide product rename, `.miq` migration scope, `MIQ2` binary signature contract hardening, and post-migration compatibility policy.
 - Newly added: review `2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md` for per-avatar preview front/back persistence contract (`PreviewFlip180`), load-time yaw reapply path, and WPF/WinUI toggle parity.
+- Newly added: review `2026-03-06_avatar_coordinate_contract_unification.md` for loader-owned coordinate contract fields (`asset axes/handedness/recommended yaw/confidence`), runtime warning-independent preview yaw resolution, and fixed5 verification evidence.
