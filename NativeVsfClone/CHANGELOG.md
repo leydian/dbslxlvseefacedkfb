@@ -2,6 +2,49 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 typed-v4 canonical material contract + depth/shadow pass slice
+
+### Summary
+
+Completed the next renderer-side parity slice by uplifting XAV2 canonical material handling to `typed-v4`, wiring pass metadata (`keyword_set/render_state/pass_flags`), and expanding native runtime topology with `DepthOnly` + `ShadowCaster` passes under a stability-first policy.
+
+### Changed
+
+- typed-v4 contract and canonicalization:
+  - `include/vsfclone/avatar/avatar_package.h`
+  - `src/avatar/xav2_loader.cpp`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2DataModel.cs`
+  - `unity/Packages/com.vsfclone.xav2/Runtime/Xav2RuntimeLoader.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2AvatarExtractors.cs`
+  - `unity/Packages/com.vsfclone.xav2/Editor/Xav2Exporter.cs`
+  - added contract fields: `keyword_set`, `render_state`, `pass_flags`
+  - canonical encoding path moved to `typed-v4` with v4 schema floor and safe defaults.
+- native/host quality + diagnostics expansion:
+  - `include/vsfclone/nativecore/api.h`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - `src/nativecore/native_core.cpp`
+  - added quality profile `FAST_FALLBACK` and diagnostics fields:
+    - `parity_score`, `variant_id`, `parity_fallback_reason`, `quality_mode`
+- native render pass expansion:
+  - `src/nativecore/native_core.cpp`
+  - added pass-state routing for `DepthOnly` and `ShadowCaster`.
+  - added depth-only blend state (`color write off`) and pass counters (`depth/shadow/base/outline/emission/blend`).
+  - pass scheduling now includes `DepthOnly -> ShadowCaster -> Base -> Outline -> Emission -> Blend`.
+  - `FastFallback` policy continues to reduce high-cost pass usage for stability.
+- parity diagnostics enrichment:
+  - added fallback reason hints: `missing_depth_pass`, `missing_shadow_pass`.
+- documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore avatar_tool`: PASS
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release`: PASS
+- `NativeVsfClone/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.xav2"`: PASS (`Compat: full`, `PrimaryError: NONE`)
+
 ## 2026-03-06 - Tracking HybridAuto default + no-input watchdog diagnostics + WPF/WinUI hint hardening
 
 ### Summary

@@ -743,7 +743,10 @@ namespace VsfClone.Xav2.Editor
                 ShaderName = shaderName,
                 ShaderVariant = shaderVariant,
                 ShaderFamily = shaderFamily,
-                MaterialParamEncoding = (shaderFamily == "liltoon" || shaderFamily == "poiyomi" || shaderFamily == "standard" || shaderFamily == "mtoon") ? "typed-v3" : "legacy-json",
+                KeywordSet = "[]",
+                RenderState = "auto",
+                PassFlags = "base",
+                MaterialParamEncoding = (shaderFamily == "liltoon" || shaderFamily == "poiyomi" || shaderFamily == "standard" || shaderFamily == "mtoon") ? "typed-v4" : "legacy-json",
                 BaseColorTextureName = baseTextureName,
                 AlphaMode = ResolveAlphaMode(material),
                 AlphaCutoff = ResolveAlphaCutoff(material),
@@ -752,7 +755,7 @@ namespace VsfClone.Xav2.Editor
             };
             if (shaderFamily == "liltoon" || shaderFamily == "poiyomi" || shaderFamily == "standard" || shaderFamily == "mtoon")
             {
-                item.TypedSchemaVersion = 3;
+                item.TypedSchemaVersion = 4;
                 AddTypedColor(item, material, "_BaseColor", "_BaseColor", "_Color");
                 AddTypedFloat(item, material, "_Cutoff", "_Cutoff");
                 AddTypedTexture(item, "base", baseTextureName);

@@ -37,6 +37,7 @@ public enum NcRenderQualityProfile : uint
     Default = 0,
     Balanced = 1,
     UltraParity = 2,
+    FastFallback = 3,
 }
 
 public enum NcPoseBoneId : uint
@@ -129,6 +130,13 @@ public struct NcAvatarInfo
     public string LastRenderPassSummary;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
     public string LastMissingFeature;
+    public float ParityScore;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string VariantId;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+    public string ParityFallbackReason;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
+    public string QualityMode;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
@@ -459,6 +467,16 @@ public static class NativeCoreInterop
         options.QualityProfile = (uint)NcRenderQualityProfile.UltraParity;
         options.FovDeg = 42.0f;
         options.Headroom = 0.10f;
+        options.ShowDebugOverlay = 0U;
+        return options;
+    }
+
+    public static NcRenderQualityOptions BuildFastFallbackPreset()
+    {
+        var options = BuildBroadcastPreset();
+        options.QualityProfile = (uint)NcRenderQualityProfile.FastFallback;
+        options.FovDeg = 45.0f;
+        options.Headroom = 0.12f;
         options.ShowDebugOverlay = 0U;
         return options;
     }

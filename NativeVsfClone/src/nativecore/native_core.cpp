@@ -68,9 +68,17 @@ struct GpuMeshResource {
 };
 
 struct GpuMaterialResource {
+    std::string shader_family = "legacy";
+    std::string shader_variant = "default";
+    std::string pass_flags = "base";
     std::string alpha_mode = "OPAQUE";
     float alpha_cutoff = 0.5f;
     bool double_sided = false;
+    bool enable_depth_pass = true;
+    bool enable_shadow_pass = false;
+    bool enable_base_pass = true;
+    bool enable_outline_pass = false;
+    bool enable_emission_pass = false;
     std::array<float, 4U> base_color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4U> shade_color = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -109,6 +117,8 @@ struct RendererResources {
     ID3D11DepthStencilState* depth_read = nullptr;
     ID3D11BlendState* blend_opaque = nullptr;
     ID3D11BlendState* blend_alpha = nullptr;
+    ID3D11BlendState* blend_additive = nullptr;
+    ID3D11BlendState* blend_depth_only = nullptr;
     ID3D11SamplerState* linear_sampler = nullptr;
     ID3D11Texture2D* depth_texture = nullptr;
     ID3D11DepthStencilView* depth_dsv = nullptr;
@@ -186,6 +196,12 @@ struct CoreState {
     float last_cpu_frame_ms = 0.0f;
     float last_material_resolve_ms = 0.0f;
     std::uint32_t last_pass_count = 0U;
+    std::uint32_t last_depth_pass_count = 0U;
+    std::uint32_t last_shadow_pass_count = 0U;
+    std::uint32_t last_base_pass_count = 0U;
+    std::uint32_t last_outline_pass_count = 0U;
+    std::uint32_t last_emission_pass_count = 0U;
+    std::uint32_t last_blend_pass_count = 0U;
     float runtime_time_seconds = 0.0f;
 
 #if defined(_WIN32)
@@ -227,7 +243,7 @@ NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions
     for (int i = 0; i < 4; ++i) {
         out.background_rgba[i] = std::max(0.0f, std::min(1.0f, out.background_rgba[i]));
     }
-    if (out.quality_profile > NC_RENDER_QUALITY_ULTRA_PARITY) {
+    if (out.quality_profile > NC_RENDER_QUALITY_FAST_FALLBACK) {
         out.quality_profile = NC_RENDER_QUALITY_DEFAULT;
     }
     out.show_debug_overlay = out.show_debug_overlay > 0U ? 1U : 0U;
@@ -236,6 +252,10 @@ NcRenderQualityOptions SanitizeRenderQualityOptions(const NcRenderQualityOptions
 
 CoreState g_state;
 std::mutex g_mutex;
+
+const char* RenderQualityModeName(std::uint32_t quality_profile);
+std::vector<std::string> TokenizeLooseFlags(std::string text);
+bool HasLooseToken(const std::vector<std::string>& tokens, const char* token);
 
 void CopyString(char* dst, std::size_t dst_size, const std::string& src) {
     if (dst == nullptr || dst_size == 0U) {
@@ -275,6 +295,12 @@ struct MaterialModeCounts {
 struct MtoonDiagnosticsCounts {
     std::uint32_t advanced = 0U;
     std::uint32_t fallback = 0U;
+};
+
+struct ParityDiagnosticsSummary {
+    float score = 0.0f;
+    std::string variant_id = "none";
+    std::string fallback_reason = "none";
 };
 
 MaterialModeCounts CountMaterialModes(const AvatarPackage& pkg) {
@@ -319,6 +345,89 @@ MtoonDiagnosticsCounts CountMtoonDiagnostics(const AvatarPackage& pkg) {
         }
     }
     return counts;
+}
+
+ParityDiagnosticsSummary ComputeParityDiagnostics(
+    const AvatarPackage& pkg,
+    std::uint32_t quality_profile) {
+    ParityDiagnosticsSummary out {};
+    if (pkg.material_payloads.empty()) {
+        out.fallback_reason = "no-material-payload";
+        return out;
+    }
+
+    auto normalize = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return value;
+    };
+    auto is_parity_family = [&](const std::string& family) {
+        const std::string key = normalize(family);
+        return key == "liltoon" || key == "poiyomi" || key == "mtoon" || key == "standard";
+    };
+
+    std::uint32_t matched = 0U;
+    std::vector<std::string> reasons;
+    for (const auto& material : pkg.material_payloads) {
+        const bool typed_v4 = normalize(material.material_param_encoding) == "typed-v4" &&
+                              material.typed_schema_version >= 4U;
+        const bool family_ok = is_parity_family(material.shader_family);
+        const std::string alpha_mode = normalize(material.alpha_mode);
+        const bool alpha_allows_depth = alpha_mode != "blend";
+        const std::vector<std::string> pass_tokens = TokenizeLooseFlags(material.pass_flags + " " + material.keyword_set);
+        const bool has_depth_token =
+            HasLooseToken(pass_tokens, "depth") ||
+            HasLooseToken(pass_tokens, "depthonly") ||
+            HasLooseToken(pass_tokens, "zprepass");
+        const bool has_shadow_token =
+            HasLooseToken(pass_tokens, "shadow") ||
+            HasLooseToken(pass_tokens, "shadowcaster") ||
+            HasLooseToken(pass_tokens, "castshadow");
+        const bool has_base_color = std::any_of(
+            material.typed_color_params.begin(),
+            material.typed_color_params.end(),
+            [](const avatar::MaterialRenderPayload::TypedColorParam& p) { return p.id == "_BaseColor"; });
+        if (typed_v4 && family_ok && has_base_color) {
+            ++matched;
+        } else {
+            if (!typed_v4) {
+                reasons.push_back("non-v4");
+            }
+            if (!family_ok) {
+                reasons.push_back("family");
+            }
+            if (!has_base_color) {
+                reasons.push_back("base-color");
+            }
+        }
+        if (alpha_allows_depth && !has_depth_token) {
+            reasons.push_back("missing_depth_pass");
+        }
+        if (alpha_allows_depth && family_ok && !has_shadow_token) {
+            reasons.push_back("missing_shadow_pass");
+        }
+    }
+
+    out.score = static_cast<float>(matched) / static_cast<float>(pkg.material_payloads.size());
+    const auto& first = pkg.material_payloads.front();
+    out.variant_id = normalize(first.shader_family) + "." +
+                     (first.shader_variant.empty() ? "default" : normalize(first.shader_variant)) + "." +
+                     std::string(RenderQualityModeName(quality_profile));
+    if (reasons.empty()) {
+        out.fallback_reason = "none";
+    } else {
+        std::ostringstream ss;
+        const std::size_t max_reasons = std::min<std::size_t>(reasons.size(), 6U);
+        for (std::size_t i = 0U; i < max_reasons; ++i) {
+            if (i > 0U) {
+                ss << ",";
+            }
+            ss << reasons[i];
+        }
+        out.fallback_reason = ss.str();
+    }
+    return out;
 }
 
 void FillAvatarRuntimeMetricsV2(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarRuntimeMetricsV2* out_info) {
@@ -669,6 +778,20 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         out_info->mtoon_advanced_param_material_count = mtoon_counts.advanced;
         out_info->mtoon_fallback_material_count = mtoon_counts.fallback;
     }
+    {
+        const auto quality = SanitizeRenderQualityOptions(g_state.render_quality);
+        const auto parity = ComputeParityDiagnostics(pkg, quality.quality_profile);
+        out_info->parity_score = parity.score;
+        CopyString(out_info->variant_id, sizeof(out_info->variant_id), parity.variant_id);
+        CopyString(
+            out_info->parity_fallback_reason,
+            sizeof(out_info->parity_fallback_reason),
+            parity.fallback_reason);
+        CopyString(
+            out_info->quality_mode,
+            sizeof(out_info->quality_mode),
+            RenderQualityModeName(quality.quality_profile));
+    }
     CopyString(out_info->display_name, sizeof(out_info->display_name), pkg.display_name);
     CopyString(out_info->source_path, sizeof(out_info->source_path), pkg.source_path);
     CopyString(
@@ -726,6 +849,14 @@ void FillAvatarInfo(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarInfo
         pass_summary << "format=" << AvatarSourceTypeName(pkg.source_type)
                      << ", applied_preview_yaw_deg=" << applied_preview_yaw
                      << ", preview_yaw_reason=" << yaw_reason
+                     << ", quality_mode=" << out_info->quality_mode
+                     << ", pass(depth/shadow/base/outline/emission/blend)="
+                     << g_state.last_depth_pass_count << "/"
+                     << g_state.last_shadow_pass_count << "/"
+                     << g_state.last_base_pass_count << "/"
+                     << g_state.last_outline_pass_count << "/"
+                     << g_state.last_emission_pass_count << "/"
+                     << g_state.last_blend_pass_count
                      << ", opaque=" << mode_counts.opaque
                      << ", mask=" << mode_counts.mask
                      << ", blend=" << mode_counts.blend;
@@ -847,6 +978,14 @@ void ReleaseGpuMaterialResource(GpuMaterialResource* material) {
     material->uv_anim_scroll_y = 0.0f;
     material->uv_anim_rotation = 0.0f;
     material->uv_anim_enabled = false;
+    material->shader_family = "legacy";
+    material->shader_variant = "default";
+    material->pass_flags = "base";
+    material->enable_depth_pass = true;
+    material->enable_shadow_pass = false;
+    material->enable_base_pass = true;
+    material->enable_outline_pass = false;
+    material->enable_emission_pass = false;
 }
 
 void ResetRendererResources(RendererResources* renderer) {
@@ -876,6 +1015,14 @@ void ResetRendererResources(RendererResources* renderer) {
     if (renderer->blend_alpha != nullptr) {
         renderer->blend_alpha->Release();
         renderer->blend_alpha = nullptr;
+    }
+    if (renderer->blend_additive != nullptr) {
+        renderer->blend_additive->Release();
+        renderer->blend_additive = nullptr;
+    }
+    if (renderer->blend_depth_only != nullptr) {
+        renderer->blend_depth_only->Release();
+        renderer->blend_depth_only = nullptr;
     }
     if (renderer->linear_sampler != nullptr) {
         renderer->linear_sampler->Release();
@@ -982,6 +1129,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         renderer->raster_cull_none != nullptr &&
         renderer->depth_write != nullptr && renderer->depth_read != nullptr &&
         renderer->blend_opaque != nullptr && renderer->blend_alpha != nullptr &&
+        renderer->blend_additive != nullptr && renderer->blend_depth_only != nullptr &&
         renderer->linear_sampler != nullptr) {
         return true;
     }
@@ -1041,6 +1189,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "SamplerState samp0 : register(s0);\n"
         "float4 main(float4 pos : SV_POSITION, float4 color : COLOR0, float3 nrm : NORMAL, float2 uv : TEXCOORD0) : SV_TARGET {\n"
         "  float is_outline_pass = outline_params.w;\n"
+        "  float is_emission_pass = outline_params.z;\n"
         "  if (is_outline_pass > 0.5) {\n"
         "    float3 outline_tint = lerp(base_color.rgb, shade_color.rgb, saturate(outline_params.y));\n"
         "    return float4(outline_tint, base_color.a);\n"
@@ -1067,6 +1216,13 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "    float2 shifted = rotated + uv_anim_params.xy * t;\n"
         "    float mask = has_uv_mask > 0.5 ? saturate(tex5.Sample(samp0, uv).r) : 1.0;\n"
         "    sample_uv = lerp(uv, shifted, mask);\n"
+        "  }\n"
+        "  if (is_emission_pass > 0.5) {\n"
+        "    float3 em = emission_color.rgb;\n"
+        "    if (use_emission_tex > 0.5) {\n"
+        "      em *= tex3.Sample(samp0, sample_uv).rgb;\n"
+        "    }\n"
+        "    return float4(em * saturate(liltoon_mix.y), 1.0);\n"
         "  }\n"
         "  float4 out_color = color;\n"
         "  float3 normal = normalize(nrm);\n"
@@ -1266,6 +1422,25 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     if (FAILED(hr) || renderer->blend_alpha == nullptr) {
         return false;
     }
+
+    blend_desc.RenderTarget[0].BlendEnable = TRUE;
+    blend_desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    hr = device->CreateBlendState(&blend_desc, &renderer->blend_additive);
+    if (FAILED(hr) || renderer->blend_additive == nullptr) {
+        return false;
+    }
+
+    blend_desc.RenderTarget[0].BlendEnable = FALSE;
+    blend_desc.RenderTarget[0].RenderTargetWriteMask = 0U;
+    hr = device->CreateBlendState(&blend_desc, &renderer->blend_depth_only);
+    if (FAILED(hr) || renderer->blend_depth_only == nullptr) {
+        return false;
+    }
     D3D11_SAMPLER_DESC sampler_desc {};
     sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sampler_desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -1339,6 +1514,36 @@ std::string ToLowerAscii(std::string s) {
         return static_cast<char>(std::tolower(c));
     });
     return s;
+}
+
+std::vector<std::string> TokenizeLooseFlags(std::string text) {
+    for (char& ch : text) {
+        const unsigned char uc = static_cast<unsigned char>(ch);
+        if ((uc >= 'a' && uc <= 'z') ||
+            (uc >= 'A' && uc <= 'Z') ||
+            (uc >= '0' && uc <= '9') ||
+            uc == '_' ||
+            uc == '-') {
+            ch = static_cast<char>(std::tolower(uc));
+        } else {
+            ch = ' ';
+        }
+    }
+    std::vector<std::string> tokens;
+    std::istringstream iss(text);
+    std::string token;
+    while (iss >> token) {
+        tokens.push_back(std::move(token));
+    }
+    return tokens;
+}
+
+bool HasLooseToken(const std::vector<std::string>& tokens, const char* token) {
+    if (token == nullptr || *token == '\0') {
+        return false;
+    }
+    const std::string key = ToLowerAscii(token);
+    return std::find(tokens.begin(), tokens.end(), key) != tokens.end();
 }
 
 ExpressionState* FindExpressionByNameCaseInsensitive(std::vector<ExpressionState>* expressions, const std::string& name) {
@@ -1884,7 +2089,7 @@ bool ShouldApplyExperimentalStaticSkinning() {
     static const bool enabled = []() {
         const char* raw = std::getenv("VSFCLONE_XAV2_ENABLE_STATIC_SKINNING");
         if (raw == nullptr) {
-            return true;
+            return false;
         }
         std::string token(raw);
         std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
@@ -3063,6 +3268,19 @@ bool IsTypedEncoding(std::string encoding) {
     return encoding.rfind("typed-v", 0U) == 0U;
 }
 
+const char* RenderQualityModeName(std::uint32_t quality_profile) {
+    if (quality_profile == NC_RENDER_QUALITY_ULTRA_PARITY) {
+        return "ultra-parity";
+    }
+    if (quality_profile == NC_RENDER_QUALITY_FAST_FALLBACK) {
+        return "fast-fallback";
+    }
+    if (quality_profile == NC_RENDER_QUALITY_BALANCED) {
+        return "balanced";
+    }
+    return "default";
+}
+
 bool ParseFloatToken(const std::string& token, float* out_value) {
     if (out_value == nullptr) {
         return false;
@@ -3190,7 +3408,7 @@ bool TryGetTypedTextureRef(
 std::string ResolveAlphaMode(const avatar::MaterialRenderPayload& payload) {
     std::string alpha_mode = CanonicalizeAlphaMode(payload.alpha_mode);
     const std::string typed_encoding = NormalizeRefKey(payload.material_param_encoding);
-    if (typed_encoding == "typed-v2" || typed_encoding == "typed-v3") {
+    if (typed_encoding == "typed-v2" || typed_encoding == "typed-v3" || typed_encoding == "typed-v4") {
         if (payload.feature_flags & (1U << 1)) {
             return "BLEND";
         }
@@ -3238,19 +3456,149 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
     materials.reserve(std::max<std::size_t>(avatar_pkg.material_payloads.size(), 1U));
     std::unordered_map<std::string, const avatar::TextureRenderPayload*> textures_by_key;
     textures_by_key.reserve(avatar_pkg.texture_payloads.size());
-    for (const auto& tex : avatar_pkg.texture_payloads) {
-        textures_by_key[NormalizeRefKey(tex.name)] = &tex;
+    std::unordered_map<std::string, const avatar::TextureRenderPayload*> textures_by_normalized_alias;
+    textures_by_normalized_alias.reserve(avatar_pkg.texture_payloads.size() * 2U);
+    std::unordered_map<std::string, const avatar::TextureRenderPayload*> textures_by_basename;
+    textures_by_basename.reserve(avatar_pkg.texture_payloads.size());
+    const auto insert_unique_or_ambiguous = [](
+        std::unordered_map<std::string, const avatar::TextureRenderPayload*>* map,
+        const std::string& key,
+        const avatar::TextureRenderPayload* payload) {
+        if (map == nullptr || key.empty() || payload == nullptr) {
+            return;
+        }
+        const auto it = map->find(key);
+        if (it == map->end()) {
+            map->emplace(key, payload);
+            return;
+        }
+        if (it->second != payload) {
+            it->second = nullptr;
+        }
     };
-    auto resolve_texture_payload = [&](const std::string& texture_ref) -> const avatar::TextureRenderPayload* {
+    const auto trim_texture_prefix = [](std::string key) {
+        for (;;) {
+            if (key.rfind("./", 0U) == 0U) {
+                key.erase(0U, 2U);
+                continue;
+            }
+            if (key.rfind("/", 0U) == 0U) {
+                key.erase(0U, 1U);
+                continue;
+            }
+            if (key.rfind("assets/", 0U) == 0U) {
+                key.erase(0U, 7U);
+                continue;
+            }
+            if (key.rfind("textures/", 0U) == 0U) {
+                key.erase(0U, 9U);
+                continue;
+            }
+            if (key.rfind("texture/", 0U) == 0U) {
+                key.erase(0U, 8U);
+                continue;
+            }
+            if (key.rfind("resources/", 0U) == 0U) {
+                key.erase(0U, 10U);
+                continue;
+            }
+            break;
+        }
+        return key;
+    };
+    const auto drop_extension = [](std::string key) {
+        const auto slash = key.find_last_of('/');
+        const auto dot = key.find_last_of('.');
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+            key.erase(dot);
+        }
+        return key;
+    };
+    for (const auto& tex : avatar_pkg.texture_payloads) {
+        const std::string key = NormalizeRefKey(tex.name);
+        textures_by_key[key] = &tex;
+        const std::string trimmed = trim_texture_prefix(key);
+        const std::string key_noext = drop_extension(key);
+        const std::string trimmed_noext = drop_extension(trimmed);
+        insert_unique_or_ambiguous(&textures_by_normalized_alias, trimmed, &tex);
+        insert_unique_or_ambiguous(&textures_by_normalized_alias, key_noext, &tex);
+        insert_unique_or_ambiguous(&textures_by_normalized_alias, trimmed_noext, &tex);
+        const std::string basename = drop_extension(ExtractTerminalToken(key));
+        insert_unique_or_ambiguous(&textures_by_basename, basename, &tex);
+    }
+    enum class TextureMatchStage {
+        Exact,
+        Normalized,
+        Basename,
+        Missing,
+        Ambiguous,
+    };
+    const auto texture_match_stage_name = [](TextureMatchStage stage) {
+        switch (stage) {
+        case TextureMatchStage::Exact:
+            return "exact";
+        case TextureMatchStage::Normalized:
+            return "normalized";
+        case TextureMatchStage::Basename:
+            return "basename";
+        case TextureMatchStage::Ambiguous:
+            return "ambiguous";
+        default:
+            return "miss";
+        }
+    };
+    struct TextureResolveResult {
+        const avatar::TextureRenderPayload* payload = nullptr;
+        TextureMatchStage stage = TextureMatchStage::Missing;
+    };
+    auto resolve_texture_payload = [&](const std::string& texture_ref) -> TextureResolveResult {
+        TextureResolveResult out {};
         if (texture_ref.empty()) {
-            return nullptr;
+            return out;
         }
         const std::string key = NormalizeRefKey(texture_ref);
         const auto exact_it = textures_by_key.find(key);
         if (exact_it != textures_by_key.end()) {
-            return exact_it->second;
+            out.payload = exact_it->second;
+            out.stage = TextureMatchStage::Exact;
+            return out;
         }
-        return nullptr;
+        if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
+            const std::string trimmed = trim_texture_prefix(key);
+            const std::string key_noext = drop_extension(key);
+            const std::string trimmed_noext = drop_extension(trimmed);
+            const std::array<std::string, 3U> normalized_candidates = {trimmed, key_noext, trimmed_noext};
+            for (const auto& candidate : normalized_candidates) {
+                if (candidate.empty()) {
+                    continue;
+                }
+                const auto it = textures_by_normalized_alias.find(candidate);
+                if (it == textures_by_normalized_alias.end()) {
+                    continue;
+                }
+                if (it->second == nullptr) {
+                    out.stage = TextureMatchStage::Ambiguous;
+                    return out;
+                }
+                out.payload = it->second;
+                out.stage = TextureMatchStage::Normalized;
+                return out;
+            }
+            const std::string basename = drop_extension(ExtractTerminalToken(key));
+            if (!basename.empty()) {
+                const auto it = textures_by_basename.find(basename);
+                if (it != textures_by_basename.end()) {
+                    if (it->second == nullptr) {
+                        out.stage = TextureMatchStage::Ambiguous;
+                        return out;
+                    }
+                    out.payload = it->second;
+                    out.stage = TextureMatchStage::Basename;
+                    return out;
+                }
+            }
+        }
+        return out;
     };
     for (const auto& payload : avatar_pkg.material_payloads) {
         GpuMaterialResource material {};
@@ -3261,6 +3609,35 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             : "XAV2_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
         std::vector<std::string> fallback_reasons;
         const std::string shader_family = NormalizeShaderFamilyKey(payload.shader_family);
+        material.shader_family = shader_family;
+        material.shader_variant = payload.shader_variant.empty() ? "default" : payload.shader_variant;
+        material.pass_flags = payload.pass_flags.empty() ? "base" : payload.pass_flags;
+        const std::vector<std::string> pass_tokens = TokenizeLooseFlags(material.pass_flags + " " + payload.keyword_set);
+        const bool pass_declared = !payload.pass_flags.empty();
+        material.enable_base_pass =
+            !pass_declared ||
+            HasLooseToken(pass_tokens, "base") ||
+            HasLooseToken(pass_tokens, "main") ||
+            HasLooseToken(pass_tokens, "forward");
+        material.enable_outline_pass =
+            HasLooseToken(pass_tokens, "outline") ||
+            HasLooseToken(pass_tokens, "outline_on") ||
+            HasLooseToken(pass_tokens, "_outline_on");
+        material.enable_emission_pass =
+            HasLooseToken(pass_tokens, "emission") ||
+            HasLooseToken(pass_tokens, "emission_on") ||
+            HasLooseToken(pass_tokens, "_emission") ||
+            HasLooseToken(pass_tokens, "_emission_on");
+        const bool has_depth_token =
+            HasLooseToken(pass_tokens, "depth") ||
+            HasLooseToken(pass_tokens, "depthonly") ||
+            HasLooseToken(pass_tokens, "zprepass");
+        const bool has_shadow_token =
+            HasLooseToken(pass_tokens, "shadow") ||
+            HasLooseToken(pass_tokens, "shadowcaster") ||
+            HasLooseToken(pass_tokens, "castshadow");
+        material.enable_depth_pass = !pass_declared || has_depth_token;
+        material.enable_shadow_pass = has_shadow_token;
         const bool family_supported = IsSupportedShaderFamilyKey(shader_family);
         const bool has_typed_payload =
             IsTypedEncoding(payload.material_param_encoding) ||
@@ -3274,6 +3651,19 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             fallback_reasons.push_back("alpha_mode_defaulted");
         }
         material.alpha_mode = ResolveAlphaMode(payload);
+        const std::string resolved_alpha_mode = ToUpperAscii(material.alpha_mode);
+        const bool alpha_allows_depth = resolved_alpha_mode != "BLEND";
+        const bool parity_family =
+            shader_family == "liltoon" ||
+            shader_family == "poiyomi" ||
+            shader_family == "mtoon" ||
+            shader_family == "standard";
+        if (!alpha_allows_depth) {
+            material.enable_depth_pass = false;
+            material.enable_shadow_pass = false;
+        } else if (!pass_declared && parity_family) {
+            material.enable_shadow_pass = true;
+        }
         material.alpha_cutoff = payload.alpha_cutoff;
         material.double_sided = payload.double_sided;
         float typed_cutoff = 0.0f;
@@ -3410,14 +3800,15 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryGetTypedTextureRef(payload, "_MainTex", &base_texture_ref) ||
             TryGetTypedTextureRef(payload, "_BaseMap", &base_texture_ref);
         if (!base_texture_ref.empty()) {
-            const auto* tex_payload = resolve_texture_payload(base_texture_ref);
-            if (tex_payload != nullptr) {
-                material.base_color_srv = CreateTextureSrvFromPayload(device, tex_payload);
+            const auto tex_res = resolve_texture_payload(base_texture_ref);
+            if (tex_res.payload != nullptr) {
+                material.base_color_srv = CreateTextureSrvFromPayload(device, tex_res.payload);
             } else if (has_typed_base_ref) {
                 unresolved_base_texture = true;
                 std::ostringstream warning;
                 warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
-                        << ", slot=base, ref=" << base_texture_ref;
+                        << ", slot=base, ref=" << base_texture_ref
+                        << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -3433,9 +3824,9 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryGetTypedTextureRef(payload, "normal", &normal_texture_ref) ||
             TryGetTypedTextureRef(payload, "_BumpMap", &normal_texture_ref);
         if (!conservative_xav2_material && !normal_texture_ref.empty()) {
-            const auto* tex_payload = resolve_texture_payload(normal_texture_ref);
-            if (tex_payload != nullptr) {
-                material.normal_srv = CreateTextureSrvFromPayload(device, tex_payload);
+            const auto tex_res = resolve_texture_payload(normal_texture_ref);
+            if (tex_res.payload != nullptr) {
+                material.normal_srv = CreateTextureSrvFromPayload(device, tex_res.payload);
                 if (material.normal_strength < 0.01f) {
                     material.normal_strength = 0.35f;
                 }
@@ -3443,7 +3834,8 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
                 unresolved_normal_texture = true;
                 std::ostringstream warning;
                 warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
-                        << ", slot=normal, ref=" << normal_texture_ref;
+                        << ", slot=normal, ref=" << normal_texture_ref
+                        << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -3459,15 +3851,16 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryGetTypedTextureRef(payload, "rim", &rim_texture_ref) ||
             TryGetTypedTextureRef(payload, "_RimTex", &rim_texture_ref);
         if (!conservative_xav2_material && !rim_texture_ref.empty()) {
-            const auto* tex_payload = resolve_texture_payload(rim_texture_ref);
-            if (tex_payload != nullptr) {
-                material.rim_srv = CreateTextureSrvFromPayload(device, tex_payload);
+            const auto tex_res = resolve_texture_payload(rim_texture_ref);
+            if (tex_res.payload != nullptr) {
+                material.rim_srv = CreateTextureSrvFromPayload(device, tex_res.payload);
                 material.rim_strength = std::max(0.35f, material.rim_strength);
             } else if (has_typed_rim_ref) {
                 unresolved_rim_texture = true;
                 std::ostringstream warning;
                 warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
-                        << ", slot=rim, ref=" << rim_texture_ref;
+                        << ", slot=rim, ref=" << rim_texture_ref
+                        << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -3482,15 +3875,16 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryGetTypedTextureRef(payload, "emission", &emission_texture_ref) ||
             TryGetTypedTextureRef(payload, "_EmissionMap", &emission_texture_ref);
         if (!conservative_xav2_material && !emission_texture_ref.empty()) {
-            const auto* tex_payload = resolve_texture_payload(emission_texture_ref);
-            if (tex_payload != nullptr) {
-                material.emission_srv = CreateTextureSrvFromPayload(device, tex_payload);
+            const auto tex_res = resolve_texture_payload(emission_texture_ref);
+            if (tex_res.payload != nullptr) {
+                material.emission_srv = CreateTextureSrvFromPayload(device, tex_res.payload);
                 material.emission_strength = std::max(material.emission_strength, 0.75f);
             } else if (has_typed_emission_ref) {
                 unresolved_emission_texture = true;
                 std::ostringstream warning;
                 warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
-                        << ", slot=emission, ref=" << emission_texture_ref;
+                        << ", slot=emission, ref=" << emission_texture_ref
+                        << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -3507,15 +3901,16 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryGetTypedTextureRef(payload, "_MatCapTex", &matcap_texture_ref) ||
             TryGetTypedTextureRef(payload, "_MatCapTexture", &matcap_texture_ref);
         if (!conservative_xav2_material && !matcap_texture_ref.empty()) {
-            const auto* tex_payload = resolve_texture_payload(matcap_texture_ref);
-            if (tex_payload != nullptr) {
-                material.matcap_srv = CreateTextureSrvFromPayload(device, tex_payload);
+            const auto tex_res = resolve_texture_payload(matcap_texture_ref);
+            if (tex_res.payload != nullptr) {
+                material.matcap_srv = CreateTextureSrvFromPayload(device, tex_res.payload);
                 material.matcap_strength = std::max(material.matcap_strength, 0.35f);
             } else if (has_typed_matcap_ref) {
                 unresolved_matcap_texture = true;
                 std::ostringstream warning;
                 warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
-                        << ", slot=matcap, ref=" << matcap_texture_ref;
+                        << ", slot=matcap, ref=" << matcap_texture_ref
+                        << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -3530,15 +3925,16 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             TryGetTypedTextureRef(payload, "uvAnimationMask", &uv_anim_mask_ref) ||
             TryGetTypedTextureRef(payload, "_UvAnimMaskTex", &uv_anim_mask_ref);
         if (!conservative_xav2_material && !uv_anim_mask_ref.empty()) {
-            const auto* tex_payload = resolve_texture_payload(uv_anim_mask_ref);
-            if (tex_payload != nullptr) {
-                material.uv_anim_mask_srv = CreateTextureSrvFromPayload(device, tex_payload);
+            const auto tex_res = resolve_texture_payload(uv_anim_mask_ref);
+            if (tex_res.payload != nullptr) {
+                material.uv_anim_mask_srv = CreateTextureSrvFromPayload(device, tex_res.payload);
                 material.uv_anim_enabled = true;
             } else if (has_typed_uv_mask_ref) {
                 unresolved_uv_mask_texture = true;
                 std::ostringstream warning;
                 warning << "W_RENDER: " << unresolved_texture_code << ": material=" << payload.name
-                        << ", slot=uvAnimationMask, ref=" << uv_anim_mask_ref;
+                        << ", slot=uvAnimationMask, ref=" << uv_anim_mask_ref
+                        << ", match_stage=" << texture_match_stage_name(tex_res.stage);
                 auto avatar_it = g_state.avatars.find(handle);
                 if (avatar_it != g_state.avatars.end()) {
                     avatar_it->second.warnings.push_back(warning.str());
@@ -3598,6 +3994,10 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             material.alpha_mode = "OPAQUE";
             material.alpha_cutoff = 0.0f;
             material.double_sided = false;
+            material.enable_depth_pass = true;
+            material.enable_shadow_pass = false;
+            material.enable_outline_pass = false;
+            material.enable_emission_pass = false;
         }
         if (!fallback_reasons.empty()) {
             std::ostringstream reasons;
@@ -3953,6 +4353,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     }
 
     const auto quality = SanitizeRenderQualityOptions(g_state.render_quality);
+    const bool fast_fallback = (quality.quality_profile == NC_RENDER_QUALITY_FAST_FALLBACK);
     const float frame_dt = std::max(1.0f / 240.0f, std::min(1.0f / 15.0f, ctx->delta_time_seconds));
     g_state.runtime_time_seconds =
         std::fmod(std::max(0.0f, g_state.runtime_time_seconds + frame_dt), 3600.0f);
@@ -3995,7 +4396,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
     std::vector<DrawItem> opaque_draws;
     std::vector<DrawItem> mask_draws;
     std::vector<DrawItem> blend_draws;
+    std::vector<DrawItem> depth_draws;
+    std::vector<DrawItem> shadow_draws;
     std::vector<DrawItem> outline_draws;
+    std::vector<DrawItem> emission_draws;
     std::uint32_t frame_draw_calls = 0U;
     const float fov_deg = quality.fov_deg;
     const float tan_half_fov = std::tan(DirectX::XMConvertToRadians(fov_deg) * 0.5f);
@@ -4331,7 +4735,6 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 const float emax = std::max(ex, std::max(ey, ez));
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
                     ++mesh_extent_outlier_skipped_count;
-                    continue;
                 }
             }
             std::size_t material_index = std::numeric_limits<std::size_t>::max();
@@ -4367,15 +4770,32 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             const auto center = DirectX::XMVectorSet(mesh.center.x, mesh.center.y, mesh.center.z, 1.0f);
             const auto center_view = DirectX::XMVector3TransformCoord(DirectX::XMVector3TransformCoord(center, world), view);
             item.view_z = DirectX::XMVectorGetZ(center_view);
-            if (item.is_blend) {
-                blend_draws.push_back(item);
-            } else if (item.is_mask) {
-                mask_draws.push_back(item);
-            } else {
-                opaque_draws.push_back(item);
+            if (!fast_fallback && material != nullptr && material->enable_depth_pass) {
+                depth_draws.push_back(item);
             }
-            if (material != nullptr && material->outline_width > 0.0005f) {
+            if (!fast_fallback && material != nullptr && material->enable_shadow_pass) {
+                shadow_draws.push_back(item);
+            }
+            if (material != nullptr && material->enable_base_pass) {
+                if (item.is_blend) {
+                    blend_draws.push_back(item);
+                } else if (item.is_mask) {
+                    mask_draws.push_back(item);
+                } else {
+                    opaque_draws.push_back(item);
+                }
+            }
+            if (!fast_fallback &&
+                material != nullptr &&
+                material->enable_outline_pass &&
+                material->outline_width > 0.0005f) {
                 outline_draws.push_back(item);
+            }
+            if (!fast_fallback &&
+                material != nullptr &&
+                material->enable_emission_pass &&
+                material->emission_strength > 0.0001f) {
+                emission_draws.push_back(item);
             }
         }
         if (material_index_oob_count > 0U) {
@@ -4435,7 +4855,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float uv_anim_params[4];
         float time_params[4];
     };
-    auto draw_pass = [&](const DrawItem& item, bool outline_pass) {
+    enum class RenderPassKind {
+        DepthOnly,
+        ShadowCaster,
+        Base,
+        Outline,
+        Emission
+    };
+    auto draw_pass = [&](const DrawItem& item, RenderPassKind pass_kind) {
         if (item.mesh == nullptr || item.mesh->vertex_buffer == nullptr || item.mesh->index_buffer == nullptr || item.pkg == nullptr) {
             return;
         }
@@ -4464,6 +4891,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::transform(alpha_mode.begin(), alpha_mode.end(), alpha_mode.begin(), [](unsigned char c) {
             return static_cast<char>(std::toupper(c));
         });
+        const bool depth_only_pass = pass_kind == RenderPassKind::DepthOnly;
+        const bool shadow_pass = pass_kind == RenderPassKind::ShadowCaster;
+        const bool outline_pass = pass_kind == RenderPassKind::Outline;
+        const bool emission_pass = pass_kind == RenderPassKind::Emission;
         const bool is_mask = (alpha_mode == "MASK");
         const bool is_blend = (alpha_mode == "BLEND");
         const bool force_no_cull_for_avatar =
@@ -4471,7 +4902,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 (item.pkg->source_type == AvatarSourceType::Xav2 ||
                  item.pkg->source_type == AvatarSourceType::Vrm));
         const float blend_factor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        if (is_blend) {
+        if (depth_only_pass || shadow_pass) {
+            device_ctx->OMSetBlendState(renderer.blend_depth_only, blend_factor, 0xFFFFFFFFU);
+            device_ctx->OMSetDepthStencilState(renderer.depth_write, 0U);
+        } else if (emission_pass) {
+            device_ctx->OMSetBlendState(renderer.blend_additive, blend_factor, 0xFFFFFFFFU);
+            device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
+        } else if (is_blend) {
             device_ctx->OMSetBlendState(renderer.blend_alpha, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
         } else if (is_mask) {
@@ -4489,6 +4926,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             } else {
                 device_ctx->RSSetState(renderer.raster_cull_front);
             }
+        } else if (shadow_pass) {
+            device_ctx->RSSetState((double_sided || force_no_cull_for_avatar) ? renderer.raster_cull_none : renderer.raster_cull_back);
         } else {
             device_ctx->RSSetState((double_sided || force_no_cull_for_avatar) ? renderer.raster_cull_none : renderer.raster_cull_back);
         }
@@ -4542,7 +4981,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.liltoon_aux[3] = 0.0f;
             cb.outline_params[0] = item.material->outline_width * 0.02f;
             cb.outline_params[1] = item.material->outline_lighting_mix;
-            cb.outline_params[2] = 0.0f;
+            cb.outline_params[2] = emission_pass ? 1.0f : 0.0f;
             cb.outline_params[3] = outline_pass ? 1.0f : 0.0f;
             cb.uv_anim_params[0] = item.material->uv_anim_scroll_x;
             cb.uv_anim_params[1] = item.material->uv_anim_scroll_y;
@@ -4552,6 +4991,25 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.time_params[1] = frame_dt;
             cb.time_params[2] = 0.0f;
             cb.time_params[3] = 0.0f;
+            if (fast_fallback) {
+                cb.liltoon_mix[0] = std::min(cb.liltoon_mix[0], 0.12f);
+                cb.liltoon_mix[1] = 0.0f;
+                cb.liltoon_mix[2] = 0.0f;
+                cb.liltoon_mix[3] = 0.0f;
+                cb.liltoon_params[1] = 0.0f;
+                cb.liltoon_params[2] = 0.0f;
+                cb.liltoon_params[3] = 0.0f;
+                cb.liltoon_aux[0] = 0.0f;
+                cb.liltoon_aux[1] = 0.0f;
+                cb.liltoon_aux[2] = 0.0f;
+                cb.outline_params[0] = 0.0f;
+                cb.outline_params[1] = 0.0f;
+                cb.outline_params[3] = 0.0f;
+                cb.uv_anim_params[0] = 0.0f;
+                cb.uv_anim_params[1] = 0.0f;
+                cb.uv_anim_params[2] = 0.0f;
+                cb.uv_anim_params[3] = 0.0f;
+            }
         } else {
             cb.base_color[0] = 1.0f;
             cb.base_color[1] = 1.0f;
@@ -4587,7 +5045,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.liltoon_aux[3] = 0.0f;
             cb.outline_params[0] = 0.0f;
             cb.outline_params[1] = 0.0f;
-            cb.outline_params[2] = 0.0f;
+            cb.outline_params[2] = emission_pass ? 1.0f : 0.0f;
             cb.outline_params[3] = 0.0f;
             cb.uv_anim_params[0] = 0.0f;
             cb.uv_anim_params[1] = 0.0f;
@@ -4598,10 +5056,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             cb.time_params[2] = 0.0f;
             cb.time_params[3] = 0.0f;
         }
-        cb.alpha_misc[0] = is_mask ? alpha_cutoff : 0.0f;
-        cb.alpha_misc[1] = is_mask ? 1.0f : 0.0f;
+        cb.alpha_misc[0] = (is_mask && !emission_pass) ? alpha_cutoff : 0.0f;
+        cb.alpha_misc[1] = (is_mask && !emission_pass) ? 1.0f : 0.0f;
         cb.alpha_misc[2] = base_srv != nullptr ? 1.0f : 0.0f;
-        cb.alpha_misc[3] = (is_mask || is_blend) ? 1.0f : 0.0f;
+        cb.alpha_misc[3] = ((is_mask || is_blend) && !emission_pass) ? 1.0f : 0.0f;
 
         D3D11_MAPPED_SUBRESOURCE mapped {};
         if (SUCCEEDED(device_ctx->Map(renderer.constant_buffer, 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped))) {
@@ -4614,30 +5072,47 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ++frame_draw_calls;
     };
     std::uint32_t frame_pass_count = 0U;
-    if (!opaque_draws.empty()) {
-        ++frame_pass_count;
+    const std::uint32_t depth_pass_count = depth_draws.empty() ? 0U : 1U;
+    const std::uint32_t shadow_pass_count = shadow_draws.empty() ? 0U : 1U;
+    const std::uint32_t base_pass_count = (!opaque_draws.empty() || !mask_draws.empty()) ? 1U : 0U;
+    const std::uint32_t outline_pass_count = outline_draws.empty() ? 0U : 1U;
+    const std::uint32_t emission_pass_count = emission_draws.empty() ? 0U : 1U;
+    const std::uint32_t blend_pass_count = blend_draws.empty() ? 0U : 1U;
+    frame_pass_count =
+        depth_pass_count +
+        shadow_pass_count +
+        base_pass_count +
+        outline_pass_count +
+        emission_pass_count +
+        blend_pass_count;
+    for (const auto& item : depth_draws) {
+        draw_pass(item, RenderPassKind::DepthOnly);
     }
-    if (!mask_draws.empty()) {
-        ++frame_pass_count;
-    }
-    if (!outline_draws.empty()) {
-        ++frame_pass_count;
-    }
-    if (!blend_draws.empty()) {
-        ++frame_pass_count;
+    for (const auto& item : shadow_draws) {
+        draw_pass(item, RenderPassKind::ShadowCaster);
     }
     for (const auto& item : opaque_draws) {
-        draw_pass(item, false);
+        draw_pass(item, RenderPassKind::Base);
     }
     for (const auto& item : mask_draws) {
-        draw_pass(item, false);
+        draw_pass(item, RenderPassKind::Base);
     }
     for (const auto& item : outline_draws) {
-        draw_pass(item, true);
+        draw_pass(item, RenderPassKind::Outline);
+    }
+    for (const auto& item : emission_draws) {
+        draw_pass(item, RenderPassKind::Emission);
     }
     for (const auto& item : blend_draws) {
-        draw_pass(item, false);
+        draw_pass(item, RenderPassKind::Base);
     }
+
+    g_state.last_depth_pass_count = depth_pass_count;
+    g_state.last_shadow_pass_count = shadow_pass_count;
+    g_state.last_base_pass_count = base_pass_count;
+    g_state.last_outline_pass_count = outline_pass_count;
+    g_state.last_emission_pass_count = emission_pass_count;
+    g_state.last_blend_pass_count = blend_pass_count;
 
     if (g_state.spout.IsActive()) {
         bool submitted_on_gpu = false;
@@ -4719,6 +5194,12 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     vsfclone::nativecore::g_state.last_cpu_frame_ms = 0.0f;
     vsfclone::nativecore::g_state.last_material_resolve_ms = 0.0f;
     vsfclone::nativecore::g_state.last_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_depth_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_shadow_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_base_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_outline_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_emission_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_blend_pass_count = 0U;
     vsfclone::nativecore::ClearError();
     return NC_OK;
 }
@@ -4744,6 +5225,12 @@ NcResultCode nc_shutdown(void) {
     vsfclone::nativecore::g_state.render_ready_avatars.clear();
     vsfclone::nativecore::g_state.render_quality = vsfclone::nativecore::MakeDefaultRenderQualityOptions();
     vsfclone::nativecore::g_state.pose_offsets = vsfclone::nativecore::MakeDefaultPoseOffsets();
+    vsfclone::nativecore::g_state.last_depth_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_shadow_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_base_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_outline_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_emission_pass_count = 0U;
+    vsfclone::nativecore::g_state.last_blend_pass_count = 0U;
     vsfclone::nativecore::g_state.initialized = false;
     vsfclone::nativecore::ClearError();
     return NC_OK;

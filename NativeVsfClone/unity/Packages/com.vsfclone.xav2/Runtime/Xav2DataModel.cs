@@ -150,6 +150,9 @@ namespace VsfClone.Xav2.Runtime
         public string ShaderName = "MToon (minimal)";
         public string ShaderVariant = "default";
         public string ShaderFamily = "legacy";
+        public string KeywordSet = "[]";
+        public string RenderState = "auto";
+        public string PassFlags = "base";
         public string MaterialParamEncoding = "legacy-json";
         public ushort TypedSchemaVersion;
         public uint FeatureFlags;

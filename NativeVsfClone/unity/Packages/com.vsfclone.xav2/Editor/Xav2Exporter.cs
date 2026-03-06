@@ -169,12 +169,13 @@ namespace VsfClone.Xav2.Editor
             payload.Manifest.physicsSource = ResolvePhysicsSource(payload);
             payload.Manifest.strictShaderSet = new List<string>(options.StrictShaderSet ?? new List<string>());
             payload.Manifest.materialParamEncoding =
-                payload.Materials.Exists(m => m.MaterialParamEncoding == "typed-v3" ||
+                payload.Materials.Exists(m => m.MaterialParamEncoding == "typed-v4" ||
+                                              m.MaterialParamEncoding == "typed-v3" ||
                                               m.MaterialParamEncoding == "typed-v2" ||
                                               m.TypedFloatParams.Count > 0 ||
                                               m.TypedColorParams.Count > 0 ||
                                               m.TypedTextureParams.Count > 0)
-                    ? "typed-v3"
+                    ? "typed-v4"
                     : "legacy-json";
         }
 

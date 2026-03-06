@@ -96,6 +96,10 @@ typedef struct NcAvatarInfo {
     char last_material_diag[256];
     char last_render_pass_summary[128];
     char last_missing_feature[256];
+    float parity_score;
+    char variant_id[64];
+    char parity_fallback_reason[256];
+    char quality_mode[16];
 } NcAvatarInfo;
 
 typedef struct NcExpressionInfo {
@@ -170,7 +174,8 @@ typedef enum NcCameraMode {
 typedef enum NcRenderQualityProfile {
     NC_RENDER_QUALITY_DEFAULT = 0,
     NC_RENDER_QUALITY_BALANCED = 1,
-    NC_RENDER_QUALITY_ULTRA_PARITY = 2
+    NC_RENDER_QUALITY_ULTRA_PARITY = 2,
+    NC_RENDER_QUALITY_FAST_FALLBACK = 3
 } NcRenderQualityProfile;
 
 typedef struct NcRenderQualityOptions {

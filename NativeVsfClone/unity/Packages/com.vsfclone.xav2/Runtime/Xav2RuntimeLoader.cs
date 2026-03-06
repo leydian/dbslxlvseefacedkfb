@@ -295,7 +295,8 @@ namespace VsfClone.Xav2.Runtime
                         materialsByName,
                         diagnostics,
                         options,
-                        string.Equals(payload.Manifest.materialParamEncoding, "typed-v3", StringComparison.OrdinalIgnoreCase));
+                        string.Equals(payload.Manifest.materialParamEncoding, "typed-v3", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(payload.Manifest.materialParamEncoding, "typed-v4", StringComparison.OrdinalIgnoreCase));
                 case SectionSkeletonPosePayload:
                     return TryParseSkeletonPose(bytes, sectionOffset, sectionLength, payload, diagnostics, options);
                 case SectionSkeletonRigPayload:
@@ -1146,11 +1147,11 @@ namespace VsfClone.Xav2.Runtime
                 }
 
                 var hasTyped = HasTypedMaterialPayload(material);
-                if (!hasTyped || !string.Equals(material.MaterialParamEncoding, "typed-v3", StringComparison.OrdinalIgnoreCase))
+                if (!hasTyped || !string.Equals(material.MaterialParamEncoding, "typed-v4", StringComparison.OrdinalIgnoreCase))
                 {
                     diagnostics.MigrationApplied = true;
-                    material.MaterialParamEncoding = "typed-v3";
-                    material.TypedSchemaVersion = 3;
+                    material.MaterialParamEncoding = "typed-v4";
+                    material.TypedSchemaVersion = 4;
 
                     if (!material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)))
                     {
@@ -1174,6 +1175,22 @@ namespace VsfClone.Xav2.Runtime
                         });
                     }
                 }
+                if (string.IsNullOrWhiteSpace(material.ShaderVariant))
+                {
+                    material.ShaderVariant = "default";
+                }
+                if (string.IsNullOrWhiteSpace(material.KeywordSet))
+                {
+                    material.KeywordSet = "[]";
+                }
+                if (string.IsNullOrWhiteSpace(material.RenderState))
+                {
+                    material.RenderState = "auto";
+                }
+                if (string.IsNullOrWhiteSpace(material.PassFlags))
+                {
+                    material.PassFlags = "base";
+                }
 
                 if (!material.TypedColorParams.Exists(p => string.Equals(p.Id, "_BaseColor", StringComparison.Ordinal)))
                 {
@@ -1185,7 +1202,7 @@ namespace VsfClone.Xav2.Runtime
                 }
             }
 
-            payload.Manifest.materialParamEncoding = "typed-v3";
+            payload.Manifest.materialParamEncoding = "typed-v4";
             return true;
         }
 

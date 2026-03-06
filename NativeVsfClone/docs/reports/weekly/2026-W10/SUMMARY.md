@@ -48,6 +48,7 @@
 - Newly added: review `2026-03-06_xav2_full_parity_contract_enforcement.md` for strict lilToon/Poiyomi parity contract enforcement, typed-v3 canonical migration policy, and hard-fail diagnostics behavior.
 - Newly added: review `2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md` for strict parity-family expansion to Standard/MToon, Unity/native shader-family inference alignment, and typed-v3 export policy widening.
 - Newly added: review `2026-03-06_xav2_poiyomi_typed_material_parity_extension.md` for Poiyomi advanced typed-v3 extraction uplift, feature-flag parity alignment, and runtime typed parse regression coverage.
+- Newly added: review `2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md` for typed-v4 canonical contract uplift, pass-flag driven depth/shadow scheduling, and fast-fallback-safe runtime diagnostics expansion.
 - Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.
 - Newly added: review `2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md` for HybridAuto default routing, no-input watchdog diagnostics, and per-source packet-age/hint surfacing in WPF/WinUI.
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.

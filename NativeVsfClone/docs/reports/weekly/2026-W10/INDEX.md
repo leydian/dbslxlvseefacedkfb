@@ -129,6 +129,7 @@ Report list for this week.
 - [2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md](./2026-03-06_xav2_standard_mtoon_strict_parity_expansion.md)
 - [2026-03-06_xav2_typed_material_v2_liltoon_phase1.md](./2026-03-06_xav2_typed_material_v2_liltoon_phase1.md)
 - [2026-03-06_xav2_typed_v3_ultra_parity_foundation.md](./2026-03-06_xav2_typed_v3_ultra_parity_foundation.md)
+- [2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md](./2026-03-06_xav2_typed_v4_and_depth_shadow_pass_slice.md)
 - [2026-03-06_xav2_visibility_fallback_and_warning_gate.md](./2026-03-06_xav2_visibility_fallback_and_warning_gate.md)
 - [2026-03-06_xav2_warning_contract_gate_upgrade.md](./2026-03-06_xav2_warning_contract_gate_upgrade.md)
 - [2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md](./2026-03-06_vrm_to_xav2_quality_runtime_validation_hardening.md)

@@ -1364,7 +1364,7 @@ core::Result<AvatarPackage> Xav2Loader::Load(
                     section_payload,
                     0U,
                     section_payload.size(),
-                    manifest_material_param_encoding == "typed-v3",
+                    manifest_material_param_encoding == "typed-v3" || manifest_material_param_encoding == "typed-v4",
                     &typed_payload)) {
                 pkg.primary_error_code = "XAV2_MATERIAL_TYPED_SCHEMA_INVALID";
                 PushWarning(&pkg, "E_PARSE: XAV2_MATERIAL_TYPED_SCHEMA_INVALID: invalid material typed params section.");
@@ -1518,6 +1518,10 @@ core::Result<AvatarPackage> Xav2Loader::Load(
         const auto typed_it = material_typed_sections.find(key);
         if (typed_it != material_typed_sections.end()) {
             payload.shader_family = typed_it->second.shader_family;
+            payload.shader_variant = typed_it->second.shader_variant;
+            payload.keyword_set = typed_it->second.keyword_set;
+            payload.render_state = typed_it->second.render_state;
+            payload.pass_flags = typed_it->second.pass_flags;
             payload.material_param_encoding = typed_it->second.material_param_encoding;
             payload.typed_schema_version = typed_it->second.typed_schema_version;
             payload.feature_flags = typed_it->second.feature_flags;
@@ -1544,9 +1548,21 @@ core::Result<AvatarPackage> Xav2Loader::Load(
             !payload.typed_float_params.empty() ||
             !payload.typed_color_params.empty() ||
             !payload.typed_texture_params.empty();
-        if (!has_typed || payload.material_param_encoding != "typed-v3" || payload.typed_schema_version < 3U) {
-            payload.material_param_encoding = "typed-v3";
-            payload.typed_schema_version = 3U;
+        if (!has_typed || payload.material_param_encoding != "typed-v4" || payload.typed_schema_version < 4U) {
+            payload.material_param_encoding = "typed-v4";
+            payload.typed_schema_version = 4U;
+        }
+        if (payload.shader_variant.empty()) {
+            payload.shader_variant = "default";
+        }
+        if (payload.keyword_set.empty()) {
+            payload.keyword_set = "[]";
+        }
+        if (payload.render_state.empty()) {
+            payload.render_state = payload.alpha_mode.empty() ? "auto" : ("alpha=" + payload.alpha_mode);
+        }
+        if (payload.pass_flags.empty()) {
+            payload.pass_flags = "base";
         }
 
         const bool has_base_color = std::any_of(
