@@ -41,30 +41,42 @@ function Get-MarkdownLinks {
     return [regex]::Matches($raw, '\[[^\]]+\]\(([^)]+)\)') | ForEach-Object { $_.Groups[1].Value.Trim() }
 }
 
+$docsMarkdownFiles = @(Get-ChildItem -Path $docsRoot -Recurse -File -Filter '*.md')
 $indexLinks = @(Get-MarkdownLinks -Path $indexPath)
 $absolutePathLinks = @()
-$brokenIndexLinks = @()
-foreach ($target in $indexLinks) {
-    if ([string]::IsNullOrWhiteSpace($target)) { continue }
-    if ($target -match '^(https?|mailto):' -or $target.StartsWith('#')) { continue }
+$brokenDocLinks = @()
 
-    if ($target -match '^/[A-Za-z]:/' -or $target -match '^[A-Za-z]:[\\/]') {
-        $absolutePathLinks += $target
-    }
+foreach ($doc in $docsMarkdownFiles) {
+    $docLinks = @(Get-MarkdownLinks -Path $doc.FullName)
+    foreach ($target in $docLinks) {
+        if ([string]::IsNullOrWhiteSpace($target)) { continue }
+        if ($target -match '^(https?|mailto):' -or $target.StartsWith('#')) { continue }
 
-    $cleanTarget = ($target -split '#')[0]
-    if ([string]::IsNullOrWhiteSpace($cleanTarget)) { continue }
-    $resolved = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $indexPath) $cleanTarget))
-    if (-not (Test-Path $resolved)) {
-        $brokenIndexLinks += $target
+        if ($target -match '^/[A-Za-z]:/' -or $target -match '^[A-Za-z]:[\\/]') {
+            $absolutePathLinks += ("{0} -> {1}" -f (Resolve-Path -Relative $doc.FullName), $target)
+            continue
+        }
+
+        $cleanTarget = ($target -split '#')[0]
+        $cleanTarget = ($cleanTarget -split '\?')[0]
+        if ([string]::IsNullOrWhiteSpace($cleanTarget)) { continue }
+
+        $resolved = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $doc.FullName) $cleanTarget))
+        if (-not (Test-Path $resolved)) {
+            $brokenDocLinks += ("{0} -> {1}" -f (Resolve-Path -Relative $doc.FullName), $target)
+        }
     }
 }
+
+$brokenIndexLinks = @($brokenDocLinks | Where-Object { $_ -like '*docs\\INDEX.md -> *' })
 
 $weeklyDirs = @(Get-ChildItem -Path $weeklyRoot -Directory)
 $weeklyMissingIndex = @()
 $weeklyMissingSummary = @()
 $weeklyEmpty = @()
 $invalidCanonicalNames = @()
+$weeklyMissingFromIndex = @()
+$weeklyStaleInIndex = @()
 
 foreach ($w in $weeklyDirs) {
     $wIndex = Join-Path $w.FullName 'INDEX.md'
@@ -83,19 +95,51 @@ foreach ($w in $weeklyDirs) {
             $invalidCanonicalNames += $r.FullName
         }
     }
+
+    if (Test-Path $wIndex) {
+        $wIndexTargets = @(
+            Get-MarkdownLinks -Path $wIndex |
+                Where-Object { $_ -notmatch '^(https?|mailto):' -and -not $_.StartsWith('#') } |
+                ForEach-Object {
+                    $clean = ($_.Split('#')[0].Split('?')[0])
+                    Split-Path $clean -Leaf
+                }
+        )
+
+        $reportSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach ($r in $reports) { [void]$reportSet.Add($r.Name) }
+
+        $indexSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        foreach ($n in $wIndexTargets) {
+            if ($n -and $n -ne 'INDEX.md' -and $n -ne 'SUMMARY.md') {
+                [void]$indexSet.Add($n)
+            }
+        }
+
+        foreach ($r in $reportSet) {
+            if (-not $indexSet.Contains($r)) {
+                $weeklyMissingFromIndex += ("{0}: {1}" -f $w.Name, $r)
+            }
+        }
+        foreach ($n in $indexSet) {
+            if (-not $reportSet.Contains($n)) {
+                $weeklyStaleInIndex += ("{0}: {1}" -f $w.Name, $n)
+            }
+        }
+    }
 }
 
 $legacyMapRaw = Get-Content -Path $legacyMapPath -Raw -Encoding UTF8
 $mapMatches = [regex]::Matches($legacyMapRaw, '\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|')
-$mapOldSet = New-Object 'System.Collections.Generic.HashSet[string]'
-$mapNewSet = New-Object 'System.Collections.Generic.HashSet[string]'
+$mapOldSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$mapNewSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 foreach ($m in $mapMatches) {
     [void]$mapOldSet.Add($m.Groups[1].Value.Trim())
     [void]$mapNewSet.Add($m.Groups[2].Value.Trim())
 }
 
 $stubFiles = @(Get-ChildItem -Path $reportsDir -File -Filter '*.md' | Where-Object {
-    $_.Name -ne 'TEMPLATE.md' -and $_.Name -ne 'DOMAIN_INDEX.md' -and $_.Name -ne 'legacy-map.md'
+    $_.Name -match '^.+_\d{4}-\d{2}-\d{2}\.md$'
 })
 
 $legacyMissingMap = @()
@@ -142,7 +186,7 @@ $utf8Targets = @(
     (Join-Path $docsRoot 'CONTRIBUTING_DOCS.md'),
     (Join-Path $repoRoot 'build/reports/README.md')
 )
-$utf8Targets += @(Get-ChildItem -Path $docsRoot -Recurse -File -Filter '*.md' | ForEach-Object { $_.FullName })
+$utf8Targets += @($docsMarkdownFiles | ForEach-Object { $_.FullName })
 $utf8Targets = $utf8Targets | Sort-Object -Unique
 
 $utf8Invalid = @()
@@ -155,14 +199,18 @@ foreach ($f in $utf8Targets) {
 
 Write-Host '=== Docs Quality Gate ==='
 Write-Host ("Index links: {0}" -f $indexLinks.Count)
+Write-Host ("Docs markdown files: {0}" -f $docsMarkdownFiles.Count)
 Write-Host ("Weekly folders: {0}" -f $weeklyDirs.Count)
 Write-Host ("Legacy stubs: {0}" -f $stubFiles.Count)
 Write-Host ("Legacy map entries: {0}" -f $mapOldSet.Count)
 Write-Host ("Broken links in docs/INDEX.md: {0}" -f $brokenIndexLinks.Count)
+Write-Host ("Broken markdown links in docs/: {0}" -f $brokenDocLinks.Count)
 Write-Host ("Missing weekly INDEX.md: {0}" -f $weeklyMissingIndex.Count)
 Write-Host ("Missing weekly SUMMARY.md: {0}" -f $weeklyMissingSummary.Count)
 Write-Host ("Empty weekly folders: {0}" -f $weeklyEmpty.Count)
 Write-Host ("Invalid canonical names: {0}" -f $invalidCanonicalNames.Count)
+Write-Host ("Weekly reports missing from INDEX.md: {0}" -f $weeklyMissingFromIndex.Count)
+Write-Host ("Weekly INDEX.md stale entries: {0}" -f $weeklyStaleInIndex.Count)
 Write-Host ("Legacy stubs missing map: {0}" -f $legacyMissingMap.Count)
 Write-Host ("Legacy stubs with invalid target: {0}" -f $legacyBrokenTarget.Count)
 Write-Host ("Legacy map missing new target: {0}" -f $mapMissingNewTarget.Count)
@@ -171,7 +219,16 @@ Write-Host ("UTF-8 invalid files: {0}" -f $utf8Invalid.Count)
 if ($brokenIndexLinks.Count -gt 0) {
     Write-Host ''
     Write-Host 'Broken links in docs/INDEX.md:'
-    $brokenIndexLinks | Sort-Object -Unique | ForEach-Object { Write-Host ("- {0}" -f $_) }
+    $brokenIndexLinks | Sort-Object -Unique | ForEach-Object {
+        $parts = $_ -split ' -> ', 2
+        if ($parts.Count -eq 2) { Write-Host ("- {0}" -f $parts[1]) }
+    }
+}
+
+if ($brokenDocLinks.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Broken markdown links in docs/:'
+    $brokenDocLinks | Sort-Object -Unique | ForEach-Object { Write-Host ("- {0}" -f $_) }
 }
 
 if ($weeklyMissingIndex.Count -gt 0) {
@@ -196,6 +253,18 @@ if ($invalidCanonicalNames.Count -gt 0) {
     Write-Host ''
     Write-Host 'Invalid canonical report names:'
     $invalidCanonicalNames | Sort-Object -Unique | ForEach-Object { Write-Host ("- {0}" -f (Resolve-Path -Relative $_)) }
+}
+
+if ($weeklyMissingFromIndex.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Weekly reports missing from weekly INDEX.md:'
+    $weeklyMissingFromIndex | Sort-Object -Unique | ForEach-Object { Write-Host ("- {0}" -f $_) }
+}
+
+if ($weeklyStaleInIndex.Count -gt 0) {
+    Write-Host ''
+    Write-Host 'Weekly INDEX.md links that point to missing reports:'
+    $weeklyStaleInIndex | Sort-Object -Unique | ForEach-Object { Write-Host ("- {0}" -f $_) }
 }
 
 if ($legacyInvalidName.Count -gt 0) {
@@ -234,15 +303,17 @@ if ($utf8Invalid.Count -gt 0) {
     $utf8Invalid | ForEach-Object { Write-Host ("- {0}" -f (Resolve-Path -Relative $_)) }
 }
 
-$failed = ($brokenIndexLinks.Count -gt 0) -or
-          ($weeklyMissingIndex.Count -gt 0) -or
+$failed = ($weeklyMissingIndex.Count -gt 0) -or
           ($weeklyMissingSummary.Count -gt 0) -or
           ($weeklyEmpty.Count -gt 0) -or
           ($invalidCanonicalNames.Count -gt 0) -or
+          ($weeklyMissingFromIndex.Count -gt 0) -or
+          ($weeklyStaleInIndex.Count -gt 0) -or
           ($legacyInvalidName.Count -gt 0) -or
           ($legacyMissingMap.Count -gt 0) -or
           ($legacyBrokenTarget.Count -gt 0) -or
           ($mapMissingNewTarget.Count -gt 0) -or
+          ($brokenDocLinks.Count -gt 0) -or
           ($utf8Invalid.Count -gt 0)
 
 if ($FailOnAbsolutePathLinks -and $absolutePathLinks.Count -gt 0) {

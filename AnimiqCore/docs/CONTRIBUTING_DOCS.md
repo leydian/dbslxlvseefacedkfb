@@ -14,8 +14,9 @@ This file defines how documentation is written and maintained in this repository
 - `README.md`: onboarding and operational quick path.
 - `CHANGELOG.md`: chronological change summary.
 - `docs/formats/*.md`: format-level specs.
+- `docs/reference/*.md`: reusable schemas and policy references.
 - `docs/reports/weekly/YYYY-Www/*.md`: canonical implementation/verification reports.
-- `docs/reports/*_YYYY-MM-DD.md`: legacy redirect stubs only.
+- `docs/reports/*_YYYY-MM-DD.md`: auto-generated legacy redirect stubs only.
 - `docs/reports/DOMAIN_INDEX.md`: domain-level navigation hub.
 - `docs/reports/legacy-map.md`: old path to new path migration map.
 - `docs/archive/`: historical docs and generated artifacts.
@@ -29,6 +30,12 @@ This file defines how documentation is written and maintained in this repository
   - `INDEX.md`
   - `SUMMARY.md`
 - Do not create new canonical reports at `docs/reports/` root.
+- Do not hand-edit legacy stubs under `docs/reports/` root.
+- Sync legacy stubs from map:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\docs_sync_legacy_stubs.ps1
+```
 
 ## 4. Report Template
 
@@ -68,7 +75,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs_quality_gate.ps1
 
 Current checks:
 
-- Links in `docs/INDEX.md` resolve.
+- All markdown links under `docs/**/*.md` resolve.
 - Weekly structure is valid (`INDEX.md`, `SUMMARY.md`, canonical reports).
+- Weekly `INDEX.md` includes every canonical report file and no stale entries.
 - Legacy stubs map to canonical paths in `legacy-map.md`.
 - Markdown files tracked by the gate are valid UTF-8.

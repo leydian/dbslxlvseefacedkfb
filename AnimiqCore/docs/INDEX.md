@@ -17,9 +17,13 @@
 
 - [Weekly Hub](./reports/weekly/INDEX.md): 주차별 문서 탐색
 - [Domain Hub](./reports/DOMAIN_INDEX.md): 도메인별 문서 탐색
-- [Persona Evaluation Schema](./reports/persona_evaluation_schema.md): 페르소나 평가 리포트 표준 스키마
 - [Legacy Map](./reports/legacy-map.md): 구경로 -> 신경로 매핑
 - [Report Template](./reports/TEMPLATE.md)
+
+## Reference Docs
+
+- [Reference Index](./reference/INDEX.md)
+- [Persona Evaluation Schema](./reference/persona_evaluation_schema.md): 페르소나 평가 리포트 표준 스키마
 
 ## Latest Week
 
