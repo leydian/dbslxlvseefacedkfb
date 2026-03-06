@@ -91,8 +91,13 @@ WarningMeta ClassifyWarningCode(const std::string& raw_code) {
         meta.category = "payload";
         return meta;
     }
-    if (code == "skinning_matrix_convention_applied") {
+    if (code == "skinning_matrix_convention_applied" || code == "skinning_matrix_convention_selected") {
         meta.severity = "info";
+        meta.category = "render";
+        return meta;
+    }
+    if (code == "xav2_skinning_convention_ambiguous") {
+        meta.severity = "warn";
         meta.category = "render";
         return meta;
     }

@@ -346,6 +346,7 @@ std::string BuildManifest(const vsfclone::avatar::AvatarPackage& pkg, CliOptions
     out += ",\"textureRefs\":";
     AppendStringArrayJson(&out, texture_refs);
     out += ",\"strictShaderSet\":[\"Standard\",\"MToon\",\"lilToon\",\"Poiyomi\",\"potatoon\",\"realtoon\"],";
+    out += "\"skinningMatrixConvention\":\"dx_row_major\",";
     out += "\"hasSkinning\":" + BoolJson(!pkg.skin_payloads.empty()) + ",";
     out += "\"hasBlendShapes\":" + BoolJson(!pkg.blendshape_payloads.empty()) + ",";
     out += "\"hasSpringBones\":" + BoolJson(!pkg.springbone_payloads.empty()) + ",";

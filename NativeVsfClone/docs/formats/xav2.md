@@ -28,6 +28,7 @@ XAV2 is a vxa2-derived container focused on runtime-ready mesh/material transpor
 - `strictShaderSet`: string array
 - `schemaVersion`: uint (`1`)
 - `exporterVersion`: string
+- `skinningMatrixConvention`: string (`dx_row_major|gltf_column_major`)
 - `hasSkinning`: bool
 - `hasBlendShapes`: bool
 - `physicsSchemaVersion`: uint (`1`)

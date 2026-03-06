@@ -28,6 +28,12 @@ enum class Xav2UnknownSectionPolicy {
     Fail,
 };
 
+enum class SkinningMatrixConvention : std::uint8_t {
+    Unknown = 0,
+    GltfColumnMajor,
+    DxRowMajor,
+};
+
 struct MeshAssetSummary {
     std::string name;
     std::uint32_t vertex_count = 0;
@@ -226,6 +232,7 @@ struct SkeletonRigPayload {
 struct AvatarPackage {
     AvatarSourceType source_type = AvatarSourceType::Unknown;
     AvatarCompatLevel compat_level = AvatarCompatLevel::Unknown;
+    SkinningMatrixConvention skinning_matrix_convention = SkinningMatrixConvention::Unknown;
     std::string parser_stage;
     std::string primary_error_code;
     std::string source_path;

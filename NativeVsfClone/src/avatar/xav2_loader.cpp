@@ -90,6 +90,17 @@ std::string InferShaderFamilyFromShaderName(const std::string& shader_name) {
     return "legacy";
 }
 
+SkinningMatrixConvention ParseSkinningMatrixConvention(const std::string& raw) {
+    const std::string key = ToLower(raw);
+    if (key == "dx_row_major") {
+        return SkinningMatrixConvention::DxRowMajor;
+    }
+    if (key == "gltf_column_major") {
+        return SkinningMatrixConvention::GltfColumnMajor;
+    }
+    return SkinningMatrixConvention::Unknown;
+}
+
 HumanoidBoneId ToHumanoidBoneId(const std::string& bone_name_raw) {
     std::string key;
     key.reserve(bone_name_raw.size());
@@ -1246,6 +1257,9 @@ core::Result<AvatarPackage> Xav2Loader::Load(
     std::string manifest_material_param_encoding = "legacy-json";
     if (const auto encoding = ExtractStringField(manifest, "materialParamEncoding"); encoding && !encoding->empty()) {
         manifest_material_param_encoding = ToLower(*encoding);
+    }
+    if (const auto convention = ExtractStringField(manifest, "skinningMatrixConvention"); convention && !convention->empty()) {
+        pkg.skinning_matrix_convention = ParseSkinningMatrixConvention(*convention);
     }
     const bool expects_blendshapes = ExtractBoolField(manifest, "hasBlendShapes").value_or(false);
     const bool expects_springbones = ExtractBoolField(manifest, "hasSpringBones").value_or(false);

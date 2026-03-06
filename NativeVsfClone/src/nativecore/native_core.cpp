@@ -40,6 +40,7 @@ using vsfclone::avatar::AvatarCompatLevel;
 using vsfclone::avatar::AvatarPackage;
 using vsfclone::avatar::AvatarSourceType;
 using vsfclone::avatar::ExpressionState;
+using vsfclone::avatar::SkinningMatrixConvention;
 
 #if defined(_WIN32)
 struct WindowRenderState {
@@ -590,8 +591,13 @@ WarningMeta ClassifyWarningCode(std::string code) {
         meta.category = "payload";
         return meta;
     }
-    if (code == "skinning_matrix_convention_applied") {
+    if (code == "skinning_matrix_convention_applied" || code == "skinning_matrix_convention_selected") {
         meta.severity = "info";
+        meta.category = "render";
+        return meta;
+    }
+    if (code == "xav2_skinning_convention_ambiguous") {
+        meta.severity = "warn";
         meta.category = "render";
         return meta;
     }
@@ -1711,6 +1717,18 @@ std::string NormalizeRefKey(std::string s) {
     return s;
 }
 
+const char* SkinningMatrixConventionName(SkinningMatrixConvention convention) {
+    switch (convention) {
+        case SkinningMatrixConvention::DxRowMajor:
+            return "dx_row_major";
+        case SkinningMatrixConvention::GltfColumnMajor:
+            return "gltf_column_major";
+        case SkinningMatrixConvention::Unknown:
+        default:
+            return "unknown";
+    }
+}
+
 std::string ExtractTerminalToken(const std::string& path) {
     if (path.empty()) {
         return {};
@@ -2619,7 +2637,16 @@ bool ApplyStaticSkinningToVertexBlob(
     std::vector<std::uint8_t>* vertex_blob,
     std::uint32_t vertex_stride,
     const avatar::SkinRenderPayload& skin_payload,
-    const avatar::SkeletonRenderPayload* skeleton_payload) {
+    const avatar::SkeletonRenderPayload* skeleton_payload,
+    SkinningMatrixConvention convention_hint,
+    SkinningMatrixConvention* out_selected_convention,
+    bool* out_ambiguous_selection) {
+    if (out_selected_convention != nullptr) {
+        *out_selected_convention = SkinningMatrixConvention::Unknown;
+    }
+    if (out_ambiguous_selection != nullptr) {
+        *out_ambiguous_selection = false;
+    }
     if (vertex_blob == nullptr || vertex_stride < 12U || vertex_blob->empty()) {
         return false;
     }
@@ -2647,21 +2674,180 @@ bool ApplyStaticSkinningToVertexBlob(
         return true;
     }
 
-    std::vector<DirectX::XMMATRIX> skin_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
+    std::vector<DirectX::XMMATRIX> bind_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
+    std::vector<DirectX::XMMATRIX> bone_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
     for (std::size_t i = 0U; i < bind_pose_count; ++i) {
         DirectX::XMFLOAT4X4 bind_pose {};
         for (std::size_t j = 0U; j < 16U; ++j) {
             reinterpret_cast<float*>(&bind_pose)[j] = skin_payload.bind_poses_16xn[i * 16U + j];
         }
-        const auto bind_m = DirectX::XMLoadFloat4x4(&bind_pose);
+        bind_matrices[i] = DirectX::XMLoadFloat4x4(&bind_pose);
         DirectX::XMFLOAT4X4 bone_m {};
         for (std::size_t j = 0U; j < 16U; ++j) {
             reinterpret_cast<float*>(&bone_m)[j] = skeleton_payload->bone_matrices_16xn[i * 16U + j];
         }
-        // Convention: skin matrix = current joint pose (mesh-space) * inverse-bind.
-        skin_matrices[i] = DirectX::XMMatrixMultiply(DirectX::XMLoadFloat4x4(&bone_m), bind_m);
+        bone_matrices[i] = DirectX::XMLoadFloat4x4(&bone_m);
     }
 
+    auto build_skin_matrices = [&](SkinningMatrixConvention convention) {
+        std::vector<DirectX::XMMATRIX> skin_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
+        for (std::size_t i = 0U; i < bind_pose_count; ++i) {
+            if (convention == SkinningMatrixConvention::GltfColumnMajor) {
+                // Some legacy payloads carry glTF column-major matrices directly.
+                // Convert to DX row-major before applying skinning.
+                const auto bone_dx = DirectX::XMMatrixTranspose(bone_matrices[i]);
+                const auto bind_dx = DirectX::XMMatrixTranspose(bind_matrices[i]);
+                skin_matrices[i] = DirectX::XMMatrixMultiply(bone_dx, bind_dx);
+            } else {
+                skin_matrices[i] = DirectX::XMMatrixMultiply(bone_matrices[i], bind_matrices[i]);
+            }
+        }
+        return skin_matrices;
+    };
+
+    struct PositionStats {
+        bool finite = true;
+        float max_abs = 0.0f;
+        float extent_x = 0.0f;
+        float extent_y = 0.0f;
+        float extent_z = 0.0f;
+        float extent_max = 0.0f;
+        float extent_min = 0.0f;
+    };
+    auto compute_blob_stats = [&](const std::vector<std::uint8_t>& blob) {
+        PositionStats stats {};
+        if (blob.empty() || (blob.size() % vertex_stride) != 0U) {
+            stats.finite = false;
+            return stats;
+        }
+        float bmin_x = std::numeric_limits<float>::max();
+        float bmin_y = std::numeric_limits<float>::max();
+        float bmin_z = std::numeric_limits<float>::max();
+        float bmax_x = -std::numeric_limits<float>::max();
+        float bmax_y = -std::numeric_limits<float>::max();
+        float bmax_z = -std::numeric_limits<float>::max();
+        const std::size_t vtx_count = blob.size() / vertex_stride;
+        for (std::size_t i = 0U; i < vtx_count; ++i) {
+            const std::size_t base = i * vertex_stride;
+            float px = 0.0f;
+            float py = 0.0f;
+            float pz = 0.0f;
+            std::memcpy(&px, blob.data() + base, sizeof(float));
+            std::memcpy(&py, blob.data() + base + 4U, sizeof(float));
+            std::memcpy(&pz, blob.data() + base + 8U, sizeof(float));
+            if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(pz)) {
+                stats.finite = false;
+                return stats;
+            }
+            stats.max_abs = std::max(stats.max_abs, std::max(std::abs(px), std::max(std::abs(py), std::abs(pz))));
+            bmin_x = std::min(bmin_x, px);
+            bmin_y = std::min(bmin_y, py);
+            bmin_z = std::min(bmin_z, pz);
+            bmax_x = std::max(bmax_x, px);
+            bmax_y = std::max(bmax_y, py);
+            bmax_z = std::max(bmax_z, pz);
+        }
+        stats.extent_x = std::max(0.0f, bmax_x - bmin_x);
+        stats.extent_y = std::max(0.0f, bmax_y - bmin_y);
+        stats.extent_z = std::max(0.0f, bmax_z - bmin_z);
+        stats.extent_max = std::max(stats.extent_x, std::max(stats.extent_y, stats.extent_z));
+        stats.extent_min = std::min(stats.extent_x, std::min(stats.extent_y, stats.extent_z));
+        return stats;
+    };
+    auto score_candidate = [&](const PositionStats& pre, const PositionStats& post) {
+        if (!post.finite) {
+            return std::numeric_limits<float>::max();
+        }
+        const float pre_extent = std::max(0.0001f, pre.extent_max);
+        const float post_extent = std::max(0.0001f, post.extent_max);
+        const float extent_ratio = post_extent / pre_extent;
+        const float pre_volume =
+            std::max(0.0001f, pre.extent_x) *
+            std::max(0.0001f, pre.extent_y) *
+            std::max(0.0001f, pre.extent_z);
+        const float post_volume =
+            std::max(0.0001f, post.extent_x) *
+            std::max(0.0001f, post.extent_y) *
+            std::max(0.0001f, post.extent_z);
+        const float volume_ratio = post_volume / pre_volume;
+        const float axis_ratio = std::max(0.0f, post.extent_min) / std::max(0.0001f, post.extent_max);
+        float score = std::abs(std::log(std::max(0.01f, std::min(100.0f, extent_ratio))));
+        score += std::abs(std::log(std::max(0.01f, std::min(100.0f, volume_ratio))));
+        if (axis_ratio < 0.04f) {
+            score += 8.0f;
+        }
+        if (post_extent < (pre_extent * 0.12f) || post_extent > (pre_extent * 8.0f)) {
+            score += 4.0f;
+        }
+        if (post.max_abs > std::max(200.0f, pre.max_abs * 20.0f)) {
+            score += 8.0f;
+        }
+        return score;
+    };
+
+    SkinningMatrixConvention selected = convention_hint;
+    if (selected == SkinningMatrixConvention::Unknown) {
+        const auto pre_stats = compute_blob_stats(*vertex_blob);
+        const auto dx_matrices = build_skin_matrices(SkinningMatrixConvention::DxRowMajor);
+        const auto gltf_matrices = build_skin_matrices(SkinningMatrixConvention::GltfColumnMajor);
+
+        auto apply_to_copy = [&](const std::vector<DirectX::XMMATRIX>& skin_matrices) {
+            std::vector<std::uint8_t> copy = *vertex_blob;
+            for (std::uint32_t vi = 0U; vi < vertex_count; ++vi) {
+                const std::size_t base = static_cast<std::size_t>(vi) * vertex_stride;
+                float px = 0.0f;
+                float py = 0.0f;
+                float pz = 0.0f;
+                std::memcpy(&px, copy.data() + base, sizeof(float));
+                std::memcpy(&py, copy.data() + base + 4U, sizeof(float));
+                std::memcpy(&pz, copy.data() + base + 8U, sizeof(float));
+                const auto p = DirectX::XMVectorSet(px, py, pz, 1.0f);
+                const auto& sw = decoded_weights[vi];
+                DirectX::XMVECTOR accum = DirectX::XMVectorZero();
+                float total_weight = 0.0f;
+                for (std::size_t wi = 0U; wi < 4U; ++wi) {
+                    const float w = sw.weights[wi];
+                    const auto bone_index = sw.bone_indices[wi];
+                    if (w <= 0.000001f || bone_index < 0 ||
+                        static_cast<std::size_t>(bone_index) >= skin_matrices.size()) {
+                        continue;
+                    }
+                    const auto tp =
+                        DirectX::XMVector3TransformCoord(p, skin_matrices[static_cast<std::size_t>(bone_index)]);
+                    accum = DirectX::XMVectorAdd(accum, DirectX::XMVectorScale(tp, w));
+                    total_weight += w;
+                }
+                if (total_weight <= 0.000001f) {
+                    continue;
+                }
+                if (std::abs(total_weight - 1.0f) > 0.0001f) {
+                    accum = DirectX::XMVectorScale(accum, 1.0f / total_weight);
+                }
+                DirectX::XMFLOAT3 out_pos {};
+                DirectX::XMStoreFloat3(&out_pos, accum);
+                std::memcpy(copy.data() + base, &out_pos.x, sizeof(float));
+                std::memcpy(copy.data() + base + 4U, &out_pos.y, sizeof(float));
+                std::memcpy(copy.data() + base + 8U, &out_pos.z, sizeof(float));
+            }
+            return copy;
+        };
+
+        const auto dx_stats = compute_blob_stats(apply_to_copy(dx_matrices));
+        const auto gltf_stats = compute_blob_stats(apply_to_copy(gltf_matrices));
+        const float dx_score = score_candidate(pre_stats, dx_stats);
+        const float gltf_score = score_candidate(pre_stats, gltf_stats);
+        if (std::abs(dx_score - gltf_score) < 0.35f) {
+            if (out_ambiguous_selection != nullptr) {
+                *out_ambiguous_selection = true;
+            }
+        }
+        selected = (gltf_score < dx_score) ? SkinningMatrixConvention::GltfColumnMajor : SkinningMatrixConvention::DxRowMajor;
+    }
+
+    if (out_selected_convention != nullptr) {
+        *out_selected_convention = selected;
+    }
+    const auto skin_matrices = build_skin_matrices(selected);
     for (std::uint32_t vi = 0U; vi < vertex_count; ++vi) {
         const std::size_t base = static_cast<std::size_t>(vi) * vertex_stride;
         float px = 0.0f;
@@ -2758,8 +2944,11 @@ bool BuildGpuMeshForPayload(
     const avatar::MeshRenderPayload& payload,
     const avatar::SkinRenderPayload* skin_payload,
     const avatar::SkeletonRenderPayload* skeleton_payload,
+    SkinningMatrixConvention skinning_convention_hint,
     bool enable_static_skinning,
     bool force_static_skinning_fallback,
+    SkinningMatrixConvention* out_selected_convention,
+    bool* out_ambiguous_convention,
     bool* collapse_guard_triggered,
     ID3D11Device* device,
     GpuMeshResource* out_mesh) {
@@ -2807,6 +2996,9 @@ bool BuildGpuMeshForPayload(
             float max_abs = 0.0f;
             float extent_max = 0.0f;
             float extent_min = 0.0f;
+            float extent_x = 0.0f;
+            float extent_y = 0.0f;
+            float extent_z = 0.0f;
             bool finite = true;
         };
         Stats s {};
@@ -2843,6 +3035,9 @@ bool BuildGpuMeshForPayload(
         const float ex = std::max(0.0f, bmax_x - bmin_x);
         const float ey = std::max(0.0f, bmax_y - bmin_y);
         const float ez = std::max(0.0f, bmax_z - bmin_z);
+        s.extent_x = ex;
+        s.extent_y = ey;
+        s.extent_z = ez;
         s.extent_max = std::max(ex, std::max(ey, ez));
         s.extent_min = std::min(ex, std::min(ey, ez));
         return s;
@@ -2856,10 +3051,24 @@ bool BuildGpuMeshForPayload(
         const bool can_apply_with_skeleton =
             skeleton_payload != nullptr && IsValidSkeletonPosePayload(*skin_payload, *skeleton_payload);
         if (enable_static_skinning && can_apply_with_skeleton) {
-            (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, skeleton_payload);
+            (void)ApplyStaticSkinningToVertexBlob(
+                &gpu_vertex_blob,
+                32U,
+                *skin_payload,
+                skeleton_payload,
+                skinning_convention_hint,
+                out_selected_convention,
+                out_ambiguous_convention);
             skinning_applied = true;
         } else if (enable_static_skinning && force_static_skinning_fallback) {
-            (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, nullptr);
+            (void)ApplyStaticSkinningToVertexBlob(
+                &gpu_vertex_blob,
+                32U,
+                *skin_payload,
+                nullptr,
+                skinning_convention_hint,
+                out_selected_convention,
+                out_ambiguous_convention);
             skinning_applied = true;
         }
         const auto post_stats = compute_position_stats(gpu_vertex_blob);
@@ -2878,10 +3087,24 @@ bool BuildGpuMeshForPayload(
         const float pre_aspect = pre_extent / pre_min_extent;
         const float post_aspect = post_extent / post_min_extent;
         const bool tube_aspect_spike = skinning_applied && post_aspect > std::max(pre_aspect * 3.0f, 18.0f);
-        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike) {
+        const float post_axis_min = std::min(post_stats.extent_x, std::min(post_stats.extent_y, post_stats.extent_z));
+        const float post_axis_max = std::max(0.0001f, post_stats.extent_max);
+        const bool tube_axis_ratio = skinning_applied && (post_axis_min / post_axis_max) < 0.06f;
+        const float pre_volume =
+            std::max(0.0001f, pre_stats.extent_x) *
+            std::max(0.0001f, pre_stats.extent_y) *
+            std::max(0.0001f, pre_stats.extent_z);
+        const float post_volume =
+            std::max(0.0001f, post_stats.extent_x) *
+            std::max(0.0001f, post_stats.extent_y) *
+            std::max(0.0001f, post_stats.extent_z);
+        const float volume_ratio = post_volume / pre_volume;
+        const bool collapsed_volume = skinning_applied && volume_ratio < 0.08f;
+        const bool exploded_volume = skinning_applied && volume_ratio > 25.0f;
+        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume || exploded_volume) {
             if (collapsed_extent && collapse_guard_triggered != nullptr) {
                 *collapse_guard_triggered = true;
-            } else if ((collapsed_axis || tube_aspect_spike) && collapse_guard_triggered != nullptr) {
+            } else if ((collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume) && collapse_guard_triggered != nullptr) {
                 *collapse_guard_triggered = true;
             }
             gpu_vertex_blob = bind_pose_blob;
@@ -2999,6 +3222,8 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         const avatar::SkinRenderPayload* skin_payload = nullptr;
         const avatar::SkeletonRenderPayload* skeleton_payload = nullptr;
         bool force_static_skinning_fallback = false;
+        SkinningMatrixConvention selected_skinning_convention = SkinningMatrixConvention::Unknown;
+        bool ambiguous_skinning_convention = false;
         bool collapse_guard_triggered = false;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
         if (static_skinning_enabled && !bypass_vrm_static_skinning && skin_it != skin_by_mesh.end()) {
@@ -3048,21 +3273,15 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                     "XAV2_SKINNING_FALLBACK_SKIPPED_NO_SKELETON");
             }
         }
-        if (static_skinning_enabled && skin_payload != nullptr && skeleton_payload != nullptr) {
-            auto avatar_it = g_state.avatars.find(handle);
-            if (avatar_it != g_state.avatars.end()) {
-                PushAvatarWarningUnique(
-                    &avatar_it->second,
-                    "W_RENDER: SKINNING_MATRIX_CONVENTION_APPLIED: skin=jointPose*inverseBind.",
-                    "SKINNING_MATRIX_CONVENTION_APPLIED");
-            }
-        }
         if (!BuildGpuMeshForPayload(
                 payload,
                 skin_payload,
                 skeleton_payload,
+                avatar_pkg.skinning_matrix_convention,
                 static_skinning_enabled,
                 force_static_skinning_fallback,
+                &selected_skinning_convention,
+                &ambiguous_skinning_convention,
                 &collapse_guard_triggered,
                 device,
                 &mesh)) {
@@ -3070,6 +3289,28 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                 ReleaseGpuMeshResource(&created);
             }
             return false;
+        }
+        if (static_skinning_enabled && skin_payload != nullptr && skeleton_payload != nullptr) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: SKINNING_MATRIX_CONVENTION_SELECTED: mesh=" << payload.name
+                        << ", selected=" << SkinningMatrixConventionName(selected_skinning_convention)
+                        << ", hint=" << SkinningMatrixConventionName(avatar_pkg.skinning_matrix_convention);
+                PushAvatarWarningUnique(
+                    &avatar_it->second,
+                    warning.str(),
+                    "SKINNING_MATRIX_CONVENTION_SELECTED");
+                if (ambiguous_skinning_convention) {
+                    std::ostringstream ambiguous;
+                    ambiguous << "W_RENDER: XAV2_SKINNING_CONVENTION_AMBIGUOUS: mesh=" << payload.name
+                              << ", selected=" << SkinningMatrixConventionName(selected_skinning_convention);
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        ambiguous.str(),
+                        "XAV2_SKINNING_CONVENTION_AMBIGUOUS");
+                }
+            }
         }
         if (collapse_guard_triggered) {
             auto avatar_it = g_state.avatars.find(handle);
@@ -3097,11 +3338,17 @@ bool ApplyArmPoseToAvatar(
     if (renderer == nullptr || device_ctx == nullptr) {
         return false;
     }
-    if (!ShouldApplyExperimentalStaticSkinning()) {
-        return true;
-    }
-    // Temporary safety gate for XAV2 until arm-pose skeleton convention is finalized.
-    if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
+    const bool arm_pose_enabled = ShouldApplyStaticSkinningForAvatarMeshes(avatar_pkg);
+    if (!arm_pose_enabled) {
+        if (!avatar_pkg.skin_payloads.empty()) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                PushAvatarWarningUnique(
+                    &avatar_it->second,
+                    "W_RENDER: ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY: arm pose skipped due to static skinning policy.",
+                    "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY");
+            }
+        }
         return true;
     }
     auto mesh_it = renderer->avatar_meshes.find(handle);
@@ -3160,6 +3407,9 @@ bool ApplyArmPoseToAvatar(
             float max_abs = 0.0f;
             float extent_max = 0.0f;
             float extent_min = 0.0f;
+            float extent_x = 0.0f;
+            float extent_y = 0.0f;
+            float extent_z = 0.0f;
             bool finite = true;
         };
         Stats s {};
@@ -3196,6 +3446,9 @@ bool ApplyArmPoseToAvatar(
         const float ex = std::max(0.0f, bmax_x - bmin_x);
         const float ey = std::max(0.0f, bmax_y - bmin_y);
         const float ez = std::max(0.0f, bmax_z - bmin_z);
+        s.extent_x = ex;
+        s.extent_y = ey;
+        s.extent_z = ez;
         s.extent_max = std::max(ex, std::max(ey, ez));
         s.extent_min = std::min(ex, std::min(ey, ez));
         return s;
@@ -3261,7 +3514,14 @@ bool ApplyArmPoseToAvatar(
 
         const auto pre_stats = compute_position_stats(mesh.bind_pose_vertex_blob, mesh.vertex_stride);
         auto posed_vertices = mesh.bind_pose_vertex_blob;
-        if (!ApplyStaticSkinningToVertexBlob(&posed_vertices, mesh.vertex_stride, *skin_payload, &posed_skeleton)) {
+        if (!ApplyStaticSkinningToVertexBlob(
+                &posed_vertices,
+                mesh.vertex_stride,
+                *skin_payload,
+                &posed_skeleton,
+                avatar_pkg.skinning_matrix_convention,
+                nullptr,
+                nullptr)) {
             continue;
         }
         const auto post_stats = compute_position_stats(posed_vertices, mesh.vertex_stride);
@@ -3275,10 +3535,24 @@ bool ApplyArmPoseToAvatar(
         const float pre_aspect = pre_extent / pre_min_extent;
         const float post_aspect = std::max(0.0001f, post_stats.extent_max) / post_min_extent;
         const bool tube_aspect_spike = post_aspect > std::max(pre_aspect * 3.0f, 18.0f);
-        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike) {
+        const float post_axis_min = std::min(post_stats.extent_x, std::min(post_stats.extent_y, post_stats.extent_z));
+        const float post_axis_max = std::max(0.0001f, post_stats.extent_max);
+        const bool tube_axis_ratio = (post_axis_min / post_axis_max) < 0.06f;
+        const float pre_volume =
+            std::max(0.0001f, pre_stats.extent_x) *
+            std::max(0.0001f, pre_stats.extent_y) *
+            std::max(0.0001f, pre_stats.extent_z);
+        const float post_volume =
+            std::max(0.0001f, post_stats.extent_x) *
+            std::max(0.0001f, post_stats.extent_y) *
+            std::max(0.0001f, post_stats.extent_z);
+        const float volume_ratio = post_volume / pre_volume;
+        const bool collapsed_volume = volume_ratio < 0.08f;
+        const bool exploded_volume = volume_ratio > 25.0f;
+        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent || collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume || exploded_volume) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
-                if (collapsed_extent || collapsed_axis || tube_aspect_spike) {
+                if (collapsed_extent || collapsed_axis || tube_aspect_spike || tube_axis_ratio || collapsed_volume) {
                     std::ostringstream warning;
                     warning << "W_RENDER: XAV2_SKINNING_COLLAPSE_GUARD: mesh=" << mesh.mesh_name
                             << ", posed mesh rejected; keep bind pose.";
