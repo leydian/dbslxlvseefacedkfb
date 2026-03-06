@@ -1,0 +1,14 @@
+{
+  "2021-lts": {
+    "expected_unity_version": "2021.3.18f1",
+    "editor_env_var": "UNITY_2021_3_18F1_EDITOR_PATH"
+  },
+  "2022-lts": {
+    "expected_unity_version": "2022.3.62f1",
+    "editor_env_var": "UNITY_2022_3_LTS_EDITOR_PATH"
+  },
+  "2023-lts": {
+    "expected_unity_version": "2023.2.20f1",
+    "editor_env_var": "UNITY_2023_2_LTS_EDITOR_PATH"
+  }
+}

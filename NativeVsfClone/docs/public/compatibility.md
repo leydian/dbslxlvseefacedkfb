@@ -5,7 +5,11 @@ Last updated: 2026-03-06
 ## Supported runtime baseline
 
 - Package: `com.vsfclone.xav2@1.0.0`
-- Unity Editor: `2021.3.18f1`
+- Unity Editor (gate-backed official lines):
+  - `2021.3.18f1` (`2021-lts`)
+  - `2022.3.62f1` (`2022-lts`)
+  - `2023.2.20f1` (`2023-lts`)
+- Minimum package floor: `unity: 2021.3`, `unityRelease: 18f1`
 - Render pipeline: Built-in Render Pipeline only
 - Platform expectation: Windows-first validation baseline
 
@@ -20,8 +24,9 @@ Allowed shader families:
 
 Default behavior:
 
-- export fails on unsupported shader family when `FailOnMissingShader = true`
-- runtime load fails with `ParityContractViolation` for unsupported typed shader family
+- export defaults to relaxed path (`Export Selected AvatarRoot`), strict export is explicit menu entry
+- runtime load defaults to `ShaderPolicy = WarnFallback`
+- strict parity behavior is available via `ShaderPolicy = Fail` and is used by CI parity gate
 
 ## XAV2 format support
 
@@ -34,10 +39,23 @@ Default behavior:
 Compression support:
 
 - codec: `LZ4` (`Xav2CompressionCodec.Lz4`)
-- unknown section handling defaults to `Warn`
+- unknown section handling default: `Warn`
+
+## Official support contract
+
+A Unity LTS line is considered officially supported only when all gates pass for that line:
+
+- EditMode tests
+- export/load smoke
+- compression quality gate
+- unity/native parity gate
+
+Gate orchestration is matrix-driven through:
+
+- `.github/workflows/unity-xav2-compat.yml`
+- `tools/unity_lts_matrix.json`
 
 ## Out of scope for 1.0.0
 
 - URP/HDRP rendering support
-- multi-Unity baseline support outside `2021.3.18f1`
 - non-Windows parity guarantees

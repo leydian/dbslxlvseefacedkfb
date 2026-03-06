@@ -2,7 +2,7 @@
   "name": "com.vsfclone.xav2",
   "version": "1.0.0",
   "displayName": "VsfClone XAV2 SDK",
-  "description": "Unity 2021.3.18f1+ Built-in RP export/runtime bridge for XAV2 avatar containers.",
+  "description": "Unity LTS Built-in RP export/runtime bridge for XAV2 avatar containers (official: 2021/2022, candidate: 2023).",
   "unity": "2021.3",
   "unityRelease": "18f1",
   "documentationUrl": "https://github.com/leydian/dbslxlvseefacedkfb/blob/main/NativeVsfClone/unity/Packages/com.vsfclone.xav2/README.md",

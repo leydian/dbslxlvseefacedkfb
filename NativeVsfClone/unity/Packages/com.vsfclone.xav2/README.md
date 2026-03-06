@@ -4,7 +4,7 @@ Unity SDK for exporting and loading `.xav2` avatar containers.
 
 ## Quickstart (5 minutes)
 
-1. Open a Unity `2021.3.18f1` project (Built-in Render Pipeline).
+1. Open a supported Unity LTS project (Built-in Render Pipeline).
 2. Add this package through UPM.
 3. Select an avatar root object in Scene.
 4. Export via `Tools/VsfClone/XAV2/Export Selected AvatarRoot`.
@@ -26,7 +26,11 @@ else
 
 ## Supported matrix (v1.0.0)
 
-- Unity: `2021.3.18f1` only
+- Unity (official gate-backed lines):
+  - `2021.3.18f1` (`2021-lts`)
+  - `2022.3.62f1` (`2022-lts`)
+  - `2023.2.20f1` (`2023-lts`)
+- Package minimum floor: `2021.3.18f1`
 - Render pipeline: Built-in RP only
 - Shader allowlist: `Standard`, `MToon`, `lilToon`, `Poiyomi`
 - File format support:
@@ -69,6 +73,12 @@ Error catalog: [error-codes.md](../../../docs/public/error-codes.md)
 - Import:
   - `Tools/VsfClone/XAV2/Import XAV2...`
   - `Tools/VsfClone/XAV2/Diagnose Rig (Strict/Fallback)...`
+
+## CI and gates
+
+- Unity LTS matrix source: `tools/unity_lts_matrix.json`
+- Workflow: `.github/workflows/unity-xav2-compat.yml`
+- Official support means all gates PASS for each official Unity line.
 
 ## Troubleshooting
 

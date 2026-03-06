@@ -1,6 +1,8 @@
-param(
-    [string]$ExpectedUnityVersion = "2021.3.18f1",
-    [string]$UnityEditorPath = $env:UNITY_2021_3_18F1_EDITOR_PATH,
+﻿param(
+    [string]$UnityLine = "2021-lts",
+    [string]$MatrixPath = ".\tools\unity_lts_matrix.json",
+    [string]$ExpectedUnityVersion = "",
+    [string]$UnityEditorPath = "",
     [string]$UnityProjectPath = $env:UNITY_XAV2_PROJECT_PATH,
     [switch]$PersistUserEnv,
     [string]$ReportPath = ".\build\reports\unity_xav2_env_bootstrap_summary.txt",
@@ -15,6 +17,20 @@ function Resolve-AbsolutePath {
         return [System.IO.Path]::GetFullPath($Path)
     }
     return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))
+}
+
+function Get-MatrixEntry {
+    param([string]$RepoRoot, [string]$Path, [string]$Line)
+    $resolved = Resolve-AbsolutePath -Path $Path -BaseDirectory $RepoRoot
+    if (-not (Test-Path -LiteralPath $resolved)) {
+        throw "Unity LTS matrix file not found: $resolved"
+    }
+    $matrix = Get-Content -Raw -Path $resolved | ConvertFrom-Json
+    $entry = $matrix.PSObject.Properties[$Line].Value
+    if ($null -eq $entry) {
+        throw "Unity line not found in matrix: $Line"
+    }
+    return $entry
 }
 
 function Get-DefaultUnityEditorPath {
@@ -49,6 +65,15 @@ function Get-UnityProjectCandidates {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$entry = Get-MatrixEntry -RepoRoot $repoRoot -Path $MatrixPath -Line $UnityLine
+if ([string]::IsNullOrWhiteSpace($ExpectedUnityVersion)) {
+    $ExpectedUnityVersion = [string]$entry.expected_unity_version
+}
+$editorEnvVar = [string]$entry.editor_env_var
+if ([string]::IsNullOrWhiteSpace($UnityEditorPath) -and -not [string]::IsNullOrWhiteSpace($editorEnvVar)) {
+    $UnityEditorPath = [string][System.Environment]::GetEnvironmentVariable($editorEnvVar)
+}
+
 $resolvedReportPath = Resolve-AbsolutePath -Path $ReportPath -BaseDirectory $repoRoot
 $resolvedReportJsonPath = Resolve-AbsolutePath -Path $ReportJsonPath -BaseDirectory $repoRoot
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $resolvedReportPath) | Out-Null
@@ -83,11 +108,13 @@ if (-not [string]::IsNullOrWhiteSpace($UnityProjectPath)) {
 $setProcessEditor = $false
 $setProcessProject = $false
 if ($editorExists) {
-    $env:UNITY_2021_3_18F1_EDITOR_PATH = $editorResolved
+    if (-not [string]::IsNullOrWhiteSpace($editorEnvVar)) {
+        [System.Environment]::SetEnvironmentVariable($editorEnvVar, $editorResolved, "Process")
+    }
     $setProcessEditor = $true
 }
 if ($projectExists) {
-    $env:UNITY_XAV2_PROJECT_PATH = $projectResolved
+    [System.Environment]::SetEnvironmentVariable("UNITY_XAV2_PROJECT_PATH", $projectResolved, "Process")
     $setProcessProject = $true
 }
 
@@ -95,7 +122,9 @@ $setUserEditor = $false
 $setUserProject = $false
 if ($PersistUserEnv) {
     if ($editorExists) {
-        [System.Environment]::SetEnvironmentVariable("UNITY_2021_3_18F1_EDITOR_PATH", $editorResolved, "User")
+        if (-not [string]::IsNullOrWhiteSpace($editorEnvVar)) {
+            [System.Environment]::SetEnvironmentVariable($editorEnvVar, $editorResolved, "User")
+        }
         $setUserEditor = $true
     }
     if ($projectExists) {
@@ -108,7 +137,9 @@ $status = if ($editorExists -and $projectExists) { "PASS" } else { "PARTIAL" }
 
 $summary = [ordered]@{
     generated = (Get-Date -Format o)
+    unity_line = $UnityLine
     expected_unity_version = $ExpectedUnityVersion
+    editor_env_var = $editorEnvVar
     status = $status
     editor = [ordered]@{
         source = $editorSource
@@ -125,7 +156,7 @@ $summary = [ordered]@{
         user_env_set = $setUserProject
     }
     hints = @(
-        "UNITY_2021_3_18F1_EDITOR_PATH and UNITY_XAV2_PROJECT_PATH are both required by Unity XAV2 gate scripts.",
+        "$editorEnvVar and UNITY_XAV2_PROJECT_PATH are both required by Unity XAV2 gate scripts for line $UnityLine.",
         "If project path is missing, set UNITY_XAV2_PROJECT_PATH to a Unity project root containing ProjectSettings/ProjectVersion.txt."
     )
 }
@@ -133,7 +164,9 @@ $summary = [ordered]@{
 $lines = @()
 $lines += "Unity XAV2 Env Bootstrap Summary"
 $lines += "Generated: $($summary.generated)"
+$lines += "UnityLine: $UnityLine"
 $lines += "ExpectedUnityVersion: $ExpectedUnityVersion"
+$lines += "EditorEnvVar: $editorEnvVar"
 $lines += "Status: $status"
 $lines += ""
 $lines += "EditorPath: $editorResolved"
@@ -149,7 +182,7 @@ $lines += "ProcessEnvSet.Project: $setProcessProject"
 $lines += "UserEnvSet.Project: $setUserProject"
 $lines += ""
 $lines += "Hints:"
-$lines += "- UNITY_2021_3_18F1_EDITOR_PATH and UNITY_XAV2_PROJECT_PATH are both required by Unity XAV2 gates."
+$lines += "- $editorEnvVar and UNITY_XAV2_PROJECT_PATH are both required by Unity XAV2 gates for line $UnityLine."
 $lines += "- If project path is missing, point UNITY_XAV2_PROJECT_PATH to a Unity project root (contains ProjectSettings/ProjectVersion.txt)."
 
 $lines | Set-Content -Path $resolvedReportPath -Encoding UTF8

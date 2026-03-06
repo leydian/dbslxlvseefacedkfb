@@ -1,9 +1,12 @@
 param(
     [string]$AvatarToolPath = ".\build\Release\avatar_tool.exe",
-    [string]$UnityEditorPath = $env:UNITY_2021_3_18F1_EDITOR_PATH,
+    [string]$UnityLine = "2021-lts",
+    [string]$MatrixPath = ".\tools\unity_lts_matrix.json",
+    [string]$UnityEditorPath = "",
     [string]$UnityProjectPath = $env:UNITY_XAV2_PROJECT_PATH,
-    [string]$ExpectedUnityVersion = "2021.3.18f1",
+    [string]$ExpectedUnityVersion = "",
     [string]$ReportDir = ".\build\reports",
+    [string]$ReportSuffix = "",
     [string]$SampleDir = "",
     [int]$MaxExternalSamples = 5
 )
@@ -11,11 +14,44 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Resolve-AbsolutePath {
+    param([string]$Path, [string]$BaseDirectory)
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))
+}
+
+function Get-MatrixEntry {
+    param([string]$RepoRoot, [string]$Path, [string]$Line)
+    $resolved = Resolve-AbsolutePath -Path $Path -BaseDirectory $RepoRoot
+    if (-not (Test-Path -LiteralPath $resolved)) {
+        throw "Unity LTS matrix file not found: $resolved"
+    }
+    $matrix = Get-Content -Raw -Path $resolved | ConvertFrom-Json
+    $entry = $matrix.PSObject.Properties[$Line].Value
+    if ($null -eq $entry) {
+        throw "Unity line not found in matrix: $Line"
+    }
+    return $entry
+}
+
 if (-not (Test-Path -LiteralPath $AvatarToolPath)) {
     throw "avatar_tool not found: $AvatarToolPath"
 }
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$entry = Get-MatrixEntry -RepoRoot $repoRoot -Path $MatrixPath -Line $UnityLine
+if ([string]::IsNullOrWhiteSpace($ExpectedUnityVersion)) {
+    $ExpectedUnityVersion = [string]$entry.expected_unity_version
+}
+$editorEnvVar = [string]$entry.editor_env_var
+if ([string]::IsNullOrWhiteSpace($UnityEditorPath) -and -not [string]::IsNullOrWhiteSpace($editorEnvVar)) {
+    $UnityEditorPath = [string][System.Environment]::GetEnvironmentVariable($editorEnvVar)
+}
+
 if ([string]::IsNullOrWhiteSpace($UnityEditorPath)) {
-    throw "Unity editor path is required. Set -UnityEditorPath or UNITY_2021_3_18F1_EDITOR_PATH."
+    throw "Unity editor path is required. Set -UnityEditorPath or env:$editorEnvVar."
 }
 if (-not (Test-Path -LiteralPath $UnityEditorPath)) {
     throw "Unity editor executable not found: $UnityEditorPath"
@@ -25,6 +61,10 @@ if ([string]::IsNullOrWhiteSpace($UnityProjectPath)) {
 }
 if (-not (Test-Path -LiteralPath $UnityProjectPath)) {
     throw "Unity project path not found: $UnityProjectPath"
+}
+
+if ([string]::IsNullOrWhiteSpace($ReportSuffix)) {
+    $ReportSuffix = $UnityLine
 }
 
 function Parse-NativeProbe {
@@ -49,11 +89,11 @@ function Parse-NativeProbe {
 }
 
 New-Item -ItemType Directory -Force -Path $ReportDir | Out-Null
-$unityLogPath = Join-Path $ReportDir "unity_xav2_parity_gate.log"
-$unityReportPath = Join-Path $ReportDir "unity_xav2_parity_probe.json"
-$paritySamplesDir = Join-Path $ReportDir "xav2_parity_samples"
-$summaryTxtPath = Join-Path $ReportDir "xav2_parity_gate_summary.txt"
-$summaryJsonPath = Join-Path $ReportDir "xav2_parity_gate_summary.json"
+$unityLogPath = Join-Path $ReportDir "unity_xav2_${ReportSuffix}_parity_gate.log"
+$unityReportPath = Join-Path $ReportDir "unity_xav2_${ReportSuffix}_parity_probe.json"
+$paritySamplesDir = Join-Path $ReportDir "xav2_parity_samples_${ReportSuffix}"
+$summaryTxtPath = Join-Path $ReportDir "xav2_parity_gate_${ReportSuffix}_summary.txt"
+$summaryJsonPath = Join-Path $ReportDir "xav2_parity_gate_${ReportSuffix}_summary.json"
 
 $args = @(
     "-batchmode",
@@ -82,8 +122,8 @@ $rows = [System.Collections.Generic.List[object]]::new()
 $nativeProbeAllPass = $true
 $parityStrictAllPass = $true
 
-foreach ($entry in $unityProbe.entries) {
-    $nativeOut = & $AvatarToolPath $entry.path
+foreach ($entryRow in $unityProbe.entries) {
+    $nativeOut = & $AvatarToolPath $entryRow.path
     $native = Parse-NativeProbe -Lines $nativeOut
     $nativeOk = ("$($native.PrimaryError)".ToUpperInvariant() -eq "NONE") -and
                 ("$($native.ParserStage)".ToLowerInvariant().Contains("runtime-ready"))
@@ -91,27 +131,27 @@ foreach ($entry in $unityProbe.entries) {
         $nativeProbeAllPass = $false
     }
 
-    $unityErrorNormalized = "$($entry.error_code)".ToUpperInvariant()
+    $unityErrorNormalized = "$($entryRow.error_code)".ToUpperInvariant()
     $unityErrorIsNone = $unityErrorNormalized -eq "NONE"
     $parityOk = $unityErrorIsNone -and
-                ($native.MeshPayloads -eq [int]$entry.mesh_count) -and
-                ($native.MaterialPayloads -eq [int]$entry.material_count) -and
-                ($native.TexturePayloads -eq [int]$entry.texture_count) -and
-                ($native.WarningCodes -eq [int]$entry.warning_code_count)
+                ($native.MeshPayloads -eq [int]$entryRow.mesh_count) -and
+                ($native.MaterialPayloads -eq [int]$entryRow.material_count) -and
+                ($native.TexturePayloads -eq [int]$entryRow.texture_count) -and
+                ($native.WarningCodes -eq [int]$entryRow.warning_code_count)
     if (-not $parityOk) {
         $parityStrictAllPass = $false
     }
 
     $rows.Add([PSCustomObject]@{
-        name = [string]$entry.name
-        path = [string]$entry.path
-        unity_ok = [bool]$entry.ok
-        unity_error = [string]$entry.error_code
-        unity_stage = [string]$entry.parser_stage
-        unity_mesh = [int]$entry.mesh_count
-        unity_material = [int]$entry.material_count
-        unity_texture = [int]$entry.texture_count
-        unity_warning_codes = [int]$entry.warning_code_count
+        name = [string]$entryRow.name
+        path = [string]$entryRow.path
+        unity_ok = [bool]$entryRow.ok
+        unity_error = [string]$entryRow.error_code
+        unity_stage = [string]$entryRow.parser_stage
+        unity_mesh = [int]$entryRow.mesh_count
+        unity_material = [int]$entryRow.material_count
+        unity_texture = [int]$entryRow.texture_count
+        unity_warning_codes = [int]$entryRow.warning_code_count
         native_error = [string]$native.PrimaryError
         native_stage = [string]$native.ParserStage
         native_mesh_payloads = [int]$native.MeshPayloads
@@ -129,6 +169,7 @@ $gateP3 = $parityStrictAllPass
 $overall = $gateP1 -and $gateP2 -and $gateP3
 
 $summary = [ordered]@{
+    unity_line = $UnityLine
     generated = (Get-Date).ToString("s")
     unity_version = [string]$unityProbe.unity_version
     unity_exit_code = $unityExitCode
@@ -148,6 +189,7 @@ $summary | ConvertTo-Json -Depth 8 | Set-Content -Path $summaryJsonPath -Encodin
 $lines = @()
 $lines += "XAV2 Unity/Native Parity Gate Summary"
 $lines += "Generated: $($summary.generated)"
+$lines += "UnityLine: $UnityLine"
 $lines += "UnityVersion: $($summary.unity_version)"
 $lines += "UnityExitCode: $unityExitCode"
 $lines += ""
@@ -167,6 +209,13 @@ $lines += "- unity_report=$unityReportPath"
 $lines += "- unity_log=$unityLogPath"
 $lines += "- summary_json=$summaryJsonPath"
 $lines | Set-Content -Path $summaryTxtPath -Encoding UTF8
+
+if ($UnityLine -eq "2021-lts") {
+    Copy-Item -Force -Path $unityLogPath -Destination (Join-Path $ReportDir "unity_xav2_parity_gate.log")
+    Copy-Item -Force -Path $unityReportPath -Destination (Join-Path $ReportDir "unity_xav2_parity_probe.json")
+    Copy-Item -Force -Path $summaryJsonPath -Destination (Join-Path $ReportDir "xav2_parity_gate_summary.json")
+    Copy-Item -Force -Path $summaryTxtPath -Destination (Join-Path $ReportDir "xav2_parity_gate_summary.txt")
+}
 
 if (-not $overall) {
     exit 1
