@@ -117,3 +117,56 @@ File: `host/HostCore/TrackingErrorHintCatalog.cs`
 ### Verification (follow-up slice)
 - `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`
 - Result: `0 warnings`, `0 errors`.
+
+### Redeploy + receive-check automation
+- Added wrapper script:
+  - `tools/redeploy_wpf_ifacial_check.ps1`
+- Purpose:
+  - run WPF redeploy via existing `publish_hosts.ps1`,
+  - launch `dist/wpf/WpfHost.exe`,
+  - observe tracking status and judge iFacial receive success with:
+    - PASS: `packets` increases and `parse_err` does not increase.
+- Output artifacts:
+  - text report: `build/reports/ifacial_redeploy_check_latest.txt`
+  - JSON summary: `build/reports/ifacial_redeploy_check_latest.json`
+- Example:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\redeploy_wpf_ifacial_check.ps1 -Configuration Release -RuntimeIdentifier win-x64`
+
+### Script contract details (operational)
+1) Inputs
+- `-Configuration` (default `Release`)
+- `-RuntimeIdentifier` (default `win-x64`)
+- `-NoRestore`
+- `-SkipPublish`
+- `-AutoLaunch` (default `true`)
+- `-NonInteractive` (switch; disables prompt-based fallback)
+- `-ObserveSeconds` (default `25`)
+- `-PollIntervalMs` (default `1000`)
+- `-ReportPath` (default `.\build\reports\ifacial_redeploy_check_latest.txt`)
+
+2) Execution flow
+- Triggers `tools/publish_hosts.ps1` for WPF-only redeploy unless `-SkipPublish` is set.
+- Resolves and launches `dist/wpf/WpfHost.exe` (or reuses running process when `-AutoLaunch:$false`).
+- Collects tracking status samples from WPF status text (`tracking=... packets=... parse_err=...`) via UI Automation.
+- If UI Automation fails in interactive mode, accepts manual status-line paste twice and computes deltas.
+
+3) PASS/FAIL policy
+- PASS:
+  - `packets_delta > 0`
+  - `parse_err_delta <= 0`
+- FAIL:
+  - no parsable tracking samples,
+  - `packets_delta <= 0`,
+  - or `parse_err_delta > 0`.
+
+4) Outputs
+- Text report:
+  - `build/reports/ifacial_redeploy_check_latest.txt`
+- JSON summary:
+  - `build/reports/ifacial_redeploy_check_latest.json`
+- Captured fields include:
+  - sample count, first/last counters, deltas, final status, reason, and last tracking line when available.
+
+5) Known limitations
+- UI Automation text scraping can fail depending on host focus/rendering environment.
+- Interactive fallback (manual status-line paste) exists for that case and is intentionally retained for operator reliability.
