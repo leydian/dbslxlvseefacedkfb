@@ -1,0 +1,118 @@
+# Weekly Summary 2026-W10
+
+## Scope
+- This summary groups weekly changes by domain.
+
+## Highlights
+- `miq`: 31 reports
+- `host`: 13 reports
+- `ui`: 9 reports
+- `vsfavatar`: 9 reports
+- `r01`: 4 reports
+- `vxavatar`: 4 reports
+- `wpf`: 16 reports
+- `release`: 9 reports
+- `vrm`: 14 reports
+- `winui`: 3 reports
+- `workspace`: 3 reports
+- `avatar`: 2 reports
+- `platform`: 3 reports
+- `session`: 2 reports
+- `tracking`: 13 reports
+- `webcam`: 3 reports
+- `consumer`: 1 reports
+- `ifacialmocap`: 1 reports
+- `nativecore`: 4 reports
+- `arkit52`: 2 reports
+- `runtime`: 1 reports
+- `spout2`: 1 reports
+- `vxa2`: 1 reports
+- `animiq`: 1 reports
+
+## Documentation Optimization Update (2026-03-06)
+- Quality gate status: `PASS` (`docs_quality_gate.ps1`)
+- Verified checks:
+- broken `docs/INDEX.md` links `0`
+- missing weekly `INDEX.md`/`SUMMARY.md` `0`
+- invalid canonical names `0`
+- legacy stubs missing map `0`
+- legacy stubs with invalid target `0`
+- legacy map rows with missing target `0`
+- UTF-8 invalid files `0`
+- Structural cleanup completed:
+- `docs/reports/legacy-map.md` rebuilt to current canonical/legacy/archive mapping (`114` entries)
+- legacy report redirects normalized (required `New location` + `Archived original snapshot` link contract)
+- archive snapshots backfilled under `docs/archive/reports-legacy/` for missing legacy snapshots (`22` files)
+- Weekly canonical doc normalization:
+- `2026-03-06_wpf_render_only_mode_toggle.md` re-encoded to valid UTF-8 for gate compatibility
+
+## Next Steps
+- Pick three key reports and review promotion to long-term references.
+- Newly added: review `2026-03-06_platform_10persona_action_plan_evaluation.md` for 10-persona scoring, P1/P2 action mapping, and owner/window alignment.
+- Newly added: review `2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md` for onboarding KPI fail-closed gate policy and error remediation contract wiring.
+- Newly added: review `2026-03-06_release_execution_recheck_winui_unity_kpi_status.md` for latest `WpfOnly/Full` candidate state, WinUI `WMC9999` triage evidence, Unity MIQ gate status, and onboarding KPI insufficiency confirmation.
+- Newly added: review `2026-03-06_release_execution_active_round3_wpf_only_hold_and_full_blockers.md` for post-tracking-stabilization recheck evidence, `WPF_ONLY` candidate hold status, and remaining full-release blocker bundle (WinUI/Unity/KPI).
+- Newly added: review `2026-03-06_release_execution_active_round4_unity_project_lock_and_winui_split.md` for WinUI restore-split convergence evidence, Unity project-lock blocker confirmation during MIQ gate recovery, and refreshed `WPF_ONLY`/`Full` candidate state.
+- Newly added: review `2026-03-06_completion_90pct_execution_update.md` for board-status closure evidence, verification results, and remaining WinUI blocker classification.
+- Newly added: review `2026-03-06_vrm_runtime_metrics_v2_api.md` for runtime quality metric adoption and gate integration.
+- Newly added: review `2026-03-06_webcam_device_enumeration_and_tracking_refresh.md` for Windows camera enumeration contract, index-key sidecar compatibility, and WPF/WinUI refresh/fallback behavior.
+- Newly added: review `2026-03-06_vrm_springbone_mtoon_runtime_refinement.md` for SpringBone solver and MToon advanced runtime uplift validation notes.
+- Newly added: review `2026-03-06_onboarding_kpi_summary_automation.md` for diagnostics KPI rollup automation and operational gating readiness.
+- Newly added: review `2026-03-06_wpf_avatar_preview_worker_thumbnails.md` for WPF pre-load avatar 3D thumbnail worker architecture, persistence schema v7, and queue/timeout behavior.
+- Newly added: review `2026-03-06_wpf_arm_chain_coupling_shoulder_lowerarm_hand.md` for upper-arm driven shoulder/lower-arm/hand coupling model, per-bone pitch clamp policy, and native static-skinning chain application coverage.
+- Newly added: review `2026-03-06_wpf_render_only_mode_toggle.md` for WPF render-only mode toggle, F11 UX, and layout/resize sync behavior.
+- Newly added: review `2026-03-06_wpf_arm_pose_slider_wiring.md` for both/per-arm pitch slider control flow and pose sync/busy-gating behavior in WPF host.
+- Newly added: review `2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md` for arm filtering/tuning, suggested arm preset automation, and native arm-pose update optimization.
+- Newly added: review `2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md` for upper-arm-only safety rollback, preset linked-bone pitch neutralization, and native static-skinning arm-pose scope reduction.
+- Newly added: review `2026-03-06_arm_pose_policy_alignment_fix.md` for arm-pose gate policy mismatch root cause, MIQ forced-skip removal, and runtime warning contract for policy-disabled scenarios.
+- Newly added: review `2026-03-06_arm_pose_miq_vrm_auto_policy_split_fix.md` for MIQ(VRM-origin) no-motion regression triage, arm-pose vs mesh-skinning policy decoupling, and payload-missing warning contract (`ARM_POSE_PAYLOAD_MISSING`).
+- Newly added: review `2026-03-06_wpf_light_glass_editorial_ui_refresh.md` for WPF design token expansion, left-rail + workspace layout modernization, and render-only visibility sync updates.
+- Newly added: review `2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md` for single-active rail navigation, diagnostics default-collapse policy, dual-theme runtime switch, and lightweight section transition optimization.
+- Newly added: review `2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md` for HostCore-backed workspace restore, core keyboard shortcuts, nav keyboard traversal, and section-focused primary control routing.
+- Newly added: review `2026-03-06_wpf_ui_v4_operation_hub_and_flow_timing.md` for Getting Started operation hub quick actions, block-reason consolidation, and first-broadcast timing telemetry (latest/median).
+- Newly added: review `2026-03-06_wpf_dark_theme_coverage_and_contrast_fix.md` for semantic token expansion, hardcoded color island removal, dark-theme coverage completion, and readability/contrast uplift in WPF host.
+- Newly added: review `2026-03-06_arkit52_strict_full_support_pipeline.md` for strict ARKit52 channel binding policy, host/native coverage diagnostics, and non-fatal missing-channel warning behavior.
+- Newly added: review `2026-03-06_arkit52_quality_refinement_hybrid_fallback.md` for strict-first hybrid fallback routing, ARKit quality scoring, per-group calibration tuning, and fallback warning telemetry.
+- Newly added: review `2026-03-06_miq_full_parity_contract_enforcement.md` for strict lilToon/Poiyomi parity contract enforcement, typed-v3 canonical migration policy, and hard-fail diagnostics behavior.
+- Newly added: review `2026-03-06_miq_extreme_detached_cluster_and_autofit_stability.md` for MIQ detached-cluster draw safety override in `autofit_only`, tightened bounds-cluster filtering, and bust AutoFit focus stability clamp policy.
+- Newly added: review `2026-03-06_miq_vrm_origin_detached_cluster_hotfix.md` for VRM-origin MIQ detached-cluster draw skip hardening, static-skinning rollback to bind-pose default, and VRM-origin bust focus retune/clamp policy.
+- Newly added: review `2026-03-06_miq_vrm_origin_hair_face_alignment_root_fix.md` for VRM-origin MIQ hair/face desync root-cause isolation, re-export non-effect evidence, and final static/arm re-skinning policy lock.
+- Newly added: review `2026-03-06_miq_standard_mtoon_strict_parity_expansion.md` for strict parity-family expansion to Standard/MToon, Unity/native shader-family inference alignment, and typed-v3 export policy widening.
+- Newly added: review `2026-03-06_miq_poiyomi_typed_material_parity_extension.md` for Poiyomi advanced typed-v3 extraction uplift, feature-flag parity alignment, and runtime typed parse regression coverage.
+- Newly added: review `2026-03-06_miq_typed_v4_and_depth_shadow_pass_slice.md` for typed-v4 canonical contract uplift, pass-flag driven depth/shadow scheduling, and fast-fallback-safe runtime diagnostics expansion.
+- Newly added: review `2026-03-06_miq_static_skinning_regression_and_safe_default_off.md` for MIQ tube-shape regression triage, static skinning collapse guard contracts, and final safety-first default-off stabilization policy.
+- Newly added: review `2026-03-06_miq_pass_flags_and_tracking_strict_followup.md` for MIQ all-pass-disabled fail-safe base-pass recovery, strict tracking wrapper skip-switch passthrough, and refreshed VRM GateK/GateL evidence fields.
+- Newly added: review `2026-03-06_miq_public_sdk_packaging_v100.md` for external SDK packaging baseline (`v1.0.0`), public contract docs rollout, legal/notice artifacts, UPM sample onboarding, and package release-gate coverage.
+- Newly added: review `2026-03-06_miq_unity_lts_matrix_gate_policy.md` for Unity LTS matrix orchestration, 3-line official all-pass blocking policy, release dashboard hard-fail integration, and unified official support contract alignment.
+- Newly added: review `2026-03-06_miq_lts_kpi_risk_signal_and_dashboard_failclosed.md` for unified 3-line official defaults, dashboard fail-closed Unity verdicting, and recent-pass-rate risk signal integration.
+- Newly added: review `2026-03-06_shader_family_backend_split_liltoon_mtoon.md` for backend-owned liltoon/mtoon pass-graph dispatch, per-family pixel-shader split, safe common-backend fallback policy, and `NcAvatarInfo` backend diagnostics fields.
+- Newly added: review `2026-03-06_shader_family_backend_split_poiyomi_standard.md` for poiyomi/standard backend dispatch expansion, 5-backend pass topology execution order, pipeline resource slot extension, and gate-verified safe fallback retention.
+- Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.
+- Newly added: review `2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md` for HybridAuto default routing, no-input watchdog diagnostics, and per-source packet-age/hint surfacing in WPF/WinUI.
+- Newly added: review `2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md` for webcam sidecar output/publish packaging guarantees, deterministic sidecar path resolution policy, and config-invalid operator hint hardening.
+- Newly added: review `2026-03-06_tracking_webcam_python_fallback_and_start_failure_diagnostics.md` for Python fallback-chain startup policy, sidecar warmup failure-class split (`START_FAILED` vs `NO_FRAME`), and WPF/WinUI tracking-start remediation UX.
+- Newly added: review `2026-03-06_tracking_mediapipe_start_failed_user_env_pin_fix.md` for machine-level `ANIMIQ_MEDIAPIPE_PYTHON` pinning procedure, sidecar `code=2` triage path, and sanity validation evidence (`Overall: PASS`).
+- Newly added: review `2026-03-06_tracking_mediapipe_no_frame_root_cause_and_venv_rebuild.md` for `TRACKING_MEDIAPIPE_NO_FRAME` 실원인(`mp.solutions` 미존재) 분석, Python 3.11 + clean venv 재구성 절차, MediaPipe 호환 버전 핀다운, 그리고 sidecar 첫 프레임 JSON 배출 검증.
+- Newly added: review `2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md` for local IPv4 operator guidance in tracking UI, persistent hide/show preference, and WPF/WinUI parity behavior.
+- Newly added: review `2026-03-06_tracking_udp_dualstack_bind_and_fallback_lockdown.md` for UDP dual-stack bind fallback policy, bind-mode diagnostics visibility, and webcam-runtime-unavailable hybrid fallback lockdown behavior.
+- Newly added: review `2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md` for strict tracking-contract gating (HostE2E/Fuzz/MediaPipe sanity), explicit MediaPipe Python pinning policy, and release dashboard candidate decision alignment.
+- Newly added: review `2026-03-06_tracking_strict_runtime_venv_runbook.md` for project-local venv pinning standard, strict readiness wrapper execution flow, and failure-code triage runbook.
+- Newly added: review `2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md` for strict tracking runtime activation steps, fuzz-gate TFM compatibility fix, and tracking-contract PASS verification evidence.
+- Newly added: review `2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md` for upper-body auto-pose runtime merge (`manual + auto`), webcam-side shoulder/upper-arm extraction contract, tracking diagnostics extension, and WPF/WinUI operator toggle/status surfacing.
+- Newly added: review `2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md` for iFacial parse-failure cause diagnostics (`VMC` mismatch / unsupported OSC type tags), parser type-tag compatibility widening (`d/h/T/F/N/I`), and actionable in-app remediation hints.
+- Newly added: review `2026-03-06_tracking_ifacial_key_alias_expansion_for_ifm_lr_prefix.md` for IFM prefixed-key normalization (`blendshape/face/bs`), compact left/right alias expansion (`*_L/*_R` class), and strict allowlist-preserving ARKit52 mapping recovery behavior.
+- Newly added: review `2026-03-06_tracking_ifm_key_sample_telemetry_and_browouterup_alias_fix.md` for runtime IFM accepted/dropped key telemetry surfacing (`ifm_keys_ok`, `ifm_keys_drop`), residual `browOuterUp*` alias completion, and 50/52 -> full-coverage diagnostic closure path.
+- Newly added: review `2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md` for HybridAuto source-switch hysteresis/cooldown/hold-time policy, runtime deadband auto-stability tuning, upper-body low-confidence/stale decay smoothing, and operator-facing switch telemetry/hint expansion.
+- Newly added: review `2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md` for iFacial native/delimited text parser compatibility expansion (`key&value`, `key-value`), snapshot-time tracking diagnostics sync, and MIQ base-only shadow-pass inference behavior.
+- Newly added: review `2026-03-06_winui_ui_token_alignment_and_badge_consistency_refine.md` for WinUI onboarding/step semantic token expansion, actionability badge resource-driven READY/BLOCKED styling, and remaining environment-dependent XAML compiler verification risk.
+- Newly added: review `2026-03-06_release_tooling_implementation_winui_triage_and_gate_automation.md` for WinUI line-level blocker triage automation, release gate orchestration expansion, MIQ 10-sample corpus preparation, onboarding KPI calibration utility, and host-publish CI artifact wiring updates.
+- Newly added: review `2026-03-06_release_roi_execution_hardening.md` for release dashboard SSOT hardening, FPS-budget/per-sample gate policy wiring, and diagnostics manifest reproducibility metadata.
+- Newly added: review `2026-03-06_vsfavatar_preview_output_policy_and_render_gate_split.md` for VSFAvatar placeholder preview/output split policy, `VSF_ALLOW_VSF_PLACEHOLDER_RENDER` scope, and render-gate split metrics (`output_readiness`, `placeholder_dependency`).
+- Newly added: review `2026-03-06_host_perf_hotpath_and_metrics_contract_update.md` for frame-loop allocation reduction, metrics provenance/memory-sample contract expansion, and dist publish hygiene updates.
+- Newly added: review `2026-03-06_host_latency_hotpath_lock_and_wpf_diag_cache.md` for tracking P95 hotpath optimization, `nc_set_tracking_frame` lock-window reduction via dirty-flag staging, and WPF runtime diagnostics static-block cache split.
+- Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.
+- Newly added: review `2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md` for GateK/GateL policy, VRM unresolved warning-code normalization, and stage-1 MToon parity baseline telemetry.
+- Newly added: review `2026-03-06_vrm_node_transform_skinning_and_preview_yaw_autofallback.md` for skinned node-transform unification, conflict-only fallback warning contract, and VRM preview yaw auto-fallback diagnostics.
+- Newly added: review `2026-03-06_vrm_crash_guard_front_yaw_and_cull_hotfix.md` for invalid node-transform crash guard, VRM front-facing yaw default, and VRM no-cull render hotfix for transparent-looking outfit breakage.
+- Newly added: review `2026-03-06_nativecore_realtime_shadow_pipeline.md` for VSF-style realtime shadow pipeline wiring across Native API/renderer, Host preset+UI propagation, Unity pass-flag alignment, and current WinUI toolchain verification limits.
+- Newly added: review `2026-03-06_animiq_rebrand_and_miq_migration.md` for workspace-wide product rename, `.miq` migration scope, `MIQ2` binary signature contract hardening, and post-migration compatibility policy.

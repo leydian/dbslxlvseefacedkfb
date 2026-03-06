@@ -1,0 +1,95 @@
+﻿name: unity-miq-lts-compat
+
+on:
+  pull_request:
+    paths:
+      - "unity/Packages/com.animiq.miq/**"
+      - "tools/unity_lts_matrix.json"
+      - "tools/unity_Miq_validate.ps1"
+      - "tools/Miq_compression_quality_gate.ps1"
+      - "tools/Miq_parity_gate.ps1"
+      - ".github/workflows/unity-miq-compat.yml"
+      - "AnimiqCore/unity/Packages/com.animiq.miq/**"
+      - "AnimiqCore/tools/unity_lts_matrix.json"
+      - "AnimiqCore/tools/unity_Miq_validate.ps1"
+      - "AnimiqCore/tools/Miq_compression_quality_gate.ps1"
+      - "AnimiqCore/tools/Miq_parity_gate.ps1"
+      - "AnimiqCore/.github/workflows/unity-miq-compat.yml"
+  workflow_dispatch:
+
+jobs:
+  unity-lts-compat:
+    runs-on: [self-hosted, windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - line: "2021-lts"
+            expected_version: "2021.3.18f1"
+            editor_var: "UNITY_2021_3_18F1_EDITOR_PATH"
+          - line: "2022-lts"
+            expected_version: "2022.3.62f1"
+            editor_var: "UNITY_2022_3_LTS_EDITOR_PATH"
+          - line: "2023-lts"
+            expected_version: "2023.2.20f1"
+            editor_var: "UNITY_2023_2_LTS_EDITOR_PATH"
+
+    defaults:
+      run:
+        shell: powershell
+        working-directory: AnimiqCore
+
+    env:
+      UNITY_EDITOR_PATH: ${{ vars[matrix.editor_var] }}
+      UNITY_MIQ_PROJECT_PATH: ${{ vars.UNITY_MIQ_PROJECT_PATH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Unity MIQ compatibility (${{ matrix.line }})
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\unity_Miq_validate.ps1 `
+            -UnityLine "${{ matrix.line }}" `
+            -UnityEditorPath "$env:UNITY_EDITOR_PATH" `
+            -UnityProjectPath "$env:UNITY_MIQ_PROJECT_PATH" `
+            -ExpectedUnityVersion "${{ matrix.expected_version }}"
+
+      - name: Run MIQ compression quality gate (${{ matrix.line }})
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\Miq_compression_quality_gate.ps1 `
+            -UnityLine "${{ matrix.line }}" `
+            -UnityEditorPath "$env:UNITY_EDITOR_PATH" `
+            -UnityProjectPath "$env:UNITY_MIQ_PROJECT_PATH" `
+            -ExpectedUnityVersion "${{ matrix.expected_version }}"
+
+      - name: Build native avatar_tool for parity gate
+        run: |
+          cmake -S . -B .\build
+          cmake --build .\build --config Release --target avatar_tool
+
+      - name: Run MIQ unity/native parity gate (${{ matrix.line }})
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\Miq_parity_gate.ps1 `
+            -AvatarToolPath ".\build\Release\avatar_tool.exe" `
+            -UnityLine "${{ matrix.line }}" `
+            -UnityEditorPath "$env:UNITY_EDITOR_PATH" `
+            -UnityProjectPath "$env:UNITY_MIQ_PROJECT_PATH" `
+            -ExpectedUnityVersion "${{ matrix.expected_version }}"
+
+      - name: Upload Unity compatibility reports (${{ matrix.line }})
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unity-miq-${{ matrix.line }}-compat-reports
+          if-no-files-found: warn
+          path: |
+            build/reports/*${{ matrix.line }}*.log
+            build/reports/*${{ matrix.line }}*.xml
+            build/reports/*${{ matrix.line }}*.json
+            build/reports/*${{ matrix.line }}*.txt
+            AnimiqCore/build/reports/*${{ matrix.line }}*.log
+            AnimiqCore/build/reports/*${{ matrix.line }}*.xml
+            AnimiqCore/build/reports/*${{ matrix.line }}*.json
+            AnimiqCore/build/reports/*${{ matrix.line }}*.txt
+

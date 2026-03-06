@@ -1,0 +1,22 @@
+{
+  "name": "Animiq.Miq.Editor.Tests",
+  "rootNamespace": "Animiq.Miq.Editor.Tests",
+  "references": [
+    "Animiq.Miq.Runtime",
+    "Animiq.Miq.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

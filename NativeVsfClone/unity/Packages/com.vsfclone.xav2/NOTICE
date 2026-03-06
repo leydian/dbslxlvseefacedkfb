@@ -1,8 +1,0 @@
-VsfClone XAV2 SDK
-Copyright (c) VsfClone.
-
-This package may include references to third-party shader ecosystems
-(`MToon`, `lilToon`, `Poiyomi`) for compatibility policy checks.
-No third-party shader source code is bundled by default in this package.
-
-See `ThirdPartyNotices.md` for third-party attribution details.

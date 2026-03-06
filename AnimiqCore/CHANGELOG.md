@@ -1,0 +1,6850 @@
+# Changelog
+
+All notable implementation changes in this workspace are documented here.
+
+## 2026-03-06 - Animiq rebrand and `.miq` format migration (workspace-wide)
+
+### Summary
+
+Completed a workspace-wide product rebrand and format migration for broadcast-focused VTuber tracking:
+- product identity migrated to `Animiq`
+- package/SDK/runtime naming aligned from legacy `vsfclone` and `xav2` terms
+- avatar format extension standardized to `.miq`
+- loader/writer binary signature aligned to `MIQ2`
+
+### Changed
+
+- Workspace directory and identity migration:
+  - repository subtree moved from `NativeVsfClone` to `AnimiqCore`
+  - broad rename of identifiers:
+    - `VsfClone` -> `Animiq`
+    - `vsfclone` -> `animiq`
+    - `VSFCLONE_` -> `ANIMIQ_`
+- Avatar format and tooling migration:
+  - legacy `xav2` naming moved to `miq` across code, scripts, docs, and CI
+  - extension usage and UI strings switched from `.xav2` to `.miq`
+  - tool chain rename examples:
+    - `tools/vrm_to_xav2.cpp` -> `tools/vrm_to_Miq.cpp`
+    - `tools/xav2_*` -> `tools/Miq_*`
+- Core format contract correction:
+  - `src/avatar/Miq_loader.cpp` now validates 4-byte magic `MIQ2`
+  - `tools/vrm_to_Miq.cpp` now emits 4-byte magic `MIQ2`
+- Include and source tree rename:
+  - `include/vsfclone` -> `include/animiq`
+  - `src/avatar/xav2_loader.*` -> `src/avatar/Miq_loader.*`
+- Unity package migration:
+  - package path moved:
+    - `unity/Packages/com.vsfclone.xav2`
+    - -> `unity/Packages/com.animiq.miq`
+  - assembly and script names normalized to `Animiq.Miq.*` / `Miq*`
+- CI/workflow updates:
+  - stale path references updated to `AnimiqCore`
+  - workflow naming aligned to MIQ:
+    - `unity-miq-compat.yml`
+
+### Verification
+
+- Host builds:
+  - `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+  - `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+  - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release --no-restore`: FAIL (existing XAML compiler baseline issue)
+- Native/tool builds:
+  - `cmake -S . -B build`: PASS
+  - `cmake --build build --config Release --target nativecore`: PASS
+  - `cmake --build build --config Release --target vrm_to_miq animiq_cli`: PASS
+  - `cmake --build build --config Release --target avatar_tool`: PASS
+- Compatibility smoke:
+  - old `.xav2` sample on updated `avatar_tool` fails compatibility with `MIQ_SCHEMA_INVALID` as expected after hard switch to `MIQ2`.
+
+## 2026-03-06 - Release ROI execution hardening (SSOT + budgeted gates + diagnostics manifest)
+
+### Summary
+
+Implemented a high-ROI stabilization slice focused on release decision consistency, stricter performance/soak regression detection, and reproducible diagnostics packaging.
+
+### Changed
+
+- Release gate orchestration and summary hardening:
+  - `tools/release_readiness_gate.ps1`
+  - added policy passthrough for render/soak gate controls
+  - fail-safe summary emission on fatal step failure
+  - summary now mirrors dashboard candidate states from `release_gate_dashboard.json`
+- Release dashboard policy traceability:
+  - `tools/release_gate_dashboard.ps1`
+  - added `PolicyVersion` and policy snapshot rows
+  - `gate_summary.policy_version` exported in dashboard JSON
+- Render performance gate refinement:
+  - `tools/render_perf_gate.ps1`
+  - added `desktop-60` / `desktop-30` profiles
+  - added `TargetFps` budget derivation path
+  - added `MinLiveTickSampleRatio` provenance gate
+- Soak gate regression sensitivity uplift:
+  - `tools/avatar_load_soak_gate.ps1`
+  - added `MinPerSampleSuccessRatio`
+  - per-sample first-failure evidence captured in summary
+- Quality baseline orchestration wiring:
+  - `tools/run_quality_baseline.ps1`
+  - passes render/soak policy parameters and records them in baseline summary
+- Diagnostics bundle reproducibility metadata:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added `diagnostics_manifest.json` with session fingerprint + artifact SHA256 fields
+  - environment snapshot now includes `ANIMIQ_MEDIAPIPE_PYTHON`
+  - repro commands updated with explicit release-readiness policy arguments
+- Documentation:
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_release_roi_execution_hardening.md`
+  - weekly rollups updated:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- Script syntax checks: PASS
+  - `tools/render_perf_gate.ps1`
+  - `tools/run_quality_baseline.ps1`
+  - `tools/avatar_load_soak_gate.ps1`
+  - `tools/release_readiness_gate.ps1`
+  - `tools/release_gate_dashboard.ps1`
+- Build checks: PASS
+  - `dotnet build host/HostCore/HostCore.csproj -c Release -nologo` (`0 warnings`, `0 errors`)
+
+## 2026-03-06 - VRM-origin MIQ hair/face desync root-cause isolation and policy lock
+
+### Summary
+
+Resolved an intermittent but severe VRM-origin MIQ render regression where hair and face appeared detached/misaligned after avatar load, despite successful parsing and runtime-ready status.
+
+The final stable fix was to lock VRM-origin MIQ out of runtime re-skinning paths that can produce mixed mesh-space outcomes:
+- static skinning path disabled
+- arm-pose mesh re-skinning path disabled
+
+This preserves coherent bind-pose placement for face/hair/body under current runtime contracts.
+
+### Changed
+
+- Native runtime policy lock:
+  - `src/nativecore/native_core.cpp`
+  - `ShouldApplyStaticSkinningForAvatarMeshes(...)`
+    - `source_type == Miq && source_ext == ".vrm"` now force-returns `false`
+  - `ShouldApplyArmPoseForAvatar(...)`
+    - `source_type == Miq && source_ext == ".vrm"` now force-returns `false` in auto mode
+- Existing VRM-origin framing/outlier stabilization changes remain intact in same file:
+  - bust focus retune / vertical lift
+  - detached-cluster recenter scaffolding kept disabled (`enable_vrm_mesh_recentering = false`)
+
+### Root Cause Notes
+
+- Runtime diagnostics showed parser-level success for both sources (`Compat: full`, `ParserStage: runtime-ready`) but behavior diverged:
+  - source VRM load contained node-transform application warnings (`VRM_NODE_TRANSFORM_APPLIED: meshes=6`)
+  - re-exported MIQ lacked equivalent runtime transform warning context while still carrying full payload counts
+- Re-export was validated but non-effective:
+  - `sample\\개인작10-2.vrm -> sample\\개인작10-2.reexport.miq` generated successfully
+  - replacing `개인작10-2.miq` with re-export output did not change render result
+  - hashes matched, confirming deterministic identical output from same source input
+
+### Verification
+
+- Build/deploy:
+  - `MSBuild build/nativecore.vcxproj /p:Configuration=Release /p:Platform=x64 /m`: PASS
+  - deployed `build/Release/nativecore.dll` -> `dist/wpf/nativecore.dll`
+  - runtime DLL hash parity confirmed after deploy
+- Loader checks:
+  - `build/Release/avatar_tool.exe "D:\\dbslxlvseefacedkfb\\sample\\개인작10-2.vrm" --dump-warnings-limit=200`: PASS
+  - `build/Release/avatar_tool.exe "D:\\dbslxlvseefacedkfb\\개인작10-2.miq" --dump-warnings-limit=200`: PASS
+- Operator confirmation:
+  - after final policy lock, user confirmed issue resolved ("이제 잘돼!").
+
+## 2026-03-06 - IFM key-sample telemetry surface + browOuterUp alias completion (50/52 -> 52/52 path)
+
+### Summary
+
+Added operator-visible IFM key diagnostics so unmapped sender keys can be identified directly from host status text, and closed a remaining ARKit52 gap by expanding left/right alias coverage for `browOuterUp*` variants.
+
+### Changed
+
+- Tracking diagnostics contract expansion:
+  - `host/HostCore/HostInterfaces.cs`
+  - `TrackingDiagnostics` fields added:
+    - `IfmAcceptedKeySample`
+    - `IfmDroppedKeySample`
+- IFM key telemetry capture/runtime wiring:
+  - `host/HostCore/TrackingInputService.cs`
+  - tracks normalized IFM raw-key frequency in two buckets:
+    - accepted (mapped)
+    - dropped (unmapped)
+  - samples top keys as `key:count` summary strings for diagnostics surfacing
+  - reset lifecycle includes telemetry dictionaries
+  - alias stem completion:
+    - added `browouterup` to left/right compact-expansion stem set
+- WPF/WinUI status visibility:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - tracking status/runtime text now includes:
+    - `ifm_keys_ok=...`
+    - `ifm_keys_drop=...`
+
+### Verification
+
+- `dotnet build D:\dbslxlvseefacedkfb\NativeAnimiq\host\HostCore\HostCore.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+- `dotnet build D:\dbslxlvseefacedkfb\NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+- Runtime evidence (WPF diagnostics snapshot):
+  - before alias completion:
+    - `arkit52=50/52`
+    - `ifm_keys_drop` included `browouterupl`, `browouterupr`
+  - after alias completion build:
+    - expected path to full ARKit coverage under same sender payload shape
+
+## 2026-03-06 - MIQ VRM-origin detached-cluster draw hotfix + bust focus retune
+
+### Summary
+
+Applied a targeted follow-up runtime hotfix for VRM-origin MIQ avatars that still showed detached floating face/hair clusters and unstable bust framing after the previous outlier/autofit stabilization pass.
+
+### Changed
+
+- Runtime render/autofit follow-up:
+  - `src/nativecore/native_core.cpp`
+  - VRM-origin static skinning policy rollback:
+    - `sourceExt=.vrm` path now remains bind-pose default again (`SKINNING_STATIC_DISABLED` policy retained)
+  - VRM-origin outlier draw hardening:
+    - meshes excluded by preview-bounds filter are also skipped in draw path for VRM-origin MIQ
+  - added dedicated VRM-origin detached-cluster skip gate:
+    - skip when `robust_dist > max(1.4, median_center_dist * 2.8)`
+    - and `emax <= max(1.8, median_extent * 3.2)`
+  - new warning code:
+    - `MIQ_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED`
+  - VRM-origin bust focus retune in `AutoFitBust`:
+    - stronger robust-center pull blend (`0.25/0.75`)
+    - clamp window tightened to `[0.48 * extent_y, 0.76 * extent_y]` relative to `avatar_bmin.y`
+  - preview diagnostics extended:
+    - `vrm_origin_detached_skipped`
+- Docs synchronized:
+  - `docs/formats/miq.md`
+    - corrected VRM-origin static skinning statement back to bind-pose default
+    - added warning contract entry for `MIQ_VRM_ORIGIN_DETACHED_CLUSTER_SKIPPED`
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_miq_vrm_origin_detached_cluster_hotfix.md`
+  - updated weekly rollups:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md` (`miq` report count `29 -> 30`)
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- runtime deployment sync:
+  - copied `build/Release/nativecore.dll` -> `dist/wpf/nativecore.dll` after stopping `WpfHost.exe`
+  - SHA256 parity confirmed between build and dist runtime modules
+- `NativeAnimiq/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작10-2.miq" --dump-warnings-limit=50`: PASS (`Compat: full`)
+
+## 2026-03-06 - iFacial key-alias expansion for IFM left/right variants and prefixed channels
+
+### Summary
+
+Addressed the live tracking condition where iFacial input was actively received (`format=ifm-v1`, `parse_err=0`) but expression coverage stayed at `arkit52=0/52` due to key-name mismatch between sender payload variants and HostCore allowlist normalization.
+
+### Changed
+
+- Host tracking key normalization and alias routing:
+  - `host/HostCore/TrackingInputService.cs`
+  - `TryNormalizeIfmKey(...)` now applies a prefix-trimming pass before alias resolution:
+    - strips leading tokens from normalized keys: `blendshapes`, `blendshape`, `facial`, `face`, `bs`
+    - enables compatibility for prefixed shapes such as `blendShape.eyeBlinkLeft`, `face/eyeBlinkLeft` (after normalization)
+  - added left/right compact alias expansion path:
+    - resolves stem+suffix compact forms (for example `...l`, `...r`) into canonical `...left`, `...right` when stem is in tracked ARKit families
+    - covered families include eye blink/look/squint/wide, brow down, cheek squint, mouth smile/frown/dimple/stretch/press/lowerDown/upperUp, nose sneer
+  - maintained strict allowlist safety:
+    - only keys that resolve into `Arkit52Channels.NormalizedSet` (or supported pose channels) are accepted
+    - unknown/noise keys remain rejected to avoid accidental ingestion drift
+- Added helper routines for deterministic normalization:
+  - `StripIfmKnownPrefixTokens(...)`
+  - `TryExpandIfmLeftRightAlias(...)`
+  - static alias stem set: `IfmLeftRightAliasStems`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
+## 2026-03-06 - MIQ extreme detached-cluster draw guard + AutoFit bust framing stabilization
+
+### Summary
+
+Addressed the runtime symptom where some MIQ avatars showed separated floating parts (for example face/hair pieces) and unstable bust framing that looked like the avatar was sunk into the ground.
+
+### Changed
+
+- Runtime render/autofit hardening:
+  - `src/nativecore/native_core.cpp`
+  - tightened MIQ bounds-cluster exclusion threshold for AutoFit filtering:
+    - before: `max(3.8, median_extent * 4.5)`
+    - after: `max(2.2, median_extent * 2.8)`
+  - added cluster candidate size cap for bounds exclusion:
+    - `sample.extent <= max(0.75, median_extent * 1.4)`
+  - stabilized bust framing anchor (`focus_y`) for MIQ:
+    - robust-center blend raised (`0.70/0.45 -> 0.78/0.52`)
+    - clamp window added: `[avatar_bmin.y + 0.42 * extent_y, avatar_bmin.y + 0.82 * extent_y]`
+  - preserved default draw policy `autofit_only`, but added safety override for extreme detached small clusters:
+    - skip draw when:
+      - `robust_dist > max(2.4, median_center_dist * 5.5)`
+      - `emax <= max(0.35, median_extent * 1.1)`
+  - new warning code:
+    - `MIQ_EXTREME_DETACHED_CLUSTER_SKIPPED`
+  - preview debug diagnostics enriched with:
+    - `bounds_cluster_threshold`
+    - `bounds_cluster_extent_cap`
+    - `extreme_detached_skipped`
+- Docs updated:
+  - `docs/formats/miq.md`:
+    - documented `autofit_only` safety override behavior
+    - added new warning code to runtime warning contract
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_miq_extreme_detached_cluster_and_autofit_stability.md`
+  - updated weekly index/summary:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md` (`miq` count `28 -> 29`)
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- `NativeAnimiq/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작10-2.miq" --dump-warnings-limit=50`: PASS (`Compat: full`)
+- runtime deployment sync:
+  - `build/Release/nativecore.dll` SHA256 matched `dist/wpf/nativecore.dll` after process stop + copy
+
+## 2026-03-06 - IFM native text parse compatibility + tracking snapshot sync + MIQ base-only shadow inference
+
+### Summary
+
+Resolved the live tracking failure mode where iFacial packets were received but rejected as parse failures due to payload-shape mismatch, and added native-side shadow inference hardening for base-only MIQ pass declarations.
+
+### Changed
+
+- Tracking parser/runtime:
+  - `host/HostCore/TrackingInputService.cs`
+  - receive loop polling path refined (`Poll` + `Available` pre-check before receive)
+  - added IFM native text payload parser (`key&value|...` + optional `|=` head section)
+  - widened IFM delimited regex separators to include `-` (`key-value`)
+  - version token parsing widened to include `version-<n>`
+- Tracking diagnostics snapshot sync:
+  - `host/HostCore/HostController.cs`
+  - `BuildSnapshot()` now force-refreshes tracking diagnostics from service before publishing snapshot
+  - preserved `NC_SET_*` error continuity when service-level error field is empty
+- Native render shadow inference:
+  - `src/nativecore/native_core.cpp`
+  - for MIQ parity-family materials with base-only pass declarations, shadow pass is inferred
+  - fallback reason added: `miq_pass_flags_base_only_shadow_inferred`
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md`
+- Updated weekly index/summary:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - tracking report count updated to `11`
+  - nativecore report count updated to `4`
+
+### Verification
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build .\host\WpfHost\WpfHost.csproj -c Release --no-restore`: PASS
+- `tools/publish_hosts.ps1 -Configuration Release -RuntimeIdentifier win-x64 -NoRestore -RunWpfLaunchSmoke:$false`: PASS
+- runtime validation (operator repro):
+  - `format=ifm-v1`
+  - `packets=496`
+  - `parse_err=0`
+  - `conf=ifacial=0.98`
+
+## 2026-03-06 - Release execution active round 4 (Unity lock blocker surfaced + WinUI split recheck)
+
+### Summary
+
+Executed the immediate release action pass with explicit WinUI restore split and Unity/MIQ gate recovery attempt using local Unity `2021.3.18f1` + matching project.
+
+### Changed
+
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_active_round4_unity_project_lock_and_winui_split.md`
+- Updated weekly index:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+- Updated weekly summary:
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - release report count updated to `8`
+
+### Verification
+
+- WinUI split recheck:
+  - `winui_xaml_min_repro` in both `NoRestore` and restore-enabled lanes converged to:
+    - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+    - `WMC9999` reproducible
+- Unity/MIQ gates with explicit local paths:
+  - editor: `C:\Program Files\Unity\Hub\Editor\2021.3.18f1\Editor\Unity.exe`
+  - project: `D:\Unity\My project sdk 연구용`
+  - execution blocked by project lock:
+    - `Multiple Unity instances cannot open the same project`
+- baseline gates:
+  - `tools/host_e2e_gate.ps1 -SkipNativeBuild -NoRestore`: PASS
+  - `tools/tracking_parser_fuzz_gate.ps1`: PASS (after one transient file-lock retry)
+- dashboard remains:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+
+## 2026-03-06 - Tracking receive watchdog/rebind + WPF visual refresh integration
+
+### Summary
+
+Integrated additional host tracking resiliency updates and WPF UI resource/style refresh changes into the current release-validation pass.
+
+### Changed
+
+- Tracking runtime hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - added no-packet watchdog polling in UDP receive loop
+  - added auto-rebind policy for stale/no-packet intervals with cooldown:
+    - `NoPacketRebindThresholdMs`
+    - `NoPacketRebindCooldownMs`
+    - `ReceiveWatchdogPollMs`
+  - added rebind diagnostic status/error reporting (`udp-rebind`, `TRACKING_UDP_REBIND_FAILED`)
+  - added direct 52-float vector mapping fallback for ARKit canonical order messages
+- WPF visual/theme refresh:
+  - `host/WpfHost/App.xaml`
+  - `host/WpfHost/MainWindow.xaml`
+  - updated color token set, control templates, navigation rail/button styling, backdrop gradient and panel visual presentation.
+
+### Verification
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release --nologo`: PASS
+- `dotnet build .\host\WpfHost\WpfHost.csproj -c Release --nologo`: PASS
+- `tools/tracking_parser_fuzz_gate.ps1`: PASS
+- `tools/host_e2e_gate.ps1 -SkipNativeBuild -NoRestore`: PASS
+- dashboard after refresh:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL` (Unity/KPI blockers unchanged)
+
+## 2026-03-06 - Release execution active round 3 (WPF-only hold + full blockers reconfirm)
+
+### Summary
+
+Executed the immediate release-priority validation bundle after the latest tracking changes and documented the current go/no-go state with refreshed artifacts.
+
+### Changed
+
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_active_round3_wpf_only_hold_and_full_blockers.md`
+- Updated weekly index:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+- Updated weekly summary:
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - release report count updated to `7`
+
+### Verification
+
+- `tools/tracking_parser_fuzz_gate.ps1`: PASS
+- `tools/host_e2e_gate.ps1 -SkipNativeBuild -NoRestore`: PASS
+- WinUI triage/min-repro still converged:
+  - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999` reproducible
+- Unity-dependent MIQ gates remain blocked by missing editor path:
+  - `UNITY_2021_3_18F1_EDITOR_PATH` not set
+- Onboarding KPI still insufficient:
+  - `sessions=1` (`min_sessions=5`)
+- Dashboard remains:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+
+## 2026-03-06 - Tracking UDP dual-stack bind fallback + fallback-lockdown documentation
+
+### Summary
+
+Documented and finalized tracking listener stabilization changes that make UDP bind behavior explicit (`udp6-dual` -> `udp4` fallback) and prevent misleading hybrid fallback state when webcam runtime is unavailable.
+
+### Changed
+
+- Runtime tracking implementation:
+  - `host/HostCore/TrackingInputService.cs`
+  - added `CreateUdpListener(...)` dual-stack bind strategy with IPv4 fallback
+  - surfaced bind mode in tracking status (`udp6-dual`, `udp4`)
+  - aligned startup/fallback status messaging to include bind mode
+  - tightened webcam-runtime-unavailable branch to lock source contract to iFacial-only mode
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_udp_dualstack_bind_and_fallback_lockdown.md`
+- Updated weekly index/summary:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - tracking report count updated to `10`
+
+### Verification
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release --nologo`: PASS
+- `dotnet build .\host\WpfHost\WpfHost.csproj -c Release --nologo`: PASS
+- `tools/tracking_parser_fuzz_gate.ps1`: PASS (`Overall: PASS`)
+- WinUI blocker recheck remains unchanged:
+  - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999Count: 2`
+- release dashboard remains:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+
+## 2026-03-06 - Release execution recheck documentation (WinUI/Unity/KPI status refresh)
+
+### Summary
+
+Added a follow-up execution report that captures the latest run-time release decision state after re-running WinUI triage, MIQ corpus/gate checks, KPI checks, and dashboard refresh.
+
+### Changed
+
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_recheck_winui_unity_kpi_status.md`
+- Updated weekly index:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+- Updated weekly summary:
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - release report count updated to `6`
+
+### Verification
+
+- Confirmed dashboard refresh snapshot:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+  - `OnboardingKpiStatus: INSUFFICIENT_SAMPLES`
+- Confirmed WinUI triage snapshot:
+  - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999Count: 2`
+
+## 2026-03-06 - Tracking NO_FRAME incident documentation + runtime rebuild remediation
+
+### Summary
+
+Documented the second-stage webcam tracking failure remediation where startup advanced
+past Python launch but failed with `TRACKING_MEDIAPIPE_NO_FRAME`, and captured the
+actual root cause plus validated environment rebuild procedure.
+
+### Changed
+
+- Added detailed incident/remediation report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_mediapipe_no_frame_root_cause_and_venv_rebuild.md`
+- Updated weekly documentation indexes:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+- Captured validated recovery sequence:
+  - install explicit Python `3.11`,
+  - remove and recreate `.venv` with explicit `-PythonExe`,
+  - pin `mediapipe` to sidecar-compatible line (`mediapipe==0.10.11` request; observed runtime `0.10.10` with `solutions` API),
+  - re-pin `ANIMIQ_MEDIAPIPE_PYTHON` to rebuilt `.venv\Scripts\python.exe`.
+
+### Verification
+
+- `tools/mediapipe_sidecar_sanity.ps1`: `Overall: PASS`
+- direct sidecar smoke:
+  - first frame JSON emitted (`schema_version=1`, `frame_id=1`)
+  - confirms sidecar frame loop operational after rebuild
+  
+
+## 2026-03-06 - Release tooling implementation: WinUI triage + gate automation expansion
+
+### Summary
+
+Implemented an execution-focused release tooling uplift centered on WinUI blocker diagnosability and repeatable release-prep automation.
+
+This pass adds structured diagnostics, new orchestration scripts, release gate switch expansion, and CI artifact wiring.
+
+### Changed
+
+- WinUI minimal repro diagnostics (`tools/winui_xaml_min_repro.ps1`)
+  - added JSON output (`winui_xaml_min_repro_summary.json`)
+  - added line-level diagnostic parsing (`file:line:column`, code, message)
+  - added explicit `WMC9999Count` and `FirstDiagnostic` capture
+- WinUI matrix summarization (`tools/winui_diag_matrix_summary.ps1`)
+  - added default manifest auto-discovery mode
+  - added lane classification (`local/windows-latest/windows-2022/unknown`)
+  - added JSON output (`winui_manifest_matrix_summary_latest.json`)
+- New WinUI blocker triage orchestrator:
+  - `tools/winui_blocker_triage.ps1`
+  - produces consolidated triage summary/json from min repro + matrix diagnostics
+- New MIQ corpus prep automation:
+  - `tools/miq_prepare_gate_corpus.ps1`
+  - builds 10-sample corpus + manifest for strict gate baseline
+  - added output-dir recursion guard
+- New onboarding KPI calibration automation:
+  - `tools/onboarding_kpi_calibrate.ps1`
+  - computes observed KPI stats + recommended threshold/min-session policy
+- New cross-host onboarding smoke check:
+  - `tools/host_onboarding_state_smoke.ps1`
+  - validates WPF/WinUI actionability state wiring artifacts
+- Release gate wrapper expansion (`tools/release_readiness_gate.ps1`)
+  - added toggles:
+    - `EnableHostOnboardingStateSmoke`
+    - `EnableWinUiBlockerTriage`
+    - `EnableMiqCorpusPrep` (+ corpus options)
+    - `EnableOnboardingKpiCalibration`
+  - added corresponding artifact reporting lines
+- CI workflow integration (`.github/workflows/host-publish.yml`)
+  - added triggers for new scripts
+  - WPF lane now includes onboarding smoke + dashboard artifact uploads
+  - WinUI diagnostics lane now runs min-repro + blocker-triage and uploads new summary/json artifacts
+- Documentation updates
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_release_tooling_implementation_winui_triage_and_gate_automation.md`
+  - updated weekly docs index/summary:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- Script parse checks: PASS for all added/updated tooling scripts.
+- WinUI repro execution:
+  - `FailureClass=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999Count=2`
+  - first diagnostic path+line captured in summary/json
+- WinUI triage execution:
+  - blocker triage summary/json emitted successfully
+- MIQ corpus preparation:
+  - `SampleCount=10`
+  - manifest emitted (`build/gate_corpus/miq/sample_manifest.json`)
+- Onboarding state smoke:
+  - `Overall: PASS`
+- Dashboard refresh:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+  - `OnboardingKpiStatus: INSUFFICIENT_SAMPLES`
+
+## 2026-03-06 - Tracking MediaPipe START_FAILED runtime remediation documentation + env pin procedure
+
+### Summary
+
+Documented and operationally validated remediation for webcam tracking startup failures
+where MediaPipe sidecar exits before first frame with `code=2` on Windows machines
+that cannot invoke default `py -3`/`python`.
+
+### Changed
+
+- Added detailed incident/remediation report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_mediapipe_start_failed_user_env_pin_fix.md`
+- Updated weekly documentation indexes:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+- Standardized machine-level runtime fix procedure:
+  - set `ANIMIQ_MEDIAPIPE_PYTHON` (User scope) to project `.venv\Scripts\python.exe`
+  - validate with `tools/mediapipe_sidecar_sanity.ps1` and expect `Overall: PASS`
+
+### Verification
+
+- Runtime sanity verification completed in this workspace:
+  - `build/reports/mediapipe_sidecar_sanity_summary.txt`
+  - result: `Overall: PASS`
+
+## 2026-03-06 - Tracking webcam python fallback chain + startup failure diagnostics uplift
+
+### Summary
+
+Improved webcam tracking startup resiliency and operator diagnostics when MediaPipe
+runtime cannot be started reliably in local Windows environments.
+
+This update addresses repeated `Start tracking failed: Io` cases where the root
+cause was hidden behind a generic result code.
+
+### Changed
+
+- HostCore Python launch fallback chain:
+  - `host/HostCore/TrackingInputService.cs`
+  - replaced single `python` default execution path with ordered candidate probing:
+    1. `ANIMIQ_MEDIAPIPE_PYTHON`
+    2. `py -3`
+    3. `.venv\Scripts\python.exe` (app base + current directory)
+    4. `python`
+  - each candidate is pre-validated by process probe (`--version`) before sidecar launch.
+  - failure message now includes attempted candidates and explicit remediation:
+    - set `ANIMIQ_MEDIAPIPE_PYTHON`
+    - run `tools/setup_tracking_python_venv.ps1`
+- Webcam startup error classification hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - during startup warmup, if sidecar exits before first frame:
+    - `LastErrorCode` is now `TRACKING_MEDIAPIPE_START_FAILED`
+    - status includes sidecar exit code and latest stderr line when available
+  - if sidecar stays alive but frames are not ready:
+    - `LastErrorCode` remains `TRACKING_MEDIAPIPE_NO_FRAME`
+- Operator hint and popup detail uplift:
+  - `host/HostCore/TrackingErrorHintCatalog.cs`
+    - `TRACKING_MEDIAPIPE_START_FAILED` hint now includes Python env/venv guidance.
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+    - tracking-start failure dialog now includes:
+      - `NcResultCode`
+      - `TrackingDiagnostics.LastErrorCode`
+      - `TrackingDiagnostics.StatusMessage`
+      - mapped one-line remediation action
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release`: FAIL in current environment (`NU1301`, `api.nuget.org:443` access blocked)
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: FAIL in current environment (`NU1301`, `api.nuget.org:443` access blocked)
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL in current environment (`NU1301`, `api.nuget.org:443` access blocked)
+
+## 2026-03-06 - VSFAvatar preview/output policy split + render gate metric separation
+
+### Summary
+
+Stabilized `.vsfavatar` runtime behavior by splitting placeholder rendering policy between preview and output paths, while expanding gate diagnostics so PASS signals no longer hide output-readiness gaps.
+
+### Changed
+
+- Placeholder warning-code contract:
+  - `src/avatar/vsfavatar_loader.cpp`
+  - emits `VSF_PLACEHOLDER_RENDER_PAYLOAD` when sidecar placeholder payload is applied.
+- Runtime render-resource policy:
+  - `src/nativecore/native_core.cpp`
+  - placeholder-only VSFAvatar payload is blocked for output path by default.
+  - added explicit context in error detail:
+    - `parser_mode`, `parser_stage`, `primary_error`, `mesh_extract_stage`.
+  - no-mesh payload failure detail also includes parser mode/stage context.
+- Preview worker allowlist:
+  - `host/HostCore/AvatarThumbnailWorker.cs`
+  - thumbnail worker enables `VSF_ALLOW_VSF_PLACEHOLDER_RENDER=1` only during worker process execution and restores previous state.
+- Gate/report contract extension:
+  - `tools/vsfavatar_sample_report.ps1`
+    - added `SidecarRenderPayloadMode`.
+  - `tools/vsfavatar_render_gate.ps1`
+    - added split metrics:
+      - `preview_pass_rows`
+      - `output_pass_rows`
+      - `placeholder_dependent_rows`
+      - `output_readiness`
+      - `placeholder_dependency`
+      - `target_render_payload_mode`
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_vsfavatar_preview_output_policy_and_render_gate_split.md`.
+  - updated weekly report index/summary references.
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: FAIL in current environment (`NU1301` / `api.nuget.org:443` blocked)
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet`: PASS
+  - `Overall: PASS`, `output_readiness: FAIL`, `placeholder_dependency: YES`
+
+## 2026-03-06 - 10-persona action plan artifacts + onboarding KPI release gate policy
+
+### Summary
+
+Implemented the execution slice from the 10-persona platform plan that can be shipped immediately:
+
+- added 10-persona action-plan evaluation artifacts
+- wired onboarding KPI threshold policy into release gate dashboard/readiness flow
+- formalized error-code to remediation to repro-command troubleshooting contract
+
+### Changed
+
+- Release gate dashboard (`tools/release_gate_dashboard.ps1`):
+  - added onboarding KPI policy parameters:
+    - `RequireOnboardingKpiForWpfOnly`
+    - `RequireOnboardingKpiForFull` (default `true`)
+    - `OnboardingWithin3MinSuccessRateThresholdPct` (default `70.0`)
+    - `OnboardingMinSessionCount` (default `5`)
+  - reads `build/reports/onboarding_kpi_summary.json`
+  - surfaces `Onboarding KPI Gate` row and gate-summary fields
+  - supports fail-closed onboarding KPI requirement in:
+    - `ReleaseCandidateWpfOnly`
+    - `ReleaseCandidateFull`
+- Release readiness gate (`tools/release_readiness_gate.ps1`):
+  - added onboarding KPI options and summary fields
+  - added optional `Onboarding KPI summary` step using `tools/onboarding_kpi_summary.ps1`
+  - forwards onboarding KPI policy to dashboard refresh call
+  - includes onboarding KPI artifacts in summary contract
+- Public troubleshooting contract:
+  - updated `docs/public/error-codes.md`
+  - added host troubleshooting action flow:
+    - `ErrorCode/WarningCodes` 확인 -> 조치 -> diagnostics bundle -> `repro_commands.txt` 재실행
+  - added common host tracking/runtime error guidance entries
+- Persona/report artifacts:
+  - added `docs/reports/persona_evaluation_schema.md`
+  - added `docs/reports/weekly/2026-W10/2026-03-06_platform_10persona_action_plan_evaluation.md`
+  - added `docs/reports/weekly/2026-W10/2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md`
+  - updated report indexes and weekly summary references
+
+### Verification
+
+- PowerShell parse validation:
+  - `tools/release_gate_dashboard.ps1`: PASS
+  - `tools/release_readiness_gate.ps1`: PASS
+
+## 2026-03-06 - Tracking local IPv4 hint + persistent hide toggle (WPF/WinUI)
+
+### Summary
+
+Added local IPv4 operator guidance in tracking UI for iFacialMocap destination setup,
+with copy action and persistent show/hide preference across restarts.
+
+### Changed
+
+- HostCore persistence contract:
+  - `host/HostCore/PlatformFeatures.cs`
+  - added `UiShowTrackingIpv4Hint` to `SessionPersistenceModel`
+  - session model version updated to `9` and migration fallback for old versions
+- HostCore UI support APIs:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added `GetLocalIpv4Hint()` (recommended + full IPv4 list)
+  - added `SetUiTrackingIpv4HintVisible(bool)`
+  - added local IPv4 enumeration (active NICs, IPv4 only, dedupe)
+- WPF operator UX:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - tracking panel now includes:
+    - recommended/all IPv4 hint text
+    - `IPv4 복사` button
+    - `IPv4 안내 숨기기/보기` toggle
+  - toggle state restored from session and persisted on change
+- WinUI operator UX parity:
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - same IPv4 hint/copy/toggle behavior with persisted state restore
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md`
+  - updated weekly `INDEX.md` and `SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL at existing WinUI baseline (`XamlCompiler.exe` / `MSB3073`)
+
+## 2026-03-06 - Tracking error-hint contract unification + MIQ typed-v2 edge matrix expansion
+
+### Summary
+
+Closed two release-board `IN_PROGRESS` quality items by centralizing tracking error-hint mapping into HostCore and expanding runtime typed-v2 negative/edge validation coverage for `.miq`.
+
+### Changed
+
+- Cross-layer tracking error hint contract:
+  - added `host/HostCore/TrackingErrorHintCatalog.cs`
+  - updated `host/WpfHost/MainWindow.xaml.cs` to use shared hint resolver
+  - updated `host/WinUiHost/MainWindow.xaml.cs` to use shared hint resolver
+- `.miq` typed-v2 runtime validation tests:
+  - updated `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - added edge tests:
+    - typed-v2 missing required color in strict mode -> fail
+    - typed-v2 unsupported shader family with fail policy -> fail
+    - typed-v2 schema-invalid trailing bytes in strict mode -> fail
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL at existing WinUI baseline (`WMC9999` / `XamlCompiler.exe` exit code 1)
+
+## 2026-03-06 - Tracking webcam sidecar packaging + path resolution hardening
+
+### Summary
+
+Fixed `Start tracking failed: InvalidArgument` in webcam tracking startup when
+the MediaPipe sidecar script path could not be resolved at runtime.
+The change preserves fail-fast validation policy, while making runtime outputs
+and diagnostics deterministic.
+
+### Changed
+
+- Sidecar packaging guarantees:
+  - `host/WpfHost/WpfHost.csproj`
+  - `host/WinUiHost/WinUiHost.csproj`
+  - Added `tools/mediapipe_webcam_sidecar.py` as content with:
+    - `CopyToOutputDirectory=PreserveNewest`
+    - `CopyToPublishDirectory=PreserveNewest`
+- Sidecar path resolution hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - Added ordered resolver:
+    1. `ANIMIQ_MEDIAPIPE_SIDECAR_SCRIPT`
+    2. `AppContext.BaseDirectory/tools/mediapipe_webcam_sidecar.py`
+    3. `AppContext.BaseDirectory/mediapipe_webcam_sidecar.py`
+    4. `Environment.CurrentDirectory/tools/mediapipe_webcam_sidecar.py`
+  - Config-invalid error now includes searched paths and explicit env-var guidance.
+- Operator hint update:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `TRACKING_MEDIAPIPE_CONFIG_INVALID` hint now explicitly references
+    `mediapipe_webcam_sidecar.py` and `ANIMIQ_MEDIAPIPE_SIDECAR_SCRIPT`.
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md`
+  - updated weekly `INDEX.md` and `SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- output verification:
+  - `host/WpfHost/bin/Release/net8.0-windows10.0.19041.0/win-x64/tools/mediapipe_webcam_sidecar.py` exists
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL at existing WinUI baseline (`XamlCompiler.exe` / `MSB3073`)
+
+## 2026-03-06 - WPF dark theme coverage and contrast fix
+
+### Summary
+
+Completed a WPF dark-theme consistency pass by removing remaining hardcoded color usage in the main host window and routing all affected regions through semantic resource tokens. This resolves partial theme application and low-visibility text areas reported in dark mode.
+
+### Changed
+
+- WPF theme token expansion:
+  - `host/WpfHost/App.xaml`
+    - added semantic `Color.*` brushes for:
+      - info/success/warning/error panels
+      - validation text
+      - soft card surfaces/borders
+      - splitter and overlays
+      - onboarding step states
+- Main window color tokenization:
+  - `host/WpfHost/MainWindow.xaml`
+    - replaced hardcoded hex colors with `DynamicResource` keys across onboarding/status/recovery/validation/overlay/splitter areas
+    - removed remaining color islands that were not updated by runtime theme toggle
+- Runtime theme synchronization:
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - expanded `ApplyThemeResources()` to set light/dark values for all newly introduced semantic keys
+    - updated onboarding step visual state to use resource keys (`Color.StepComplete`, `Color.StepPending`) instead of direct brush allocation
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_wpf_dark_theme_coverage_and_contrast_fix.md`
+  - updated weekly `INDEX.md` and `SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Debug`: PASS (`0 warnings`, `0 errors`)
+- static scan confirmed no hardcoded hex color usage remains in `MainWindow.xaml`
+- `MainWindow.xaml` `Color.*` resource references validated against `App.xaml` definitions
+
+## 2026-03-06 - MIQ Unity LTS matrix gate policy integration
+
+### Summary
+
+Integrated matrix-driven Unity LTS gate orchestration for MIQ and wired
+official-line all-pass blocking policy into release readiness telemetry.
+
+### Changed
+
+- Unity matrix gate orchestration:
+  - added `tools/unity_miq_lts_gate.ps1`
+  - policy: `official-lines-all-pass-required` (official defaults: `2021-lts`, `2022-lts`, `2023-lts`)
+- MIQ parity gate:
+  - updated `tools/miq_parity_gate.ps1` to matrix-aware params (`UnityLine`, `MatrixPath`) and per-line artifact outputs
+  - retained legacy unsuffixed summary aliases for `2021-lts` compatibility
+- Environment bootstrap:
+  - updated `tools/unity_miq_env_bootstrap.ps1` to resolve editor env var by matrix line instead of fixed `UNITY_2021_3_18F1_EDITOR_PATH`
+- Release and baseline wiring:
+  - updated `tools/run_quality_baseline.ps1` with `-EnableUnityMiqLtsGate`
+  - updated `tools/release_readiness_gate.ps1` with `-EnableUnityMiqLtsGate`
+  - updated `tools/release_gate_dashboard.ps1` to surface `Unity MIQ LTS Gate` and prefer matrix gate signal for Unity MIQ pass status
+  - dashboard now surfaces recent-pass-rate risk signal from `unity_miq_lts_kpi_summary.json`
+- Documentation alignment:
+  - updated package README + public compatibility/migration docs to unified official model:
+    - official: `2021-lts`, `2022-lts`, `2023-lts`
+
+### Verification
+
+- PowerShell parser validation on updated scripts: PASS
+
+## 2026-03-06 - MIQ public SDK packaging baseline (v1.0.0)
+
+### Summary
+
+Established a public-facing SDK baseline for `com.animiq.miq` with package metadata hardening, legal/attribution files, public compatibility docs, and bundled UPM samples.
+
+### Changed
+
+- Unity package metadata (`unity/Packages/com.animiq.miq/package.json`):
+  - version bumped to `1.0.0`
+  - added `documentationUrl`, `changelogUrl`, `licensesUrl`, repository metadata
+  - added two UPM samples:
+    - `Runtime Load Sample`
+    - `Export/Import Roundtrip Sample`
+- Package docs/legal:
+  - updated `unity/Packages/com.animiq.miq/README.md` to 5-minute onboarding + diagnostics-first usage
+  - added:
+    - `unity/Packages/com.animiq.miq/LICENSE`
+    - `unity/Packages/com.animiq.miq/NOTICE`
+    - `unity/Packages/com.animiq.miq/ThirdPartyNotices.md`
+- Public contract docs:
+  - `docs/public/compatibility.md`
+  - `docs/public/migration.md`
+  - `docs/public/error-codes.md`
+- Sample code:
+  - `unity/Packages/com.animiq.miq/Samples~/RuntimeLoadSample/RuntimeLoadSample.cs`
+  - `unity/Packages/com.animiq.miq/Samples~/ExportImportRoundtripSample/Editor/MiqRoundtripSampleMenu.cs`
+- Runtime API contract polish:
+  - `Runtime/MiqDataModel.cs`
+    - `MiqLoadOptions` and `MiqLoadDiagnostics` migrated to property-based contract defaults
+  - `Runtime/MiqRuntimeLoader.cs`
+    - added XML docs for `Load/TryLoad` public entrypoints
+- Release gate:
+  - added `tools/miq_package_release_gate.ps1` to enforce package metadata/docs/legal/sample presence
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\miq_package_release_gate.ps1`: PASS
+
+## 2026-03-06 - Tracking upper-body webcam AutoPose v1 + WPF/WinUI operator wiring
+
+### Summary
+
+Added upper-body automatic tracking (shoulder + upper-arm pitch) to the host tracking pipeline with webcam-side pose extraction, runtime pose merge over manual offsets, and operator-facing toggle/diagnostics in both WPF and WinUI hosts.
+
+### Changed
+
+- Host tracking contract and persistence:
+  - `host/HostCore/HostInterfaces.cs`
+    - added `UpperBodySmoothingProfile`
+    - extended `TrackingStartOptions` with `UpperBodyEnabled`, `UpperBodyStrength`, `UpperBodySmoothing`
+    - extended `TrackingDiagnostics` with upper-body active/confidence/age/status/error fields
+    - added `TrackingUpperBodyPose`
+    - added `ITrackingInputService.TryGetLatestUpperBodyPose(...)`
+  - `host/HostCore/PlatformFeatures.cs`
+    - extended `TrackingInputSettings` for upper-body options
+    - default + normalization path now preserves upper-body settings across session persistence
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - tracking settings configuration now accepts/persists upper-body options and logs them
+
+- Tracking runtime and pose merge:
+  - `host/HostCore/TrackingInputService.cs`
+    - added upper-body pose state, smoothing profile tuning, stale decay-to-neutral, and diagnostics publishing
+    - implemented webcam upper-body packet consumption and `TryGetLatestUpperBodyPose(...)`
+  - `host/HostCore/HostController.cs`
+    - tracking start now forwards upper-body options into `TrackingStartOptions`
+    - tick path now merges runtime upper-body auto-pose with manual pose offsets and submits merged `nc_set_pose_offsets(...)`
+    - added pose payload cache/equality guard to avoid redundant native submissions
+    - stop/reset paths restore manual-only pose submission state
+
+- Webcam sidecar contract:
+  - `tools/mediapipe_webcam_sidecar.py`
+    - added `mediapipe.pose` processing
+    - emits:
+      - `left_shoulder_pitch_deg`
+      - `right_shoulder_pitch_deg`
+      - `left_upperarm_pitch_deg`
+      - `right_upperarm_pitch_deg`
+      - `upper_body_confidence`
+
+- WPF/WinUI operator surface:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+    - added upper-body enable toggle in tracking panel
+    - persisted toggle through tracking config/session defaults
+    - surfaced upper-body diagnostics in tracking status/runtime text
+
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Debug`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Debug`: PASS
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -c Debug`: FAIL at WinUI XAML compiler stage (`XamlCompiler.exe` exit code 1; no location detail emitted in current run)
+
+## 2026-03-06 - Webcam device enumeration + tracking UI refresh hardening
+
+### Summary
+
+Implemented webcam device detection hardening for host tracking configuration by replacing synthetic camera lists with Windows API enumeration and aligning WPF/WinUI selection refresh behavior.
+
+### Changed
+
+- HostCore (`host/HostCore/HostController.MvpFeatures.cs`):
+  - `GetAvailableWebcamDevices(...)` now enumerates real webcams via:
+    - `DeviceInformation.FindAllAsync(DeviceClass.VideoCapture)`
+  - preserved sidecar compatibility by keeping `DeviceKey` as numeric index string (`"0"`, `"1"`, ...).
+  - added safe no-device/enumeration-failure fallback:
+    - returns default camera entry marked unavailable.
+    - logs `TrackingWebcamEnumerate` failure context.
+- WPF host (`host/WpfHost/MainWindow.xaml.cs`):
+  - webcam combo item now tracks `IsAvailable`.
+  - selection fallback now prefers available devices when prior selection is invalid/unavailable.
+  - entering `Tracking` section triggers webcam list refresh when tracking is idle.
+- WinUI host (`host/WinUiHost/MainWindow.xaml.cs`):
+  - webcam combo item now tracks `IsAvailable`.
+  - selection fallback aligned to WPF.
+  - tracking start path refreshes webcam list immediately before applying settings/start.
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_webcam_device_enumeration_and_tracking_refresh.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -v minimal`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -v minimal`: PASS
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -v normal`: FAIL (`XamlCompiler.exe` / `MSB3073`, existing WinUI baseline issue in this environment)
+
+## 2026-03-06 - Arm pose policy alignment fix (restore arm angle movement, including MIQ)
+
+### Summary
+
+Fixed a regression where arm angle sliders appeared functional in host UI but produced no visible arm movement at runtime.
+The arm pose runtime gate now follows the same static-skinning policy used by mesh build paths, and MIQ is no longer force-skipped.
+
+### Changed
+
+- Native runtime (`src/nativecore/native_core.cpp`):
+  - `ApplyArmPoseToAvatar(...)` gate policy changed:
+    - before: required `ShouldApplyExperimentalStaticSkinning()` (effectively force-on env only)
+    - after: uses `ShouldApplyStaticSkinningForAvatarMeshes(avatar_pkg)` (auto/on/off policy alignment)
+  - removed MIQ early-return safety bypass in arm pose apply path:
+    - before: MIQ arm pose always skipped
+    - after: MIQ arm pose applies when static-skinning policy is enabled and payload prerequisites are met
+  - added explicit warning contract when arm pose is skipped by policy:
+    - warning code: `ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY`
+    - warning message:
+      `W_RENDER: ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY: arm pose skipped due to static skinning policy.`
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_arm_pose_policy_alignment_fix.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+
+## 2026-03-06 - MIQ pass-flags fail-safe + strict tracking wrapper follow-up
+
+### Summary
+
+Finalized a safety-focused follow-up that prevents MIQ empty-frame regressions under malformed pass metadata and improves strict tracking operator flow by exposing focused gate-skip switches through the wrapper script.
+
+### Changed
+
+- Native runtime (`src/nativecore/native_core.cpp`):
+  - clarified MIQ static skinning auto-mode default to safety-first OFF unless explicitly forced.
+  - added MIQ fail-safe pass recovery:
+    - when all pass flags resolve to disabled (`base/depth/shadow/outline/emission`),
+    - runtime forces `base` pass ON,
+    - records fallback reason `miq_pass_flags_defaulted_to_base`.
+- Strict tracking wrapper (`tools/release_readiness_strict_tracking.ps1`):
+  - added passthrough switches:
+    - `-SkipVersionContractCheck`
+    - `-SkipQualityBaseline`
+  - forwards both switches to `release_readiness_gate.ps1`.
+- Tracking parser fuzz gate project:
+  - `tools/tracking_parser_fuzz_gate/TrackingParserFuzzGate.csproj`
+  - target framework aligned to `net8.0-windows10.0.19041`.
+- Tracking runbook update:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_strict_runtime_venv_runbook.md`
+  - strict command now includes focused skip switches.
+  - pass criteria now references `TrackingContractCandidate`.
+- Refreshed VRM evidence reports:
+  - `build/reports/vrm_probe_fixed5.txt`
+  - `build/reports/vrm_gate_fixed5.txt`
+  - includes expanded MToon diagnostics fields and GateK/GateL status lines.
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_miq_pass_flags_and_tracking_strict_followup.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+
+## 2026-03-06 - Host perf hotpath optimization + metrics provenance contract update
+
+### Summary
+
+Implemented a host/runtime performance hardening slice focused on reducing frame-loop overhead and improving performance evidence reliability without changing default feature behavior.
+
+### Changed
+
+- HostCore frame-path optimization:
+  - `host/HostCore/PlatformFeatures.cs`
+    - `FrameMetric` converted to `readonly record struct` to reduce per-frame heap allocations.
+    - metric contract expanded with:
+      - `measurement_source`
+      - `measurement_session_id`
+      - `memory_sample_status`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - rolling metric capture now stamps metric provenance/session and memory sample status.
+    - queue trim logic simplified to single overflow dequeue (bounded behavior retained).
+    - adaptive quality window path now checks cooldown before expensive window materialization/sort.
+    - CSV export header extended for provenance/status columns.
+  - `host/HostCore/DiagnosticsModel.cs`
+    - `DiagnosticsModel` expanded with `MemorySampleStatus`.
+    - added overload to accept pre-sampled memory values (`working_set_mb`, `private_mb`).
+  - `host/HostCore/HostController.cs`
+    - runtime diagnostics path now reuses already-sampled memory values from host controller state instead of re-querying process memory every capture.
+- Tooling/operational evidence updates:
+  - `tools/render_perf_gate.ps1`
+    - added optional parsing/summaries for:
+      - source/session column presence
+      - live/other/unknown source counts
+      - session count
+      - memory sample status counts (`ok/stale/failed/unknown`)
+  - `tools/release_gate_dashboard.ps1`
+    - dashboard now surfaces:
+      - `Render Perf (Live Tick Samples)`
+      - `Render Perf (Memory Sample Failures)`
+  - `tools/publish_hosts.ps1`
+    - added pre-publish dist cleanup (`Clear-DistDirectory`) for WPF/WinUI output folders to avoid stale artifact carryover in size telemetry.
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_host_perf_hotpath_and_metrics_contract_update.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+- `tools/render_perf_gate.ps1` execution (format/contract validation run): PASS
+- `tools/release_gate_dashboard.ps1` execution: PASS (new perf trust-signal rows present)
+
+## 2026-03-06 - MIQ static skinning regression recovery (safe default-off policy)
+
+### Summary
+
+Resolved a user-facing MIQ render regression where avatars intermittently collapsed into tube/cylinder-like geometry despite healthy load contracts, by finalizing a safety-first static skinning policy and documenting the full triage path.
+
+### Changed
+
+- Native runtime stabilization (`src/nativecore/native_core.cpp`):
+  - added conservative MIQ material path env gate:
+    - `ANIMIQ_MIQ_CONSERVATIVE_MATERIAL`
+  - added collapse guard in static skinning validation path with warning contract:
+    - `MIQ_SKINNING_COLLAPSE_GUARD`
+  - relaxed MIQ bounds cluster exclusion sensitivity (higher threshold + min sample gate).
+  - finalized MIQ static skinning default in auto mode to OFF (explicit opt-in required).
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_miq_static_skinning_regression_and_safe_default_off.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `build/Release/nativecore.dll` -> `dist/wpf/nativecore.dll` hash/timestamp integrity: PASS
+- runtime diagnostics after redeploy:
+  - `RuntimePathMatch: True`
+  - `RuntimeModuleStaleVsBuildOutput: False`
+  - `RuntimeTimestampWarningCode: none`
+  - backend fallback recovered in validated run (`SelectedFamilyBackend: liltoon`, fallback count `0`)
+  - operator confirmation: tube/cylinder artifact removed under safe default-off policy
+
+## 2026-03-06 - Shader family backend split (liltoon/mtoon) with safe fallback
+
+### Summary
+
+Implemented a renderer topology split where shader-family backends now own pass graph execution paths.
+This round introduces concrete backend dispatch for `liltoon` and `mtoon`, keeps unsupported/incomplete families on a safe shared path, and exposes backend selection/fallback diagnostics through native API contracts.
+
+### Changed
+
+- Native renderer backend architecture:
+  - `src/nativecore/native_core.cpp`
+  - added backend kind model:
+    - `common`
+    - `liltoon`
+    - `mtoon`
+  - material runtime now records:
+    - requested backend
+    - selected backend
+    - fallback-applied flag/reason
+- Per-family pass graph ownership in runtime draw scheduling:
+  - replaced single global draw queues with backend-scoped queues:
+    - `depth`
+    - `shadow`
+    - `base` (opaque/mask/blend)
+    - `outline`
+    - `emission`
+  - execution order now iterates by backend and applies pass graph per backend.
+- Shader pipeline split:
+  - renderer resource slots expanded to:
+    - `pixel_shader_common`
+    - `pixel_shader_liltoon`
+    - `pixel_shader_mtoon`
+  - runtime draw path binds pixel shader by selected backend.
+  - mtoon backend compiles from dedicated macro path (`FAMILY_MTOON`) to separate shading branch behavior.
+- Material backend fallback policy:
+  - `liltoon/mtoon` request path is honored when backend is available.
+  - non-target/unsupported paths stay on `common`.
+  - conservative MIQ material mode forces `common` and emits backend fallback diagnostics.
+  - added warning codes:
+    - `MIQ_FAMILY_BACKEND_FALLBACK`
+    - `VRM_FAMILY_BACKEND_FALLBACK`
+- API diagnostics contract expansion:
+  - `include/animiq/nativecore/api.h`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `NcAvatarInfo` now includes:
+    - `family_backend_fallback_count`
+    - `selected_family_backend`
+    - `active_passes`
+  - `FillAvatarInfo` populates backend dominance, fallback count, and active pass summary.
+  - render pass summary string now includes backend diagnostics fields.
+
+### Verification
+
+- Native build:
+  - `cmake --build NativeAnimiq/build --config Release --target nativecore`
+  - result: PASS (`nativecore.dll` produced)
+- Host solution build:
+  - `dotnet build NativeAnimiq/host/HostApps.sln -c Release`
+  - result: non-zero return in this shell without compile diagnostics
+  - note: `msbuild` command is not available in current shell PATH, so host-wide verification should be rerun in a VS Developer Command Prompt.
+
+## 2026-03-06 - Tracking full-contract strict gate + MediaPipe Python pinning
+
+### Summary
+
+Implemented a strict tracking readiness contract to move from partial tracking confidence to full-path certainty.
+This slice makes MediaPipe Python runtime selection explicit, promotes tracking gates to release-critical checks, and surfaces unified tracking contract status in the release dashboard.
+
+### Changed
+
+- MediaPipe sidecar sanity hardening:
+  - `tools/mediapipe_sidecar_sanity.ps1`
+  - Python executable resolution order:
+    - `-PythonExe` CLI argument
+    - `ANIMIQ_MEDIAPIPE_PYTHON` environment variable
+    - legacy fallback (`python`) only when explicit pinning is not required
+  - added strict switch:
+    - `-RequireExplicitPythonExe` (fails when no explicit Python runtime is provided)
+  - summary now records:
+    - `PythonExe`, `PythonSource`, `RequireExplicitPythonExe`
+    - explicit failure reason for missing Python pin
+- Release readiness strict tracking contract:
+  - `tools/release_readiness_gate.ps1`
+  - added tracking strict-policy controls:
+    - `-DisableStrictTrackingContract` (opt-out)
+    - `-EnableTrackingFuzz`
+    - `-MediapipePythonExe`
+  - default behavior now enables and requires all three tracking checks:
+    - `MediaPipe sidecar sanity`
+    - `Host E2E gate`
+    - `Tracking parser fuzz gate`
+  - summary now records strict/effective flags and Python pin source intent.
+- Release dashboard tracking contract visibility:
+  - `tools/release_gate_dashboard.ps1`
+  - added tracking rows:
+    - `Tracking HostE2E`
+    - `Tracking Parser Fuzz`
+    - `Tracking Mediapipe Sanity`
+  - release candidate decisions (`WpfOnly`, `Full`) now require tracking contract all-pass.
+  - retained Unity/MIQ policy switches for WPF/Full decision paths.
+- Operator repro guidance update:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - diagnostics repro commands now include strict readiness example with explicit `ANIMIQ_MEDIAPIPE_PYTHON`.
+
+### Verification
+
+- Script command resolution check:
+  - `mediapipe_sidecar_sanity.ps1`: OK
+  - `release_readiness_gate.ps1`: OK
+  - `release_gate_dashboard.ps1`: OK
+- Dashboard execution:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\release_gate_dashboard.ps1`: PASS
+  - output includes tracking rows and contract-driven candidate status.
+- Readiness behavior checks:
+  - `-DisableStrictTrackingContract` run: PASS (baseline publish/dashboard only)
+  - strict default run: FAIL as expected when Python pin missing
+    - `python_source: missing`
+    - `python_executable: FAIL (missing explicit python executable...)`
+
+### Notes
+
+- This change intentionally fails strict readiness when MediaPipe runtime pinning is not configured, to prevent false-green release readiness for webcam/hybrid tracking paths.
+
+## 2026-03-06 - MIQ static skinning auto-mode recovery for broken mesh deformation
+
+### Summary
+
+Implemented a targeted runtime recovery for "MIQ avatar appears torn/collapsed" cases by introducing an auto-mode static skinning policy in native render mesh build path.  
+This change keeps explicit operator override semantics (`on/off`) while making the default behavior safer for MIQ assets that contain valid skin/skeleton payloads.
+
+### Why this change was needed
+
+- Observed runtime state showed:
+  - `Format: MIQ`
+  - `SkinPayloads > 0`, `SkeletonPayloads > 0`
+  - warning `W_RENDER: SKINNING_STATIC_DISABLED`
+- Existing guardrail had static skinning default-off, which prevented destructive rewrites in risky cases but also left some MIQ assets rendered from non-deformed bind-position vertex blobs.
+- Result: visible mesh breakage for specific MIQ assets despite successful load (`Compat: full`, `PrimaryError: NONE`).
+
+### Changed
+
+- Native static skinning policy refactor (`src/nativecore/native_core.cpp`):
+  - Added explicit env mode parsing for `ANIMIQ_MIQ_ENABLE_STATIC_SKINNING`:
+    - force-on: `1|true|yes|on`
+    - force-off: `0|false|no|off`
+    - auto: unset or `auto` (and unknown tokens fall back to auto)
+  - Added mesh-build policy function that resolves effective static skinning state per avatar package.
+  - In `auto` mode:
+    - MIQ enables static skinning when both `skin_payloads` and `skeleton_payloads` are present.
+    - non-MIQ remains conservative (off by default).
+- Mesh build pipeline wiring:
+  - `BuildGpuMeshForPayload(...)` now receives `enable_static_skinning` from caller policy.
+  - Removed redundant in-function env re-checks; caller-provided decision is now single source of truth.
+  - Fallback application path now keys off `enable_static_skinning && force_static_skinning_fallback`.
+- Render warning behavior remains deterministic:
+  - `SKINNING_STATIC_DISABLED` is still emitted when skin payload exists but effective policy is off.
+  - under default auto mode for valid MIQ skin/skeleton payloads, this warning should no longer occur.
+
+### Scope and non-goals
+
+- Included:
+  - MIQ mesh deformation recovery in default runtime behavior.
+  - Operator override compatibility via existing env var.
+- Not changed:
+  - arm-pose runtime path policy (`ApplyArmPoseToAvatar`) remains explicitly gated by `ShouldApplyExperimentalStaticSkinning()`.
+  - physics runtime simulation support status (still reported separately as missing feature when applicable).
+
+### Verification
+
+- Build:
+  - `cmake --build NativeAnimiq/build --config Release --target nativecore avatar_tool` -> PASS
+- Loader smoke:
+  - `NativeAnimiq/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"` -> PASS
+  - load result remained healthy (`Compat: full`, `PrimaryError: NONE`, parser stage `runtime-ready`)
+- Runtime contract check:
+  - default behavior now computes static skinning ON for MIQ with both skin and skeleton payload presence.
+  - explicit `ANIMIQ_MIQ_ENABLE_STATIC_SKINNING=0` still disables skinning globally.
+
+## 2026-03-06 - MIQ typed-v4 canonical material contract + depth/shadow pass slice
+
+### Summary
+
+Completed the next renderer-side parity slice by uplifting MIQ canonical material handling to `typed-v4`, wiring pass metadata (`keyword_set/render_state/pass_flags`), and expanding native runtime topology with `DepthOnly` + `ShadowCaster` passes under a stability-first policy.
+
+### Changed
+
+- typed-v4 contract and canonicalization:
+  - `include/animiq/avatar/avatar_package.h`
+  - `src/avatar/miq_loader.cpp`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - added contract fields: `keyword_set`, `render_state`, `pass_flags`
+  - canonical encoding path moved to `typed-v4` with v4 schema floor and safe defaults.
+- native/host quality + diagnostics expansion:
+  - `include/animiq/nativecore/api.h`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - `src/nativecore/native_core.cpp`
+  - added quality profile `FAST_FALLBACK` and diagnostics fields:
+    - `parity_score`, `variant_id`, `parity_fallback_reason`, `quality_mode`
+- native render pass expansion:
+  - `src/nativecore/native_core.cpp`
+  - added pass-state routing for `DepthOnly` and `ShadowCaster`.
+  - added depth-only blend state (`color write off`) and pass counters (`depth/shadow/base/outline/emission/blend`).
+  - pass scheduling now includes `DepthOnly -> ShadowCaster -> Base -> Outline -> Emission -> Blend`.
+  - `FastFallback` policy continues to reduce high-cost pass usage for stability.
+- parity diagnostics enrichment:
+  - added fallback reason hints: `missing_depth_pass`, `missing_shadow_pass`.
+- documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_miq_typed_v4_and_depth_shadow_pass_slice.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore avatar_tool`: PASS
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release`: PASS
+- `NativeAnimiq/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"`: PASS (`Compat: full`, `PrimaryError: NONE`)
+
+## 2026-03-06 - Tracking HybridAuto default + no-input watchdog diagnostics + WPF/WinUI hint hardening
+
+### Summary
+
+Implemented a tracking operability hardening pass for "avatar loaded but tracking not moving" failures by introducing a default hybrid source mode, explicit no-input watchdog diagnostics, and clearer source-age/error hint surfacing in host UIs.
+
+### Changed
+
+- Tracking contract/default update:
+  - `host/HostCore/HostInterfaces.cs`
+    - added `TrackingSourceType.HybridAuto`
+    - extended `TrackingDiagnostics` with:
+      - `IfacialPacketAgeMs`
+      - `WebcamPacketAgeMs`
+  - `host/HostCore/PlatformFeatures.cs`
+    - session default tracking source now `HybridAuto`
+    - normalization fallback default aligned to `HybridAuto`
+  - `host/HostCore/HostController.cs`
+    - initial tracking diagnostics default source aligned to `HybridAuto`
+- Tracking runtime behavior hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - added startup no-input watchdog (`NoActiveInputWarnDelayMs=3000`)
+  - added explicit no-input/runtime warning codes:
+    - `TRACKING_NO_ACTIVE_INPUT_SOURCE`
+    - `TRACKING_IFACIAL_NO_PACKET`
+    - `TRACKING_WEBCAM_RUNTIME_UNAVAILABLE`
+    - `TRACKING_WEBCAM_NO_FRAME`
+  - added per-source packet-age diagnostics publication (`ifacial/webcam`)
+  - source mode behavior made explicit:
+    - `OscIfacial`: OSC-only consumption
+    - `WebcamMediapipe`: webcam-only consumption
+    - `HybridAuto`: OSC primary + webcam fallback/arbitration
+  - tracking stop path now normalizes inactive active-source to `none`
+- WPF/WinUI operator surface update:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - tracking source selector now includes:
+    - `Auto (OSC + Webcam)`
+    - `OSC (iFacialMocap)`
+    - `Webcam (MediaPipe)`
+  - start/config mapping + session restore mapping updated for 3-way source selection
+  - tracking status text now prints:
+    - `ifacial_age`
+    - `webcam_age`
+  - tracking hint mapper now covers new no-input/runtime-unavailable warning codes
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 --no-restore`: FAIL in current environment baseline (`MSB3073`, `XamlCompiler.exe`)
+
+## 2026-03-06 - MIQ Standard/MToon strict parity expansion
+
+### Summary
+
+Expanded `.miq` strict material parity contract to include `Standard` and `MToon` families across Unity/native loader policy, exporter allowlist, and documentation, while preserving hard-fail behavior for unsupported families.
+
+### Changed
+
+- Native `.miq` loader parity contract expansion:
+  - `src/avatar/miq_loader.cpp`
+  - parity/supported family checks now include `standard` and `mtoon`.
+  - shader-name inference now maps:
+    - exact `Standard` -> `standard`
+    - contains `mtoon` -> `mtoon`
+  - unsupported family handling remains strict-fail with parity-contract error.
+- Unity runtime loader parity contract expansion:
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - parity/supported family checks now include `standard` and `mtoon`.
+  - shader-name inference now recognizes `Standard` and `MToon`.
+- Unity extractor/export policy update:
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExportOptions.cs`
+  - `standard/mtoon` materials now emit `typed-v3` baseline payloads.
+  - default strict shader set now includes `Standard`, `MToon`, `lilToon`, `Poiyomi`.
+- Conversion manifest strict allowlist update:
+  - `tools/vrm_to_miq.cpp`
+  - emitted `strictShaderSet` now includes `Standard` and `MToon`.
+- Docs/tests updates:
+  - `docs/formats/miq.md`
+  - `unity/Packages/com.animiq.miq/README.md`
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - `docs/reports/miq_standard_mtoon_strict_parity_expansion_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_miq_standard_mtoon_strict_parity_expansion.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- Source-level consistency checks completed for parity family policy, shader-family inference, and typed-v3 baseline emission paths.
+- Unity runner/native gate scripts were not executed in this shell session.
+
+## 2026-03-06 - Arm deformation hotfix (upper-arm-only runtime policy)
+
+### Summary
+
+Implemented a safety-first rollback for arm pose behavior to resolve severe sleeve/arm deformation observed under chain-coupled arm motion.
+
+- Upper-arm pose remains controllable with existing filtering/tuning behavior.
+- Shoulder/lower-arm/hand automatic pitch coupling is disabled.
+- Preset normalization now neutralizes linked arm pitch channels.
+- Native static skinning arm pose application is reduced to upper-arm nodes only.
+
+### Changed
+
+- Host arm pose coupling rollback:
+  - `host/HostCore/HostController.cs`
+  - removed arm-chain coupling constants and linked-bone write helpers.
+  - `SetPoseOffset(...)` no longer propagates upper-arm pitch to shoulder/lower-arm/hand.
+- Preset safety normalization:
+  - `host/HostCore/PosePresetStore.cs`
+  - linked arm bones (`Left/RightShoulder`, `Left/RightLowerArm`, `Left/RightHand`) now normalize to `pitch=0`.
+  - yaw/roll normalization behavior is preserved.
+- Native arm pose application scope reduction:
+  - `src/nativecore/native_core.cpp`
+  - `ApplyArmPoseToAvatar(...)` now applies runtime pose to:
+    - `LeftUpperArm`
+    - `RightUpperArm`
+  - linked arm poses are treated as neutral in runtime static skinning path.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md`
+  - `docs/reports/wpf_arm_pose_upperarm_only_hotfix_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -v minimal`: PASS
+  - initial sandboxed restore failed with `NU1301` (nuget network restricted), re-run with network-enabled execution passed.
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+
+## 2026-03-06 - Arm chain coupling for natural raise/lower (shoulder/lower-arm/hand)
+
+### Summary
+
+Implemented end-to-end arm-chain coupling so upper-arm raise/lower controls propagate to shoulder/lower-arm/hand for more natural motion, while preserving existing slider UX and backward compatibility of pose preset/session flows.
+
+### Changed
+
+- Host arm control and pose model expansion:
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - added pose bones:
+    - `Left/RightShoulder`
+    - `Left/RightLowerArm`
+    - `Left/RightHand`
+  - kept existing arm sliders (`Both/Left/Right upper-arm pitch`) and added automatic strong coupling:
+    - shoulder pitch = `0.55 * upper-arm pitch`
+    - lower-arm pitch = `0.85 * upper-arm pitch`
+    - hand pitch = `0.45 * upper-arm pitch`
+  - preserved linked bone yaw/roll while updating pitch only.
+  - added per-bone pitch clamp policy:
+    - upper/lower arm: `[-90, +90]`
+    - shoulder/hand: `[-60, +60]`
+    - others: `[-45, +45]`
+- Pose preset compatibility and normalization:
+  - `host/HostCore/PosePresetStore.cs`
+  - default/normalized offset sets now include new arm-chain bones.
+  - older preset payloads remain loadable; missing new bones are backfilled with neutral zero offsets.
+- WPF pose UI synchronization:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - Pose bone selector now exposes new bones.
+  - pitch slider range is dynamically adjusted by selected bone clamp profile.
+- Native pose ABI and static skinning application:
+  - `include/animiq/nativecore/api.h`
+  - `include/animiq/avatar/avatar_package.h`
+  - `src/avatar/vrm_loader.cpp`
+  - `src/nativecore/native_core.cpp`
+  - extended native pose bone IDs and humanoid bone IDs for shoulder/lower-arm/hand.
+  - VRM humanoid-name mapping now recognizes new chain bones.
+  - native static skinning pose application now applies offsets to:
+    - upper arm
+    - shoulder
+    - lower arm
+    - hand
+  - arm pose change-cache tracks all chain bones to avoid unnecessary reskinning work.
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -v minimal`: PASS
+- `cmake --build NativeAnimiq/build --target nativecore --config Debug`: PASS
+- environment note: NuGet restore required network-enabled/elevated execution in this workspace.
+
+## 2026-03-06 - VRM MToon gate hardening (warning-code normalization + GateK/GateL)
+
+### Summary
+
+Completed the first operational slice for staged MToon parity by normalizing VRM-side unresolved material warning codes, exposing MToon slot coverage counters in `avatar_tool`, and extending VRM quality gating with dedicated MToon checks (`GateK`, `GateL`) without destabilizing existing A..J quality contracts.
+
+### Changed
+
+- Native renderer warning-code normalization:
+  - `src/nativecore/native_core.cpp`
+  - unresolved texture warning code is now source-aware:
+    - VRM: `VRM_MATERIAL_TEXTURE_UNRESOLVED`
+    - MIQ: `MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED` (unchanged)
+  - VRM-specific render warning classification expanded:
+    - `VRM_MATERIAL_TEXTURE_UNRESOLVED`
+    - `VRM_MATERIAL_SAFE_FALLBACK_APPLIED`
+    - `VRM_MTOON_MATCAP_UNRESOLVED`
+- Avatar probe output expansion for MToon gating:
+  - `tools/avatar_tool.cpp`
+  - added MToon/VRM diagnostics counters to output:
+    - `MtoonOutlineMaterials`
+    - `MtoonUvAnimMaterials`
+    - `MtoonMatcapMaterials`
+    - `VrmSafeFallbackWarnings`
+    - `VrmMatcapUnresolvedWarnings`
+    - `VrmTextureUnresolvedWarnings`
+  - warning classifier in tool updated to categorize new VRM warnings as render warnings.
+- VRM quality gate extension:
+  - `tools/vrm_quality_gate.ps1`
+  - added parsing of new probe fields.
+  - added `GateK` (strict fail):
+    - fails when any sample reports unresolved/fallback VRM MToon warning counters.
+  - added `GateL` (coverage/observational):
+    - tracks outline/uv/matcap advanced coverage mode (`full|partial|no-advanced-feature-coverage|...`).
+    - currently PASS with mode annotation to avoid breaking baseline cohorts that lack advanced-feature samples.
+  - per-sample summary now prints MToon and VRM warning vectors.
+- Documentation updates:
+  - `docs/reports/vrm_mtoon_gate_hardening_and_stage1_baseline_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build-thumb --config Release --target nativecore avatar_tool`: PASS
+- `avatar_tool sample/개인작11-3.vrm` (field smoke): PASS
+  - new counters emitted:
+    - `MtoonOutlineMaterials`, `MtoonUvAnimMaterials`, `MtoonMatcapMaterials`
+    - `VrmSafeFallbackWarnings`, `VrmMatcapUnresolvedWarnings`, `VrmTextureUnresolvedWarnings`
+- `powershell -ExecutionPolicy Bypass -File tools/vrm_quality_gate.ps1 -SampleDir sample -AvatarToolPath build-thumb/Release/avatar_tool.exe -Profile fixed5`: PASS
+  - `GateA..J`: PASS
+  - `GateK`: PASS
+  - `GateL`: PASS (`mode=no-advanced-feature-coverage`)
+
+## 2026-03-06 - VRM MToon diagnostics precision + safe material fallback + warning priority
+
+### Summary
+
+Implemented a VRM-focused compatibility hardening pass that removes false-positive `MToon matcap` missing-feature reporting, adds renderer-side safe fallback for unresolved VRM material texture references, and improves UI-facing warning selection so render/material issues are surfaced ahead of incidental trailing warnings.
+
+### Changed
+
+- VRM loader MToon diagnostics refinement:
+  - `src/avatar/vrm_loader.cpp`
+  - added per-material `matcap_declared` tracking.
+  - `MToon matcap` is no longer added to `missing_features` when matcap is simply unused by the asset.
+  - added explicit warning/code path for declared-but-unresolved matcap:
+    - warning: `W_MTOON: VRM_MTOON_MATCAP_UNRESOLVED: materials=<n>`
+    - code: `VRM_MTOON_MATCAP_UNRESOLVED`
+- Native renderer VRM material safe fallback:
+  - `src/nativecore/native_core.cpp`
+  - added unresolved texture tracking per slot (`base/normal/rim/emission/matcap/uvAnimationMask`) during material resource build.
+  - for VRM sources, unresolved slots now trigger conservative fallback values instead of unstable shading contribution.
+  - fallback emits dedicated warning code:
+    - `VRM_MATERIAL_SAFE_FALLBACK_APPLIED`
+  - existing MIQ fallback path remains intact and still reports `MIQ_MATERIAL_FALLBACK_APPLIED`.
+- Warning metadata/selection priority:
+  - `src/nativecore/native_core.cpp`
+  - warning classifier updated to recognize VRM render fallback/mtoon unresolved codes under render category.
+  - `FillAvatarInfo` now prefers render/material-oriented warning code/message for `last_warning_code` and `last_warning` when available, reducing diagnostic masking by non-render trailing warnings.
+- Documentation updates:
+  - `docs/reports/vrm_mtoon_diagnostics_and_safe_material_fallback_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build-thumb --config Release --target nativecore avatar_tool`: PASS
+- `NativeAnimiq/build-thumb/Release/avatar_tool.exe sample/개인작11-3.vrm`: PASS
+  - `MissingFeatures: 2`
+  - `LastMissingFeature: MToon uv animation`
+  - `MToon matcap` no longer reported as generic missing feature.
+- `NativeAnimiq/build-thumb/Release/avatar_tool.exe sample/Kikyo_FT Variant.vrm`: PASS
+  - no regression to `MToon matcap` missing-feature reporting.
+
+## 2026-03-06 - WPF UI v4 operation hub + first-broadcast timing telemetry
+
+### Summary
+
+Implemented a WPF operator-flow optimization pass focused on reducing time-to-first-broadcast by introducing a compact action hub for the startup path and adding HostCore-backed automatic first-broadcast timing telemetry (latest + rolling median) exposed in UI/runtime diagnostics.
+
+### Changed
+
+- HostCore diagnostics/timing extensions:
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/HostController.cs`
+  - `DiagnosticsSnapshot` extended with UI flow timing fields:
+    - `UiFlowTimingVersion`
+    - `FirstBroadcastStartMs`
+    - `FirstBroadcastStartTimestamp`
+  - added first-broadcast timing lifecycle:
+    - start at `Initialize`
+    - complete on first successful `StartSpout` or `StartOsc`
+    - reset on shutdown/failed initialize
+  - added UI-facing timing accessor:
+    - `GetUiFlowTimingSnapshot()`
+- WPF operation hub and visibility polish:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added quick action hub controls in Getting Started:
+    - `QuickInitializeButton`
+    - `QuickLoadAvatarButton`
+    - `QuickStartBroadcastButton`
+  - added fixed block-reason panel (`ActionBlockReasonText`).
+  - added first-broadcast timing text surfaces (`FirstBroadcastTimingText`, `FlowMedianTimingText`).
+  - wired quick action handlers and unified primary output-start path via shared quick-start branch.
+  - changed render advanced section default behavior to collapsed-first to prioritize startup-critical controls.
+- Documentation updates:
+  - `docs/reports/wpf_ui_v4_operation_hub_and_flow_timing_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_ui_v4_operation_hub_and_flow_timing.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore`: PASS
+
+## 2026-03-06 - Tracking threshold UX completion + native submit error surfacing + WinUI repro hints
+
+### Summary
+
+Completed host-side tracking operability hardening by wiring parse/drop warn thresholds into both WPF and WinUI control surfaces, preserving native tracking/expression submit failures through tick diagnostics, and refining WinUI minimal repro failure classification output with explicit hints.
+
+### Changed
+
+- HostCore diagnostics preservation:
+  - `host/HostCore/HostController.cs`
+  - ensured same-tick native submit errors are not overwritten by service snapshot refresh.
+  - covered native error surfaces:
+    - `NC_SET_TRACKING_FRAME_*`
+    - `NC_SET_EXPRESSION_WEIGHTS_*`
+- WPF tracking UX completion:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `Parse Warn` / `Drop Warn` inputs, clamp/normalize on start, and persisted-default restore.
+  - status text now includes configured thresholds (`parse_warn`, `drop_warn`) and actionable hint mapping from error codes.
+- WinUI tracking UX completion:
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - added same threshold controls + start wiring + persisted restore + status threshold display/hints.
+- WinUI repro classifier refinement:
+  - `tools/winui_xaml_min_repro.ps1`
+  - added `FailureHints` summary output and expanded classification signals (Windows SDK / WindowsAppSDK / NuGet / XAML compiler paths).
+- Release board status sync:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_board_20.md`
+  - item 10 and 11 moved to `DONE`, item 15 wording narrowed to remaining doc/contract sweep.
+- Report indexing:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release --no-restore`: FAIL (`NU1301`, `api.nuget.org:443` reachability in current environment)
+- `powershell -ExecutionPolicy Bypass -File tools/winui_xaml_min_repro.ps1 -NoRestore`: FAIL (classified summary emitted with `FailureClass=WINDOWSAPPSDK_RESTORE_INCOMPLETE`)
+
+## 2026-03-06 - MIQ poiyomi typed material parity extension (unity/runtime tests)
+
+### Summary
+
+Extended the MIQ parity path so Poiyomi materials emit richer typed-v3 entries aligned with existing lilToon advanced material transport, improving cross-family visual consistency without changing wire format.
+
+### Changed
+
+- Unity extractor parity uplift for Poiyomi:
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - expanded Poiyomi typed extraction from minimal baseline to advanced typed coverage:
+    - typed colors: `_ShadeColor`, `_EmissionColor`, `_RimColor`, `_MatCapColor`
+    - typed floats: `_BumpScale`, `_RimFresnelPower`, `_RimLightingMix`, `_EmissionStrength`, `_MatCapBlend`
+    - typed textures: `shade`, `normal`, `emission`, `rim`, `matcap`
+  - feature flags now set for Poiyomi advanced signals:
+    - `FeatureShade`
+    - `FeatureNormalMap`
+    - `FeatureEmission`
+    - `FeatureRim`
+    - `FeatureMatCap`
+- Runtime loader regression coverage:
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - added test `TryLoad_TypedMaterialParams_AdvancedPoiyomiEntries_Parses` validating:
+    - `shader_family=poiyomi` accepted under parity contract
+    - advanced typed keys parsed (`_MatCapBlend`, `_EmissionStrength`, `_MatCapColor`, `slot=matcap`)
+    - no unsupported-family warning raised for Poiyomi.
+- Documentation update:
+  - `docs/reports/miq_poiyomi_typed_material_parity_extension_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_miq_poiyomi_typed_material_parity_extension.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- Unity runtime test source updated with Poiyomi advanced typed parse assertion.
+- Unity EditMode/PlayMode tests were not executed in this shell-only environment.
+
+## 2026-03-06 - MIQ full parity contract enforcement (Unity/native loader policy)
+
+### Summary
+
+Hardened MIQ material-loading policy toward full parity operation by enforcing a strict shader-family contract (`liltoon`/`poiyomi`), canonicalizing material payloads to `typed-v3` during load, and promoting fallback-prone unresolved typed texture conditions from warning-only behavior to load-failure behavior.
+
+### Changed
+
+- Unity runtime diagnostics and policy:
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - added `ParityContractViolation` error code.
+  - expanded diagnostics with migration/parity state:
+    - `MigrationApplied`
+    - `SourceFormatVersion`
+    - `SourceMaterialParamEncoding`
+    - `CriticalParityViolation`
+  - added canonicalization stage to force material contract:
+    - shader family normalized/inferred, parity families only (`liltoon`/`poiyomi`)
+    - legacy/typed-v2 payloads auto-migrated to canonical `typed-v3`
+    - required `_BaseColor` typed field ensured
+  - unresolved typed texture refs now hard-fail with parity violation.
+- Unity extractor/export defaults:
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExportOptions.cs`
+  - Poiyomi family now emits typed-v3 baseline and strict default shader set reduced to lilToon/Poiyomi.
+- Native loader parity alignment:
+  - `src/avatar/miq_loader.cpp`
+  - added parity-family-only guard and shader-family inference from shader name.
+  - canonicalized material encoding to `typed-v3` with minimal required typed payload defaults.
+  - unresolved typed texture refs now surface as primary load error.
+- Runtime tests and docs:
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - `unity/Packages/com.animiq.miq/README.md`
+  - updated expectations from warning-based fallback to strict parity failure/migration behavior.
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_miq_full_parity_contract_enforcement.md`
+    - index/summary entries updated.
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore avatar_tool`: PASS
+- `NativeAnimiq/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"`: PASS (loader now reports strict parity failure for non-allowed shader family as intended)
+
+## 2026-03-06 - WPF UI v3 refinement (shortcuts + focus routing + workspace persistence)
+
+### Summary
+
+Extended the WPF operator UI with productivity-oriented controls and continuity behavior by adding keyboard shortcuts, rail keyboard navigation, section-aware focus routing, and HostCore-backed workspace state restore (section/theme/diagnostics pin). This iteration builds directly on v2 without changing runtime contracts.
+
+### Changed
+
+- HostCore session persistence expansion:
+  - `host/HostCore/PlatformFeatures.cs`
+  - `SessionPersistenceModel` upgraded to version `8` with:
+    - `UiActiveSection`
+    - `UiThemeMode`
+    - `UiDiagnosticsPinned`
+  - normalization and legacy fallback path updated with safe defaults.
+- HostCore UI workspace persistence API:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added:
+    - `GetUiWorkspaceState()`
+    - `SetUiWorkspaceState(activeSection, themeMode, diagnosticsPinned)`
+  - integrated with existing session snapshot persistence.
+- WPF keyboard/accessibility/flow polish:
+  - `host/WpfHost/MainWindow.xaml`
+  - nav button focus-ring trigger style, shortcut tooltips on key controls.
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added core shortcuts (`Ctrl+1..6`, `Ctrl+D`, `Ctrl+T`).
+  - added rail keyboard traversal (`Up/Down/Enter/Space`).
+  - added section-primary focus routing after section switch and startup restore.
+  - startup now restores section/theme/diagnostics pin from HostCore session state.
+  - UI workspace state is persisted on section/theme/diagnostics changes.
+- Documentation:
+  - `docs/reports/wpf_ui_v3_shortcuts_focus_persistence_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
+## 2026-03-06 - WPF UI v2 refinement (navigation + dual theme + diagnostics collapse policy)
+
+### Summary
+
+Delivered a second-stage WPF UI refinement to increase visual quality and operational focus: the left rail is now functional with single-section navigation, diagnostics default to collapsed unless forced or pinned, and light/dark theme switching is available at runtime. Also added lightweight section transition animation and reduced hidden-section synchronization overhead.
+
+### Changed
+
+- WPF token expansion:
+  - `host/WpfHost/App.xaml`
+  - added brushes for navigation rail/items, render shell, and status bar to support theme-aware v2 UI behavior.
+- WPF navigation and layout behavior:
+  - `host/WpfHost/MainWindow.xaml`
+  - replaced static left-rail cards with actionable nav buttons.
+  - added diagnostics panel toggle button and theme toggle button.
+  - switched render/status shell color usage to dynamic resource tokens.
+- WPF interaction/state policy updates:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `UiSection`-based single-active section model.
+  - added nav click handlers and active-state styling (`ApplyNavRailState`).
+  - diagnostics visibility now follows `forced OR pinned` policy.
+  - added runtime light/dark token switching (`ApplyThemeResources`).
+  - added low-intensity section transition animation.
+  - reduced unnecessary control sync calls for hidden sections.
+- Documentation:
+  - `docs/reports/wpf_ui_v2_navigation_theme_diagnostics_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
+## 2026-03-06 - ARKit52 quality refinement (hybrid fallback + per-group calibration)
+
+### Summary
+
+Enhanced ARKit52 expression quality with strict-first hybrid fallback resolution, richer ARKit quality diagnostics, and channel-group adaptive calibration tuning. Added native fallback alias application telemetry for ARKit mode to improve operator visibility in partial-mapping scenarios.
+
+### Changed
+
+- Host ARKit52 resolution and diagnostics:
+  - `host/HostCore/Arkit52Channels.cs`
+    - added limited fallback candidate table for critical channels.
+  - `host/HostCore/HostController.cs`
+    - added strict-first ARKit payload resolution with fallback-only-on-miss behavior.
+    - added ARKit quality summary metrics calculation (`strict/fallback/missing/score/stage_ms`).
+  - `host/HostCore/HostInterfaces.cs`
+    - extended `TrackingDiagnostics` with:
+      - `Arkit52StrictCount`
+      - `Arkit52FallbackCount`
+      - `Arkit52TopMissingKeys`
+      - `Arkit52QualityScore`
+      - `Arkit52QualityStageMs`
+- Tracking calibration refinement:
+  - `host/HostCore/TrackingInputService.cs`
+    - channel-group calibration profile split (eye, mouth/jaw, brow/nose/cheek).
+    - adaptive baseline update now uses profile-specific alpha/denominator tuning.
+- Native ARKit fallback telemetry:
+  - `src/nativecore/native_core.cpp`
+    - ARKit-mode fallback alias resolution for selected channels in `nc_set_expression_weights(...)`.
+    - emits `W_ARKIT52_FALLBACK_APPLIED` when fallback aliases are used.
+- WinUI tracking diagnostics display:
+  - `host/WinUiHost/MainWindow.xaml.cs`
+    - status/runtime text now includes strict/fallback counts and quality score/stage timing.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_arkit52_quality_refinement_hybrid_fallback.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- `dotnet build NativeAnimiq/host/WinUiHost/WinUiHost.csproj -c Release --no-restore`: blocked by environment network restriction (`NU1301`, `api.nuget.org`)
+
+## 2026-03-06 - WPF Light Glass Editorial UI refresh
+
+### Summary
+
+Modernized the `WpfHost` operator UI with a light-glass editorial direction by introducing a tokenized style system, a new left-rail + workspace layout, and visibility sync updates for render-only mode while preserving existing behavior contracts.
+
+### Changed
+
+- WPF design-token and global-style refresh:
+  - `host/WpfHost/App.xaml`
+  - added typography/color/spacing tokens and refined global styles for `Window`, `GroupBox`, `Button`, `TextBox`, `ComboBox`, `ListBox`, `TabControl`, `TabItem`, `CheckBox`, `TextBlock`, `ProgressBar`.
+- WPF layout modernization:
+  - `host/WpfHost/MainWindow.xaml`
+  - restructured control area with a new `LeftRailPanel` + existing control workspace.
+  - updated splitter, render host framing, debug overlay, and status bar contrast treatment.
+- Render-only mode visibility alignment:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `ApplyModeVisibility()` now toggles `LeftRailPanel` and uses updated control/splitter widths.
+- Documentation:
+  - `docs/reports/wpf_light_glass_editorial_ui_refresh_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_light_glass_editorial_ui_refresh.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
+## 2026-03-06 - ARKit52 strict full-support pipeline (VRM + MIQ)
+
+### Summary
+
+Implemented strict ARKit52 end-to-end support wiring with host/native coverage diagnostics and non-fatal missing-channel handling. Runtime now builds ARKit52 expression bindings per avatar from blendshape payloads and applies direct ARKit channels without legacy fallback interference when ARKit binding mode is active.
+
+### Changed
+
+- HostCore ARKit52 canonical source + diagnostics:
+  - `host/HostCore/Arkit52Channels.cs` (new shared channel source and normalizer)
+  - `host/HostCore/TrackingInputService.cs` (uses shared ARKit52 channel source)
+  - `host/HostCore/HostInterfaces.cs` (`TrackingDiagnostics` expanded with ARKit52 coverage fields)
+  - `host/HostCore/HostController.cs` (per-tick ARKit52 submitted/missing coverage computation)
+- Host UI status visibility:
+  - `host/WpfHost/MainWindow.xaml.cs` (tracking status/runtime text includes ARKit52 coverage)
+  - `host/WinUiHost/MainWindow.xaml.cs` (tracking status/runtime text includes ARKit52 coverage)
+- NativeCore ARKit52 strict bind generation + precedence update:
+  - `src/nativecore/native_core.cpp`
+  - builds ARKit52 expression/bind map at avatar load from blendshape payloads
+  - warns with `W_ARKIT52_MISSING_BIND` when channels are missing
+  - disables legacy blink/jaw/smile alias fallback when ARKit52 bindings are present
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_arkit52_strict_full_support_pipeline.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/HostCore/HostCore.csproj -c Release`: blocked by NU1301 (NuGet network access restricted in current environment)
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: blocked by same environment restriction
+
+## 2026-03-06 - WPF arm pose refinement + suggested preset automation + native update optimization
+
+### Summary
+
+Upgraded T-pose arm raise/lower control quality with host-side filtering/tuning, added suggested arm preset automation for repetitive operator flows, and optimized native arm pose updates to skip redundant re-skinning work on negligible input deltas.
+
+### Changed
+
+- HostCore arm pose refinement:
+  - `host/HostCore/HostUiState.cs`
+    - added `ArmPoseTuningSettings`, `SuggestedArmPreset`.
+  - `host/HostCore/HostController.cs`
+    - added upper-arm pitch filtering pipeline (hard/soft clamp, deadband, smoothing, rate limit).
+    - added `ConfigureArmPoseTuning(...)`.
+    - added suggested arm preset generation/apply flow from recent arm pose history.
+  - `host/HostCore/PosePresetStore.cs`
+    - updated arm pitch normalization range to preserve `[-90, +90]`.
+- WPF UI integration:
+  - `host/WpfHost/MainWindow.xaml`
+    - added arm quality controls (smoothing + deadband).
+    - added suggested arm preset controls (apply/save).
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - wired tuning change handlers and suggested preset apply/save actions.
+    - integrated state sync and UI enable policy with existing render/pose flows.
+- Native optimization:
+  - `src/nativecore/native_core.cpp`
+    - added per-avatar arm pose cache state.
+    - `ApplyArmPoseToAvatar(...)` now short-circuits when arm pose delta is below threshold.
+    - clears arm pose cache on init/shutdown/unload/resource lifecycle paths.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md`
+  - `docs/reports/wpf_arm_pose_refinement_and_suggestion_optimization_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+
+## 2026-03-06 - WPF arm pose slider wiring (both + per-arm pitch)
+
+### Summary
+
+Completed the WPF host-side interaction wiring for T-pose arm adjustment so operators can control arm pitch with both synchronized and per-arm slider flows while preserving existing pose preset/controller contracts.
+
+### Changed
+
+- WPF pose interaction wiring:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `ArmPoseSlider_ValueChanged(...)` to support:
+    - `Both` pitch apply to left/right upper arm
+    - independent left/right pitch apply
+    - combined slider value recompute from per-arm values
+  - added null-safe guards and existing busy/sync gating integration (`_isSyncingPoseUi`, `OperationState.IsBusy`).
+- Pose apply helper and state synchronization:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added `ApplyArmPitchOffset(...)` helper that updates pitch while preserving current Yaw/Roll.
+  - extended `SyncPoseControlsFromState()` to keep arm sliders aligned with `PoseOffsets`.
+  - extended `ApplySelectedPoseOffset()` so legacy arm-bone edits synchronize arm slider UI.
+- Render control availability alignment:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - arm sliders now follow existing render-control enable policy.
+- Documentation updates:
+  - `docs/reports/weekly/2026-W10/2026-03-06_wpf_arm_pose_slider_wiring.md`
+  - `docs/reports/wpf_arm_pose_slider_wiring_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq/build --config Release --target nativecore`: PASS
+- `dotnet build NativeAnimiq/host/WpfHost/WpfHost.csproj -c Release`: PASS (0 warnings, 0 errors)
+
+## 2026-03-06 - VRM SpringBone runtime refinement + MToon advanced runtime application
+
+### Summary
+
+Implemented a runtime-focused VRM quality refinement slice that upgraded secondary motion behavior from single-axis deformation to bounded 2-axis response, and promoted MToon advanced fields (outline/uv-animation) from payload-only extraction into active render-path behavior.
+
+### Changed
+
+- SpringBone runtime refinement in nativecore:
+  - `src/nativecore/native_core.cpp`
+  - chain runtime model upgraded to 2-axis offsets/velocities (`offset_x/y`, `velocity_x/y`).
+  - replaced oscillation-biased single-axis solve with damped target solve using tracked head influence.
+  - added 2D radial length constraint and stability damping on constraint hit.
+  - upgraded mesh deformation from y-only to x/y with height-based influence weighting.
+  - unsupported collider classifier adjusted to treat only `Unknown` as unsupported in runtime warning path.
+- MToon advanced runtime application:
+  - `src/nativecore/native_core.cpp`
+  - GPU material runtime state expanded with:
+    - outline (`outline_width`, `outline_lighting_mix`)
+    - uv animation (`uv_anim_scroll_x/y`, `uv_anim_rotation`, `uv_anim_enabled`)
+    - uv animation mask texture SRV (`uv_anim_mask_srv`)
+  - renderer pipeline expanded with front-cull raster state for outline pass.
+  - shader constant contract expanded with:
+    - `outline_params`
+    - `uv_anim_params`
+    - `time_params`
+  - pixel shader extended with time-based UV scroll/rotation and mask-weighted UV blend (`tex5`).
+  - render loop extended with runtime clock accumulation and dedicated outline draw pass.
+- Typed param/texture wiring for advanced MToon:
+  - `src/nativecore/native_core.cpp`
+  - added extraction/mapping for:
+    - `_OutlineWidth`
+    - `_OutlineLightingMix`
+    - `_UvAnimScrollX`
+    - `_UvAnimScrollY`
+    - `_UvAnimRotation`
+  - added typed texture ingestion for `uvAnimationMask` / `_UvAnimMaskTex` with unresolved-texture diagnostics.
+- SpringBone missing-feature reporting correction:
+  - `src/avatar/vrm_loader.cpp`
+  - `SpringBone runtime simulation` missing feature is now reported only when metadata exists but runtime payload extraction is partial.
+  - payload-ready spring path now emits explicit readiness warning instead of unconditional missing feature.
+- Reports:
+  - `docs/reports/vrm_springbone_mtoon_runtime_refinement_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_springbone_mtoon_runtime_refinement.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build .\\build --config Release --target nativecore avatar_tool`: PASS
+- `powershell -ExecutionPolicy Bypass -File .\\tools\\vrm_quality_gate.ps1 -Profile fixed5`: PASS (GateA..GateJ)
+- `avatar_tool ..\\sample\\NewOnYou.vrm`: Spring payload-ready path validated (`MissingFeatures: 3`)
+- `avatar_tool \"..\\sample\\Kikyo_FT Variant.vrm\"`: no-payload path validated (`MissingFeatures: 4`)
+
+## 2026-03-06 - Onboarding KPI diagnostics summary automation (3-minute success rollup)
+
+### Summary
+
+Added automation to compute and export onboarding KPI rollups from telemetry events so first-run success metrics are immediately available in diagnostics artifacts and offline report scripts.
+
+### Changed
+
+- Host diagnostics bundle export expansion:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added `onboarding_kpi_summary.txt` to diagnostics bundle payload.
+  - wired onboarding KPI rollup generation in `ExportDiagnosticsBundle(...)`.
+- Host telemetry aggregation helpers:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added in-process KPI rollup builder:
+    - session cardinality based on `session_started_at`
+    - output-started session count
+    - within-3-minute success session count/rate
+    - output milestone counters
+  - appended repro command guidance for KPI script execution.
+- Telemetry snapshot contract:
+  - `host/HostCore/PlatformFeatures.cs`
+  - added `TelemetryService.Snapshot()` for safe read-only event copies used by KPI aggregation.
+- Offline KPI report script:
+  - `tools/onboarding_kpi_summary.ps1`
+  - reads telemetry JSON array, computes onboarding funnel/KPI summary, writes:
+    - `build/reports/onboarding_kpi_summary.json`
+    - `build/reports/onboarding_kpi_summary.txt`
+
+### Verification
+
+- `dotnet build host\\WpfHost\\WpfHost.csproj -c Release` PASS
+- `powershell -ExecutionPolicy Bypass -File .\\tools\\onboarding_kpi_summary.ps1 -TelemetryPath .\\build\\reports\\telemetry_latest.json` PASS (sample telemetry smoke)
+
+### Documentation
+
+- `docs/reports/onboarding_kpi_summary_automation_2026-03-06.md`
+- `docs/reports/weekly/2026-W10/2026-03-06_onboarding_kpi_summary_automation.md`
+- `docs/reports/weekly/2026-W10/INDEX.md`
+
+## 2026-03-06 - WPF consumer UI onboarding uplift + 3-minute success telemetry instrumentation
+
+### Summary
+
+Implemented a WPF-first consumer UI uplift centered on first-run completion, including a policy-driven onboarding state model, a single primary CTA flow with output fallback behavior, app-wide visual style tokens, and telemetry milestones to measure `output start within 3 minutes`.
+
+### Changed
+
+- Host UI state/policy contract expansion:
+  - `host/HostCore/HostUiState.cs`
+  - `host/HostCore/HostUiPolicy.cs`
+  - added onboarding contract types (`HostOnboardingStep`, `HostPrimaryActionKind`, `HostOnboardingState`).
+  - added `BuildOnboardingState(...)` decision flow and consumer-facing action copy.
+- WPF onboarding UX and beginner-mode simplification:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - replaced quick-start block with onboarding card, primary CTA, step progress, and recovery panel.
+  - wired CTA routing (`Initialize -> Load Avatar -> Start Output`) with Spout-first then OSC fallback attempt in CTA path.
+  - reduced beginner cognitive load by hiding Session/Render/Outputs groups outside advanced mode.
+- WPF visual system baseline:
+  - `host/WpfHost/App.xaml`
+  - introduced app-wide color/style tokens and implicit styles for window, cards/groups, buttons, text inputs, combos, and text blocks.
+- Onboarding KPI telemetry instrumentation:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/HostController.cs`
+  - added onboarding milestone timestamps and success flag fields:
+    - `session_started_at`
+    - `initialized_at`
+    - `avatar_loaded_at`
+    - `output_started_at`
+    - `within_3min_success`
+  - added milestone event stream (`onboarding_milestone`) with step-specific markers.
+
+### Verification
+
+- `dotnet build host\\WpfHost\\WpfHost.csproj -c Release` PASS
+
+### Documentation
+
+- `docs/reports/wpf_consumer_ui_onboarding_and_telemetry_2026-03-06.md`
+- `docs/reports/weekly/2026-W10/2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md`
+- `docs/reports/weekly/2026-W10/INDEX.md`
+
+## 2026-03-06 - VRM SpringBone runtime uplift + MToon advanced typed binding expansion
+
+### Summary
+
+Implemented a VRM-focused compatibility uplift that expanded SpringBone runtime readiness and diagnostics, upgraded the native secondary motion path for practical stability, and extended MToon advanced typed parameter extraction/binding with clearer missing-feature granularity.
+
+### Changed
+
+- native API/interop diagnostics expansion:
+  - `include/animiq/nativecore/api.h`
+  - `host/HostCore/NativeCoreInterop.cs`
+  - added Spring runtime counters (`active/corrected/disabled/unsupported`, `avg_substeps`) and MToon diagnostics counters (`advanced/fallback`) to native avatar/spring info contracts.
+- native runtime secondary motion quality pass:
+  - `src/nativecore/native_core.cpp`
+  - introduced fixed-step (`120Hz`) bounded substep integration for secondary motion chains.
+  - added offset-length stabilization and unsupported collider chain diagnostics.
+  - improved chain-to-mesh resolution with rig-bone-first matching plus existing heuristic fallback.
+  - split VRM-specific warning contracts:
+    - `VRM_SPRING_AUTO_CORRECTED`
+    - `VRM_SPRING_CHAIN_DISABLED`
+    - `VRM_SPRING_UNSUPPORTED_COLLIDER`
+- VRM loader SpringBone payload extraction:
+  - `src/avatar/vrm_loader.cpp`
+  - added runtime payload extraction into:
+    - `physics_colliders`
+    - `springbone_payloads`
+  - covers VRM1 (`VRMC_springBone`) and legacy VRM0 (`secondaryAnimation`) paths.
+- MToon advanced typed parameter uplift:
+  - `src/avatar/vrm_loader.cpp`
+  - expanded typed bindings for matcap/outline/uv-animation related fields and textures.
+  - normalized VRM material payload typed contract defaults (`typed-v1`, schema version `1`).
+  - missing feature reporting now includes:
+    - `MToon outline`
+    - `MToon uv animation`
+    - `MToon matcap`
+- tooling and gate expansion:
+  - `tools/avatar_tool.cpp`
+  - `tools/vrm_quality_gate.ps1`
+  - avatar diagnostics output now includes spring payload/collider and MToon advanced/fallback counts.
+  - VRM quality gate expanded with:
+    - GateH (spring payload completeness)
+    - GateI (spring runtime activation readiness)
+    - GateJ (spring payload stability guard)
+- implementation report:
+  - `docs/reports/vrm_springbone_mtoon_runtime_uplift_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_vrm_springbone_mtoon_runtime_uplift.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+
+## 2026-03-06 - Native secondary motion v1 runtime execution (VRC-first, auto-correct, frame-pass integration)
+
+### Summary
+
+Implemented the first native runtime execution slice for MIQ physics by adding a frame-time secondary motion solver pass in `nativecore` with VRC-first chain priority, automatic data correction, and non-fatal warning diagnostics.
+
+### Changed
+
+- native runtime secondary motion state/model:
+  - `src/nativecore/native_core.cpp`
+  - added per-avatar runtime state (`secondary_motion_states`) and chain runtime model.
+  - tracks chain activation/correction/disable counts and one-time warning emission.
+- VRC-first chain policy + auto-correction:
+  - `src/nativecore/native_core.cpp`
+  - PhysBone chains are prioritized when both PhysBone/SpringBone exist.
+  - SpringBone chains are disabled under mixed input when VRC chains are present.
+  - automatic correction behavior:
+    - clamps invalid numeric params (radius/stiffness/drag/gravity).
+    - backfills missing bone path from root path.
+    - marks unresolved collider refs and unresolved target meshes.
+  - emits stable runtime warning codes:
+    - `MIQ_PHYSICS_AUTO_CORRECTED`
+    - `MIQ_PHYSICS_CHAIN_DISABLED`
+- render frame integration:
+  - `src/nativecore/native_core.cpp`
+  - inserted secondary motion pass after expression morph application in render loop.
+  - uses `delta_time_seconds` with bounded dt for stable 60fps-oriented integration.
+  - applies per-chain y-offset deformation directly to dynamic vertex buffers each frame.
+- lifecycle consistency:
+  - `src/nativecore/native_core.cpp`
+  - clears secondary motion state on:
+    - `nc_initialize`
+    - `nc_shutdown`
+    - `nc_load_avatar` (handle state reset)
+    - `nc_unload_avatar`
+    - `nc_create_render_resources`
+    - `nc_destroy_render_resources`
+- detailed implementation report:
+  - `docs/reports/native_secondary_motion_v1_runtime_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_native_secondary_motion_v1_runtime.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+
+## 2026-03-06 - MIQ physics typed section rollout (SpringBone/PhysBone/Collider metadata)
+
+### Summary
+
+Implemented the first end-to-end MIQ physics transport slice by introducing typed physics sections (`0x0018/0x0019/0x001A`), wiring Unity export/import/runtime parsing, and aligning native loader contracts so physics metadata survives conversion while unsupported runtime simulation degrades with explicit warnings.
+
+### Changed
+
+- MIQ schema and docs expansion:
+  - `docs/formats/miq.md`
+  - added manifest keys:
+    - `physicsSchemaVersion`
+    - `physicsSource` (`none|vrm|vrc|mixed`)
+    - `hasSpringBones`
+    - `hasPhysBones`
+  - added section layout definitions:
+    - `0x0018` SpringBone typed payload
+    - `0x0019` PhysBone typed payload
+    - `0x001A` Physics collider typed payload
+- Unity runtime data model + loader:
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - added physics payload types and manifest fields.
+  - loader now parses sections `0x0018/0x0019/0x001A`.
+  - added compatibility diagnostics:
+    - `MIQ_PHYSICS_REF_MISSING`
+    - `MIQ_PHYSICS_COMPONENT_UNAVAILABLE`
+    - `MIQ_PHYSICS_SCHEMA_INVALID`
+- Unity exporter + extractor + importer:
+  - `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqImporter.cs`
+  - exporter writes physics typed sections and manifest flags/source.
+  - extractor added reflection-based metadata extraction for PhysBone/SpringBone/Collider families (SDK-optional).
+  - importer attempts reflection-based component rehydration when target component types are available; otherwise records non-fatal warnings and keeps import flow alive.
+- Native loader contract + parser alignment:
+  - `include/animiq/avatar/avatar_package.h`
+  - `src/avatar/miq_loader.cpp`
+  - added native physics payload structs and parse path for `0x0018/0x0019/0x001A`.
+  - added collider reference validation and warning path parity.
+  - added explicit runtime limitation signal:
+    - `MIQ_PHYSICS_COMPONENT_UNAVAILABLE: runtime_simulation_not_implemented`
+- Test coverage expansion:
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - `unity/Packages/com.animiq.miq/Tests/Editor/MiqExporterTests.cs`
+  - added runtime parse/diagnostic tests for physics sections.
+  - added exporter round-trip test covering physics payload persistence.
+- Detailed implementation report:
+  - `docs/reports/miq_physics_typed_sections_and_pipeline_2026-03-06.md`
+  - `docs/reports/weekly/2026-W10/2026-03-06_miq_physics_typed_sections_and_pipeline.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+
+## 2026-03-06 - MIQ lilToon parity material extension (unity/native)
+
+### Summary
+
+Extended the `.miq` lilToon quality path by adding high-impact typed material coverage (matcap/emission-strength family), syncing Unity importer behavior, and expanding native shader/material consumption for stronger Unity-to-native visual parity.
+
+### Changed
+
+- Unity extractor typed-v3 expansion:
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - added lilToon typed entries:
+    - float: `_EmissionStrength`, `_MatCapBlend`
+    - color: `_MatCapColor`
+    - texture slot: `matcap`
+  - extended property aliases and set `FeatureMatCap`.
+- Unity importer parity updates:
+  - `unity/Packages/com.animiq.miq/Editor/MiqImporter.cs`
+  - mapped typed `matcap` slot and `_MatCapColor` / `_EmissionStrength` / `_MatCapBlend` aliases to Unity material properties.
+- Native lilToon shading/material expansion:
+  - `src/nativecore/native_core.cpp`
+  - added GPU material fields/resources for emission/matcap texture paths.
+  - expanded pixel shader constants/resources (`t3` emission, `t4` matcap).
+  - added parse/apply paths for `_EmissionStrength`, `_MatCapBlend`, `_MatCapColor` and related aliases.
+  - unresolved typed texture diagnostics now also cover `emission` and `matcap` slots.
+- Runtime loader test expansion:
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - added advanced lilToon typed parse test for matcap/emission-strength entries.
+- Documentation update:
+  - `docs/reports/miq_liltoon_parity_material_extension_2026-03-06.md`
+  - `docs/INDEX.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq\build --config Release --target nativecore` PASS
+- Unity EditMode tests were updated but not executed in this environment.
+
+## 2026-03-06 - MIQ typed-v3 + UltraParity foundation (native/unity/host/gate)
+
+### Summary
+
+Implemented the foundation layer for high-fidelity MIQ rendering progression by introducing typed-v3 material schema support (with typed-v2 fallback), extending runtime render metrics contracts, wiring an `ultra-parity` quality profile path, and tightening gate/documentation alignment.
+
+### Changed
+
+- typed material schema uplift (`0x0015`):
+  - `include/animiq/avatar/avatar_package.h`
+  - `src/avatar/miq_loader.cpp`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - added `typed_schema_version` and `typed-v3` parse/export path while keeping `typed-v2` compatibility fallback.
+- native runtime API/stats expansion:
+  - `include/animiq/nativecore/api.h`
+  - `src/nativecore/native_core.cpp`
+  - added `NcRenderQualityProfile` (`DEFAULT|BALANCED|ULTRA_PARITY`) and extended `NcRuntimeStats` with:
+    - `gpu_frame_ms`
+    - `cpu_frame_ms`
+    - `material_resolve_ms`
+    - `pass_count`
+- host interop/profile/diagnostics wiring:
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/DiagnosticsModel.cs`
+  - `host/HostCore/PlatformFeatures.cs`
+  - added `ultra-parity` profile mapping and propagated new runtime metrics into diagnostics + rolling CSV export.
+- gates/docs updates:
+  - `tools/render_perf_gate.ps1` (`ultra-parity` profile thresholds)
+  - `tools/miq_render_regression_gate.ps1` (snapshot parity requirement option + shader parity warning handling)
+  - `docs/formats/miq.md` (`typed-v2/v3` layout wording)
+  - `docs/reports/miq_typed_v3_ultra_parity_foundation_2026-03-06.md`
+  - `docs/INDEX.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq\build --config Release --target nativecore avatar_tool` PASS
+- `NativeAnimiq\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"` PASS
+  - `Format=MIQ`, `Compat=full`, `ParserStage=runtime-ready`, `PrimaryError=NONE`
+- `dotnet build host/HostCore/HostCore.csproj -c Release` PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release` PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release` restore PASS, compile FAIL in current environment (`MSB3073`, WinUI `XamlCompiler.exe`)
+- `tools/miq_render_regression_gate.ps1 -FailOnRenderWarnings` run completed; current local sample set (`SampleCount=1`) does not satisfy gate minimum sample policy.
+
+## 2026-03-06 - MIQ 10/10 gate hardening baseline (sample-count + warning-zero + manifest checks)
+
+### Summary
+
+Implemented the baseline guardrails required for a stricter MIQ quality target: minimum sample-count policy, zero-warning enforcement path, and manifest-based expected-result matching.
+
+### Changed
+
+- MIQ warning-code accumulation normalization:
+  - `src/avatar/miq_loader.cpp`
+  - stage/lifecycle warnings (`W_STAGE`) are no longer accumulated into `warning_codes[]`.
+  - generic payload notes without stable code token are excluded from `warning_codes[]`.
+  - compatibility-note codes with suffix `_PARTIAL` are excluded from `warning_codes[]` while text warnings remain.
+  - warning-code extraction now prefers stable second-token codes (for `W_*/E_*` records) when available.
+- MIQ regression gate strictness expansion:
+  - `tools/miq_render_regression_gate.ps1`
+  - default `-MinSampleCount` raised to `10`.
+  - added `-FailOnAnyWarnings` (`GateX6`) to enforce zero warning-code policy.
+  - added sample-manifest contract inputs:
+    - `-SampleManifestPath`
+    - `-FailOnManifestMismatch` (`GateX7`)
+  - summary/json output now includes sample class and expected-result fields.
+- sample-manifest template:
+  - `tools/miq_gate_sample_manifest.example.json`
+  - includes a 10-sample target layout (`normal/boundary/corrupt`) with expected results.
+- docs sync:
+  - `docs/formats/miq.md`
+  - documented warning-code accumulation notes for stage/generic/partial diagnostics.
+
+### Verification
+
+Executed in this environment:
+
+```powershell
+cmake --build NativeAnimiq\build --config Release --target avatar_tool
+NativeAnimiq\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"
+powershell -ExecutionPolicy Bypass -File NativeAnimiq\tools\miq_render_regression_gate.ps1 `
+  -SampleDir D:\dbslxlvseefacedkfb `
+  -AvatarToolPath D:\dbslxlvseefacedkfb\NativeAnimiq\build\Release\avatar_tool.exe `
+  -FailOnRenderWarnings -FailOnAnyWarnings
+```
+
+Result:
+
+- sample-level warning-code set reduced to zero (`WarningCodes=0`, `CriticalWarningCount=0`) on current local sample.
+- strict gate baseline currently fails only at sample-count policy:
+  - `GateX0` FAIL (`MinSampleCount=10`, current `SampleCount=1`)
+  - `GateX1..X7` PASS
+- detailed execution report:
+  - `docs/reports/miq_10of10_gate_execution_2026-03-06.md`
+
+## 2026-03-06 - MIQ warning contract and regression gate upgrade
+
+### Summary
+
+Upgraded MIQ warning quality governance by formalizing warning-code contract mapping and strengthening render regression gate decision logic with structured diagnostics output.
+
+### Changed
+
+- MIQ regression gate enhancements:
+  - `tools/miq_render_regression_gate.ps1`
+  - added `GateX0` minimum sample-count check (`-MinSampleCount`)
+  - parses structured warning metadata (`WarningCodeMeta[n]`) with fallback for legacy output
+  - GateX4 now evaluates critical warning presence via per-row `CriticalWarningCount`
+  - added per-row `failure_reason` classification
+  - expanded summary rows with severity counts and last warning severity/category
+  - added JSON summary artifact output (`-JsonSummaryPath`)
+- MIQ warning contract docs sync:
+  - `docs/formats/miq.md`
+  - documented severity/category mapping and critical warning-code list for tooling/host parity
+- implementation report:
+  - `docs/reports/miq_warning_contract_gate_upgrade_2026-03-06.md`
+
+### Verification
+
+Executed in this environment:
+
+```powershell
+cmake --build NativeAnimiq\build --config Release --target avatar_tool
+cmake --build NativeAnimiq\build --config Release --target nativecore
+NativeAnimiq\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"
+powershell -ExecutionPolicy Bypass -File NativeAnimiq\tools\miq_render_regression_gate.ps1 `
+  -SampleDir D:\dbslxlvseefacedkfb `
+  -AvatarToolPath D:\dbslxlvseefacedkfb\NativeAnimiq\build\Release\avatar_tool.exe `
+  -SummaryPath D:\dbslxlvseefacedkfb\build\reports\miq_render_regression_gate_summary.txt `
+  -JsonSummaryPath D:\dbslxlvseefacedkfb\build\reports\miq_render_regression_gate_summary.json `
+  -FailOnRenderWarnings
+```
+
+Result:
+
+- build targets: PASS
+- MIQ regression gate: PASS
+- artifacts generated:
+  - `build/reports/miq_render_regression_gate_summary.txt`
+  - `build/reports/miq_render_regression_gate_summary.json`
+
+## 2026-03-06 - Tracking latency/lock hardening follow-up
+
+### Summary
+
+Hardened the hybrid tracking runtime with operator-selectable source lock modes, latency profile tuning, and stage-level latency diagnostics for low-latency operation insight.
+
+### Changed
+
+- tracking contract extensions:
+  - `host/HostCore/HostInterfaces.cs`
+  - added:
+    - `TrackingSourceLockMode` (`Auto`, `IfacialLocked`, `WebcamLocked`)
+    - `TrackingLatencyProfile` (`LowLatency`, `Balanced`, `Stable`)
+  - extended `TrackingStartOptions` with lock/profile options.
+  - extended `TrackingDiagnostics` with:
+    - `LatencyAvgMs`, `LatencyP95Ms`
+    - `CaptureStageMs`, `ParseStageMs`, `SmoothStageMs`, `SubmitStageMs`
+    - `SourceLockMode`, `SwitchBlockedReason`
+- tracking persistence and migration:
+  - `host/HostCore/PlatformFeatures.cs`
+  - `TrackingInputSettings` now persists source lock/profile.
+  - session persistence model version raised to `6` with backward normalization defaults.
+- host configuration wiring:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - tracking configuration path now accepts and persists lock/profile values in host session settings.
+- runtime arbitration and latency instrumentation:
+  - `host/HostCore/TrackingInputService.cs`
+  - added source-lock-aware arbitration behavior and blocked-switch reason diagnostics.
+  - added profile-driven smoothing/fallback tuning:
+    - `LowLatency` / `Balanced` / `Stable`
+  - added rolling latency sample collection and p95 computation.
+  - added stage-timing updates across parse/smooth/submit path and exposed through diagnostics snapshot.
+- MediaPipe sidecar packet contract:
+  - `tools/mediapipe_webcam_sidecar.py`
+  - output now includes:
+    - `schema_version`
+    - `source_ts_unix_ms`
+  - HostCore parser now validates schema presence and uses sidecar timestamp in capture-stage estimation.
+- documentation:
+  - `docs/reports/tracking_latency_lock_followup_2026-03-06.md`
+
+### Verification
+
+Executed in this environment:
+
+```powershell
+dotnet build host\HostCore\HostCore.csproj -c Release --no-restore
+dotnet build host\WpfHost\WpfHost.csproj -c Release --no-restore
+```
+
+Result:
+
+- build verification is currently blocked by environment network restrictions:
+  - `NU1301` while resolving repository-signature metadata from `api.nuget.org:443`
+
+## 2026-03-06 - Documentation onboarding optimization and quality gate
+
+### Summary
+
+Optimized documentation for faster onboarding by reducing README scope, rebuilding the documentation index, and adding an automated docs quality gate.
+
+### Changed
+
+- onboarding-first documentation refresh:
+  - `README.md`
+  - reduced long-form operational history and kept a focused quick-start path.
+- docs navigation restructure:
+  - `docs/INDEX.md`
+  - switched to repo-relative links, added recent-reports view, and regenerated full report catalog.
+- docs policy and retention clarity:
+  - `docs/CONTRIBUTING_DOCS.md`
+  - `build/reports/README.md`
+  - restored UTF-8 readable policy docs and aligned report conventions.
+- docs automation:
+  - `tools/docs_quality_gate.ps1`
+  - added checks for report-index coverage, broken local links, absolute-path links, and UTF-8 validity.
+- report authoring baseline:
+  - `docs/reports/TEMPLATE.md`
+  - added a concise default report template.
+
+## 2026-03-06 - Hybrid tracking precision + render/VRM follow-up
+
+### Summary
+
+Completed a follow-up pass across tracking precision, render interaction, and VRM transform handling, with synchronized diagnostics updates and verification evidence.
+
+### Changed
+
+- hybrid tracking precision and diagnostics:
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/TrackingInputService.cs`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `tools/mediapipe_webcam_sidecar.py`
+  - `tools/mediapipe_sidecar_sanity.ps1`
+  - added source arbitration (`iFacial` primary + webcam fallback), adaptive calibration, and expanded tracking diagnostics (`active source`, `fallback count`, `calibration state`, `confidence summary`).
+- WPF render direct interaction:
+  - `host/WpfHost/RenderHwndHost.cs`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added right-drag yaw and mouse-wheel FOV direct controls mapped to manual camera mode updates.
+- VRM node transform support:
+  - `src/avatar/vrm_loader.cpp`
+  - added node transform matrix build/apply path for mesh vertex positions, plus warning codes for multi-node references and transform application.
+- native render path depth-state correction:
+  - `src/nativecore/native_core.cpp`
+  - adjusted depth-stencil state selection for the affected draw pass.
+- docs:
+  - `docs/reports/tracking_render_followup_2026-03-06.md`
+  - `docs/INDEX.md`
+
+## 2026-03-06 - Webcam tracking runtime pivot to MediaPipe sidecar
+
+### Summary
+
+Shifted webcam tracking from temporary in-process heuristics to a MediaPipe sidecar runtime contract, including packet ingestion, diagnostics wiring, and gate-level sanity checks.
+
+### Changed
+
+- MediaPipe runtime integration:
+  - `host/HostCore/TrackingInputService.cs`
+  - replaced pseudo frame-analysis path with sidecar process orchestration and JSON packet ingestion.
+  - mapped sidecar pose/expression fields into native tracking submit flow with error-classed diagnostics.
+- Sidecar runtime script:
+  - `tools/mediapipe_webcam_sidecar.py`
+  - added webcam capture + MediaPipe face mesh processing + JSONL frame output.
+- Automation and readiness:
+  - `tools/mediapipe_sidecar_sanity.ps1`
+  - `tools/run_quality_baseline.ps1`
+  - `tools/release_readiness_gate.ps1`
+  - added optional `-EnableMediapipeSanity` gate path and summary artifact emission.
+- Documentation:
+  - `docs/reports/webcam_mediapipe_runtime_integration_2026-03-06.md`
+  - `docs/INDEX.md`
+
+## 2026-03-06 - Avatar render recovery bundle (VRM/MIQ visibility, alpha contract, runtime diagnostics, redeploy stabilization)
+
+### Summary
+
+Completed an end-to-end recovery pass for "avatar not visible / visible-but-broken" regressions observed in both `.miq` and `.vrm` paths, then validated with WPF runtime smoke checks and redeployed `nativecore.dll`.
+
+### Changed
+
+- runtime tracking safety and neutral fallback:
+  - `host/HostCore/TrackingInputService.cs`
+  - `host/HostCore/HostController.cs`
+  - `src/nativecore/native_core.cpp`
+  - stale/no-frame tracking paths now submit neutral data and clamp invalid tracking payloads before native apply.
+- MIQ visibility/culling and diagnostics quality:
+  - `src/nativecore/native_core.cpp`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `tools/avatar_tool.cpp`
+  - `tools/miq_render_regression_gate.ps1`
+  - enforced no-cull fallback for MIQ preview path, fixed warning-code extraction/reporting, and hardened regression gate against partial warning sampling.
+- VRM mesh extraction completeness:
+  - `src/avatar/vrm_loader.cpp`
+  - fixed primitive extraction from "first primitive only" to "all primitives", restoring missing mesh payloads/draw calls for multi-primitive meshes.
+- VRM material binding uplift (core MToon-compatible subset):
+  - `src/avatar/vrm_loader.cpp`
+  - added structured parameter emission for base/shade/emission/rim colors, normal/emission/rim texture refs, bump/rim floats, and alpha hints.
+- alpha contract correction (critical):
+  - `src/avatar/vrm_loader.cpp`
+  - `src/nativecore/native_core.cpp`
+  - `_Cutoff` is now emitted only for `MASK` materials; alpha-mode resolve no longer downgrades `OPAQUE` to `MASK` solely by cutoff presence.
+  - this resolves clothing/opacity corruption where opaque materials were incorrectly clipped.
+- release/deploy scripts and execution-board follow-ups:
+  - `tools/release_gate_dashboard.ps1`
+  - `tools/release_readiness_gate.ps1`
+  - `tools/run_quality_baseline.ps1`
+  - `tools/host_e2e_gate.ps1`
+  - `tools/nuget_mirror_bootstrap.ps1`
+  - `tools/sample_profile_resolve.ps1`
+  - `tools/sidecar_lock_guard.ps1`
+  - `tools/winui_xaml_min_repro.ps1`
+  - `tools/session_state_migration_check/Program.cs`
+  - `tools/tracking_parser_fuzz_gate/Program.cs`
+  - expanded automation for fail-fast gating, diagnostics trend/fuzz/migration checks, and reproducible host publish diagnostics.
+- Unity MIQ SDK/runtime alignment:
+  - `unity/Packages/com.animiq.miq/Editor/MiqExportOptions.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqLz4Codec.cs`
+  - `unity/Packages/com.animiq.miq/Tests/Editor/MiqImporterTests.cs`
+  - `unity/Packages/com.animiq.miq/Tests/Editor/MiqExporterTests.cs`
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - synchronized typed-v2/validation behavior and test coverage with native loader expectations.
+- host UX/feature integration updates:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/PlatformFeatures.cs`
+  - `host/HostCore/HostCore.csproj`
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - `host/WpfHost/MainWindow.xaml`
+  - diagnostics/export and host wiring updated to match new gate/report pipeline.
+- documentation/report updates:
+  - `docs/formats/miq.md`
+  - `docs/reports/release_execution_board_20_2026-03-06.md`
+  - `docs/reports/release_execution_followup_2026-03-06.md`
+  - `docs/reports/avatar_render_recovery_bundle_2026-03-06.md`
+
+### Verification
+
+- `cmake --build NativeAnimiq\\build --config Release --target nativecore` PASS
+- `dist\\wpf\\nativecore.dll` refreshed from latest Release build.
+- `dist\\wpf\\WpfHost.exe` smoke launch PASS (process starts and stays alive).
+- runtime avatar inspection after fixes:
+  - previously invisible avatar became render-visible with restored mesh payload count.
+  - remaining diagnostics narrowed to non-blocking feature gaps (for example, SpringBone simulation not yet implemented), separating visibility regressions from optional runtime features.
+
+## 2026-03-06 - Release execution follow-up (trend/perf/soak/migration/fuzz + diagnostics bundle enrichment)
+
+### Summary
+
+Implemented follow-up automation for the 20-item execution board by adding GateD trend tracking, render numeric gate, avatar soak gate, session migration regression check, tracking parser fuzz gate, and diagnostics bundle payload enrichment.
+
+### Changed
+
+- new automation scripts:
+  - `tools/vsfavatar_gated_trend.ps1`
+  - `tools/render_perf_gate.ps1`
+  - `tools/avatar_load_soak_gate.ps1`
+  - `tools/session_state_migration_check.ps1`
+  - `tools/tracking_parser_fuzz_gate.ps1`
+  - `tools/nuget_mirror_bootstrap.ps1`
+  - `tools/sidecar_lock_guard.ps1`
+  - `tools/host_e2e_gate.ps1`
+  - `tools/winui_xaml_min_repro.ps1`
+  - `tools/sample_profile_resolve.ps1`
+- sample profile split:
+  - `tools/sample_profiles/fixed_set.txt`
+  - `tools/sample_profiles/real_large_set.txt`
+- host tracking diagnostics hardening:
+  - `TrackingStartOptions` / `TrackingInputSettings` include parse/drop warn thresholds
+  - tracking ingest status/error transitions now include threshold-exceeded states
+  - native tracking/expression submit failures now set `TrackingDiagnostics.LastErrorCode`
+- typed-v2 edge validation test expansion:
+  - unsupported shader-family warning coverage
+  - strict missing-required-typed-param failure coverage
+- native renderer MIQ follow-up:
+  - force no-cull raster state for MIQ source meshes
+- new checker helper projects:
+  - `tools/session_state_migration_check/` (dotnet-run migration checker)
+  - `tools/tracking_parser_fuzz_gate/` (dotnet-run fuzz checker)
+- diagnostics bundle enrichment:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `ExportDiagnosticsBundle` now writes:
+    - `repro_commands.txt`
+    - `environment_snapshot.json`
+- baseline integration (opt-in):
+  - `tools/run_quality_baseline.ps1`
+  - added:
+    - `-EnableVsfTrend`
+    - `-EnableRenderPerf`
+    - `-EnableSoak`
+    - `-EnableSessionMigration`
+    - `-EnableTrackingFuzz`
+- execution board/report updates:
+  - `docs/reports/release_execution_board_20_2026-03-06.md`
+  - `docs/reports/release_execution_followup_2026-03-06.md`
+  - `docs/INDEX.md`
+
+## 2026-03-06 - Release execution board + fail-fast gate and dashboard split
+
+### Summary
+
+Converted the 20-item completion discussion into executable automation by adding a release execution board, a fail-fast release checklist script, a WinUI diagnostic matrix summary tool, and a split release-candidate dashboard (`WPF-only` vs `Full`).
+
+### Changed
+
+- release dashboard split status:
+  - `tools/release_gate_dashboard.ps1`
+  - added host-mode aware rows (`Host Publish (mode/WPF/WinUI)`)
+  - added gate summary booleans:
+    - `release_candidate_wpf_only`
+    - `release_candidate_full`
+  - text output now includes:
+    - `ReleaseCandidateWpfOnly`
+    - `ReleaseCandidateFull`
+- new fail-fast release checklist script:
+  - `tools/release_readiness_gate.ps1`
+  - sequence:
+    - `version_contract_check`
+    - `run_quality_baseline`
+    - `publish_hosts` (WPF-first, optional WinUI)
+    - `release_gate_dashboard`
+  - stops immediately on first failure and emits summary report.
+- new WinUI manifest matrix summarizer:
+  - `tools/winui_diag_matrix_summary.ps1`
+  - consumes multiple `winui_diagnostic_manifest.json` inputs and emits convergence summary.
+- execution board/report:
+  - `docs/reports/release_execution_board_20_2026-03-06.md`
+  - captures 20 items with statuses (`DONE/IN_PROGRESS/BLOCKED/TODO`) and runnable commands.
+- detailed execution update report:
+  - `docs/reports/release_automation_execution_update_2026-03-06.md`
+  - records implementation details, commands run, and artifact-level verification results.
+- docs index:
+  - `docs/INDEX.md` report link added.
+
+## 2026-03-06 - VSFAvatar error contract/target gate stabilization
+
+### Summary
+
+Stabilized VSFAvatar sidecar diagnostic output and fixed-set gate parsing contracts so the real failure-class sample (`*11-3.vsfavatar`) is deterministically included and evaluated, while keeping parser/host gate status green.
+
+### Changed
+
+- sidecar output contract:
+  - `tools/vsfavatar_sidecar.cpp`
+  - `serialized_best_candidate_path` now emits `NONE` when empty.
+- fixed sample set expansion:
+  - `tools/vsfavatar_sample_report.ps1`
+  - `tools/vsfavatar_quality_gate.ps1`
+  - `tools/vsfavatar_render_gate.ps1`
+  - added `*11-3.vsfavatar` to `-UseFixedSet` inputs.
+- render gate hardening:
+  - `tools/vsfavatar_render_gate.ps1`
+  - added `TargetSamplePattern` + `GateR3` (target row presence).
+  - summary now includes target metrics:
+    - `target_stage`
+    - `target_primary_error`
+    - `target_mesh_payloads`
+  - parser tightened to count only actual sample blocks.
+- quality gate required-field rule alignment:
+  - `tools/vsfavatar_quality_gate.ps1`
+  - `SidecarSerializedBestPath` now requires field presence (not non-empty string).
+- docs:
+  - `docs/reports/vsfavatar_error_contract_and_target_gate_update_2026-03-06.md` (new)
+  - `docs/INDEX.md` updated.
+
+### Verified
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release` PASS
+- `cmake --build .\build --config Release --target nativecore avatar_tool vsfavatar_sidecar` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet` PASS
+
+## 2026-03-06 - MIQ render breakage guardrail update (static skinning default-off + typed texture diagnostics hardening)
+
+### Summary
+
+Applied a targeted stabilization pass for the MIQ/lilToon render-breakage line by disabling risky static skinning by default, strengthening typed-v2 texture reference resolution, and adding explicit unresolved-texture diagnostics across native and Unity runtime loader paths.
+
+### Changed
+
+- native render guardrail:
+  - `src/nativecore/native_core.cpp`
+  - static skinning application is now opt-in via:
+    - `ANIMIQ_MIQ_ENABLE_STATIC_SKINNING=1|true|yes|on`
+  - default path keeps mesh positions untouched to reduce deformation risk.
+  - adds warning when skin payload exists but static skinning is disabled:
+    - warning: `W_RENDER: MIQ_SKINNING_STATIC_DISABLED: ...`
+    - code: `MIQ_SKINNING_STATIC_DISABLED`
+- native typed texture resolution hardening:
+  - `src/nativecore/native_core.cpp`
+  - typed slot matching and texture payload lookup now use normalized keys (case-insensitive, slash-normalized).
+  - unresolved typed base texture now emits:
+    - warning: `W_RENDER: MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED: ...`
+    - code: `MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED`
+- alpha safety on mixed material paths:
+  - `src/nativecore/native_core.cpp`
+  - `feature_flags` alpha override applies only for `material_param_encoding=typed-v2`.
+  - legacy-json materials continue existing heuristic resolution.
+- native loader warning parity:
+  - `src/avatar/miq_loader.cpp`
+  - added typed texture ref validation against manifest texture refs.
+  - emits `W_PAYLOAD: MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED: ...` for unresolved refs.
+- Unity runtime parity + test:
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - runtime loader now normalizes mesh/texture ref matching and emits typed unresolved texture warning.
+  - added test `TryLoad_TypedMaterialTextureRefMissing_Warns`.
+- docs:
+  - added `docs/reports/miq_render_breakage_guardrail_update_2026-03-06.md`
+  - updated `docs/INDEX.md`
+
+### Verified
+
+- `cmake --build NativeAnimiq\build --config Release --target nativecore avatar_tool` PASS
+- `NativeAnimiq\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"` PASS
+  - `Load succeeded`
+  - `Format=MIQ`
+  - `Compat=full`
+  - `ParserStage=runtime-ready`
+  - `PrimaryError=NONE`
+
+## 2026-03-06 - MIQ typed-v2 material params (lilToon phase1) end-to-end wiring
+
+### Summary
+
+Implemented MIQ `typed-v2` material parameter flow across Unity exporter/runtime loader and native loader/renderer, so lilToon-focused material controls can be consumed without relying only on free-form `shader_params_json`.
+
+### Changed
+
+- typed material data model expansion:
+  - `include/animiq/avatar/avatar_package.h`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - added shader family/encoding/feature flags and typed float/color/texture parameter lists.
+- new MIQ section support:
+  - `src/avatar/miq_loader.cpp`
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - added `0x0015 (MaterialTypedParams)` parser path.
+  - parse diagnostics/warnings added:
+    - `MIQ_MATERIAL_TYPED_SCHEMA_INVALID`
+    - `MIQ_MATERIAL_TYPED_UNSUPPORTED_SHADER_FAMILY`
+    - `MIQ_MATERIAL_TYPED_MISSING_REQUIRED_PARAM`
+- Unity exporter + extractor update:
+  - `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - exporter writes `0x0015` when typed params exist and sets manifest `materialParamEncoding=typed-v2`.
+  - extractor now emits lilToon phase1 typed set:
+    - float: `_Cutoff`, `_BumpScale`, `_RimFresnelPower`, `_RimLightingMix`
+    - color: `_BaseColor`, `_ShadeColor`, `_EmissionColor`, `_RimColor`
+    - texture slots: `base`, `shade`, `normal`, `emission`, `mask`, `rim`
+    - feature flags for cutout/transparent/normal/emission/rim/shade.
+- native renderer typed-priority consumption:
+  - `src/nativecore/native_core.cpp`
+  - typed params now preferred for alpha/cutoff/base-color/shade/emission/base texture lookup.
+  - legacy `shader_params_json` remains fallback.
+- tests/docs:
+  - `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs`
+  - added typed section parse test and corrected unsupported-version test to use version `3`.
+  - `docs/formats/miq.md` updated with v1/v2 wording and `0x0015` payload layout.
+
+### Verified
+
+- `cmake --build NativeAnimiq\build --config Release --target nativecore avatar_tool` PASS
+  - first run had linker lock (`LNK1104` on `avatar_tool.exe`) due running process; resolved by stopping process and rebuilding.
+- `NativeAnimiq\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"` PASS
+  - `Load succeeded`, `Format=MIQ`, `Compat=full`, `ParserStage=runtime-ready`, `PrimaryError=NONE`
+
+## 2026-03-06 - MIQ skinning stabilization + v2 path activation (native/runtime/exporter)
+
+### Summary
+
+Implemented the first execution slice for MIQ avatar quality recovery by fixing mesh collapse on skinned avatars in native rendering and wiring a v2-capable version path across native loader and Unity SDK runtime/export.
+
+### Changed
+
+- native render stabilization:
+  - `src/nativecore/native_core.cpp`
+  - added static skinning application from MIQ `0x0013` payload data (`bind_poses_16xn`, `skin_weight_blob`) before GPU vertex upload
+  - added mesh-name normalization for robust mesh-to-skin payload matching
+  - switched rasterizer cull policy to honor material `double_sided` instead of always forcing no-cull
+- liltoon-focused material uplift (phase-1 quality pass):
+  - `src/nativecore/native_core.cpp`
+  - extended material runtime state with shade/emission controls
+  - added `_ShadeColor` and `_EmissionColor` parse/apply path from `shader_params_json`
+  - expanded shader constant buffer + pixel shader composition for simple toon shade mix and emission add
+- MIQ version path update:
+  - `src/avatar/miq_loader.cpp`
+  - native loader now accepts both `v1` and `v2` MIQ container versions
+  - `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - Unity runtime loader now accepts `v1` and `v2`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - Unity exporter now writes `version=2`
+- docs:
+  - added `docs/reports/miq_skinning_stabilization_and_v2_path_2026-03-06.md`
+  - updated `docs/INDEX.md`
+
+### Verified
+
+- `cmake --build NativeAnimiq\build --config Release --target nativecore avatar_tool` PASS
+- `NativeAnimiq\build\Release\avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작11-3.miq"` PASS
+  - `Format=MIQ`
+  - `Compat=full`
+  - `ParserStage=runtime-ready`
+  - `PrimaryError=NONE`
+
+## 2026-03-05 - VSFAvatar render gate v1 + load-failure error contract refinement
+
+### Summary
+
+Implemented a VSFAvatar v1 renderability bridge (sidecar/loader contract extension) and refined host load-failure diagnostics so runtime unsupported cases retain actionable load-context details.
+
+### Changed
+
+- sidecar contract update:
+  - `tools/vsfavatar_sidecar.cpp`
+  - schema bumped to `v4`, added `render_payload_mode`, `mesh_payload_count`, `material_payload_count`
+  - emits placeholder render payload mode hint for complete/object-table-parsed cases with zero discovered meshes
+- loader bridge update:
+  - `src/avatar/vsfavatar_loader.cpp`
+  - accepts sidecar schema `2/3/4`
+  - creates placeholder quad mesh/material payload when sidecar emits `placeholder_quad_v1`
+  - sets `VSF_MESH_PAYLOAD_MISSING` diagnostics when payload remains unavailable
+- host diagnostics and UI messaging:
+  - `host/HostCore/HostInterfaces.cs`
+  - `host/HostCore/AvatarSessionService.cs`
+  - `host/HostCore/HostController.cs`
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - preserves load-attempt avatar info and exposes `GetLastLoadFailureDetails()` for failure dialogs
+  - refines `Unsupported` mapping for load/render paths from generic toolchain messaging to runtime/asset guidance
+- tooling:
+  - added `tools/vsfavatar_render_gate.ps1`
+  - updated `tools/run_quality_baseline.ps1` to include VSFAvatar render gate
+- docs:
+  - added `docs/reports/vsfavatar_render_gate_and_error_contract_2026-03-05.md`
+  - updated `docs/INDEX.md`
+
+### Verified
+
+- `cmake --build NativeAnimiq\build --config Release --target vsfavatar_sidecar nativecore avatar_tool` PASS
+- `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release` PASS
+- `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore -nr:false` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet` PASS
+  - `build/reports/vsfavatar_render_gate_summary.txt`
+  - `renderable_mesh_payload_rows: 1`
+
+## 2026-03-05 - Session rollup docs refresh (hotfix + policy trim + MIQ relaxed menu context)
+
+### Summary
+
+Added a detailed cross-commit session summary document that consolidates the latest implementation line and clarifies the runtime meaning of host `Load failed: Unsupported` observations.
+
+### Changed
+
+- added report:
+  - `docs/reports/session_change_summary_2026-03-05.md`
+- index update:
+  - `docs/INDEX.md` report link added
+
+### Notes
+
+- this update is documentation-focused and references latest change tracks:
+  - WPF cross-thread crash hotfix (`396f267`)
+  - Unity MIQ relaxed export menu (`f1d013b`)
+  - avatar extension policy trim (`dc33918`)
+
+## 2026-03-05 - WPF cross-thread crash hotfix on avatar load-error path
+
+### Summary
+
+Applied a focused WPF hotfix to prevent process termination caused by cross-thread UI access during avatar load error reporting.
+
+### Changed
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - `Controller_ErrorRaised` no longer updates WPF controls directly from callback thread.
+  - introduced `RunOnUiThread(Action)` (`Dispatcher.CheckAccess` + `BeginInvoke`) and routed error/status updates through it.
+  - switched `Controller_LoadProgressChanged` to the same UI-thread marshal helper for consistent thread-safety.
+- reporting updates:
+  - `docs/reports/host_blocker_status_board_2026-03-05.md`
+  - `docs/reports/host_blocker_closure_implementation_pass_2026-03-05.md`
+
+### Verified
+
+- `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release` PASS
+- `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1` PASS (`WPF_ONLY`)
+- `build/reports/wpf_launch_smoke_latest.txt` PASS (`2026-03-05T22:58:07+09:00`, `ExitCode=0`)
+
+## 2026-03-05 - R01-R20 phase2 execution: WinUI parity lift and operational controls
+
+### Summary
+
+Executed the next R01-R20 delivery slice by porting WPF-side operational controls to WinUI for parity, including async load progress/cancel UX, preflight/remediation surfaces, auto-quality policy control, and guide/track visibility.
+
+### Changed
+
+- WinUI host parity implementation:
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - added:
+    - avatar load timeout + cancel + progress stage UI
+    - platform ops controls (preflight, diagnostics export, metrics export, profiles, sidecar, telemetry, auto-quality policy)
+    - guides tab and track-status text surface
+    - `.miq` picker filter support
+    - event wiring for `LoadProgressChanged`, preflight remediation, and error guidance
+- docs updates:
+  - `docs/reports/r01_r20_phase2_winui_parity_execution_2026-03-05.md` (new)
+  - `docs/INDEX.md` (new report link)
+
+### Verified
+
+- build:
+  - `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release` PASS
+  - `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+  - `dotnet build NativeAnimiq\host\WinUiHost\WinUiHost.csproj -c Release -p:Platform=x64 --no-restore` FAIL (existing `MSB3073`/`XamlCompiler.exe` path)
+
+## 2026-03-05 - R01-R20 follow-up hardening (detailed plan + Top5 execution)
+
+### Summary
+
+Executed a follow-up hardening round after the R01-R20 MVP baseline, with a detailed execution plan and code delivery focused on the reassessed Top5 priorities (`R01/R02/R03/R05/R13`).
+
+This round improves operator guidance quality, import/load flow resilience, and runtime auto-quality tunability while preserving WPF-first host policy.
+
+### Changed
+
+- planning + reassessment docs:
+  - `docs/reports/platform_persona_requirements_reassessment_2026-03-05.md`
+    - latest-state 20-item re-evaluation with 5-persona cross-review
+    - added coverage tags (`implemented/partial`) and updated Top 5 priority order
+    - added immediate execution guidance block
+  - `docs/reports/r01_r20_detailed_plan_and_execution_2026-03-05.md`
+    - detailed plan-to-execution trace for this round
+    - records implementation scope, verification, and follow-ups
+  - `docs/INDEX.md`
+    - report links updated for new reassessment/execution docs
+- HostCore runtime hardening:
+  - `host/HostCore/PlatformFeatures.cs`
+    - added `LoadProgressState`
+    - added `AutoQualityPolicy` and `AutoQualityPolicyStore` for persisted guardrail tuning
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - added load progress event contract (`LoadProgressChanged`)
+    - added last user-facing error state and retrieval (`LastUserFacingError`, `GetLastErrorGuidance`)
+    - expanded import guidance with file-existence check + fallback-oriented messages
+    - refined user-facing error action hints by operation source
+    - changed auto-quality trigger from fixed constants to persisted policy values
+    - added runtime API for policy retrieval/update (`GetAutoQualityPolicy`, `ConfigureAutoQualityPolicy`)
+- WPF operator UX hardening:
+  - `host/WpfHost/MainWindow.xaml`
+    - avatar section now includes:
+      - load timeout input
+      - cancel-load button
+      - progress bar + progress text
+    - platform ops now includes:
+      - preflight remediation hint text
+      - auto-quality policy input controls + apply action
+  - `host/WpfHost/MainWindow.xaml.cs`
+    - wired `LoadProgressChanged` UI updates
+    - switched load action to timeout-configurable async path with explicit running-state gating
+    - added cancel-load handler
+    - surfaced preflight remediation hints inline
+    - surfaced last error guidance in quick status
+    - added auto-quality policy parse/apply path and startup UI hydration
+
+### Verified
+
+- build:
+  - `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release` PASS
+    - note: one transient `MSB3026` retry warning observed due to file lock, build succeeded
+  - `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+
+## 2026-03-05 - R01-R20 platform MVP feature implementation (HostCore/WPF/tools)
+
+### Summary
+
+Implemented the planned `R01-R20` requirement set as runnable MVP feature code focused on `HostCore`, `WpfHost`, and automation tools.
+
+This round added preflight/diagnostics/persistence/telemetry/profile/async-load capabilities to host runtime flow, exposed new operator controls in WPF, and introduced batch/release/version utility scripts.
+
+### Changed
+
+- HostCore feature expansion:
+  - `host/HostCore/HostController.cs` (partial conversion, operation guard integration, telemetry hook integration)
+  - `host/HostCore/HostController.MvpFeatures.cs` (new)
+  - `host/HostCore/PlatformFeatures.cs` (new)
+  - added:
+    - preflight summary model + execution (`RunPreflight`)
+    - user-facing error taxonomy/remediation mapping
+    - session persistence store/model
+    - diagnostics bundle export (`zip`)
+    - rolling frame-metric capture + CSV export
+    - sidecar configuration API + env-var propagation
+    - async load/timeout/cancel path
+    - release track status resolver (WPF/WinUI)
+    - telemetry opt-in/redaction/export controls
+    - operation-order state guard for invalid lifecycle transitions
+- WPF host UX expansion:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - added:
+    - `Platform Ops` control group (preflight, diagnostics, metrics, profiles, sidecar, telemetry)
+    - `Guides` tab (quickstart + compatibility/fallback guidance)
+    - status-strip track indicator
+    - async load path wiring and `.miq` file filter support
+- Tooling scripts added:
+  - `tools/avatar_batch_validate.ps1`
+  - `tools/release_gate_dashboard.ps1`
+  - `tools/version_contract_check.ps1`
+- Documentation updates:
+  - `docs/reports/r01_r20_mvp_implementation_round_2026-03-05.md` (new detailed report)
+  - `docs/INDEX.md` (report link update)
+
+### Verified
+
+- build:
+  - `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release` PASS
+  - `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release --no-restore` PASS
+- tools:
+  - `avatar_batch_validate.ps1` PASS
+  - `release_gate_dashboard.ps1` PASS
+  - `version_contract_check.ps1` PASS
+
+## 2026-03-05 - VRM expression runtime morph application + SpringBone metadata diagnostics (phase 1)
+
+### Summary
+
+Implemented the phase-1 VRM feature completion slice by wiring expression metadata to runtime mesh deformation and adding SpringBone metadata extraction/visibility while preserving backward-compatible native API behavior.
+
+### Changed
+
+- VRM data model extensions:
+  - `include/animiq/avatar/avatar_package.h`
+  - added expression bind list (`ExpressionState::Bind`) and springbone summary (`SpringBoneSummary`).
+- VRM loader expansion:
+  - `src/avatar/vrm_loader.cpp`
+  - added morph target delta extraction from glTF primitive targets.
+  - populated `blendshape_payloads` for VRM meshes.
+  - parsed expression binds from both:
+    - VRM1: `extensions.VRMC_vrm.expressions.*.morphTargetBinds`
+    - VRM0.x: `extensions.VRM.blendShapeMaster.blendShapeGroups[].binds`
+  - added heuristic bind fallback for blink/viseme/joy when explicit binds are missing.
+  - added SpringBone metadata summary parsing from both:
+    - VRM1: `extensions.VRMC_springBone`
+    - VRM0.x: `extensions.VRM.secondaryAnimation`
+- Runtime morph application:
+  - `src/nativecore/native_core.cpp`
+  - switched GPU vertex buffer allocation to dynamic write for mesh payloads.
+  - applied expression runtime weights to blendshape deltas and uploaded deformed vertices before draw.
+- Native C API additive extension:
+  - `include/animiq/nativecore/api.h`
+  - `src/nativecore/native_core.cpp`
+  - added:
+    - `nc_get_expression_count`
+    - `nc_get_expression_infos`
+    - `nc_get_springbone_info`
+  - existing `NcAvatarInfo` contract remains unchanged.
+- Host interop and diagnostics tooling:
+  - `host/HostCore/NativeCoreInterop.cs` (new P/Invoke structs and signatures)
+  - `tools/avatar_tool.cpp` (expression bind total + springbone summary output)
+  - `tools/vrm_quality_gate.ps1` (new GateE/GateF checks)
+
+### Verified
+
+- build:
+  - `cmake --build NativeAnimiq/build --config Release` PASS
+- quality gate:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5` PASS
+
+## 2026-03-05 - WPF operational reliability loop + Host output-state reconciliation
+
+### Summary
+
+Added a WPF-first operational reliability pass that detects output-state drift and provides bounded automatic recovery while introducing a repeatable reliability gate loop for release readiness checks.
+
+### Changed
+
+- Host runtime synchronization:
+  - `host/HostCore/HostController.cs`
+  - added desired-vs-runtime output-state reconciliation for `Spout` / `OSC`.
+  - mismatch logging and throttled recovery attempts now run during tick updates.
+- Reliability automation:
+  - `tools/wpf_reliability_gate.ps1` (new)
+  - loops WPF publish + launch smoke, optional baseline run, single summary report output.
+- Documentation:
+  - `README.md` updated with reliability loop usage and output-state reconciliation note.
+  - `docs/reports/wpf_operational_reliability_loop_and_output_sync_2026-03-05.md` added.
+  - `docs/reports/workspace_change_rollup_2026-03-05.md` added.
+  - `docs/INDEX.md` updated with new report links.
+
+### Verified
+
+- build:
+  - `dotnet build NativeAnimiq\host\HostCore\HostCore.csproj -c Release` PASS
+  - `dotnet build NativeAnimiq\host\WpfHost\WpfHost.csproj -c Release` PASS
+- reliability loop:
+  - `powershell -ExecutionPolicy Bypass -File NativeAnimiq\tools\wpf_reliability_gate.ps1 -Iterations 1 -SkipNativeBuild` PASS
+
+## 2026-03-05 - Host blocker-closure implementation pass (WPF smoke stabilized, WinUI diagnostics hardened)
+
+### Summary
+
+Implemented the planned blocker-closure slice and executed new reruns with updated diagnostics contracts.
+
+- WPF headless launch-smoke failure was fixed (startup `NullReferenceException` guard).
+- WinUI diagnostics were hardened with NuGet probe/retry metadata and CI summary outputs.
+- WinUI blocker remains open, but failure classification is now stably `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` in latest local reruns.
+
+### Changed
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - added `_uiReady` startup gate to ignore early `TextChanged` events during XAML initialization.
+  - added null guards in `RefreshValidationState()` for validation controls.
+- `tools/publish_hosts.ps1`
+  - added `WinUiRestoreRetryCount`, `NuGetProbeTimeoutSeconds` options.
+  - added NU1301-aware publish retry wrapper.
+  - added `nuget_probe` capture (proxy/source summary) into WinUI diagnostic manifest and host publish log.
+  - extended root-cause extraction with NuGet auth signal (`401/403`) and explicit `NUGET_AUTH_FAILURE` mapping.
+- `tools/wpf_launch_smoke.ps1`
+  - added `AdditionalProbePaths` and PATH probe-path injection during smoke launch.
+  - added dependency hint extraction from event messages.
+  - added probe directory DLL inventory section in report artifact.
+  - narrowed event-log query window to run-start scope to avoid stale historical noise.
+- `tools/compare_winui_diag_manifest.ps1`
+  - expanded diff coverage with:
+    - `preflight.warnings`
+    - `nuget_probe.summary.*`
+    - `profiles[].command`
+- `.github/workflows/host-publish.yml`
+  - trigger paths now include `tools/compare_winui_diag_manifest.ps1`.
+  - WinUI diagnostics matrix job now writes per-OS summary artifact:
+    - `build/reports/winui_manifest_summary_*.txt`
+  - added step-summary output for quick matrix comparison.
+- docs updates:
+  - `docs/reports/host_blocker_status_board_2026-03-05.md`
+  - `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md`
+  - `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+
+### Verification (latest local execution)
+
+- `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi -WinUiRestoreRetryCount 1 -NuGetProbeTimeoutSeconds 6` rerun x2
+  - WPF publish: PASS
+  - WPF launch smoke: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe`/`MSB3073`)
+  - WinUI failure class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `compare_winui_diag_manifest.ps1` (`runA` vs `runB`)
+  - output: `build/reports/winui_manifest_diff_runA_vs_runB.txt`
+  - result: all tracked fields `SAME`
+- direct WPF smoke rerun
+  - output: `build/reports/wpf_launch_smoke_latest.txt`
+  - `Status=PASS`, `ExitCode=0`
+
+## 2026-03-05 - Unity 2021.3.18f1 compatibility gate automation for MIQ SDK
+
+### Summary
+
+Implemented an executable compatibility gate for Unity `2021.3.18f1` so SDK support is enforced by CI/runtime checks instead of documentation-only declaration.
+
+### Changed
+
+- Added Unity validation script:
+  - `tools/unity_miq_validate.ps1`
+  - executes EditMode tests + export/load smoke and emits structured reports under `build/reports`.
+- Added Unity smoke execute-method entrypoint:
+  - `unity/Packages/com.animiq.miq/Editor/MiqCiSmoke.cs`
+  - builds a minimal AvatarRoot, exports `.miq`, validates `TryLoad(...)` reaches `runtime-ready`.
+- Added CI workflow:
+  - `.github/workflows/unity-miq-compat.yml`
+  - self-hosted Windows runner gate for `2021.3.18f1` with report artifact upload.
+- Updated docs:
+  - `README.md`
+  - `unity/Packages/com.animiq.miq/README.md`
+  - documented support contract and local/CI validation command.
+
+### Verified
+
+- local static verification:
+  - workflow YAML, PowerShell script, and Unity editor execute-method wiring reviewed for path/report contract consistency.
+- note:
+  - Unity Editor runtime execution was not run in this shell environment (requires external Unity project path + editor binary).
+
+## 2026-03-05 - Unity MIQ SDK minimum version expanded to 2021.3.18f1
+
+### Summary
+
+Expanded the Unity package compatibility contract from `2022.3 LTS` to `2021.3.18f1+` and aligned package/runtime authoring style for safer compilation on older editor toolchains.
+
+### Changed
+
+- `unity/Packages/com.animiq.miq/package.json`
+  - lowered minimum Unity requirement from `2022.3` to `2021.3`
+  - added `unityRelease: 18f1`
+  - updated package description to `Unity 2021.3.18f1+`
+- `unity/Packages/com.animiq.miq/README.md`
+  - updated supported Unity scope to `2021.3.18f1+`
+- `README.md`
+  - updated Unity MIQ SDK target line to `2021.3.18f1+`
+- Unity package C# compatibility cleanup (target-typed `new()` removal):
+  - `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - `unity/Packages/com.animiq.miq/Editor/MiqExportOptions.cs`
+
+### Verification
+
+- repository grep checks:
+  - confirmed Unity package metadata/documentation no longer references `2022.3` as minimum
+  - confirmed Unity package files no longer use target-typed `new()` expressions
+- note:
+  - Unity Editor runtime validation (`2021.3.18f1` EditMode tests/export smoke) has not been executed in this shell environment
+
+## 2026-03-05 - Host execution follow-up: preflight unblock to publish-stage and deterministic NU1301 classification
+
+### Summary
+
+Applied a focused preflight adjustment for MSBuild discovery and re-ran host diagnostics twice.
+
+- WinUI preflight now passes in this environment (no fail-fast stop on `MISSING_MSBUILD_DISCOVERY`)
+- both reruns reached WinUI publish stage and failed consistently on restore/network path (`NU1301`)
+- failure class stabilized at `NUGET_SOURCE_UNREACHABLE`
+- WPF launch smoke repeated twice with consistent failure signature (`ExitCode=-532462766`)
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - `MSBUILD_DISCOVERY` handling adjusted:
+    - added fallback path probe for standard VS2022 `MSBuild.exe` locations
+    - changed missing-msbuild outcome from hard preflight failure to warning-style recommendation
+  - keeps probe output in manifest (`preflight_probe.checks[]`) and preserves diagnostics collection flow
+
+- docs refresh:
+  - `docs/reports/host_blocker_status_board_2026-03-05.md`
+    - updated latest blocker class and rerun evidence (`run3`, `run4`)
+  - `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md`
+    - added preflight-unblock rerun snapshot and deterministic comparison result
+  - `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+    - added repeat smoke verification snapshot (`runA`, `runB`)
+
+### Verification (latest reruns)
+
+- `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi`
+  - `run3`: `2026-03-05T18:14:40.0950026+09:00`
+  - `run4`: `2026-03-05T18:15:58.0618412+09:00`
+  - both runs:
+    - WPF publish: FAIL (`NU1301`)
+    - WinUI preflight: PASS
+    - WinUI publish: FAIL (`NU1301`)
+    - failure class: `NUGET_SOURCE_UNREACHABLE`
+- `compare_winui_diag_manifest.ps1`
+  - output: `build/reports/winui_manifest_diff_run3_vs_run4.txt`
+  - result: tracked fields all `SAME`
+- `wpf_launch_smoke.ps1`
+  - `runA`: `2026-03-05T18:17:49.3166582+09:00` -> FAIL (`-532462766`)
+  - `runB`: `2026-03-05T18:18:02.8195550+09:00` -> FAIL (`-532462766`)
+
+## 2026-03-05 - Host follow-up execution: deterministic rerun evidence + manifest diff utility
+
+### Summary
+
+Executed the planned post-implementation verification loop and added a dedicated WinUI manifest diff utility for deterministic comparison.
+
+- ran `publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi` twice and archived rerun snapshots (`run1`, `run2`)
+- observed stable failure classification across reruns:
+  - `failure_class=TOOLCHAIN_VISUAL_STUDIO_INCOMPLETE`
+  - preflight fail: `MISSING_MSBUILD_DISCOVERY`
+- captured persistent WPF launch smoke failure (`ExitCode=-532462766`) in direct rerun
+- expanded smoke event capture to include Application log IDs `1026/1000/1001`
+
+### Changed
+
+- `tools/compare_winui_diag_manifest.ps1` (new)
+  - compares two WinUI diagnostics manifests and outputs drift report for:
+    - `failure_class`
+    - preflight status/checks
+    - root-cause hints
+    - profile-level fields (`name`, `enabled`, `exit_code`, hints)
+  - output example:
+    - `build/reports/winui_manifest_diff_run1_vs_run2.txt`
+
+- `tools/wpf_launch_smoke.ps1`
+  - event-log collection broadened from only `.NET Runtime` `1026` to related Application entries:
+    - `.NET Runtime` `1026`
+    - `Application Error` `1000`
+    - `Windows Error Reporting` `1001`
+  - message filter aligned to `WpfHost.exe|DllNotFoundException`
+
+- `docs/reports/host_blocker_status_board_2026-03-05.md`
+  - refreshed latest blocker class and rerun evidence snapshot
+  - linked deterministic diff output evidence
+
+- `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md`
+  - appended follow-up execution results and utility/script updates
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - appended latest direct smoke rerun outcome and event-capture note
+
+## 2026-03-05 - WinUI diagnostics profile expansion + CI matrix + WPF launch smoke automation
+
+### Summary
+
+Implemented the next host-track closure slice to make WinUI blocker triage and WPF launch smoke evidence deterministic:
+
+- expanded WinUI diagnostics collection into explicit profiles in manifest output
+- expanded WinUI preflight probe checks for tooling/package/bin prerequisites
+- added non-interactive WPF launch smoke automation with report artifact output
+- split WinUI diagnostics CI job into OS matrix runs for comparative evidence
+- published a single blocker status board document for open/closed/next actions
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - added options:
+    - `WinUiDiagnosticsProfile` (`full|diag-only`)
+    - `RunWpfLaunchSmoke`
+    - `WpfLaunchSmokeFailOnError`
+    - `WpfLaunchSmokeDurationSeconds`
+    - `WpfLaunchSmokeReportPath`
+  - WinUI diagnostics manifest now includes `profiles[]` with per-profile command/exit/artifacts/hints
+  - preflight checks extended with:
+    - `MSBUILD_DISCOVERY`
+    - `WINDOWS_SDK_19041_BINTOOLS`
+    - `WINDOWSAPPSDK_PACKAGE_CACHE`
+  - failure-class mapping extended for new preflight failure categories
+  - WPF publish path now optionally runs launch smoke and records report path in host publish log
+
+- `tools/wpf_launch_smoke.ps1` (new)
+  - launches published WPF exe in non-interactive mode
+  - verifies process-alive window
+  - captures `.NET Runtime` event `1026` evidence snapshot
+  - writes `build/reports/wpf_launch_smoke_latest.txt`
+
+- `.github/workflows/host-publish.yml`
+  - added trigger path for `tools/wpf_launch_smoke.ps1`
+  - WPF artifact upload now includes `wpf_launch_smoke_latest.txt`
+  - `publish-hosts-winui-diagnostics` now runs on matrix:
+    - `windows-latest`
+    - `windows-2022`
+  - matrix artifacts now include explicit WinUI diagnostic contract files
+
+- `docs/reports/host_blocker_status_board_2026-03-05.md` (new)
+  - consolidated open blockers / closed items / next actions
+  - fixed artifact contract list for closure tracking
+- `docs/reports/host_winui_diag_profile_and_wpf_smoke_2026-03-05.md` (new)
+  - detailed implementation breakdown for script/workflow/docs updates in this round
+
+- docs links refreshed:
+  - `docs/INDEX.md`
+  - `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - `docs/reports/wpf_verification_roundup_2026-03-05.md`
+  - `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
+
+## 2026-03-05 - WinUI blocker mitigation attempt (csproj simplification) + final rerun
+
+### Summary
+
+Applied a focused WinUI blocker mitigation attempt by simplifying `WinUiHost.csproj` build-time properties, then reran host/gate/baseline verification.
+
+- `WinUiHost.csproj` simplification:
+  - `EnableMsixTooling`: `true` -> `false`
+  - removed project-level publish defaults (`RuntimeIdentifier`, `SelfContained`, `PublishSingleFile`, `WindowsAppSDKSelfContained`, `UseRidGraph`)
+- verification outcome:
+  - WinUI build/publish still fails at `XamlCompiler.exe` (`MSB3073`)
+  - classification remains `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- WPF-first path and quality gates remained PASS
+
+### Verification (latest)
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - run: `2026-03-05T16:42:47.5904580+09:00`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`WMC9999`/`MSB3073`)
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:57:03`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:49:46`
+  - `Overall: PASS`
+
+### Documentation updates
+
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
+  - appended final-pass mitigation attempt and rerun snapshot
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - refreshed latest verification timestamps
+- `docs/reports/wpf_verification_roundup_2026-03-05.md`
+  - appended final follow-up snapshot for this round
+
+## 2026-03-05 - Host blocker follow-up rerun (WinUI persists, WPF crash signal clarified)
+
+### Summary
+
+Executed another host/gate/baseline cycle after the WinUI parity implementation to refresh blocker status and capture additional WPF crash diagnostics.
+
+- WinUI blocker remains unchanged:
+  - `WMC9999` / `XamlCompiler.exe` (`MSB3073`)
+  - class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- WPF launch-smoke failure signal was refined with event-log evidence:
+  - `.NET Runtime` event `1026`
+  - unhandled `System.DllNotFoundException` in WPF hwnd subclass hook path
+- quality gate and baseline remained PASS
+
+### Verification (latest rerun)
+
+- `publish_hosts.ps1 -IncludeWinUi`
+  - run time: `2026-03-05T16:01:21.4764432+09:00`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - `Generated: 2026-03-05T16:10:11`
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`
+  - `Generated: 2026-03-05T16:10:21`
+  - `Overall: PASS`
+
+### Documentation updates
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - updated latest verification timestamps
+  - added event-log evidence for WPF launch failure path
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md`
+  - appended follow-up rerun status and target-framework mitigation test result
+
+## 2026-03-05 - WinUI refresh-throttle parity implementation + verification rerun
+
+### Summary
+
+Implemented WinUI-side parity for the WPF refresh-throttle model and re-ran host/gate/baseline verification.
+
+- WinUI host now uses `60Hz render tick + 10Hz UI refresh` with dirty-flag processing
+- diagnostics text rebuild is gated by `SnapshotVersion`/`LogVersion`
+- logs text rebuild is now tied to Logs-tab activity (`TabView` selection)
+- WinUI publish remains blocked by XAML compiler platform-unsupported path (`WMC9999` / `XamlCompiler.exe`)
+
+### Changed
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - added `_uiRefreshTimer` (`100ms`) and dirty-flag processing path
+  - replaced immediate `RefreshAll()` event handlers with deferred update model
+  - added snapshot/log version cached text update strategy
+  - added log-tab-aware refresh gating
+- `host/WinUiHost/MainWindow.xaml`
+  - changed diagnostics area to `TabView` (`Runtime`, `Avatar`, `Logs`)
+  - wired `DiagnosticsTabControl_SelectionChanged` for logs-tab-aware updates
+- `docs/reports/winui_ui_refresh_throttle_parity_2026-03-05.md` (new)
+  - detailed implementation + validation outcomes + remaining blocker
+- `docs/reports/winui_ui_refresh_followup_ticket_2026-03-05.md`
+  - appended implementation-round status update
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - refreshed latest verification snapshot timestamps
+  - recorded latest non-interactive launch smoke as `FAIL` (`exit=-532462766`) in current CLI/headless run
+- `docs/INDEX.md`
+  - added WinUI parity implementation report entry
+
+### Verification (latest)
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release`: FAIL (`MSB3073`, `XamlCompiler.exe`)
+- `publish_hosts.ps1 -IncludeWinUi`:
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL
+  - failure class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- `vsfavatar_quality_gate.ps1 -UseFixedSet`:
+  - `HostTrackStatus=PASS_WPF_BASELINE`
+  - `Overall: PASS`
+- `run_quality_baseline.ps1`:
+  - `Overall: PASS`
+
+## 2026-03-05 - WPF smoke/perf evidence refresh (WPF-only verification rerun)
+
+### Summary
+
+Re-ran the WPF-first verification path and refreshed the WPF smoke/performance evidence report with current artifact timestamps and outcomes.
+
+- host publish rerun (`WPF_ONLY`) succeeded
+- VSFAvatar quality gate rerun succeeded (`HostTrackStatus=PASS_WPF_BASELINE`)
+- quality baseline rerun succeeded (`Overall: PASS`)
+- non-interactive WPF launch smoke (process-alive check) succeeded when launched from `dist/wpf`
+
+### Changed
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md`
+  - replaced open `PENDING` markers with explicit executed/deferred statuses
+  - added latest pipeline verification snapshot from generated artifacts
+  - recorded non-interactive launch smoke evidence and execution constraints
+- `docs/reports/wpf_verification_roundup_2026-03-05.md` (new)
+  - added consolidated command-level roundup for this verification refresh round
+  - included artifact timestamps, pass/fail outcomes, and explicit deferred manual checks
+
+- `docs/INDEX.md`
+  - updated WPF smoke/perf report entry description to reflect latest verification snapshot coverage
+  - added roundup report index entry for traceability
+
+### Verification Artifacts (latest)
+
+- `build/reports/host_publish_latest.txt`
+  - `Host publish run: 2026-03-05T14:50:03.7482246+09:00`
+  - `HostPublishMode: WPF_ONLY`
+- `build/reports/vsfavatar_gate_summary.txt`
+  - `Generated: 2026-03-05T15:12:46`
+  - `Overall: PASS`
+- `build/reports/quality_baseline_summary.txt`
+  - `Generated: 2026-03-05T15:13:41`
+  - `Overall: PASS`
+
+## 2026-03-05 - WPF UI flow relayout + refresh throttle (60Hz render / 10Hz UI)
+
+### Summary
+
+Implemented a WPF-focused UI/performance pass that preserves render cadence while reducing UI-thread update churn.
+
+- render loop remains `~16ms` tick (`60Hz` target)
+- state/diagnostics UI refresh moved to `100ms` cadence (`10Hz`)
+- logs text re-materialization is now log-tab-aware
+- WPF host layout updated to an operation-first flow
+
+### Changed
+
+- `host/HostCore/HostUiState.cs`
+  - extended `DiagnosticsSnapshot` with:
+    - `SnapshotVersion`
+    - `LogVersion`
+
+- `host/HostCore/HostController.cs`
+  - added internal version counters:
+    - `_snapshotVersion` increments on diagnostics publication
+    - `_logVersion` increments on log enqueue
+  - snapshot builder now emits version signals for downstream throttled UI consumers
+
+- `host/WpfHost/MainWindow.xaml`
+  - added `Quick Actions` section with high-frequency operator actions
+  - reordered left control surface into:
+    - `1) Session`
+    - `2) Avatar`
+    - `3) Render`
+    - `4) Outputs`
+  - split render controls into `Basic` + `Advanced`
+  - wired diagnostics tab selection event for log-tab-aware updates
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - added `_uiRefreshTimer` (`100ms`) and dirty-flag update model
+  - decoupled immediate controller-event full refresh from render tick path
+  - added cached runtime/avatar/log text update paths with version checks
+  - logs textbox updates now occur only when logs tab is active (or forced)
+
+- `docs/reports/ui_wpf_refresh_throttle_2026-03-05.md` (new)
+  - implementation detail + validation report for this pass
+
+- `docs/reports/wpf_ui_smoke_and_perf_2026-03-05.md` (new)
+  - smoke/performance evidence status and closure checklist
+
+- `docs/reports/winui_ui_refresh_followup_ticket_2026-03-05.md` (new)
+  - WinUI parity follow-up scope and DoD definition
+
+- `docs/INDEX.md`
+  - added report index entries for:
+    - `ui_wpf_refresh_throttle_2026-03-05.md`
+    - `wpf_ui_smoke_and_perf_2026-03-05.md`
+    - `winui_ui_refresh_followup_ticket_2026-03-05.md`
+
+## 2026-03-05 - WPF-first transition detailed report publication
+
+### Summary
+
+Published a dedicated transition report that documents the final WPF-first operating contract, CI split, and latest verification evidence after the policy switch implementation.
+
+### Changed
+
+- `docs/reports/host_wpf_first_transition_2026-03-05.md` (new)
+  - includes:
+    - rationale for WPF-first switch
+    - script/gate/CI contract changes
+    - latest artifact timestamps and verification outcomes
+    - operational impact and remaining WinUI recovery item
+
+- `docs/INDEX.md`
+  - added report index entry for `host_wpf_first_transition_2026-03-05.md`
+
+## 2026-03-05 - WPF-first host policy transition (WinUI optional diagnostics track)
+
+### Summary
+
+Shifted host publish/gate/CI contracts to WPF-first operation so release gating is stable while WinUI remains available as an opt-in diagnostics track.
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - added explicit host publish mode logging:
+    - `WPF_ONLY` (default)
+    - `WPF_PLUS_WINUI` (`-IncludeWinUi`)
+  - updated WinUI skip log message to clarify optional diagnostics role in default mode
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - HostTrack auto-resolution now treats WPF output as a pass baseline:
+    - `PASS_WPF_BASELINE`
+    - `PASS_WPF_AND_WINUI`
+  - HostTrack DoD pass check updated from strict `PASS` to `PASS*` family
+
+- `tools/vsfavatar_sample_report.ps1`
+  - HostTrack DoD pass check updated to `PASS*` family for report parity
+
+- `.github/workflows/host-publish.yml`
+  - split host publish jobs into:
+    - required WPF-first publish job (`publish-hosts-wpf`)
+    - optional/non-blocking WinUI diagnostics job (`publish-hosts-winui-diagnostics`)
+  - WPF required artifact validation now checks WPF outputs + publish report only
+
+- `README.md`
+  - documented WPF-first policy and `PASS*` HostTrack contract
+
+- `docs/reports/host_change_rollup_2026-03-05.md`
+  - appended policy transition section and CI split summary
+
+## 2026-03-05 - Host rollup detail refresh (commit breakdown + latest snapshot)
+
+### Summary
+
+Expanded the consolidated host rollup document with commit-by-commit detail and latest verified runtime snapshot timestamps so operators can map current status directly to recent commits and artifacts.
+
+### Changed
+
+- `docs/reports/host_change_rollup_2026-03-05.md`
+  - added detailed breakdown for:
+    - `5fabc34`
+    - `08b3fb8`
+    - `067d0dd`
+    - `ccaefc5`
+  - added latest verification snapshot section with artifact generation times and final state summary (`preflight=PASS`, `failure_class=TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`)
+
+## 2026-03-05 - WinUI preflight unblock confirmation (Windows SDK 19041 installed)
+
+### Summary
+
+Executed the host/gate/baseline plan again after installing Windows SDK `10.0.19041` to remove the preflight blocker and verify state transition behavior.
+
+- WinUI preflight transitioned from `FAIL` to `PASS`
+- WinUI publish now fails at XAML compile stage (post-preflight), not precondition stage
+- failure class transitioned from `TOOLCHAIN_PRECONDITION_FAILED` to `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+- HostTrack auto-resolution transitioned to `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+- quality baseline remained `PASS`
+
+### Environment update
+
+- installed package:
+  - `Microsoft.WindowsSDK.10.0.19041` (winget)
+- metadata probe confirmation:
+  - `C:\Program Files (x86)\Windows Kits\10\UnionMetadata\10.0.19041.0\Facade\Windows.winmd` => present
+
+### Verification
+
+- `dotnet --version`
+  - `8.0.418`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe` / `MSB3073`)
+  - diagnostics class: `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
+
+## 2026-03-05 - Host change rollup document update
+
+### Summary
+
+Added a consolidated operator-facing rollup that summarizes the latest diagnostics schema hardening and re-validation outcomes in one place.
+
+### Changed
+
+- `docs/reports/host_change_rollup_2026-03-05.md` (new)
+  - unified summary of:
+    - `preflight_probe` manifest expansion
+    - failure-class precedence hardening
+    - latest verified runtime status (`WPF=PASS`, `WinUI preflight blocked`)
+    - explicit unblock action and success condition
+
+- `docs/INDEX.md`
+  - added report index entry for the new rollup document
+
+## 2026-03-05 - Host plan execution re-validation (post-push confirmation)
+
+### Summary
+
+Executed the planned host/gate/baseline sequence again after pushing diagnostics/schema hardening changes to confirm there was no regression and blocker state remained deterministic.
+
+- `dotnet --version` in repo context: `8.0.418` (`global.json` pin confirmed)
+- WinUI preflight blocker remains unchanged: `MISSING_WINDOWS_SDK_19041_METADATA`
+- manifest class remains deterministic: `TOOLCHAIN_PRECONDITION_FAILED`
+- HostTrack remains auto-resolved to `BLOCKED_TOOLCHAIN_PRECONDITION`
+- quality baseline remains `PASS`
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - diagnostics manifest: `build/reports/winui/winui_diagnostic_manifest.json`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_TOOLCHAIN_PRECONDITION`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
+
+## 2026-03-05 - WinUI diagnostics schema expansion (preflight probe + class precedence)
+
+### Summary
+
+Extended WinUI diagnostics output so preflight evidence is decision-complete in the manifest and aligned failure classification priority with current host-track expectations.
+
+- added `preflight_probe` field in WinUI diagnostics manifest
+- kept `preflight` legacy shape unchanged for downstream compatibility
+- added explicit probe evidence for .NET SDK, Visual Studio discovery, and Windows SDK 19041 metadata paths
+- enforced failure classification priority to prefer `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` over generic XAML exec failures when managed `WMC9999` is present
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - diagnostic manifest:
+    - added `preflight_probe`
+    - preserved legacy `preflight` object contract (`passed`, `failed_checks`, `detected_sdks`, `recommended_actions`)
+  - preflight probing:
+    - added explicit probe checks and path evidence for Windows SDK metadata candidates:
+      - `UnionMetadata\10.0.19041.0\Facade\Windows.winmd`
+      - `References\10.0.19041.0\Windows.Foundation.FoundationContract...winmd`
+  - failure classification:
+    - documented/evaluated priority as:
+      - `TOOLCHAIN_PRECONDITION_FAILED` (and `TOOLCHAIN_MISSING_DOTNET8` specialization)
+      - `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+      - diagnostics-driven classes (`NUGET_SOURCE_UNREACHABLE`, `XAML_COMPILER_EXEC_FAIL`, etc.)
+      - `UNKNOWN`
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - `winui_diagnostic_manifest.json` includes:
+    - `failure_class=TOOLCHAIN_PRECONDITION_FAILED`
+    - `preflight` legacy fields
+    - `preflight_probe.checks[*]` with checked metadata paths and detection flags
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_TOOLCHAIN_PRECONDITION`
+  - HostTrack resolved from manifest `failure_class`
+
+## 2026-03-05 - WinUI preflight hardening follow-up (SDK pin + Windows SDK metadata gate)
+
+### Summary
+
+Applied an additional hardening pass after the 2026-03-05 execution round to make the WinUI blocker fail-fast and deterministic in this environment:
+
+- pinned workspace CLI SDK to .NET 8 (`global.json`)
+- added WinUI preflight guard for missing `Windows SDK 10.0.19041` metadata facade
+- refined failure classification for managed `WMC9999` path
+- verified host track auto-resolution transitions to precondition-blocked status
+
+### Changed
+
+- `global.json` (new)
+  - pins SDK to `8.0.418` (`rollForward=latestFeature`)
+
+- `tools/publish_hosts.ps1`
+  - preflight:
+    - added `MISSING_WINDOWS_SDK_19041_METADATA` check
+  - failure class:
+    - added `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` mapping for managed `WMC9999`
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - added manifest class mapping:
+    - `TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED` -> `BLOCKED_XAML_PLATFORM_UNSUPPORTED`
+
+- `docs/reports/host_execution_round_2026-03-05.md`
+  - appended post-hardening follow-up outcome section.
+
+### Verification
+
+- `dotnet --version` (in repo root with `global.json`)
+  - `8.0.418`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI preflight: FAIL (`MISSING_WINDOWS_SDK_19041_METADATA`)
+  - diagnostics class: `TOOLCHAIN_PRECONDITION_FAILED`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_TOOLCHAIN_PRECONDITION`
+
+## 2026-03-05 - WinUI blocker execution round (SDK8 remediation + XAML failure-class confirmation)
+
+### Summary
+
+Executed the current host/gate plan sequence and captured updated blocker state:
+
+- quality baseline re-run: PASS
+- WinUI preflight blocker (`MISSING_DOTNET_8_SDK`) resolved by installing .NET 8 SDK
+- WinUI publish still fails at XAML compile stage, now consistently classified as `XAML_COMPILER_EXEC_FAIL`
+- HostTrack auto-resolution correctly maps diagnostics manifest class to `BLOCKED_XAML_COMPILER`
+
+### Changed
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - Upgraded `Microsoft.WindowsAppSDK`:
+    - `1.5.240802000` -> `1.8.260209005`
+
+- `docs/reports/host_execution_round_2026-03-05.md` (new)
+  - Added full execution record:
+    - baseline/gate commands and results
+    - SDK8 remediation step
+    - WinUI publish failure-class evidence (`MSB3073`, `WMC9999`)
+    - HostTrack auto-resolution verification
+
+- `docs/INDEX.md`
+  - Added link to `host_execution_round_2026-03-05.md`.
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI publish: FAIL
+  - diagnostics class: `XAML_COMPILER_EXEC_FAIL`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - ParserTrack_DoD: PASS
+  - HostTrackStatus: `BLOCKED_XAML_COMPILER`
+
+## 2026-03-04 - WinUI preflight fail-fast + HostTrack auto-resolution + host/baseline CI integration
+
+### Summary
+
+Implemented the follow-up execution plan to reduce WinUI publish ambiguity and make HostTrack reporting/CI verification deterministic:
+
+- added WinUI toolchain preflight with fail-fast behavior
+- added normalized WinUI failure-class output in diagnostics manifest
+- switched VSFAvatar HostTrack from static default to evidence-based auto-resolution
+- integrated quality-baseline job into host publish workflow (`pull_request` + `push(main)`)
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added WinUI preflight checks before publish:
+    - `.NET 8 SDK` presence
+    - Visual Studio discovery availability
+  - Added fail-fast behavior for preflight failures with diagnostics capture.
+  - Added normalized failure classification and confidence:
+    - `TOOLCHAIN_MISSING_DOTNET8`
+    - `TOOLCHAIN_PRECONDITION_FAILED`
+    - `NUGET_SOURCE_UNREACHABLE`
+    - `MANAGED_XAML_TASK_MISSING_DEP`
+    - `XAML_COMPILER_EXEC_FAIL`
+    - `UNKNOWN`
+  - Extended WinUI diagnostic manifest fields:
+    - `failure_class`
+    - `failure_class_confidence`
+    - `preflight` (`passed`, `failed_checks`, `detected_sdks`, `recommended_actions`)
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Changed default `HostTrackStatus` from static blocker to `AUTO`.
+  - Added host evidence inputs:
+    - `HostPublishReportPath`
+    - `WinUiDiagnosticManifestPath`
+  - Added auto-resolution logic for host track status/reason/evidence path.
+  - Updated HostTrack DoD contract:
+    - `PASS` only when resolved status is `PASS`.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added host metadata fields to report header:
+    - `HostTrackStatusReason`
+    - `HostTrackEvidencePath`
+  - Updated HostTrack DoD line to align with `HostTrackStatus=PASS` contract.
+
+- `.github/workflows/host-publish.yml`
+  - Added `quality-baseline` job (`tools/run_quality_baseline.ps1`).
+  - Set `publish-hosts` to depend on baseline job.
+  - Expanded path triggers to include baseline/gate scripts.
+  - Added baseline artifact upload bundle.
+
+- `docs/reports/host_runtime_parity_smoke_checklist_2026-03-04.md` (new)
+  - Added post-publish WPF/WinUI runtime parity smoke checklist and result template.
+
+- `README.md`
+  - Updated WinUI publish notes for preflight fail-fast + enriched manifest schema.
+  - Updated VSFAvatar HostTrack DoD wording to `HostTrackStatus=PASS`.
+
+- `docs/INDEX.md`
+  - Added link to `host_runtime_parity_smoke_checklist_2026-03-04.md`.
+
+## 2026-03-04 - Host publish diagnostics hardening + gate baseline re-validation
+
+### Summary
+
+Executed the planned verification round after recent host/parser updates:
+
+- re-ran VSFAvatar/VRM/VXAvatar gates and re-confirmed PASS baseline
+- re-ran host publish path and confirmed `WPF=PASS`, `WinUI=FAIL`
+- hardened WinUI failure diagnostics in publish script to extract actionable root-cause hints
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added `CollectManagedXamlDiagnostics` option (default `true`).
+  - On WinUI publish failure, now runs an additional managed XAML diagnostic pass:
+    - `dotnet build ... -p:UseXamlCompilerExecutable=false`
+  - Added root-cause hint extraction from diagnostics logs:
+    - `XamlCompiler.exe` MSB3073 path detection
+    - `NU1101` / `NU1301` NuGet failure detection
+    - `System.Security.Permissions` missing assembly detection
+    - `WMC9999` platform-unsupported/internal compiler error detection
+    - `.NET 8 SDK` precondition hint when only `9.x` SDK entries are detected
+  - Extended diagnostic manifest with:
+    - managed diagnostic command/exit code
+    - managed diagnostic log paths
+    - extracted root-cause hints
+  - Expanded WinUI obj diagnostic dump to include `input.json` in addition to `output.json`/log files.
+
+- `README.md`
+  - Added latest validation snapshot (`2026-03-04`) with gate and publish status.
+  - Updated GUI publish notes with managed XAML diagnostic artifact paths.
+  - Added combined baseline command documentation (`tools/run_quality_baseline.ps1`).
+
+- `tools/run_quality_baseline.ps1` (new)
+  - Added combined quality baseline runner for standard gate set:
+    - VSFAvatar fixed-set
+    - VRM fixed5
+    - VXAvatar quick fixed-set
+  - Added summary output:
+    - `build/reports/quality_baseline_summary.txt`
+
+- `docs/reports/host_gate_execution_round_2026-03-04.md` (new)
+  - Added execution report for gate re-validation and host publish results.
+
+- `docs/INDEX.md`
+  - Added link to `host_gate_execution_round_2026-03-04.md`.
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - GateA/B/C/D: PASS
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vrm_quality_gate.ps1 -Profile fixed5`
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - GateA..H: PASS
+  - Overall: PASS
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi`
+  - WPF publish: PASS
+  - WinUI publish: FAIL (`XamlCompiler.exe` exit code `1`)
+  - diagnostics captured under `build/reports/winui`
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\run_quality_baseline.ps1`
+  - Overall: PASS
+
+## 2026-03-03 - VSFAvatar serialized bottleneck follow-up (4/4 fixed samples complete)
+
+### Summary
+
+Completed a follow-up pass focused on the remaining serialized parsing bottleneck after the LZMA/reconstruction lift. The fixed 4-sample set now reaches `complete + object_table_parsed=true + primary_error_code=NONE` for all samples, while preserving gate stability.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added additive serialized diagnostics fields:
+    - `serialized_detail_error_code`
+    - `serialized_last_failure_offset`
+    - `serialized_last_failure_window_size`
+    - `serialized_last_failure_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded node-based serialized candidate attempts with wider offset deltas and low-candidate expansion windows.
+  - Increased minimum parse window for node candidates to reduce header/window miss cases.
+  - Added structured tracking for best serialized failure detail (code/offset/window).
+  - Added raw-scan failure detail mapping (`SF_NO_RAW_HEADER_CANDIDATE` / `SF_RAW_PARSE_FAILED`).
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added parse classification split for truncated metadata windows:
+    - `SF_METADATA_WINDOW_TRUNCATED`
+  - Tuned offset-scan behavior for large buffers:
+    - reduced scan limit / hit cap / window size
+    - larger step for large buffers to avoid runtime blow-up while preserving fallback recovery.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Emitted new optional serialized detail fields.
+  - Added `W_SERIALIZED_DETAIL` warning line for easier triage.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Consumed serialized detail fields as warnings only (no schema contract break).
+
+- `docs/reports/vsfavatar_serialized_bottleneck_followup_2026-03-03.md` (new)
+  - Added follow-up implementation + verification report.
+
+### Verification
+
+- `tools/vsfavatar_sample_report.ps1 -UseFixedSet:$true ...`
+  - `UseFixedSet=True`, `FileCount=4`, `GateRows=4`.
+  - All fixed samples reported `SidecarProbeStage=complete`, `SidecarObjectTableParsed=True`, `SidecarPrimaryError=NONE`.
+
+- `tools/vsfavatar_quality_gate.ps1 -UseFixedSet -ReportPath ./build/reports/vsfavatar_probe_latest_after_gate_new.txt`
+  - GateA/B/C/D: PASS
+  - Overall: PASS
+
+- `tools/vrm_quality_gate.ps1`
+  - Overall: PASS
+
+## 2026-03-03 - VSFAvatar gate reporting split (parser/host) + aggregate diagnostics
+
+### Summary
+
+Improved VSFAvatar gate operations by splitting Parser/Host track status, adding aggregate diagnostics outputs, and formalizing DoD-oriented reporting fields for iterative GateD work.
+
+### Changed
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added `HostTrackStatus` input and report header output.
+  - Added `ParserTrack_DoD` / `HostTrack_DoD` summary lines.
+  - Added `RunDurationSec` output for run-to-run timing comparison.
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Added Parser/Host track split in gate summary.
+  - Added smoke mode (`-UseSmoke -SmokeMaxFiles N`) for fast pre-gate loops.
+  - Added run metrics:
+    - `RunDurationSec`
+    - `SerializedAttempts_Avg`
+    - `SerializedAttempts_Max`
+  - Added aggregate outputs:
+    - `build/reports/vsfavatar_gate_aggregate.csv`
+    - `build/reports/vsfavatar_gate_aggregate.txt`
+  - Added stage/primary/object-table distributions for failure triage.
+  - Baseline report is now optional (missing baseline continues with empty diff base).
+
+- `README.md`
+  - Updated VSFAvatar quality-gate section with track split and new aggregate outputs.
+  - Added gate-work commit hygiene guidance.
+
+- `docs/reports/vsfavatar_serialized_gateD_update_2026-03-03.md`
+  - Added DoD status checklist for Parser/Host tracks.
+
+## 2026-03-03 - Render/preset busy-gating parity follow-up for WPF and WinUI
+
+### Summary
+
+Completed a follow-up pass to enforce busy-state safety on render and preset interactions, aligning WPF and WinUI behavior with the same host operation gating contract.
+
+### Changed
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added `ShouldSkipRenderInteraction()` helper (`_isSyncingRenderUi || OperationState.IsBusy`).
+  - Applied busy-aware guard to render interaction handlers:
+    - `BroadcastMode_Changed`
+    - `CameraMode_SelectionChanged`
+    - slider/preset background/mirror/debug handlers
+  - Added busy guard for preset actions:
+    - `SavePreset_Click`
+    - `ApplyPreset_Click`
+    - `DeletePreset_Click`
+    - `ResetRender_Click`
+  - Updated render control enable rules:
+    - `Yaw`/`FOV` enabled only in `Manual` camera mode.
+  - Updated camera mode change flow to refresh UI enable state immediately before queued apply.
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added same `ShouldSkipRenderInteraction()` helper and handler coverage as WPF.
+  - Added same preset busy guards as WPF.
+  - Updated render control enable rules with same manual-mode condition for `Yaw`/`FOV`.
+  - Updated camera mode change flow to refresh UI enable state before queued apply.
+
+- `docs/reports/ui_render_busy_gating_parity_2026-03-03.md` (new)
+  - Added implementation and parity behavior report for this follow-up.
+
+- `docs/INDEX.md`
+  - Added link to the new render busy-gating parity report.
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release`
+  - PASS
+- WPF/WinUI host build:
+  - not re-validated in this follow-up run due environment network dependency for restore/package resolution.
+
+## 2026-03-03 - Host UI input validation/busy-state gating + WinUI diagnostic environment snapshot
+
+### Summary
+
+Improved host operation safety and observability across WPF/WinUI by adding shared HostCore validation and busy-operation contracts, wiring UI action gating to those contracts, and enriching WinUI publish-failure diagnostics with environment metadata for reproducible triage.
+
+### Changed
+
+- `host/HostCore/HostUiState.cs`
+  - Added:
+    - `HostOperationState` (`IsBusy`, `CurrentOperation`)
+    - `HostValidationState` (`AvatarPathValid`, `OscBindPortValid`, `OscPublishAddressValid`, error texts)
+
+- `host/HostCore/HostController.cs`
+  - Added:
+    - `OperationState` property
+    - `ValidateInputs(avatarPath, oscBindPortText, oscPublishAddress)` API
+    - centralized operation wrapper for busy-state transitions on mutating actions
+  - Added validation helpers:
+    - avatar path checks (required, supported extension, file existence)
+    - OSC bind port checks (`ushort`)
+    - OSC publish address checks (`host:port` + `ushort` port)
+
+- `host/WpfHost/MainWindow.xaml`
+  - Added inline validation text blocks for avatar path and OSC inputs.
+  - Added `TextChanged` hooks on avatar/OSC input text boxes.
+  - Added `Busy` field to status strip.
+  - Added horizontal scroll support for logs view.
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added live validation refresh and inline error rendering.
+  - Added busy-guard short-circuit on lifecycle/output actions.
+  - Updated action enable rules to include:
+    - session/avatar state
+    - validation state (`Load`, `Start OSC`)
+    - busy state (`!IsBusy`)
+
+- `host/WinUiHost/MainWindow.xaml`
+  - Added left-panel `ScrollViewer` for small-window operability.
+  - Added inline validation blocks + `TextChanged` hooks.
+  - Updated logs textbox to `NoWrap` + horizontal scroll.
+  - Added `Busy` status line.
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added live validation refresh and inline error rendering.
+  - Added busy-guard short-circuit on lifecycle/output actions.
+  - Updated action enable rules with same gate model as WPF.
+
+- `tools/publish_hosts.ps1`
+  - Extended WinUI diagnostic manifest with environment capture:
+    - OS version
+    - `.NET SDKs`/`runtimes`
+    - Visual Studio discovery (`vswhere`, when available)
+
+- `docs/reports/ui_host_validation_busy_and_winui_diag_2026-03-03.md` (new)
+  - Added detailed implementation and verification report.
+
+- `docs/INDEX.md`
+  - Added link to the new host validation/busy/diagnostics report.
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release`
+  - PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release`
+  - BLOCKED in this environment by NuGet/network access (`NU1301`/`NU1101`)
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+  - BLOCKED in this environment by NuGet/network access (`NU1301`/`NU1101`)
+
+## 2026-03-03 - VXAvatar/VXA2/MIQ Gate H expansion for MIQ policy contract
+
+### Summary
+
+Extended the VXAvatar/VXA2/MIQ gate harness with a new Gate H to continuously validate native MIQ unknown-section policy behavior and warning-code count contract (`warn|ignore|fail`) in both local runs and CI.
+
+### Changed
+
+- `tools/vxavatar_sample_report.ps1`
+  - Added policy probe fields for MIQ rows:
+    - `MiqPolicyWarn_PrimaryError`
+    - `MiqPolicyWarn_WarningCodes`
+    - `MiqPolicyIgnore_PrimaryError`
+    - `MiqPolicyIgnore_WarningCodes`
+    - `MiqPolicyFail_PrimaryError`
+    - `MiqPolicyFail_WarningCodes`
+
+- `tools/vxavatar_quality_gate.ps1`
+  - Added Gate H (`MIQ unknown-section policy contract`).
+  - Added policy field presence checks and numeric parsing checks.
+  - Added policy assertions:
+    - `warn/ignore` primary error must be `NONE`.
+    - `ignore` warning-code count must be `<= warn`.
+    - `fail` primary error must be `NONE|MIQ_UNKNOWN_SECTION_NOT_ALLOWED`.
+  - Included `gate_h` in summary text/JSON and overall pass condition.
+
+- `.github/workflows/vxavatar-gate.yml`
+  - Added trigger paths:
+    - `tools/avatar_tool.cpp`
+    - `CMakeLists.txt`
+  - Updated quick/full step labels to explicit `(A-H)`.
+
+- `README.md`
+  - Added Gate H rule description in VXAvatar/VXA2/MIQ quality gate section.
+
+- `docs/reports/miq_policy_gateH_ci_2026-03-03.md` (new)
+  - Added implementation and expected verification output summary.
+
+- `docs/INDEX.md`
+  - Added link to Gate H expansion report.
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - PASS
+
+## 2026-03-03 - MIQ native parity for unknown-section policy + structured warning codes
+
+### Summary
+
+Aligned native C++ MIQ loader diagnostics with the Unity SDK policy model by introducing configurable unknown-section handling (`Warn|Ignore|Fail`) and normalized warning-code surfaces.
+
+### Changed
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added `MiqUnknownSectionPolicy` enum.
+  - Added `AvatarPackage.warning_codes`.
+
+- `include/animiq/avatar/avatar_loader_facade.h`
+  - Added `AvatarLoadOptions` with `miq_unknown_section_policy`.
+  - Added `Load(path, options)` overload (existing `Load(path)` preserved).
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Routed MIQ loader calls through policy-aware overload while keeping non-MIQ behavior unchanged.
+
+- `src/avatar/miq_loader.h`
+  - Added `Load(path, MiqUnknownSectionPolicy)` overload.
+
+- `src/avatar/miq_loader.cpp`
+  - Added warning-code extraction and accumulation into `warning_codes`.
+  - Added unknown-section policy behavior:
+    - `Warn`: emit `MIQ_UNKNOWN_SECTION` warning.
+    - `Ignore`: skip warning.
+    - `Fail`: stop with `MIQ_UNKNOWN_SECTION_NOT_ALLOWED`.
+  - Kept default `Load(path)` behavior by delegating to `Warn`.
+
+- `tools/avatar_tool.cpp`
+  - Switched to `AvatarLoaderFacade` direct load path.
+  - Added CLI option:
+    - `--miq-unknown-section-policy=warn|ignore|fail`
+  - Added diagnostics output fields:
+    - `WarningCodes`
+    - `LastWarningCode`
+
+- `CMakeLists.txt`
+  - Updated `avatar_tool` link target from `nativecore` to `animiq_core`.
+
+- `docs/formats/miq.md`
+  - Documented native unknown-section policy and `warning_codes[]`.
+
+- `README.md`
+  - Updated Unity/native MIQ diagnostics section to include unknown-section policy + warning-code fields.
+
+### Verification
+
+- `cmake --build build --config Release --target avatar_tool`
+  - PASS
+- `.\build\Release\avatar_tool.exe .\build\tmp_vx\demo_mvp.miq --miq-unknown-section-policy=warn`
+  - PASS
+
+## 2026-03-03 - Host publish script hardening for restore/network-failure diagnostics
+
+### Summary
+
+Hardened host publish behavior to fail on real `dotnet` exit codes, preserve WinUI diagnostics even when WPF publish fails first, and support explicit no-restore validation runs.
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added `-NoRestore` switch.
+  - Added `Invoke-DotNetCommand` helper to enforce non-zero exit failure handling for `dotnet publish`.
+  - Normalized `WinUiDiagDir` to absolute path.
+  - Updated flow so WPF publish failure is logged but does not block WinUI diagnostic capture when `-IncludeWinUi` is enabled.
+  - WinUI diagnostic build now mirrors `--no-restore` when selected.
+
+- `docs/reports/host_stabilization_round_2026-03-03.md` (new)
+  - Added host stabilization execution report including command outcomes and blocker status.
+
+- `docs/INDEX.md`
+  - Added link to host stabilization round report.
+
+### Verification
+
+- `dotnet restore host/WpfHost/WpfHost.csproj -v minimal`
+  - PASS
+- `dotnet restore host/WinUiHost/WinUiHost.csproj -v minimal`
+  - PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`
+  - PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 --no-restore`
+  - FAIL (`MSB3073`, `XamlCompiler.exe ... output.json`, exit code `1`)
+- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi`
+  - FAIL (WinUI publish step), but WinUI diagnostics files generated successfully under `build/reports/winui`.
+- Additional mitigation attempts:
+  - WinUI `obj/bin` clean rebuild and direct `XamlCompiler.exe` run were both reproduced as fail (`exit=1`) without line-level diagnostics.
+
+## 2026-03-03 - WinUI publish failure diagnostics + VSFAvatar serialized failure-detail propagation
+
+### Summary
+
+Added deterministic WinUI publish failure diagnostics (local script + CI artifact path) and expanded VSFAvatar serialized parsing diagnostics to preserve compact failure code and last failure tuple (`offset/window/code`) across probe -> sidecar -> loader warning flow.
+
+### Changed
+
+- `tools/publish_hosts.ps1`
+  - Added parameters:
+    - `CollectWinUiDiagnostics` (default: `true`)
+    - `WinUiDiagDir` (default: `.\build\reports\winui`)
+  - Wrapped WinUI publish in `try/catch`.
+  - On WinUI publish failure, now runs diagnostic build:
+    - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64 -v:diag -bl:<binlog>`
+  - Collects and stores:
+    - `winui_build.binlog`
+    - `winui_build_diag.log`
+    - `winui_build_stderr.log`
+    - `winui_diagnostic_manifest.json`
+    - `obj-dump/**` copied from `host/WinUiHost/obj`
+  - Emits diagnostic artifact paths into `build/reports/host_publish_latest.txt`.
+
+- `.github/workflows/host-publish.yml`
+  - Updated publish step to include WinUI path:
+    - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -IncludeWinUi`
+  - Expanded artifact upload set to include:
+    - `NativeAnimiq/build/reports/winui`
+  - Kept `if: always()` artifact upload behavior.
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added error classification for truncated metadata windows:
+    - `SF_METADATA_WINDOW_TRUNCATED`
+  - Refined big-endian parse error messages to distinguish:
+    - invalid size (`invalid metadata size`)
+    - oversized-in-window (`metadata size exceeds current window`)
+    - range truncation (`metadata window truncated`)
+  - Relaxed raw header pre-check and widened scan:
+    - step `8 -> 4`
+    - max hits `512 -> 2048`
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added additive probe fields:
+    - `serialized_detail_error_code`
+    - `serialized_last_failure_offset`
+    - `serialized_last_failure_window_size`
+    - `serialized_last_failure_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded node-candidate fallback with bounded nearby expansion for sparse candidate sets.
+  - Increased node offset delta search set up to `±4096`.
+  - Added minimum parse window floor (`512 KiB`) for candidate attempts.
+  - Persisted best serialized failure tuple and compact detail code into probe fields.
+  - Mirrored the same detail tuple handling in raw bundle serialized scan path.
+  - Clears new serialized detail fields on successful parse for consistency.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added serialized detail warning line:
+    - `W_SERIALIZED_DETAIL: code=..., last-offset=..., window=..., last-code=...`
+  - Emitted additive JSON fields:
+    - `serialized_detail_error_code`
+    - `serialized_last_failure_offset`
+    - `serialized_last_failure_window_size`
+    - `serialized_last_failure_code`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Consumes new sidecar serialized detail fields and appends warning:
+    - `W_SERIALIZED_DETAIL: ...`
+
+- `docs/reports/winui_xaml_diagnostics_artifacts_2026-03-03.md` (new)
+  - Added WinUI diagnostic artifact map and triage order.
+
+- `docs/INDEX.md`
+  - Added link to the WinUI diagnostics artifact guide report.
+
+### Verification
+
+- Script syntax check:
+  - `tools/publish_hosts.ps1`: parse OK
+- Full WinUI publish success/failure runtime verification in this pass:
+  - not executed (pending environment run).
+
+## 2026-03-03 - VSFAvatar GateD pass with UnityFS LZMA block decode and reconstruction scoring updates
+
+### Summary
+
+Lifted VSFAvatar fixed-set quality gate from GateD FAIL to PASS by implementing `mode=1` (LZMA) UnityFS block decode, adjusting block0 candidate/ranking logic, and extending sidecar/loader diagnostics in an additive-compatible way.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added UnityFS `mode=1` LZMA decode path via integrated `LzmaDecode` one-call API.
+  - Added LZMA variant attempts (`props-only-header`, `props+size-header`) with strict output-size validation.
+  - Updated block0 mode candidate ordering to reduce over-bias toward header/block flag and include fail-hit demotion.
+  - Updated reconstruction candidate window generation to coarse + fine passes (reduced noisy search explosion).
+  - Reweighted reconstruction scoring (decoded-block ratio + continuity + node-range pass weight).
+  - Split reconstruction failure classification (`SEEK`, `READ`, `RANGE`, `LZ4`, `LZMA`, `MODE_UNSUPPORTED`, etc.).
+  - Expanded raw serialized fallback scan stride/window to improve candidate discovery.
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added additive probe fields:
+    - `lzma_decode_attempted`
+    - `lzma_decode_variant`
+    - `block0_mode_rank`
+    - `recon_failure_detail_code`
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Emitted new optional schema v3 additive fields above.
+  - Added matching warning lines (`W_LZMA`, `W_RECON_DETAIL`).
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Consumed new optional sidecar fields as warnings only (no contract break).
+  - Extended in-house metadata warning summary with new diagnostics.
+
+- `CMakeLists.txt`
+  - Enabled C language for build.
+  - Added `third_party/LzmaDec.c` to `animiq_core` sources.
+  - Added `third_party` include path for LZMA headers.
+
+- `third_party/LzmaDec.c` (new)
+- `third_party/LzmaDec.h` (new)
+- `third_party/Types.h` (new)
+  - Imported public-domain LZMA decoder components (Igor Pavlov) used by UnityFS mode=1 decode path.
+
+### Verification
+
+- `tools/vsfavatar_quality_gate.ps1 -UseFixedSet`
+  - GateA: PASS
+  - GateB: PASS
+  - GateC: PASS
+  - GateD: PASS
+  - Overall: PASS
+- `tools/vrm_quality_gate.ps1`
+  - Overall: PASS
+- `tools/vxavatar_quality_gate.ps1`
+  - FAIL due to missing fixed-valid VX/VXA2 samples in current quick profile dataset (not a parser regression from this change set).
+
+## 2026-03-03 - Host render advanced controls and local preset persistence
+
+### Summary
+
+Expanded host render UX with manual composition controls and reusable local presets, keeping WPF and WinUI behavior aligned.
+
+### Changed
+
+- `host/HostCore/HostInterfaces.cs`
+  - Added `IRenderPresetStore` interface.
+
+- `host/HostCore/RenderPresetStore.cs` (new)
+  - Added preset model:
+    - `RenderPresetModel`
+    - `RenderPresetStoreModel`
+  - Added local JSON persistence implementation:
+    - `RenderPresetStore`
+  - Added model normalization, value clamping, duplicate-name collapse, and corrupt-file fallback with `.bak` backup.
+
+- `host/HostCore/HostController.cs`
+  - Added preset management API:
+    - `CreatePreset`
+    - `SaveOrUpdateRenderPreset`
+    - `ApplyRenderPreset`
+    - `DeleteRenderPreset`
+    - `ResetRenderDefaults`
+  - Added exposed preset state:
+    - `RenderPresets`
+    - `SelectedRenderPresetName`
+  - Updated broadcast toggle behavior to preserve user camera controls (`CameraMode`, `Framing`, `Headroom`, `Yaw`, `FOV`, `Mirror`, overlay flag) while switching preset baseline.
+  - Added render state normalization/clamping path shared by UI apply and preset apply.
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added advanced render controls:
+    - `Camera Mode`, `Headroom`, `Yaw`, `FOV`, `Mirror`
+  - Added preset controls:
+    - save/apply/delete/reset UI and handlers
+  - Added render apply debounce timer (`~100ms`) to reduce high-frequency native apply calls during slider drag.
+
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added the same advanced render/preset controls and behavior as WPF.
+  - Added matching debounce and diagnostics field expansion for parity.
+
+- `docs/reports/ui_render_benchmark_plan_2026-03-02.md`
+  - Added advanced-controls implementation update and KPI status refinement.
+- `docs/reports/ui_render_advanced_controls_2026-03-03.md` (new)
+  - Added detailed implementation summary, behavior notes, and verification snapshot for advanced controls + preset persistence.
+
+## 2026-03-03 - MIQ Unity SDK diagnostics API + VRM-derived fixed sample generation
+
+### Summary
+
+Strengthened Unity-side MIQ SDK loader reliability with a non-throwing diagnostics API, added stricter section boundary/schema validation while preserving v1 compatibility, and expanded gate input stability by generating fixed-valid MIQ samples directly from VRM assets.
+
+### Changed
+
+- `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - Added load diagnostics contracts:
+    - `MiqLoadErrorCode`
+    - `MiqLoadDiagnostics` (`ErrorCode`, `ErrorMessage`, `ParserStage`, `IsPartial`, `Warnings`)
+  - Updated manifest default exporter version to `0.3.0`.
+
+- `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - Added non-throwing API:
+    - `TryLoad(path, out payload, out diagnostics)`
+  - Preserved existing API:
+    - `Load(path)` now wraps `TryLoad` and throws with diagnostic context on failure.
+  - Added boundary/schema validation for manifest and TLV section payloads.
+  - Kept backward compatibility for material payloads with/without `shaderVariant`.
+  - Added unknown-section and partial-compat diagnostics warnings.
+
+- `unity/Packages/com.animiq.miq/Editor/MiqExporter.cs`
+  - Centralized manifest defaults (`schemaVersion=1`, `exporterVersion=0.3.0`).
+  - Ensured required manifest fields and ref arrays are always populated.
+  - Standardized strict shader policy failure message format with material/shader identifiers.
+
+- `tools/vxavatar_sample_report.ps1`
+  - Added `-FixedMiqFromVrmCount` (default `5`).
+  - Added VRM-driven fixed MIQ generation path (`vrm_to_miq`) that seeds `fixed-valid` MIQ rows from `.vrm` inputs.
+
+- `tools/vxavatar_quality_gate.ps1`
+  - Added `-FixedMiqFromVrmCount` pass-through to sample report generation.
+
+- `README.md`
+- `unity/Packages/com.animiq.miq/README.md`
+  - Documented `TryLoad` + diagnostics contract and fixed MIQ sample generation policy.
+
+## 2026-03-03 - MIQ TryLoad strict option + runtime tests + deterministic VRM allowlist gate
+
+### Summary
+
+Completed the follow-up hardening slice for MIQ SDK by adding an option-based strict validation path, introducing Unity runtime loader tests, and making fixed-valid MIQ generation deterministic through a VRM allowlist policy.
+
+### Changed
+
+- `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - Added:
+    - `MiqLoadOptions` (`StrictValidation`)
+    - `MiqLoadErrorCode.StrictValidationFailed`
+
+- `unity/Packages/com.animiq.miq/Runtime/MiqRuntimeLoader.cs`
+  - Added overload:
+    - `TryLoad(path, out payload, out diagnostics, options)`
+  - Kept compatibility:
+    - existing `Load(...)` and `TryLoad(...)` signatures remain, now delegating to default options.
+  - Added strict-mode behavior:
+    - warning-level conditions now fail when `StrictValidation=true`:
+      - unknown sections
+      - trailing bytes in section payload
+      - ref/payload mismatch diagnostics
+
+- `unity/Packages/com.animiq.miq/Tests/Runtime/Animiq.Miq.Runtime.Tests.asmdef` (new)
+- `unity/Packages/com.animiq.miq/Tests/Runtime/MiqRuntimeLoaderTests.cs` (new)
+  - Added runtime test coverage for:
+    - valid load
+    - magic/version/manifest/section truncation failures
+    - legacy material compatibility (without `shaderVariant`)
+    - strict/non-strict unknown-section behavior
+    - strict ref/payload mismatch failure
+
+- `tools/vxavatar_sample_report.ps1`
+- `tools/vxavatar_quality_gate.ps1`
+  - Added deterministic allowlist-first VRM generation contract:
+    - `-FixedMiqFromVrmAllowlist`
+    - `-FixedMiqFromVrmCount`
+  - In fixed/full modes, missing allowlist entries now fail input preparation.
+
+- `README.md`
+- `unity/Packages/com.animiq.miq/README.md`
+  - Documented strict option path, test location, and deterministic gate input policy.
+
+## 2026-03-03 - Host render UI controls sync finalization + benchmark plan
+
+### Summary
+
+Finalized host-side render option controls for both WPF and WinUI by wiring the same Render UI state flow through HostCore and documenting KPI-based follow-up validation scenarios.
+
+### Changed
+
+- `host/HostCore/HostController.cs`
+  - Added render option apply/sync helpers:
+    - native apply/readback (`nc_set_render_quality_options` / `nc_get_render_quality_options`)
+    - camera mode mapping between host and native enums
+    - background preset encode/decode helpers
+    - centralized `RenderUiState` reconstruction from applied native options
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added Render control panel:
+    - `Broadcast Mode`
+    - `Framing` slider with live numeric label
+    - `Background` preset combo (`Dark Blue`, `Neutral Gray`, `Green Screen`)
+    - `Show Debug Overlay`
+  - Added bidirectional UI/state sync and reentry guard (`_isSyncingRenderUi`).
+  - Added on-canvas debug overlay panel that mirrors runtime diagnostics content.
+
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added the same Render control surface and debug overlay behavior as WPF.
+  - Added matching UI/state sync flow and event-driven apply path.
+
+- `docs/reports/ui_render_benchmark_plan_2026-03-02.md` (new)
+  - Added KPI checklist and runtime acceptance scenarios for framing, visibility, overlay hygiene, background presets, DPI stability, and frame-time regression checks.
+
+- `docs/INDEX.md`
+  - Added index entry for the render benchmark plan report.
+
+### Verified
+
+- Build success:
+  - `dotnet build host/HostCore/HostCore.csproj -c Release`
+- Environment-constrained build result:
+  - WPF/WinUI project restore failed in current environment due to `NU1301` (`api.nuget.org:443` unreachable), so host-app compilation must be revalidated in network-enabled CI/local setup.
+
+## 2026-03-02 - NativeCore render quality API contract sync
+
+### Summary
+
+Exposed render quality controls in the public native C header so the ABI now matches existing runtime capabilities.
+
+### Changed
+
+- `include/animiq/nativecore/api.h`
+  - Added public enum:
+    - `NcCameraMode`
+      - `NC_CAMERA_MODE_AUTO_FIT_FULL`
+      - `NC_CAMERA_MODE_AUTO_FIT_BUST`
+      - `NC_CAMERA_MODE_MANUAL`
+  - Added public options struct:
+    - `NcRenderQualityOptions`
+      - framing/camera/background/overlay controls
+  - Added API declarations:
+    - `nc_set_render_quality_options`
+    - `nc_get_render_quality_options`
+
+- `docs/reports/nativecore_render_quality_api_sync_2026-03-02.md` (new)
+  - Added detailed contract sync notes and compatibility impact summary.
+
+## 2026-03-03 - MIQ payload expansion + signature dispatch fallback + VSFAvatar probe hardening
+
+### Summary
+
+Expanded MIQ runtime payload coverage (skin/blendshape), added extension-independent loader dispatch fallback via file signature probing, and hardened VSFAvatar serialized probing with candidate/window/raw-bundle fallback paths and complete-state sidecar normalization.
+
+### Changed
+
+- `include/animiq/avatar/i_avatar_loader.h`
+  - Added `CanLoadBytes(...)` interface for header-based loader routing.
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Added head-byte reader and signature fallback dispatch path when extension dispatch misses.
+
+- `src/avatar/miq_loader.cpp`
+  - Added decode support for:
+    - `0x0013` skin payload sections
+    - `0x0014` blendshape payload sections
+  - Added mesh-key linkage for skin/blendshape runtime payload attachment.
+  - Added material override parser compatibility path with default variant fallback.
+  - Added partial mapping warnings for mesh-ref and payload section cardinality mismatch.
+
+- `include/animiq/avatar/avatar_package.h`
+  - Expanded payload model fields used by MIQ skin/blendshape decode paths.
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded serialized candidate discovery with:
+    - truncated node-window handling
+    - all-node fallback
+    - in-stream serialized-header scan fallback
+    - wider offset deltas
+  - Added raw-bundle serialized scan fallback path for failed node-based probe cases.
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added offset-scan parse fallback for misaligned serialized byte windows.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Normalized complete-state contract:
+    - `probe_stage=complete && object_table_parsed=true` emits `primary_error_code=NONE`
+  - Refined complete-state compatibility/missing-feature labeling.
+
+- `tools/vxavatar_sample_report.ps1`
+- `tools/vxavatar_quality_gate.ps1`
+- `.github/workflows/vxavatar-gate.yml`
+  - Expanded quality-gate/report/workflow scope from VXAvatar/VXA2 to VXAvatar/VXA2/MIQ.
+  - Added MIQ fixed-valid and synthetic-corrupt gate contracts (Gate F / Gate G).
+
+- `unity/Packages/com.animiq.miq/Runtime/MiqDataModel.cs`
+  - Added schema/exporter metadata and runtime data containers for skin/blendshape payloads.
+
+### Verified
+
+- Release build success:
+  - `cmake --build build --config Release`
+- VXAvatar/VXA2/MIQ quick gate success:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - `GateA/B/C/D/E/F/G=PASS`
+- Signature fallback behavior check success:
+  - renamed a `.vxa2` sample to `.bin`, `avatar_tool` still detected `Format: VXA2` via header signature dispatch.
+
+## 2026-03-03 - Host auto-quality pass (DPI-aware render sizing + resize debounce + Spout auto reconfigure)
+
+### Summary
+
+Addressed perceived blurriness/pixel-break artifacts in host preview by introducing DPI-aware physical-pixel render sizing and automatic runtime reconfiguration behavior.  
+Applied the same logic to both WPF and WinUI hosts without exposing manual quality toggles.
+
+### Changed
+
+- `host/HostCore/HostUiState.cs`
+  - Extended `HostSessionState` with render-metric fields:
+    - `LogicalWidth`
+    - `LogicalHeight`
+    - `DpiScaleX`
+    - `DpiScaleY`
+    - `RenderWidthPx`
+    - `RenderHeightPx`
+  - Extended `OutputState` with Spout runtime dimensions:
+    - `SpoutWidthPx`
+    - `SpoutHeightPx`
+    - `SpoutFps`
+
+- `host/HostCore/HostController.cs`
+  - Added `UpdateRenderMetrics(...)` to publish effective render sizing telemetry.
+  - `ResizeWindow(...)` now triggers auto Spout reconfiguration when active and target size changes.
+  - Added automatic Spout stop/start flow on render target resize:
+    - `SpoutAutoStop`
+    - `SpoutAutoStart`
+    - `SpoutAutoReconfigure` log entry
+  - Preserved existing interface surface while improving runtime behavior observability.
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added DPI-aware pixel-size computation using `VisualTreeHelper.GetDpi(RenderHost)`.
+  - Switched attach/resize/Spout-start dimensions from logical size to physical pixel size.
+  - Added resize debounce timer (`~90ms`) to reduce resize-thrash and avoid repeated swapchain churn.
+  - Runtime diagnostics now include auto-quality line:
+    - logical size
+    - DPI scale
+    - effective render target pixel size
+
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Added DPI-aware pixel-size computation using `RenderHost.XamlRoot.RasterizationScale`.
+  - Switched attach/resize/Spout-start dimensions to physical pixel size parity with WPF.
+  - Added resize debounce timer (`~90ms`) with matching behavior.
+  - Runtime diagnostics now include the same auto-quality telemetry line.
+
+### Verified
+
+- Build success:
+  - `dotnet build host/WpfHost/WpfHost.csproj -c Release`
+- Build attempt failed in current environment/toolchain:
+  - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+  - failure point remains Windows App SDK XAML compiler (`XamlCompiler.exe` exit code 1).
+
+## 2026-03-02 - MIQ container path + VRM to MIQ converter scaffold
+
+### Summary
+
+Added a first-class `.miq` avatar container path based on the existing TLV family, plus a converter utility that packages VRM runtime payloads into MIQ.
+
+### Changed
+
+- `src/avatar/miq_loader.cpp` / `src/avatar/miq_loader.h` (new)
+  - Added `.miq` loader with:
+    - `MIQ` magic/version validation
+    - manifest required key checks (`avatarId`, `meshRefs`, `materialRefs`, `textureRefs`)
+    - TLV decode for:
+      - `0x0011` mesh render payload
+      - `0x0002` texture payload
+      - `0x0003` material override
+      - `0x0012` material shader params JSON
+    - compatibility/error signaling (`MIQ_SCHEMA_INVALID`, `MIQ_SECTION_TRUNCATED`, `MIQ_ASSET_MISSING`)
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Registered `.miq` dispatch route.
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added `AvatarSourceType::Miq`.
+  - Added `MaterialRenderPayload.shader_params_json`.
+
+- `include/animiq/nativecore/api.h`
+  - Added `NC_AVATAR_FORMAT_MIQ`.
+
+- `src/nativecore/native_core.cpp`
+  - Added native format hint mapping for `AvatarSourceType::Miq`.
+
+- `host/HostCore/NativeCoreInterop.cs`
+  - Added managed enum mapping `NcAvatarFormatHint.Miq`.
+
+- `tools/vrm_to_miq.cpp` (new)
+  - Added converter utility:
+    - input: `.vrm`
+    - output: `.miq`
+    - writes mesh/material/texture payload sections from runtime extraction
+
+- `CMakeLists.txt`
+  - Added `miq_loader.cpp` to `animiq_core`.
+  - Added `vrm_to_miq` executable target.
+
+- `docs/formats/miq.md` (new)
+  - Added MIQ format draft and section contract.
+
+- `README.md`, `docs/INDEX.md`
+  - Updated format and tool references to include `.miq` and `vrm_to_miq`.
+
+## 2026-03-03 - Host UI operation-focused redesign (WPF + WinUI) and shared state controller
+
+### Summary
+
+Reworked both host shells from MVP button panels into operation-focused UI layouts with explicit lifecycle sections, status strip visibility, structured diagnostics, and guarded actions.  
+Added a shared HostCore controller/state model so WPF and WinUI follow the same runtime workflow and control semantics.
+
+### Changed
+
+- `host/HostCore/HostInterfaces.cs` (new)
+  - Added explicit host service contracts:
+    - `IAvatarSessionService`
+    - `IRenderLoopService`
+    - `IOutputService`
+  - Enables host-shell behavior to depend on interfaces instead of concrete service classes.
+
+- `host/HostCore/HostUiState.cs` (new)
+  - Added UI-facing state contracts:
+    - `HostSessionState`
+    - `OutputState`
+    - `DiagnosticsSnapshot`
+    - `HostLogEntry`
+  - Defines a stable snapshot/log model for both host tracks.
+
+- `host/HostCore/HostController.cs` (new)
+  - Added a shared orchestration layer over session/render/output services.
+  - Added bounded operation log ring buffer (200 entries).
+  - Added events:
+    - `StateChanged`
+    - `DiagnosticsUpdated`
+    - `ErrorRaised`
+  - Added guarded workflow methods:
+    - initialize/shutdown
+    - attach/resize/tick
+    - load/unload avatar
+    - start/stop Spout
+    - start/stop OSC
+  - Added unified diagnostics snapshot publication on each state transition/tick.
+
+- `host/HostCore/AvatarSessionService.cs`
+- `host/HostCore/RenderLoopService.cs`
+- `host/HostCore/OutputService.cs`
+  - Updated services to implement new interface contracts.
+
+- `host/WpfHost/MainWindow.xaml`
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Replaced MVP layout with operation-focused sections:
+    - `Session` (Initialize/Shutdown)
+    - `Avatar` (path + Browse + Load/Unload)
+    - `Outputs` (Spout/OSC config + start/stop)
+  - Added structured diagnostics tabs:
+    - Runtime
+    - Avatar
+    - Logs
+  - Added status strip:
+    - session/avatar/render/frame/output/last-error
+  - Added state-based button enable/disable rules.
+  - Added guarded confirmations for disruptive actions (reinitialize, unload, stop outputs, shutdown).
+  - Added input validation for OSC bind port.
+  - Added file picker flow for avatar selection.
+
+- `host/WinUiHost/MainWindow.xaml`
+- `host/WinUiHost/MainWindow.xaml.cs`
+  - Applied the same operation-focused information architecture and interaction semantics as WPF.
+  - Added runtime/avatar/log diagnostics panels and status strip parity.
+  - Added WinUI content dialog confirmations and file picker avatar browse flow.
+  - Added render-host resize handling to align with WPF runtime behavior.
+
+### Verified
+
+- Build success:
+  - `dotnet build host/WpfHost/WpfHost.csproj -c Release`
+- Build attempt failed in current environment/toolchain:
+  - `dotnet build host/WinUiHost/WinUiHost.csproj -c Release -p:Platform=x64`
+  - failure point: Windows App SDK XAML compiler (`XamlCompiler.exe` exit code 1) with no surfaced line-level diagnostics in generated `output.json`.
+
+## 2026-03-03 - VSFAvatar serialized candidate fallback expansion and complete-state normalization
+
+### Summary
+
+Improved VSFAvatar serialized probing resilience by adding node-window and stream-scan fallback candidate discovery, and normalized sidecar complete-state reporting so `probe_stage=complete` consistently emits `primary_error_code=NONE`.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded serialized candidate selection:
+    - accept truncated node windows when reconstructed stream is partial
+    - fallback to all-node candidate probing when CAB/assets paths are unusable
+    - fallback to bounded stream scan for SerializedFile-like headers when node candidates are empty
+  - Extended candidate offset deltas to improve alignment recovery (`±128`, `±256`).
+  - Added richer candidate scoring/sorting and normalized empty-candidate failure code (`SF_NO_CANDIDATE_WINDOW`).
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added bounded offset scan fallback for misaligned serialized payloads.
+  - Reuses existing parse path while annotating successful scan origin (`+scan@<offset>`).
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Normalized complete-state primary error:
+    - `probe_stage=complete && object_table_parsed=true` => `primary_error_code=NONE`
+  - Updated compatibility classification to treat complete/object-table-parsed as `full`.
+  - Refined missing-feature labeling for object-table parsed but mesh-zero cases.
+
+## 2026-03-03 - VRM runtime draw-path activation + host diagnostics/publish hardening
+
+### Summary
+
+Upgraded VRM runtime rendering from clear-only validation to an actual D3D11 mesh/material draw path, fixed HostCore interop drift for new avatar diagnostics fields, and hardened host publish defaults for practical EXE delivery on locked-file environments.
+
+### Changed
+
+- `src/nativecore/native_core.cpp`
+  - Added D3D11 pipeline resources (VS/PS/input layout/constant buffer/depth/blend/sampler) and per-avatar GPU resource caches.
+  - Added mesh/index GPU upload and material SRV binding path.
+  - Added WIC-based texture decode/upload for VRM texture payloads.
+  - Added real frame draw-call counting and storage in `AvatarPackage.last_render_draw_calls`.
+  - Added runtime camera/world fit defaults for immediate on-screen avatar visibility.
+  - Added renderer resource cleanup on unload/destroy/shutdown to avoid stale GPU handles.
+
+- `include/animiq/avatar/avatar_package.h`
+  - Extended mesh payload metadata:
+    - `vertex_stride`
+    - `material_index`
+  - Extended material payload metadata:
+    - `alpha_mode`
+    - `alpha_cutoff`
+    - `double_sided`
+
+- `src/avatar/vrm_loader.cpp`
+  - Added `TEXCOORD_0` extraction and interleaved position/uv vertex payload generation.
+  - Added primitive-level material index mapping in mesh payloads.
+  - Propagated parsed material alpha/double-sided properties into runtime payloads.
+
+- `host/HostCore/NativeCoreInterop.cs`
+  - Aligned managed `NcAvatarInfo` with native struct tail fields:
+    - `ExpressionCount`
+    - `LastRenderDrawCalls`
+    - `LastExpressionSummary`
+  - Added `nc_get_avatar_info` P/Invoke entry.
+
+- `host/HostCore/AvatarSessionService.cs`
+  - Added `RefreshAvatarInfo()` to re-query live avatar diagnostics each frame.
+
+- `host/WpfHost/MainWindow.xaml.cs`
+  - Added render-loop result capture and live diagnostics output:
+    - `RenderRc`
+    - `DrawCalls`
+    - `Expressions`
+    - `ExpressionSummary`
+
+- `tools/publish_hosts.ps1`
+  - Switched to WPF-first default publish flow.
+  - Added optional WinUI publish switch: `-IncludeWinUi`.
+  - Added running-host process stop step before publish.
+  - Added native build fallback path (`build_hotfix`) for locked `nativecore.dll` cases.
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - Added publish compatibility settings used in current toolchain:
+    - `EnableMsixTooling=true`
+    - `Platforms/Platform/PlatformTarget=x64`
+    - `UseRidGraph=true`
+
+- `CMakeLists.txt`
+  - Added Windows nativecore link dependencies required by the upgraded renderer/texture path:
+    - `d3dcompiler`
+    - `ole32`
+    - `windowscodecs`
+
+### Verified
+
+- `nativecore` Release target builds successfully after renderer/pipeline changes.
+- Patched `nativecore.dll` was deployed to:
+  - `dist/wpf/nativecore.dll`
+  - `dist/wpf_full/nativecore.dll`
+- WPF host diagnostics now expose draw/render telemetry required to distinguish:
+  - "avatar loaded but not rendered"
+  - "draw calls executed but camera/material issue"
+
+## 2026-03-03 - Host publish CI smoke workflow and artifact contract checks
+
+### Summary
+
+Added a dedicated Windows CI workflow for host publish so WPF/WinUI distribution outputs are validated automatically on host-related changes.
+
+### Changed
+
+- `.github/workflows/host-publish.yml` (new)
+  - Added trigger paths for host/nativecore/publish-script changes.
+  - Added Windows CI job (`publish-hosts`) with:
+    - CMake configure (`VS 2022`, `x64`)
+    - Release native build
+    - host publish script execution (`tools/publish_hosts.ps1 -SkipNativeBuild`)
+    - required artifact assertions for both host tracks and publish report
+    - artifact upload bundle (`host-publish-outputs`)
+
+- `docs/reports/host_exe_publish_2026-03-02.md`
+  - Added CI smoke validation section and artifact assertion contract.
+  - Updated next-step list by removing already-implemented CI item.
+
+### Verified
+
+- CI workflow definition exists at:
+  - `NativeAnimiq/.github/workflows/host-publish.yml`
+- Workflow validates required deliverables:
+  - `dist/wpf/WpfHost.exe`
+  - `dist/wpf/nativecore.dll`
+  - `dist/winui/WinUiHost.exe`
+  - `dist/winui/nativecore.dll`
+  - `build/reports/host_publish_latest.txt`
+
+## 2026-03-03 - Host publish documentation refresh and index normalization
+
+### Summary
+
+Refined host publish documentation to be decision-complete for operation and maintenance, and normalized docs index coverage so host-track reports are discoverable from a single entrypoint.
+
+### Changed
+
+- `docs/reports/host_exe_publish_2026-03-02.md`
+  - Reorganized report using documentation template sections:
+    - `Scope`
+    - `Implemented Changes`
+    - `Verification Summary`
+    - `Known Limitations`
+    - `Next Steps`
+  - Added explicit script parameter contract (`-Configuration`, `-RuntimeIdentifier`, `-SkipNativeBuild`).
+  - Added step-by-step publish behavior and output contract details.
+  - Added operational constraints and follow-up recommendations.
+
+- `docs/INDEX.md`
+  - Added missing host-track report entries:
+    - `ui_host_runtime_integration_2026-03-02.md`
+    - `host_exe_publish_2026-03-02.md`
+
+### Verified
+
+- `docs/INDEX.md` now directly links all host-track reports created on `2026-03-02`.
+- Host publish report contains executable run commands, required outputs, and failure/limitation context in one place.
+
+## 2026-03-02 - Host EXE publish pipeline (WPF + WinUI)
+
+### Summary
+
+Added reproducible GUI host publish automation so both WPF and WinUI hosts can be produced as self-contained executables and distributed with `nativecore.dll`.
+
+### Changed
+
+- `host/WpfHost/WpfHost.csproj`
+  - Added publish defaults:
+    - `RuntimeIdentifier=win-x64`
+    - `SelfContained=true`
+    - `PublishSingleFile=true`
+    - `PublishTrimmed=false`
+
+- `host/WinUiHost/WinUiHost.csproj`
+  - Added publish defaults:
+    - `RuntimeIdentifier=win-x64`
+    - `SelfContained=true`
+    - `PublishSingleFile=true`
+    - `PublishTrimmed=false`
+    - `WindowsAppSDKSelfContained=true`
+
+- `tools/publish_hosts.ps1`
+  - Added end-to-end publish script:
+    - native `Release` build
+    - WPF + WinUI publish
+    - `nativecore.dll` copy to both outputs
+    - consolidated output in `dist/wpf`, `dist/winui`
+    - report output in `build/reports/host_publish_latest.txt`
+
+- `docs/reports/host_exe_publish_2026-03-02.md`
+  - Added operational publish report and expected output contract.
+
+### Verified
+
+- Host publish command path documented:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1`
+- Distribution contract documented:
+  - `dist/wpf/*.exe + nativecore.dll`
+  - `dist/winui/*.exe + nativecore.dll`
+
+## 2026-03-02 - UI host foundation + native window render path + runtime Spout/OSC backends
+
+### Summary
+
+Implemented the UI integration foundation by adding shared HostCore + WPF/WinUI host projects, and expanded `nativecore.dll` with a window-bound render path and runtime output backends for Spout/OSC workflows.
+
+### Changed
+
+- `include/animiq/nativecore/api.h`
+  - Added window-render API:
+    - `nc_create_window_render_target`
+    - `nc_resize_window_render_target`
+    - `nc_destroy_window_render_target`
+    - `nc_render_frame_to_window`
+  - Added runtime stats API:
+    - `NcRuntimeStats`
+    - `nc_get_runtime_stats`
+
+- `src/nativecore/native_core.cpp`
+  - Replaced stub backend wiring with runtime classes:
+    - `stream::SpoutSender`
+    - `osc::OscEndpoint`
+  - Added D3D11 swapchain-per-window lifecycle management.
+  - Added shared render pipeline path used by both external-context and window-target rendering.
+  - Added render-time output hooks:
+    - frame capture from RTV to streaming backend
+    - tracking frame publish to OSC addresses (`/Animiq/Tracking/*`)
+  - Added runtime diagnostics updates (`last_frame_ms`, spout/osc active status).
+
+- `include/animiq/stream/spout_sender.h`
+- `src/stream/spout_sender.cpp`
+  - Added shared-memory based BGRA frame sender implementation (channel-scoped mapped file).
+
+- `include/animiq/osc/osc_endpoint.h`
+- `src/osc/osc_endpoint.cpp`
+  - Added Winsock UDP OSC endpoint implementation with float packet encoding and destination parsing.
+
+- `CMakeLists.txt`
+  - Switched core sources from stub files to runtime files.
+  - Linked nativecore against `d3d11`, `dxgi`, `ws2_32` on Windows.
+
+- `host/HostCore/*`
+  - Added .NET interop and services:
+    - `NativeCoreInterop`
+    - `AvatarSessionService`
+    - `RenderLoopService`
+    - `OutputService`
+    - `DiagnosticsModel`
+
+- `host/WpfHost/*`
+  - Added runnable WPF host shell for:
+    - initialize/load/unload
+    - render tick loop
+    - spout/osc start-stop
+    - runtime diagnostics panel
+
+- `host/WinUiHost/*`
+  - Added WinUI host shell with parity controls and diagnostics over shared HostCore.
+
+- `host/HostApps.sln`
+  - Added host-focused solution file grouping HostCore/WpfHost/WinUiHost.
+
+## 2026-03-03 - VRM expression wiring + fixed/auto gate profiles + render diagnostics
+
+### Summary
+
+Advanced the VRM quality track by adding expression extraction/runtime mapping, exposing expression/render diagnostics through NativeCore, and splitting VRM quality gate execution into deterministic `fixed5` and exploratory `auto5` profiles.
+
+### Changed
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added expression/runtime state container:
+    - `ExpressionState`
+    - `AvatarPackage.expressions`
+    - `AvatarPackage.last_expression_summary`
+    - `AvatarPackage.last_render_draw_calls`
+
+- `include/animiq/nativecore/api.h`
+  - Extended `NcAvatarInfo` tail fields:
+    - `expression_count`
+    - `last_render_draw_calls`
+    - `last_expression_summary`
+
+- `src/nativecore/native_core.cpp`
+  - `nc_set_tracking_frame` now applies minimal expression runtime mapping for extracted expressions:
+    - `blink` -> average blink
+    - `viseme_aa` -> `mouth_open`
+    - `joy` -> mouth-driven proxy weight
+  - `nc_render_frame` now tracks and stores per-avatar draw-call counts (mesh payload count proxy).
+  - `FillAvatarInfo` now surfaces expression/render diagnostics into `NcAvatarInfo`.
+
+- `tools/avatar_tool.cpp`
+  - Prints new diagnostics:
+    - `ExpressionCount`
+    - `LastRenderDrawCalls`
+    - `LastExpressionSummary`
+
+- `src/avatar/vrm_loader.cpp`
+  - Added VRM expression extraction:
+    - `extensions.VRMC_vrm.expressions.preset/custom`
+    - legacy `extensions.VRM.blendShapeMaster.blendShapeGroups`
+  - Added expression mapping tags (`blink`, `viseme_aa`, `joy`, `none`).
+  - Added warnings/feature flags for expression fallback visibility.
+
+- `tools/vrm_quality_gate.ps1`
+  - Added gate profiles:
+    - `-Profile fixed5` (default)
+    - `-Profile auto5`
+  - Added Gate D (`ExpressionCount > 0` per sample).
+  - Profile-specific outputs:
+    - `fixed5`: `vrm_probe_fixed5.txt`, `vrm_gate_fixed5.txt`
+    - `auto5`: `vrm_probe_auto5.txt`, `vrm_gate_auto5.txt`
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Added per-sample Gate D unmet diagnostics (`stage/object_table_parsed/primary`) to failure reasons.
+
+- `README.md`
+  - Updated VRM gate section for profile-based execution and Gate D expression visibility.
+
+## 2026-03-03 - VRM material/texture payload quality pass + 5-sample gate harness
+
+### Summary
+
+Started the VRM quality sprint by replacing default-only VRM material scaffolding with parsed material/texture payload extraction and adding a strict 5-sample quality gate harness.
+
+### Changed
+
+- `src/avatar/vrm_loader.cpp`
+  - Added JSON helpers:
+    - `TryGetBool(...)`
+    - texture format inference (`DetectTextureFormat`)
+  - Added GLB image extraction from BIN `bufferView` ranges.
+  - Added `materials[]` parse with basic fields:
+    - `name`
+    - `doubleSided`
+    - `alphaMode`
+    - `alphaCutoff`
+    - `pbrMetallicRoughness.baseColorTexture.index`
+  - Added `textures[] -> images[]` source resolution.
+  - Populates:
+    - `materials`
+    - `material_payloads`
+    - `texture_payloads`
+  - Added diagnostics and quality downgrade behavior:
+    - `VRM_TEXTURE_MISSING`
+    - `VRM_MATERIAL_UNSUPPORTED`
+    - unresolved/unsupported paths now return `Compat=partial` (when mesh path is otherwise valid).
+
+- `tools/vrm_quality_gate.ps1` (new)
+  - Added strict VRM 5-sample quality gate harness.
+  - Runs `avatar_tool` per sample and evaluates:
+    - Gate A: load stability
+    - Gate B: VRM/runtime-ready/mesh payload contract
+    - Gate C: material+texture payload minimum
+  - Outputs:
+    - `build/reports/vrm_probe_latest.txt`
+    - `build/reports/vrm_gate_summary.txt`
+  - Exit code:
+    - `0` pass, `1` fail
+
+- `README.md`
+  - Added `VRM quality gate` section (command, gate definitions, outputs, exit-code policy).
+
+## 2026-03-03 - VRM minimal runtime-ready slice + native render clear path
+
+### Summary
+
+Implemented the first functional VRM vertical slice from file parse to runtime payload readiness, and upgraded native render path from pure placeholder validation to minimal D3D11 render execution (`ClearRenderTargetView`).
+
+### Changed
+
+- `src/avatar/vrm_loader.cpp`
+  - Replaced scaffold-only loader with minimal GLB v2 parser flow:
+    - header + chunk validation (`JSON`, `BIN`)
+    - in-loader lightweight JSON parse
+    - accessor/bufferView decode for:
+      - `POSITION` (`FLOAT VEC3`)
+      - `indices` (`U8/U16/U32`, fallback sequential indices)
+  - Added payload population:
+    - `mesh_payloads`
+    - `materials` / `material_payloads` (minimal placeholder)
+  - Added parser stage + error code contract:
+    - stages: `parse -> resolve -> payload -> runtime-ready`
+    - errors: `VRM_SCHEMA_INVALID`, `VRM_ASSET_MISSING`, `NONE`
+
+- `src/nativecore/native_core.cpp`
+  - `nc_create_render_resources` now rejects avatars with no mesh payloads.
+  - `nc_render_frame` now executes minimal D3D11 frame action:
+    - bind RTV
+    - clear RTV with a fixed color
+  - Added `NOMINMAX` guard for Windows macro conflicts with STL.
+
+- `CMakeLists.txt`
+  - Linked `nativecore` against `d3d11` on Windows.
+
+### Verified
+
+- Configure/build:
+  - `cmake -S . -B build -G "Visual Studio 17 2022" -A x64`
+  - `cmake --build build --config Release`
+- VRM sample runtime checks via `avatar_tool`:
+  - `sample/개인작08.vrm`
+    - `Format=VRM`
+    - `Compat=full`
+    - `ParserStage=runtime-ready`
+    - `MeshPayloads=9`
+  - `sample/Kikyo_FT Variant.vrm`
+    - `Format=VRM`
+    - `Compat=full`
+    - `ParserStage=runtime-ready`
+    - `MeshPayloads=22`
+
+## 2026-03-03 - VXAvatar/VXA2 gate profiles + CI strict enforcement
+
+### Summary
+
+Expanded the VXAvatar/VXA2 quality gate from fixed local checks to profile-based strict enforcement (`quick`/`full`) and added CI workflow integration with machine-readable gate output.
+
+### Changed
+
+- `tools/vxavatar_sample_report.ps1`
+  - Added profile control:
+    - `-Profile quick|full`
+  - `quick`: fixed baseline + synthetic corruption samples.
+  - `full`: fixed baseline + discovered real samples + synthetic corruption samples.
+  - Added report header field:
+    - `Profile`
+  - Gate input marker bumped:
+    - `GateInputVersion: 2`
+
+- `tools/vxavatar_quality_gate.ps1`
+  - Added profile control:
+    - `-Profile quick|full`
+  - Added JSON summary output:
+    - `build/reports/vxavatar_gate_summary.json`
+  - Added Gate E for full-profile real-sample coverage.
+  - Added `-RequireRealFullSamples` option for strict full-profile environments.
+  - Strict pass policy remains exit-code based (`0` pass, `1` fail).
+
+- `.github/workflows/vxavatar-gate.yml` (new)
+  - Added `quick-gate` job:
+    - build + `vxavatar_quality_gate.ps1 -UseFixedSet -Profile quick`
+  - Added `full-gate` job:
+    - build + `vxavatar_quality_gate.ps1 -Profile full`
+  - Added artifact upload for probe/summary outputs.
+
+- `README.md`
+  - Updated VXAvatar/VXA2 gate usage for quick/full profile commands.
+  - Added CI gate behavior and JSON summary output documentation.
+
+- `docs/INDEX.md`
+  - Added report link:
+    - `docs/reports/vxavatar_gate_ci_expansion_2026-03-03.md`
+
+- `docs/reports/vxavatar_gate_ci_expansion_2026-03-03.md` (new)
+  - Added implementation and CI rollout details for profile-based strict gating.
+
+## 2026-03-03 - VSFAvatar serialized-candidate expansion + strict GateD
+
+### Summary
+
+Expanded VSFAvatar serialized candidate probing with bounded offset deltas, added serialized-candidate diagnostics to sidecar/loader output, and tightened fixed-set gate strictness with a new Gate D milestone (`complete + object_table_parsed + no primary error`).
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added serialized probe observability fields:
+    - `serialized_attempt_count`
+    - `serialized_best_candidate_path`
+    - `serialized_best_candidate_score`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Extended serialized candidate parsing attempts with offset deltas:
+    - `0`, `+16`, `-16`, `+32`, `-32`, `+64`, `-64`
+  - Added score policy for candidate selection:
+    - prioritize parsed `object_count`
+    - tie-break using major-type diversity (`GameObject`, `Mesh`, `Material`, `Texture2D`, `SkinnedMeshRenderer`)
+  - Preserves highest-scored failure code/path when all candidates fail.
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Added parse-error classification in final dual-endian failure string:
+    - `SF_PARSE_BOTH_ENDIAN_FAILED[<little_code>|<big_code>]`
+  - Normalized success summary error code to `NONE`.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added serialized diagnostics to JSON contract:
+    - `serialized_candidate_count`
+    - `serialized_attempt_count`
+    - `serialized_best_candidate_path`
+    - `serialized_best_candidate_score`
+  - Added matching warning summaries for serialized probing.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Sidecar path now maps serialized diagnostics into package warnings.
+  - In-house path metadata warning now includes serialized candidate/attempt/best-score/path.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Fixed-set mode now fails fast when any required fixed sample is missing.
+  - Sidecar `status=ok` is now required per sample.
+  - Added per-sample fields:
+    - `SidecarObjectTableParsed`
+    - `SidecarSerializedAttempts`
+    - `SidecarSerializedBestPath`
+    - `SidecarSerializedBestScore`
+  - Added strict report integrity check:
+    - `GateRows` must equal processed file count.
+  - Added Gate D summary line:
+    - `GateD_AtLeastOneCompleteWithObjectTable`
+
+- `tools/vsfavatar_quality_gate.ps1`
+  - Added Gate D:
+    - at least one sample must satisfy `complete + object_table_parsed=true + no primary error`.
+  - Gate A now validates report integrity:
+    - sample count, header `FileCount`, header `GateRows` alignment.
+  - Added `SidecarObjectTableParsed` to required-field set.
+  - Overall pass condition is now `GateA && GateB && GateC && GateD`.
+
+- `README.md`
+  - Updated VSFAvatar gate documentation to include Gate D strict criteria.
+  - Documented serialized probe diagnostics in sidecar JSON contract and behavior notes.
+
+## 2026-03-03 - VSFAvatar reconstruction stage-lift gate pass (failed-reconstruction -> failed-serialized)
+
+### Summary
+
+Completed the VSFAvatar quality-gate pass by promoting fixed-set samples from `failed-reconstruction` to `failed-serialized` stage while preserving reconstruction-dominant root-cause diagnostics (`DATA_BLOCK_READ_FAILED` with read tuple evidence).
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Candidate selection priority was normalized to:
+    - `decoded_blocks` (highest)
+    - `score`
+    - family priority (`after-metadata` first)
+  - Best-partial stream is now retained and surfaced from reconstruction attempts.
+  - On reconstruction failure, serialized probing is attempted against best-partial stream.
+  - When reconstruction summary code exists, it remains dominant in `probe_primary_error`.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Sidecar path now maps parser diagnostics into package fields:
+    - `parser_stage`
+    - `primary_error_code`
+  - In-house path mirrors probe-level stage/error into package diagnostics.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added gate-summary block:
+    - `GateA_NoCrashAndDiagPresent`
+    - `GateB_AtLeastOneFailedSerializedOrComplete`
+    - `GateC_ReadFailureHasOffsetModeSizeEvidence`
+  - Added per-run `GateRows` count for deterministic fixed-set checks.
+
+### Verified
+
+- `Release` build succeeded after changes.
+- Fixed-set report regenerated:
+  - `build/reports/vsfavatar_probe_latest_after_scoring.txt`
+- Gate outcome:
+  - `GateA_NoCrashAndDiagPresent=PASS`
+  - `GateB_AtLeastOneFailedSerializedOrComplete=PASS`
+  - `GateC_ReadFailureHasOffsetModeSizeEvidence=PASS`
+- Fixed-set stage snapshot:
+  - all 4 samples now at `SidecarProbeStage=failed-serialized`
+  - primary error remains `DATA_BLOCK_READ_FAILED` with read-offset/compressed-size/uncompressed-size evidence.
+
+## 2026-03-02 - VXAvatar/VXA2 quality gate harness (fixed-set + synthetic corruption)
+
+### Summary
+
+Added a dedicated quality gate harness for `.vxavatar` and `.vxa2` regression checks.
+The harness runs `avatar_tool` over fixed baseline samples plus synthetic corruption samples and enforces deterministic pass/fail criteria.
+
+### Changed
+
+- `tools/vxavatar_sample_report.ps1` (new)
+  - Produces structured probe output for `.vxavatar` and `.vxa2`.
+  - Supports fixed-set mode with defaults:
+    - `demo_mvp.vxavatar`
+    - `demo_mvp.vxa2`
+  - Regenerates synthetic corruption samples under `build/tmp_vx/`:
+    - `demo_mvp_truncated.vxavatar`
+    - `demo_mvp_cd_mismatch.vxavatar`
+    - `demo_tlv_truncated.vxa2`
+  - Emits per-sample metadata for gate parsing:
+    - `InputKind`
+    - `InputTag`
+
+- `tools/vxavatar_quality_gate.ps1` (new)
+  - Runs the probe script and evaluates strict gates:
+    - Gate A: fixed `.vxavatar` success contract
+    - Gate B: synthetic `.vxavatar` corruption handling
+    - Gate C: `.vxa2` fixed/corruption classification
+    - Gate D: required output field presence
+  - Writes summary report:
+    - `build/reports/vxavatar_gate_summary.txt`
+  - Exit code contract:
+    - `0` pass, `1` fail
+
+- `README.md`
+  - Added `VXAvatar/VXA2 quality gate` section with command, gate definitions, outputs, and exit-code policy.
+
+- `docs/INDEX.md`
+  - Added report link:
+    - `docs/reports/vxavatar_gate_harness_2026-03-02.md`
+
+- `docs/reports/vxavatar_gate_harness_2026-03-02.md` (new)
+  - Documents synthetic sample policy, gate semantics, and runtime outputs.
+
+## 2026-03-02 - VXAvatar in-process deflate decode (external extractor removal)
+
+### Summary
+
+Removed the PowerShell-based extraction fallback from `.vxavatar` and replaced it with in-process ZIP deflate decode using vendored `miniz`, so runtime no longer depends on external process execution for `method=8` entries.
+
+### Changed
+
+- `src/avatar/vxavatar_loader.cpp`
+  - Removed:
+    - `ReadZipEntryViaPowershell(...)`
+    - external `std::system("powershell ...")` path
+    - `W_PARSE: VX_EXTERNAL_EXTRACTOR` warning emission
+  - Added:
+    - local-header data-range resolver (`ResolveZipEntryDataRange`)
+    - in-process `deflate(8)` decoder (`ReadDeflateZipEntry`)
+    - payload failure classification split:
+      - unsupported method -> `VX_UNSUPPORTED_COMPRESSION`
+      - malformed/truncated/invalid payload read -> `VX_SCHEMA_INVALID`
+  - Kept:
+    - `stored(0)` path
+    - `parse -> resolve -> payload -> runtime-ready` stage contract
+
+- `third_party/miniz/*` (new vendored dependency)
+  - Added miniz source/header set for in-process inflate implementation:
+    - `miniz.c`, `miniz.h`, `miniz_common.h`, `miniz_tdef.h`, `miniz_tinfl.h`, `miniz_zip.h`, `miniz_export.h`
+
+- `src/common/miniz_impl.cpp` (new)
+  - Added single translation unit wrapper to compile miniz implementation files into `animiq_core`.
+
+- `CMakeLists.txt`
+  - Added `src/common/miniz_impl.cpp` to `animiq_core`.
+  - Added private include path for `third_party/miniz`.
+  - Removed temporary `find_package(ZLIB)` dependency path.
+
+- `README.md`
+  - Updated VXAvatar compression note: `stored(0)` + `deflate(8)` in-process support.
+  - Added behavior note for external extractor removal.
+
+### Verified
+
+- `cmake --build build_vxdeflate --config Release` succeeded.
+- `avatar_tool sample/demo_mvp.vxavatar`:
+  - `Compat: full`
+  - `ParserStage: runtime-ready`
+  - `PrimaryError: NONE`
+  - no external extractor warning.
+- Truncated sample check:
+  - `build/tmp_vx/demo_mvp_truncated.vxavatar`
+  - returns `Compat: failed`, `PrimaryError: VX_SCHEMA_INVALID`, no process crash.
+
+## 2026-03-02 - VSFAvatar quality gate harness (A/B/C + baseline diff)
+
+### Summary
+
+Added a standalone quality-gate harness for fixed-set VSFAvatar regression checks so parser iteration runs can be evaluated with deterministic pass/fail criteria and baseline comparison.
+
+### Changed
+
+- `tools/vsfavatar_quality_gate.ps1` (new)
+  - Runs `vsfavatar_sample_report.ps1` and parses probe output.
+  - Evaluates strict gates:
+    - Gate A: required field completeness + no parse/process failure
+    - Gate B: at least one sample reaches `failed-serialized|complete`
+    - Gate C: `DATA_BLOCK_READ_FAILED` samples include offset/size/family tuple evidence
+  - Generates baseline diff summary:
+    - `IMPROVED|REGRESSED|CHANGED|UNCHANGED|NEW`
+  - Emits machine-usable exit code:
+    - `0` pass, `1` fail
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added report header marker:
+    - `GateInputVersion: 1`
+
+- `README.md`
+  - Added `VSFAvatar quality gate` section with command, gate definitions, output files, and exit-code policy.
+
+- `docs/INDEX.md`
+  - Added report link for gate harness documentation.
+
+- `docs/reports/vsfavatar_gate_harness_2026-03-03.md` (new)
+  - Documents gate semantics, diff labels, and failure interpretation.
+
+### Verified
+
+- Harness script parses fixed-set reports and emits explicit gate pass/fail summary.
+- Gate B is strict-fail by default (`exit 1` when unmet).
+- Fixed-set gate run result (`tools/vsfavatar_quality_gate.ps1 -UseFixedSet`):
+  - `GateA=PASS`
+  - `GateB=FAIL` (all samples remained `failed-reconstruction`)
+  - `GateC=PASS`
+  - `Overall=FAIL` (strict policy)
+- Diff summary from gate output:
+  - `Improved=0`
+  - `Regressed=0`
+  - `Changed=4`
+  - `Unchanged=0`
+  - `New=0`
+- Generated files:
+  - `build/reports/vsfavatar_probe_latest_after_gate.txt`
+  - `build/reports/vsfavatar_gate_summary.txt`
+
+## 2026-03-02 - Docs: add detailed VXA2 TLV update report
+
+### Summary
+
+Added a detailed implementation/verification report for the VXA2 TLV decode MVP pass.
+
+### Changed
+
+- Added report:
+  - `docs/reports/vxa2_tlv_update_2026-03-02.md`
+- Report includes:
+  - implemented loader/API/doc deltas
+  - build/run verification outcomes
+  - known limitations and next-step backlog
+
+### Verified
+
+- Report content is aligned with current `main` behavior and validation logs.
+
+## 2026-03-02 - Documentation structure normalization (index + archive policy)
+
+### Summary
+
+Standardized the documentation layout to reduce drift between core docs, format specs, implementation reports, and generated build reports.
+
+### Changed
+
+- Added documentation entrypoint:
+  - `docs/INDEX.md`
+- Added documentation maintenance guide:
+  - `docs/CONTRIBUTING_DOCS.md`
+- Added generated-report retention policy:
+  - `build/reports/README.md`
+- Added archive location for historical generated reports:
+  - `docs/archive/build-reports/README.md`
+- Applied `build/reports` cleanup by moving non-retained snapshots to archive.
+
+### Verified
+
+- Documentation index links resolve to existing files.
+- `build/reports` now contains latest/milestone snapshots only.
+- Archived report files are available under `docs/archive/build-reports/`.
+
+## 2026-03-02 - VXA2 TLV section decode MVP + format diagnostics
+
+### Summary
+
+Implemented `.vxa2` binary section decoding so the loader can map real mesh/texture/material payload sections beyond header+manifest validation.
+
+### Changed
+
+- `src/avatar/vxa2_loader.cpp`
+  - Added TLV section table parse after manifest:
+    - section header: `type(u16)`, `flags(u16)`, `size(u32)`
+  - Added known section decoders:
+    - `0x0001` mesh blob section
+    - `0x0002` texture blob section
+    - `0x0003` material override section
+  - Added strict boundary/truncation guard:
+    - `VXA2_SECTION_TRUNCATED`
+  - Added payload/schema guard for malformed known section payloads:
+    - `VXA2_SCHEMA_INVALID`
+  - Added manifest-reference coverage classification:
+    - `VXA2_ASSET_MISSING` when mesh/texture refs cannot be resolved to section payloads
+  - Added section counters in package diagnostics:
+    - `format_section_count`
+    - `format_decoded_section_count`
+    - `format_unknown_section_count`
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added generic format diagnostics counters:
+    - `format_section_count`
+    - `format_decoded_section_count`
+    - `format_unknown_section_count`
+
+- `include/animiq/nativecore/api.h`
+  - Extended `NcAvatarInfo` with format diagnostics counters:
+    - `format_section_count`
+    - `format_decoded_section_count`
+    - `format_unknown_section_count`
+
+- `src/nativecore/native_core.cpp`
+  - Mapped package format diagnostics counters into `NcAvatarInfo`.
+
+- `tools/avatar_tool.cpp`
+  - Added output lines:
+    - `FormatSections`
+    - `FormatDecodedSections`
+    - `FormatUnknownSections`
+
+- `docs/formats/vxa2.md`
+  - Promoted v1 section layout from draft placeholder to concrete TLV contract.
+  - Documented section types (`0x0001/0x0002/0x0003`) and payload field layouts.
+  - Documented runtime truncation/unknown-type behavior.
+
+- `README.md`
+  - Updated `.vxa2` status to manifest + TLV section decode MVP.
+  - Added latest behavior notes for VXA2 section decode and diagnostics.
+
+## 2026-03-02 - VXAvatar deflate/BOM compatibility hardening (MVP unblock)
+
+### Summary
+
+Hardened the `.vxavatar` MVP path to handle real-world ZIPs produced with deflate compression (`method=8`) and UTF-8 BOM-prefixed manifests, removing the remaining blocker that kept valid sample files at `Compat: failed`.
+
+### Changed
+
+- `src/avatar/vxavatar_loader.cpp`
+  - Added compression-method branch:
+    - `stored(0)`: in-house local-header payload read (existing path)
+    - `deflate(8)`: temporary PowerShell/.NET extraction fallback
+  - Added `ReadZipEntryViaPowershell(...)` fallback:
+    - opens archive with .NET `ZipFile`
+    - extracts entry bytes
+    - writes temp payload and re-ingests into loader
+  - Added `ReadZipEntryPayload(...)` dispatcher so manifest/mesh/texture reads share the same compression-aware path.
+  - Added UTF-8 BOM stripping for `manifest.json` prior to JSON parse.
+  - Added parser warning for external extraction path:
+    - `W_PARSE: VX_EXTERNAL_EXTRACTOR: deflate manifest extracted via PowerShell.`
+
+### Behavior Impact
+
+- Before this pass:
+  - deflate-based `.vxavatar` files failed in parse stage with schema errors.
+- After this pass:
+  - deflate-based samples can complete parse/resolve/payload/runtime-ready flow.
+  - same sample now reaches `Compat: full` with populated mesh/material/texture payload counts.
+
+### Verified
+
+- `Release` build succeeded after the hardening patch.
+- `avatar_tool.exe D:\dbslxlvseefacedkfb\sample\demo_mvp.vxavatar`:
+  - `Format: VXAvatar`
+  - `Compat: full`
+  - `ParserStage: runtime-ready`
+  - `PrimaryError: NONE`
+  - `MeshPayloads/MaterialPayloads/TexturePayloads: 1/1/1`
+
+## 2026-03-03 - VSFAvatar reconstruction candidate scoring + failure-offset diagnostics
+
+### Summary
+
+Focused the VSFAvatar in-house reconstruction pass on reproducible candidate scoring and richer block failure metadata so block-0 read/decode blockers can be triaged with concrete offsets and size tuples.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added reconstruction diagnostics:
+    - `reconstruction_candidate_count`
+    - `best_candidate_score`
+  - Added block read diagnostics:
+    - `failed_block_read_offset`
+    - `failed_block_compressed_size`
+    - `failed_block_uncompressed_size`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Expanded reconstruction window scan from `+/-256` to `+/-4096` (`16`-byte step).
+  - Normalized candidate families:
+    - `after-metadata`
+    - `aligned-after-metadata`
+    - `tail-packed`
+    - `header-window`
+    - `tail-window`
+  - Added candidate quality scoring (decoded block ratio + node-range consistency + block0 mode-source plausibility).
+  - Added block-0 decode hypotheses:
+    - `prefix-skip-16`
+    - `prefix-skip-32`
+  - Added implausible-size guard (`>256 MiB`) with explicit classification:
+    - `DATA_BLOCK_SIZE_IMPLAUSIBLE`
+  - Preserved failed read offset and size tuple in probe diagnostics for dominant failure paths.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added JSON output fields:
+    - `reconstruction_candidate_count`
+    - `best_candidate_score`
+    - `failed_block_read_offset`
+    - `failed_block_compressed_size`
+    - `failed_block_uncompressed_size`
+  - Added warning stream line:
+    - `W_RECON_META`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added sidecar warning mapping for reconstruction candidate score/count and failed-read tuple.
+  - Extended in-house reconstruction warning payload with failed-read tuple and score/candidate count.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added report fields:
+    - `SidecarReconCandidateCount`
+    - `SidecarBestCandidateScore`
+    - `SidecarFailedReadOffset`
+    - `SidecarFailedCompressedSize`
+    - `SidecarFailedUncompressedSize`
+
+### Verified
+
+- `Release` build succeeded after diagnostics/scoring updates.
+- Fixed-set report regenerated:
+  - `build/reports/vsfavatar_probe_latest_after_scoring.txt`
+- Current fixed baseline remains blocked at reconstruction:
+  - `SidecarProbeStage=failed-reconstruction`
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - dominant offset family observed: `aligned-after-metadata`
+  - candidate count range observed: `791..1057`
+
+## 2026-03-03 - VXAvatar MVP parser/payload integration + NativeCore diagnostics expansion
+
+### Summary
+
+Upgraded `.vxavatar` from scaffold signature checks to a manifest-aware MVP pipeline with payload extraction (stored ZIP entries), and extended NativeCore/API diagnostics to expose parser state and payload coverage.
+
+### Changed
+
+- `src/avatar/vxavatar_loader.cpp`
+  - Replaced scaffold-only ZIP magic check with full ZIP central-directory traversal:
+    - EOCD locate
+    - central-directory parse
+    - local-header validation
+  - Added `manifest.json` discovery (root or nested suffix path).
+  - Added lightweight in-house JSON parser for manifest decode.
+  - Added required manifest validation:
+    - `avatarId`/`avatar_id`
+    - `meshRefs[]`
+    - `materialRefs[]`
+    - `textureRefs[]`
+  - Added path hardening for asset refs (reject absolute/drive-letter/`..` traversal).
+  - Added payload population:
+    - `mesh_payloads` (`vertex_blob` from entry bytes)
+    - `material_payloads` (MToon placeholder policy)
+    - `texture_payloads` (format inference + bytes)
+  - Added stage/error propagation:
+    - `parser_stage` (`parse`, `resolve`, `payload`, `runtime-ready`)
+    - `primary_error_code` (`NONE`, `VX_SCHEMA_INVALID`, `VX_MANIFEST_MISSING`, `VX_ASSET_MISSING`, `VX_UNSUPPORTED_COMPRESSION`)
+  - MVP compression scope is currently `stored(0)` entries only.
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added new source type:
+    - `AvatarSourceType::Vxa2`
+  - Added package-level parser diagnostics:
+    - `parser_stage`
+    - `primary_error_code`
+
+- `include/animiq/nativecore/api.h`
+  - Added format hint:
+    - `NC_AVATAR_FORMAT_VXA2`
+  - Extended `NcAvatarInfo`:
+    - `mesh_payload_count`
+    - `material_payload_count`
+    - `texture_payload_count`
+    - `parser_stage`
+    - `primary_error_code`
+
+- `src/nativecore/native_core.cpp`
+  - Added `AvatarSourceType::Vxa2` mapping to `NC_AVATAR_FORMAT_VXA2`.
+  - Added payload-count and parser-diagnostic mapping into `NcAvatarInfo`.
+
+- `tools/avatar_tool.cpp`
+  - Added output fields:
+    - `ParserStage`
+    - `PrimaryError`
+    - `MeshPayloads`
+    - `MaterialPayloads`
+    - `TexturePayloads`
+  - Added format display branch for `VXA2`.
+
+- `src/avatar/vxa2_loader.h` / `src/avatar/vxa2_loader.cpp` (new)
+  - Added `.vxa2` loader with MVP validation flow:
+    - magic/version/header checks
+    - manifest section JSON key validation
+    - reference array extraction
+    - placeholder payload container mapping
+  - Emits staged diagnostics and `VXA2_SCHEMA_INVALID` codes on parse failures.
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Registered `Vxa2Loader` in extension dispatch chain.
+
+- `CMakeLists.txt`
+  - Added `src/avatar/vxa2_loader.cpp` to `animiq_core` target.
+
+- `src/main.cpp`
+  - Added CLI source-type display branch for `VXA2`.
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added block-0 trace fields:
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added block-0 mode candidate prioritization helper (`BuildBlockModeCandidates`).
+  - Added block-0 mode failure-hit demotion logic to reduce repeated low-value retries.
+  - Added block-0 selected offset/mode-source propagation:
+    - `header-derived`
+    - `block-flag`
+    - `fallback`
+    - `failed-candidate`
+  - Added reconstruction success candidate quality scoring before final selection.
+  - Preserved best-partial block-0 offset/mode metadata on failure.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added sidecar parse support for:
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+  - Added `W_BLOCK0_META` warning emission.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added JSON fields:
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+  - Added warning emission:
+    - `W_BLOCK0_META`
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Extended sample report with sidecar block-0 metadata:
+    - `SidecarBlock0Offset`
+    - `SidecarBlock0ModeSource`
+
+### Verified
+
+- `Release` build succeeded after all updates.
+- Fixed-set VSFAvatar report regenerated:
+  - `build/reports/vsfavatar_probe_latest_decode_tuning.txt`
+- VSFAvatar fixed baseline remains blocked:
+  - `Compat: partial`
+  - `Meshes: 0`
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - `SidecarBlock0Hypothesis=swap-size-flags`
+  - `SidecarBlock0ModeSource=failed-candidate`
+
+## 2026-03-03 - VSFAvatar diagnostics contract refresh (probe stage + primary error)
+
+### Summary
+
+Refined VSFAvatar diagnostics into explicit probe stages and primary-error codes, and aligned sidecar/loader JSON contracts to expose the same root-cause fields.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added stage/error and trace fields:
+    - `probe_stage`
+    - `probe_primary_error`
+    - `serialized_candidate_count`
+    - `selected_offset_family`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added explicit failure classification helper for reconstruction decode paths.
+  - Reworked reconstruction candidate generation to track offset families.
+  - Added stage transitions (`metadata-parsed`, `reconstruction`, `failed-reconstruction`, `failed-serialized`, `complete`).
+  - Added primary error propagation from metadata/reconstruction/serialized stages.
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Upgraded sidecar response schema to `schema_version=3`.
+  - Added sidecar diagnostic fields:
+    - `probe_stage`
+    - `primary_error_code`
+    - `selected_block_layout`
+    - `selected_offset_family`
+    - `reconstruction_summary`
+  - Structured sidecar warnings with code prefixes (`W_META`, `W_RECON`).
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Loader schema validation now accepts `schema_version=2|3` and requires `primary_error_code` in `ok` responses.
+  - Added sidecar diagnostic mapping into loader warnings (`W_STAGE`, `W_PRIMARY`, `W_LAYOUT`, `W_OFFSET`, `W_RECON_SUMMARY`).
+  - In-house warning/error outputs were normalized to `W_*` / `E_*` prefixes.
+  - Fallback path warnings were normalized (`W_FALLBACK`, `W_MODE`) to keep parser-path traces machine-readable.
+
+- `README.md`
+  - Updated sidecar JSON contract to reflect schema `v3` and diagnostic fields.
+  - Documented `probe_stage` semantics and `primary_error_code` usage guidance.
+
+### Verified
+
+- `Release` build succeeded (`nativecore.dll`, `avatar_tool.exe`, `vsfavatar_sidecar.exe`, `animiq_cli.exe`).
+- Fixed-set sample report regenerated (`build/reports/vsfavatar_probe_latest_after_impl.txt`).
+- Sidecar direct execution now returns compact schema-v3 diagnostics with truncation-safe warning payloads.
+- Baseline samples remain `Compat: partial`, `Meshes: 0`; primary blocker is still `DATA_BLOCK_READ_FAILED` on block 0.
+
+## 2026-03-03 - VSFAvatar block-0 hypothesis instrumentation pass
+
+### Summary
+
+Implemented a block-0 focused reconstruction hypothesis pass and surfaced its outcomes through sidecar/report diagnostics.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added block-0 diagnostics:
+    - `selected_block0_hypothesis`
+    - `block0_attempt_count`
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Extended block decode variants for block-0:
+    - `orig-trim16`
+    - `orig-trim32`
+    - `orig-clamp-range`
+  - Added block-0 attempt counting and selected-hypothesis capture.
+  - Preserved best-partial block-0 diagnostics when full reconstruction does not succeed.
+  - Added block-0 mode-source trace (`header-derived` / `block-flag` / `fallback`).
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Added sidecar JSON fields:
+    - `selected_block0_hypothesis`
+    - `block0_attempt_count`
+    - `block0_selected_offset`
+    - `block0_selected_mode_source`
+  - Added warning line:
+    - `W_BLOCK0: hypothesis=..., attempts=...`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Mapped sidecar block-0 diagnostics into loader warnings (`W_BLOCK0`).
+  - Included block-0 hypothesis and attempt count in in-house `W_META` warning output.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added sidecar invocation per sample and appended parsed JSON diagnostics:
+    - probe stage / primary error / block layout / offset family / block0 hypothesis / block0 attempts / block0 offset / block0 mode source
+
+### Verified
+
+- `Release` build succeeded after instrumentation changes.
+- Fixed-set report regenerated:
+  - `build/reports/vsfavatar_probe_latest_block0_hypothesis.txt`
+- Baseline remains blocked at reconstruction:
+  - `Compat: partial`, `Meshes: 0`
+  - `SidecarPrimaryError=DATA_BLOCK_READ_FAILED`
+  - `SidecarBlock0Hypothesis=swap-size-flags` (current dominant failed hypothesis path)
+
+## 2026-03-02 - VSFAvatar parser pivot: sidecar-first loading path
+
+### Summary
+
+Shifted `.vsfavatar` loading from in-process parser-first to a sidecar-first execution model, while keeping in-house parsing as fallback.
+
+### Update (schema v2 + timeout)
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added sidecar timeout env var support:
+    - `VSF_SIDECAR_TIMEOUT_MS` (default `15000`)
+  - Added sidecar timeout handling with explicit failure code:
+    - `SIDECAR_TIMEOUT`
+  - Added schema validation for sidecar output (`schema_version=2`) with explicit failure code:
+    - `SCHEMA_INVALID`
+  - Added structured sidecar/runtime failure prefixes:
+    - `SIDECAR_EXEC_FAILED`
+    - `SIDECAR_RUNTIME_ERROR`
+  - Added `warnings[]`/`missing_features[]` JSON array parsing.
+  - Added sidecar `compat_level` mapping (`full|partial|failed`).
+
+- `tools/vsfavatar_sidecar.cpp`
+  - Upgraded JSON output to schema v2.
+  - Added fields:
+    - `compat_level`
+    - `warnings`
+    - `missing_features`
+  - Error output now includes:
+    - `schema_version`
+    - `error_code`
+    - `error_message`
+
+### Changed
+
+- `src/avatar/vsfavatar_loader.h`
+  - Added explicit split of loader paths:
+    - `LoadViaSidecar`
+    - `LoadInHouse`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added parser mode switch via env var:
+    - `VSF_PARSER_MODE=sidecar|inhouse|sidecar-strict`
+  - Default mode is now `sidecar`.
+  - Added sidecar path override via env var:
+    - `VSF_SIDECAR_PATH`
+  - Added Windows `CreateProcess`-based sidecar execution and JSON response parsing.
+  - Added fallback behavior:
+    - `sidecar` -> in-house fallback on sidecar failure
+    - `sidecar-strict` -> fail without fallback
+  - Added explicit parser-path warnings (`parser mode=sidecar` / fallback warnings).
+
+- `tools/vsfavatar_sidecar.cpp` (new)
+  - Added standalone sidecar executable that outputs structured JSON:
+    - status/error
+    - display name
+    - mesh/material counts
+    - object table status
+    - last warning / last missing feature
+
+- `CMakeLists.txt`
+  - Added `vsfavatar_sidecar` console target.
+
+### Verified
+
+- `Release` build succeeded and now emits:
+  - `build/Release/vsfavatar_sidecar.exe`
+- `VSF_PARSER_MODE=sidecar` path works in both `animiq_cli` and `avatar_tool`.
+- Sidecar-mode fixed sample report generated (`build/reports/vsfavatar_probe_sidecar.txt`).
+- Sidecar pipe handling was hardened; long JSON warning payloads no longer force fallback via timeout.
+- `sidecar-strict` timeout path verified with `VSF_SIDECAR_TIMEOUT_MS=1`:
+  - returns `SIDECAR_TIMEOUT: process timed out`
+- `sidecar` fallback path re-verified with invalid `VSF_SIDECAR_PATH`:
+  - load succeeds through in-house fallback with `parser mode=inhouse (fallback)` warning.
+- Compatibility remains `partial` on baseline samples (block-0 reconstruction blocker still active in in-house decode internals used by current sidecar output path).
+
+## 2026-03-02 - VSFAvatar reconstruction summary-code pass and count-endian probing
+
+### Summary
+
+Added another decode iteration to improve reconstruction observability and broaden metadata table interpretation hypotheses while keeping the in-house decoder path.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added reconstruction summary diagnostics:
+    - `selected_reconstruction_layout`
+    - `reconstruction_failure_summary_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added reconstruction failure-code extraction/aggregation to report dominant error class across offset attempts.
+  - Added reconstruction layout capture (`variant/mode`) when block decode succeeds for leading block.
+  - Expanded metadata table parse hypotheses with count-endian probing:
+    - block-count endian: `BE` / `LE`
+    - node-count endian: `BE` / `LE`
+  - Adjusted block-layout scoring to penalize implausible raw-mode (`mode=0`) size relationships.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Metadata warning now includes reconstruction summary code.
+
+### Verified
+
+- `Release` build succeeded.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`, generated `2026-03-02T23:40:51`).
+- Baseline remains `Compat: partial` / `Meshes: 0` across fixed samples.
+- Block-0 failure remains converged:
+  - `code=DATA_BLOCK_READ_FAILED`
+  - observed mode in latest snapshot: `mode=1`
+  - expected sizes: `74890067`, `88135067`, `125513796`, `402596`
+
+## 2026-03-02 - VSFAvatar reconstruction window expansion and block-total diagnostics
+
+### Summary
+
+Added another reconstruction-focused diagnostics pass to improve candidate scoring and expose per-attempt decode evidence.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added additional reconstruction diagnostics:
+    - `total_block_compressed_size`
+    - `total_block_uncompressed_size`
+    - `reconstruction_best_partial_blocks`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Updated metadata candidate scoring with block-total plausibility checks against bundle layout.
+  - Added reconstruction start-offset expansion:
+    - anchor windows (`+/-256`, 16-byte step) around key offsets
+    - tail-packed anchor (`bundle_file_size - total_compressed`)
+  - Added bounded variant-level decode failure aggregation for block diagnostics.
+  - Added LZ4 bounded fallback path when exact-size/frame/size-prefixed decoding all fail.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Metadata warning now includes:
+    - block compressed/uncompressed totals
+    - best partial reconstructed block count
+
+### Verified
+
+- `Release` build succeeded.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`, generated `2026-03-02T23:30:48`).
+- Current baseline is still `Compat: partial` / `Meshes: 0` for all fixed samples.
+- Block-0 diagnostics remain consistent on fixed set:
+  - `mode=0`
+  - `code=DATA_BLOCK_READ_FAILED`
+  - expected sizes: `74890067`, `88135067`, `125513796`, `402596`
+
+## 2026-03-02 - VSFAvatar block-layout candidate expansion and reconstruction scoring
+
+### Summary
+
+Implemented another decode-focused pass to reduce hardcoded block-table assumptions and improve reconstruction candidate diagnostics.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added `selected_block_layout` to expose which block-table variant was selected.
+
+- `src/vsf/unityfs_reader.cpp`
+  - Reworked metadata table parse to evaluate multiple block layouts:
+    - `be`, `be-swap-size`, `be-swap-flags`, `be-swap-size-flags`
+    - `le`, `le-swap-size`, `le-swap-flags`, `le-swap-size-flags`
+  - Added block-layout scoring heuristics and node-range consistency checks before selecting a layout.
+  - Extended reconstruction attempts to track partial progress (`decoded_blocks`) and report best partial attempt.
+  - Added per-block decode variants during reconstruction:
+    - original
+    - swapped size
+    - swapped flag bytes
+    - swapped size + swapped flag bytes
+  - Enhanced block decode failure detail to include variant-level failure reasons.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Included selected block layout in metadata warning output.
+
+### Verified
+
+- `Release` build succeeded.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`).
+- Pipeline remains at `Compat: partial` / `Meshes: 0`; metadata stage is stable and now reports `block layout=...`, while reconstruction blocker is still concentrated at block 0.
+- Latest fixed-set snapshot (`2026-03-02T23:24:05`) shows block-0 failures converged to:
+  - `mode=0`, `code=DATA_BLOCK_READ_FAILED`
+  - expected sizes observed: `74890067`, `88135067`, `125513796`, `402596`
+
+## 2026-03-02 - VSFAvatar diagnostics hardening + NativeCore render-resource API extension
+
+### Summary
+
+Added stronger reconstruction diagnostics for `.vsfavatar` block decode failures and extended `nativecore` render API lifecycle for host-side wiring.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added block decode failure diagnostics:
+    - `failed_block_index`
+    - `failed_block_mode`
+    - `failed_block_expected_size`
+    - `failed_block_error_code`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added metadata candidate validation + scoring path to reduce fragile first-hit candidate selection.
+  - Added block failure error-code mapping:
+    - `DATA_BLOCK_READ_FAILED`
+    - `DATA_BLOCK_RAW_MISMATCH`
+    - `DATA_BLOCK_LZ4_FAIL`
+    - `DATA_BLOCK_LZMA_UNIMPLEMENTED`
+  - Added block-level failure context in reconstruction error text (`block`, `mode`, `expected`, `code`).
+  - Added heuristic byte-order handling for block flags to improve compression-mode plausibility.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added warning emission for block diagnostics (`data block diagnostic: ...`).
+
+- `include/animiq/nativecore/api.h`
+  - Extended `NcRenderContext` with D3D11 handles:
+    - `d3d11_device`
+    - `d3d11_device_context`
+    - `d3d11_rtv`
+  - Added render-resource lifecycle APIs:
+    - `nc_create_render_resources`
+    - `nc_destroy_render_resources`
+
+- `src/nativecore/native_core.cpp`
+  - Added per-avatar render-resource readiness tracking.
+  - Implemented lifecycle API stubs with handle validation.
+  - Updated `nc_render_frame` validation to require D3D11 context handles and at least one render-ready avatar.
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added future-facing render payload containers:
+    - `mesh_payloads`
+    - `material_payloads`
+    - `texture_payloads`
+
+### Verified
+
+- `Release` build succeeded after API and parser updates.
+- Fixed sample report regenerated (`build/reports/vsfavatar_probe_latest.txt`).
+- Current samples still load as `Compat: partial`, with clearer blocker details now visible in diagnostics (`mode=1`, large expected block sizes, read/decode failure).
+
+## 2026-03-02 - VSFAvatar phase 2 kickoff (UnityFS metadata deep parse)
+
+### Summary
+
+Started the second implementation track for `.vsfavatar` compatibility by moving from header-level probing to metadata-level parsing.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Extended `UnityFsProbe` with metadata diagnostics:
+    - `metadata_parsed`
+    - `block_count`
+    - `node_count`
+    - `first_node_path`
+    - `metadata_error`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Implemented metadata offset resolution logic for UnityFS bundle variants.
+  - Added metadata decompression path for `LZ4` and `LZ4HC`.
+  - Added UnityFS metadata table parsing:
+    - block info table
+    - node table
+    - first node path extraction
+  - Added structured metadata parse failure reporting.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added loader warning output for parsed metadata summary.
+  - Added loader warning output for metadata parse failure reasons.
+  - Updated `missing_features` behavior to avoid reporting metadata decompression as missing when parse succeeds.
+
+### Verified
+
+- Release rebuild succeeded after parser changes.
+- `avatar_tool.exe` executed against multiple files in `D:\dbslxlvseefacedkfb\sample`.
+- Confirmed metadata diagnostics in runtime output:
+  - parsed metadata status true on tested samples
+  - `blocks=1`, `nodes=2`
+  - first node path reported as `CAB-...`
+
+### Remaining gap after this update
+
+- SerializedFile object table decode is not implemented.
+- Mesh/Material/Texture extraction is not implemented.
+
+## 2026-03-02 - VSFAvatar phase 2 continuation (object-table pipeline wiring)
+
+### Summary
+
+Wired the full VSFAvatar object-table extraction path after metadata parse, including serialized file parser scaffolding and sample report automation.
+
+### Added
+
+- `include/animiq/vsf/serialized_file_reader.h`
+- `src/vsf/serialized_file_reader.cpp`
+  - Added `SerializedFileReader::ParseObjectSummary`:
+    - parses SerializedFile metadata/object table in a best-effort mode
+    - extracts object counts and major Unity class distributions
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Runs `avatar_tool.exe` against sample `.vsfavatar` files
+  - writes report to `build/reports/vsfavatar_probe.txt`
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Extended `UnityFsProbe` with object-table fields:
+    - `object_table_parsed`, `object_count`
+    - `mesh_object_count`, `material_object_count`, `texture_object_count`
+    - `game_object_count`, `skinned_mesh_renderer_count`
+    - `major_types_found`
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added metadata table structs (`BlockInfo`, `NodeInfo`) and parsing
+  - Added data-stream reconstruction attempt from parsed block table
+  - Added node-level SerializedFile summary extraction attempts
+  - Added detailed reconstruction diagnostics by offset candidate
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Updated warning output to include serialized diagnostics
+  - Updated mesh/material placeholder population from discovered object counts
+  - Refined missing-feature messages for staged progress
+
+- `CMakeLists.txt`
+  - Added `src/vsf/serialized_file_reader.cpp` to `animiq_core`
+
+### Verified
+
+- Release build succeeded after integration.
+- Sample probe script executed successfully on sample `.vsfavatar` files.
+- Metadata parse remains successful; object-table path is now executed and emits diagnostics.
+
+### Current blocker
+
+- Current sample set fails during bundle data block decompression in reconstruction stage (`LZ4 decode failed`).
+- As a result, object table summary extraction does not complete on those samples yet.
+
+## 2026-03-02 - VSFAvatar phase 2 decompression hardening
+
+### Summary
+
+Hardened UnityFS metadata/data decompression and expanded diagnostics to accelerate blocker resolution.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - Updated metadata-at-end detection to support sample variant flag usage.
+  - Added LZ4 frame fallback decode path alongside raw LZ4 decode.
+  - Added multi-mode decompression attempts (`block/header/LZ4/LZ4HC/raw`) for metadata and data blocks.
+  - Added multi-strategy metadata handling:
+    - whole compressed metadata attempt
+    - 16-byte hash-prefix + compressed tail attempt
+  - Added reconstruction diagnostics:
+    - candidate attempt count
+    - successful reconstruction offset
+    - serialized parse fallback error code propagation
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added diagnostic fields:
+    - `reconstruction_attempts`
+    - `reconstruction_success_offset`
+    - `serialized_parse_error_code`
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added warnings for reconstruction attempts/success offset and serialized parse code.
+
+- `README.md`
+  - Added phase-2 decompression hardening summary and current blocker status.
+
+### Verified
+
+- Release build succeeded after decompression hardening.
+- Sample probe report regenerated successfully (`build/reports/vsfavatar_probe.txt`).
+- Current sample set still fails metadata decompression under in-house LZ4 logic, with improved explicit diagnostics.
+
+## 2026-03-02 - VSFAvatar phase 2 diagnostics expansion (offset/strategy probing)
+
+### Summary
+
+Expanded metadata decode instrumentation and probing strategies to better isolate why sample bundles still fail metadata reconstruction.
+
+### Changed
+
+- `include/animiq/vsf/unityfs_reader.h`
+  - Added metadata decode diagnostics:
+    - `metadata_offset`
+    - `metadata_decode_strategy`
+    - `metadata_decode_mode`
+    - `metadata_decode_error_code`
+
+- `include/animiq/vsf/serialized_file_reader.h`
+  - Added parser metadata fields:
+    - `parse_path`
+    - `error_code`
+
+- `src/vsf/serialized_file_reader.cpp`
+  - Populated summary parse path metadata (`metadata-endian-little` / `metadata-endian-big`).
+  - Improved combined parse failure string for dual-endian attempts.
+
+- `src/vsf/unityfs_reader.cpp`
+  - Added metadata offset candidate scan around file tail (16-byte aligned window).
+  - Added metadata decode strategy attempts:
+    - whole compressed decode
+    - hash-prefix + compressed tail decode
+    - raw-direct metadata parse fallback
+  - Added mode candidate fallback and extended LZ4 fallback variants:
+    - raw decode
+    - frame decode
+    - size-prefixed raw decode
+  - Added bounded candidate error aggregation to keep diagnostics readable.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added warning fields for decode strategy/mode/offset and decode error code.
+
+- `tools/vsfavatar_sample_report.ps1`
+  - Added fixed baseline support:
+    - `-UseFixedSet`
+    - `-FixedSamples`
+
+### Verified
+
+- Release build succeeded after integration.
+- Fixed sample report generation succeeded:
+  - `build/reports/vsfavatar_probe_fixed.txt`
+- Baseline sample set currently still reports metadata decode failure (`META_DECODE_FAILED`).
+
+### Current blocker
+
+- Despite broader probing and fallback paths, metadata decode for current `.vsfavatar` samples still fails in the in-house decoder path.
+- This continues to block `object_table_parsed` on baseline samples.
+
+## 2026-03-02 - VSFAvatar phase 2 metadata candidate refinement
+
+### Summary
+
+Refined metadata offset selection and reconstruction candidate wiring so sample bundles progress past metadata decode into reconstruction diagnostics.
+
+### Changed
+
+- `src/vsf/unityfs_reader.cpp`
+  - merged metadata candidate sets from:
+    - primary metadata offset root
+    - header-adjacent offset root
+  - added aligned tail-window metadata scanning in candidate generation
+  - expanded metadata decode prefix attempts (`prefix-0..32`)
+  - fixed reconstruction call to use actual parsed metadata offset (`probe.metadata_offset`)
+  - added reconstruction candidates based on parsed metadata location:
+    - `metadata_offset + compressed_metadata_size`
+    - aligned variant
+  - deduplicated reconstruction candidates before attempts
+
+- `README.md`
+  - added phase-2 refinement summary and updated blocker state
+
+### Verified
+
+- Release build succeeded after refinement.
+- Fixed sample report regenerated successfully.
+- Baseline samples now consistently reach metadata parse stage and fail at reconstruction stage with explicit errors.
+
+### Current blocker
+
+- Data block reconstruction still fails (`raw block size mismatch` / read failure) on baseline samples.
+- `object_table_parsed` remains blocked until block decode interpretation is corrected.
+
+## 2026-03-02 - NativeCore foundation + avatar pipeline extension
+
+### Summary
+
+Implemented the first end-to-end native runtime foundation for the VSeeFace-style standalone app effort.  
+This update moves the project from a scaffold CLI into a reusable runtime DLL model with explicit API contracts and richer avatar compatibility diagnostics.
+
+### Added
+
+- `include/animiq/nativecore/api.h`
+  - New exported C ABI contract for host applications.
+  - Stable primitive structs for init/load/render/tracking/broadcast flows.
+  - Error/result codes designed for cross-language interop.
+
+- `src/nativecore/native_core.cpp`
+  - Runtime state manager with guarded global state (`std::mutex`).
+  - Avatar handle lifecycle (`load -> query -> unload`).
+  - Last-error propagation via `nc_get_last_error`.
+  - Tracking and render entrypoints stabilized as callable placeholders.
+  - Spout/OSC integration points wired to existing stub backends.
+
+- `src/avatar/vxavatar_loader.h`
+- `src/avatar/vxavatar_loader.cpp`
+  - New `.vxavatar` loader route.
+  - ZIP signature probing (`PK` magic) for initial format validation.
+  - Diagnostic reporting for missing parser stages.
+
+- `tools/avatar_tool.cpp`
+  - New runtime API sanity tool.
+  - Exercises `nativecore.dll` instead of direct facade calls.
+  - Prints normalized format/compatibility/diagnostic information.
+
+### Changed
+
+- `include/animiq/avatar/avatar_package.h`
+  - Added `AvatarSourceType::VxAvatar`.
+  - Added `AvatarCompatLevel` enum.
+  - Added `compat_level` field.
+  - Added `missing_features` list.
+
+- `src/avatar/avatar_loader_facade.cpp`
+  - Registered `VxAvatarLoader` in extension dispatch chain.
+
+- `src/avatar/vrm_loader.cpp`
+  - Added compatibility/missing-feature diagnostics for scaffold state.
+
+- `src/avatar/vsfavatar_loader.cpp`
+  - Added compatibility classification.
+  - Added explicit pending-feature diagnostics for UnityFS deep parse path.
+
+- `src/main.cpp`
+  - Added `VXAvatar` source type display support.
+  - Replaced non-ASCII usage sample path with ASCII-safe sample path.
+
+- `CMakeLists.txt`
+  - Converted `animiq_core` to static internal library.
+  - Added shared library target: `nativecore`.
+  - Added executable target: `avatar_tool`.
+  - Wired include paths and export macro definition for DLL build.
+
+- `build.ps1`
+  - Updated build output summary to include `nativecore.dll` and `avatar_tool.exe`.
+
+- `README.md`
+  - Updated current capabilities.
+  - Documented API and runtime scope.
+  - Added implementation summary and verification notes.
+
+### Verified
+
+- CMake configure + MSVC Release build succeeded.
+- Built artifacts produced:
+  - `build/Release/nativecore.dll`
+  - `build/Release/animiq_cli.exe`
+  - `build/Release/avatar_tool.exe`
+- `avatar_tool.exe` tested with a real `.vsfavatar` file:
+  - Load success
+  - Detected format: `VSFAvatar`
+  - Compatibility: `partial`
+  - Missing-feature diagnostics returned as expected
+
+### Known gaps after this update
+
+- DX11 renderer is not implemented yet (render call is placeholder).
+- VRM decode + MToon binding are not implemented.
+- `.vxavatar` manifest/material override parser is not implemented.
+- `.vsfavatar` deep object extraction is not implemented.
+- MediaPipe webcam tracking integration is not implemented.
+- WinUI/WPF host app project is not created yet.

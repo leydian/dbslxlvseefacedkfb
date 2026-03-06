@@ -1,0 +1,67 @@
+﻿name: host-stability-nightly
+
+on:
+  schedule:
+    - cron: "20 17 * * *"
+  workflow_dispatch:
+
+jobs:
+  soak-and-memory-trend:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+        working-directory: AnimiqCore
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run Avatar Soak (nightly)
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\avatar_load_soak_gate.ps1 `
+            -IterationsPerSample 20 `
+            -MinSuccessRatio 1.0 `
+            -MinPerSampleSuccessRatio 1.0
+
+      - name: Refresh Render Perf History (if metrics exists)
+        run: |
+          $metrics = Join-Path $PWD "build\reports\metrics_latest.csv"
+          if (Test-Path -LiteralPath $metrics) {
+            powershell -ExecutionPolicy Bypass -File .\tools\render_perf_gate.ps1 `
+              -MetricsCsvPath $metrics `
+              -Profile desktop-60 `
+              -MinLiveTickSampleRatio 0.8
+          } else {
+            "metrics_latest_missing=true" | Set-Content -Path ".\build\reports\render_perf_history_refresh_skipped.txt" -Encoding UTF8
+            Write-Host "metrics_latest.csv missing; skipped render perf history refresh."
+          }
+
+      - name: Run Memory Trend Gate (best effort)
+        continue-on-error: true
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\memory_trend_gate.ps1 `
+            -LookbackRows 10 `
+            -MaxAllowedPrivateMbIncrease 200 `
+            -MaxAllowedWorkingSetMbIncrease 250 `
+            -MaxAllowedMemorySampleFailedCount 0
+
+      - name: Upload Nightly Stability Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-stability-nightly-reports
+          if-no-files-found: warn
+          path: |
+            AnimiqCore/build/reports/avatar_load_soak_gate_summary.txt
+            AnimiqCore/build/reports/render_perf_gate_summary.txt
+            AnimiqCore/build/reports/render_perf_gate_history.csv
+            AnimiqCore/build/reports/memory_trend_gate_summary.txt
+            AnimiqCore/build/reports/render_perf_history_refresh_skipped.txt
+

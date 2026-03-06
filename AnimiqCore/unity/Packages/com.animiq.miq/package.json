@@ -1,0 +1,30 @@
+{
+  "name": "com.animiq.miq",
+  "version": "1.0.0",
+  "displayName": "Animiq MIQ SDK",
+  "description": "Unity 2021.3/2022.3/2023.2 LTS Built-in RP export/runtime bridge for MIQ avatar containers.",
+  "unity": "2021.3",
+  "unityRelease": "18f1",
+  "documentationUrl": "https://github.com/leydian/dbslxlvseefacedkfb/blob/main/NativeAnimiq/unity/Packages/com.animiq.miq/README.md",
+  "changelogUrl": "https://github.com/leydian/dbslxlvseefacedkfb/blob/main/NativeAnimiq/CHANGELOG.md",
+  "licensesUrl": "https://github.com/leydian/dbslxlvseefacedkfb/blob/main/NativeAnimiq/unity/Packages/com.animiq.miq/LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leydian/dbslxlvseefacedkfb.git"
+  },
+  "samples": [
+    {
+      "displayName": "Runtime Load Sample",
+      "description": "Demonstrates MiqRuntimeLoader.TryLoad and diagnostics handling.",
+      "path": "Samples~/RuntimeLoadSample"
+    },
+    {
+      "displayName": "Export/Import Roundtrip Sample",
+      "description": "Demonstrates editor export/import roundtrip flows for .miq assets.",
+      "path": "Samples~/ExportImportRoundtripSample"
+    }
+  ],
+  "author": {
+    "name": "Animiq"
+  }
+}

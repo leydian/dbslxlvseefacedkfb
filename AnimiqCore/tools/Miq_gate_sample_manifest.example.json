@@ -1,0 +1,14 @@
+{
+  "samples": [
+    { "name": "miq_normal_01.miq", "sample_class": "normal", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_normal_02.miq", "sample_class": "normal", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_normal_03.miq", "sample_class": "normal", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_normal_04.miq", "sample_class": "normal", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_normal_05.miq", "sample_class": "normal", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_normal_06.miq", "sample_class": "normal", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_boundary_01.miq", "sample_class": "boundary", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_boundary_02.miq", "sample_class": "boundary", "expected_primary_error": "NONE", "expected_max_warning_codes": 0 },
+    { "name": "miq_corrupt_01.miq", "sample_class": "corrupt", "expected_primary_error": "MIQ_SCHEMA_INVALID", "expected_max_warning_codes": 0 },
+    { "name": "miq_corrupt_02.miq", "sample_class": "corrupt", "expected_primary_error": "MIQ_SECTION_TRUNCATED", "expected_max_warning_codes": 0 }
+  ]
+}
