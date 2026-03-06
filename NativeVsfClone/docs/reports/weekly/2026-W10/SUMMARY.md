@@ -18,7 +18,7 @@
 - `avatar`: 2 reports
 - `platform`: 3 reports
 - `session`: 2 reports
-- `tracking`: 11 reports
+- `tracking`: 12 reports
 - `webcam`: 3 reports
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
@@ -97,6 +97,7 @@
 - Newly added: review `2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md` for strict tracking runtime activation steps, fuzz-gate TFM compatibility fix, and tracking-contract PASS verification evidence.
 - Newly added: review `2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md` for upper-body auto-pose runtime merge (`manual + auto`), webcam-side shoulder/upper-arm extraction contract, tracking diagnostics extension, and WPF/WinUI operator toggle/status surfacing.
 - Newly added: review `2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md` for iFacial parse-failure cause diagnostics (`VMC` mismatch / unsupported OSC type tags), parser type-tag compatibility widening (`d/h/T/F/N/I`), and actionable in-app remediation hints.
+- Newly added: review `2026-03-06_tracking_ifacial_key_alias_expansion_for_ifm_lr_prefix.md` for IFM prefixed-key normalization (`blendshape/face/bs`), compact left/right alias expansion (`*_L/*_R` class), and strict allowlist-preserving ARKit52 mapping recovery behavior.
 - Newly added: review `2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md` for HybridAuto source-switch hysteresis/cooldown/hold-time policy, runtime deadband auto-stability tuning, upper-body low-confidence/stale decay smoothing, and operator-facing switch telemetry/hint expansion.
 - Newly added: review `2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md` for iFacial native/delimited text parser compatibility expansion (`key&value`, `key-value`), snapshot-time tracking diagnostics sync, and XAV2 base-only shadow-pass inference behavior.
 - Newly added: review `2026-03-06_winui_ui_token_alignment_and_badge_consistency_refine.md` for WinUI onboarding/step semantic token expansion, actionability badge resource-driven READY/BLOCKED styling, and remaining environment-dependent XAML compiler verification risk.

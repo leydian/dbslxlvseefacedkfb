@@ -2557,6 +2557,12 @@ public sealed class TrackingInputService : ITrackingInputService
             return false;
         }
 
+        normalized = StripIfmKnownPrefixTokens(normalized);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
         normalizedKey = normalized switch
         {
             "blinkl" or "blinkleft" or "eyecloseleft" => "eyeblinkleft",
@@ -2572,6 +2578,11 @@ public sealed class TrackingInputService : ITrackingInputService
             _ => normalized,
         };
 
+        if (TryExpandIfmLeftRightAlias(normalizedKey, out var expanded))
+        {
+            normalizedKey = expanded;
+        }
+
         if (Arkit52Channels.NormalizedSet.Contains(normalizedKey) ||
             normalizedKey is "headyaw" or "headpitch" or "headroll" or "headposx" or "headposy" or "headposz" or
                 "leftshoulderpitch" or "rightshoulderpitch" or "leftupperarmpitch" or "rightupperarmpitch")
@@ -2581,6 +2592,66 @@ public sealed class TrackingInputService : ITrackingInputService
 
         normalizedKey = null;
         return false;
+    }
+
+    private static string StripIfmKnownPrefixTokens(string normalized)
+    {
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        var current = normalized;
+        while (true)
+        {
+            var next = current switch
+            {
+                _ when current.StartsWith("blendshapes", StringComparison.Ordinal) && current.Length > "blendshapes".Length
+                    => current["blendshapes".Length..],
+                _ when current.StartsWith("blendshape", StringComparison.Ordinal) && current.Length > "blendshape".Length
+                    => current["blendshape".Length..],
+                _ when current.StartsWith("facial", StringComparison.Ordinal) && current.Length > "facial".Length
+                    => current["facial".Length..],
+                _ when current.StartsWith("face", StringComparison.Ordinal) && current.Length > "face".Length
+                    => current["face".Length..],
+                _ when current.StartsWith("bs", StringComparison.Ordinal) && current.Length > "bs".Length
+                    => current["bs".Length..],
+                _ => current,
+            };
+
+            if (ReferenceEquals(next, current) || next == current)
+            {
+                break;
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static bool TryExpandIfmLeftRightAlias(string normalized, [NotNullWhen(true)] out string? expanded)
+    {
+        expanded = null;
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length < 2)
+        {
+            return false;
+        }
+
+        var suffix = normalized[^1];
+        if (suffix is not ('l' or 'r'))
+        {
+            return false;
+        }
+
+        var stem = normalized[..^1];
+        if (!IfmLeftRightAliasStems.Contains(stem))
+        {
+            return false;
+        }
+
+        expanded = stem + (suffix == 'l' ? "left" : "right");
+        return true;
     }
 
     private bool TryExtractFormatA(OscMessage message, List<KeyValuePair<string, float>> updates)
@@ -3789,6 +3860,28 @@ public sealed class TrackingInputService : ITrackingInputService
     private static readonly Regex IfmVersionRegex = new(
         @"(?i)\bversion\s*[:=\-]\s*(\d+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly IReadOnlySet<string> IfmLeftRightAliasStems = new HashSet<string>(
+        new[]
+        {
+            "eyeblink",
+            "mouthsmile",
+            "browdown",
+            "cheeksquint",
+            "eyewide",
+            "eyesquint",
+            "eyelookin",
+            "eyelookout",
+            "eyelookup",
+            "eyelookdown",
+            "mouthfrown",
+            "mouthdimple",
+            "mouthstretch",
+            "mouthpress",
+            "mouthlowerdown",
+            "mouthupperup",
+            "nosesneer",
+        },
+        StringComparer.OrdinalIgnoreCase);
 
     private readonly record struct OscMessage(string Address, string TypeTag, IReadOnlyList<OscValue> Values);
     private readonly record struct OscValue(OscValueKind Kind, float FloatValue, string StringValue);

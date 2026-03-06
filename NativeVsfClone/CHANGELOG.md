@@ -2,6 +2,34 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - iFacial key-alias expansion for IFM left/right variants and prefixed channels
+
+### Summary
+
+Addressed the live tracking condition where iFacial input was actively received (`format=ifm-v1`, `parse_err=0`) but expression coverage stayed at `arkit52=0/52` due to key-name mismatch between sender payload variants and HostCore allowlist normalization.
+
+### Changed
+
+- Host tracking key normalization and alias routing:
+  - `host/HostCore/TrackingInputService.cs`
+  - `TryNormalizeIfmKey(...)` now applies a prefix-trimming pass before alias resolution:
+    - strips leading tokens from normalized keys: `blendshapes`, `blendshape`, `facial`, `face`, `bs`
+    - enables compatibility for prefixed shapes such as `blendShape.eyeBlinkLeft`, `face/eyeBlinkLeft` (after normalization)
+  - added left/right compact alias expansion path:
+    - resolves stem+suffix compact forms (for example `...l`, `...r`) into canonical `...left`, `...right` when stem is in tracked ARKit families
+    - covered families include eye blink/look/squint/wide, brow down, cheek squint, mouth smile/frown/dimple/stretch/press/lowerDown/upperUp, nose sneer
+  - maintained strict allowlist safety:
+    - only keys that resolve into `Arkit52Channels.NormalizedSet` (or supported pose channels) are accepted
+    - unknown/noise keys remain rejected to avoid accidental ingestion drift
+- Added helper routines for deterministic normalization:
+  - `StripIfmKnownPrefixTokens(...)`
+  - `TryExpandIfmLeftRightAlias(...)`
+  - static alias stem set: `IfmLeftRightAliasStems`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS (`0 warnings`, `0 errors`)
+
 ## 2026-03-06 - XAV2 extreme detached-cluster draw guard + AutoFit bust framing stabilization
 
 ### Summary

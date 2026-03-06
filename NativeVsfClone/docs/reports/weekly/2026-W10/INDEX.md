@@ -95,6 +95,7 @@ Report list for this week.
 - [2026-03-06_tracking_latency_lock_followup.md](./2026-03-06_tracking_latency_lock_followup.md)
 - [2026-03-06_tracking_render_followup.md](./2026-03-06_tracking_render_followup.md)
 - [2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md](./2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md)
+- [2026-03-06_tracking_ifacial_key_alias_expansion_for_ifm_lr_prefix.md](./2026-03-06_tracking_ifacial_key_alias_expansion_for_ifm_lr_prefix.md)
 - [2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md](./2026-03-06_tracking_ifm_native_text_parser_and_shadow_infer.md)
 - [2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md](./2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md)
 - [2026-03-06_tracking_wpf_benchmark_controls_basic_advanced.md](./2026-03-06_tracking_wpf_benchmark_controls_basic_advanced.md)
