@@ -2728,6 +2728,43 @@ bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
     return false;
 }
 
+bool ShouldApplyArmPoseForAvatar(const AvatarPackage& avatar_pkg) {
+    enum class StaticSkinningEnvMode {
+        Auto = 0,
+        ForceOn,
+        ForceOff,
+    };
+    static const StaticSkinningEnvMode mode = []() {
+        const char* raw = std::getenv("VSFCLONE_XAV2_ENABLE_STATIC_SKINNING");
+        if (raw == nullptr) {
+            return StaticSkinningEnvMode::Auto;
+        }
+        std::string token(raw);
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (token == "0" || token == "false" || token == "no" || token == "off") {
+            return StaticSkinningEnvMode::ForceOff;
+        }
+        if (token == "1" || token == "true" || token == "yes" || token == "on") {
+            return StaticSkinningEnvMode::ForceOn;
+        }
+        return StaticSkinningEnvMode::Auto;
+    }();
+    if (mode == StaticSkinningEnvMode::ForceOn) {
+        return true;
+    }
+    if (mode == StaticSkinningEnvMode::ForceOff) {
+        return false;
+    }
+    // Auto mode: allow arm pose for XAV2 when the runtime has complete pose payloads.
+    // Keep mesh static-skinning policy separate to avoid regressions in mesh-space safety rules.
+    return avatar_pkg.source_type == AvatarSourceType::Xav2 &&
+        !avatar_pkg.skin_payloads.empty() &&
+        !avatar_pkg.skeleton_payloads.empty() &&
+        !avatar_pkg.skeleton_rig_payloads.empty();
+}
+
 bool ShouldUseConservativeXav2MaterialPath() {
     const char* raw = std::getenv("VSFCLONE_XAV2_CONSERVATIVE_MATERIAL");
     if (raw == nullptr) {
@@ -3951,7 +3988,7 @@ bool ApplyArmPoseToAvatar(
     if (renderer == nullptr || device_ctx == nullptr) {
         return false;
     }
-    const bool arm_pose_enabled = ShouldApplyStaticSkinningForAvatarMeshes(avatar_pkg);
+    const bool arm_pose_enabled = ShouldApplyArmPoseForAvatar(avatar_pkg);
     if (!arm_pose_enabled) {
         if (!avatar_pkg.skin_payloads.empty()) {
             auto avatar_it = g_state.avatars.find(handle);
@@ -3969,6 +4006,13 @@ bool ApplyArmPoseToAvatar(
         return true;
     }
     if (avatar_pkg.skin_payloads.empty() || avatar_pkg.skeleton_payloads.empty() || avatar_pkg.skeleton_rig_payloads.empty()) {
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            PushAvatarWarningUnique(
+                &avatar_it->second,
+                "W_RENDER: ARM_POSE_PAYLOAD_MISSING: arm pose skipped due to missing skin/skeleton/rig payload.",
+                "ARM_POSE_PAYLOAD_MISSING");
+        }
         return true;
     }
     SkinningMatrixConvention arm_pose_convention_hint = avatar_pkg.skinning_matrix_convention;

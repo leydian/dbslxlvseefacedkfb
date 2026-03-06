@@ -64,6 +64,7 @@
 - Newly added: review `2026-03-06_wpf_arm_pose_refinement_and_suggestion_optimization.md` for arm filtering/tuning, suggested arm preset automation, and native arm-pose update optimization.
 - Newly added: review `2026-03-06_wpf_arm_pose_upperarm_only_hotfix.md` for upper-arm-only safety rollback, preset linked-bone pitch neutralization, and native static-skinning arm-pose scope reduction.
 - Newly added: review `2026-03-06_arm_pose_policy_alignment_fix.md` for arm-pose gate policy mismatch root cause, XAV2 forced-skip removal, and runtime warning contract for policy-disabled scenarios.
+- Newly added: review `2026-03-06_arm_pose_xav2_vrm_auto_policy_split_fix.md` for XAV2(VRM-origin) no-motion regression triage, arm-pose vs mesh-skinning policy decoupling, and payload-missing warning contract (`ARM_POSE_PAYLOAD_MISSING`).
 - Newly added: review `2026-03-06_wpf_light_glass_editorial_ui_refresh.md` for WPF design token expansion, left-rail + workspace layout modernization, and render-only visibility sync updates.
 - Newly added: review `2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md` for single-active rail navigation, diagnostics default-collapse policy, dual-theme runtime switch, and lightweight section transition optimization.
 - Newly added: review `2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md` for HostCore-backed workspace restore, core keyboard shortcuts, nav keyboard traversal, and section-focused primary control routing.
