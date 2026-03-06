@@ -1,7 +1,9 @@
 param(
     [string]$ReportDir = ".\build\reports",
     [string]$OutputJson = ".\build\reports\release_gate_dashboard.json",
-    [string]$OutputTxt = ".\build\reports\release_gate_dashboard.txt"
+    [string]$OutputTxt = ".\build\reports\release_gate_dashboard.txt",
+    [switch]$RequireUnityXav2ForWpfOnly,
+    [switch]$RequireUnityXav2ForFull = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -107,6 +109,27 @@ $rows += [PSCustomObject]@{
     source_file = $hostReport
 }
 
+$hostE2EGate = Join-Path $ReportDir "host_e2e_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "Tracking HostE2E"
+    status_line = Get-StatusFromFile -Path $hostE2EGate -Pattern "Overall:"
+    source_file = $hostE2EGate
+}
+
+$trackingFuzzGate = Join-Path $ReportDir "tracking_parser_fuzz_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "Tracking Parser Fuzz"
+    status_line = Get-StatusFromFile -Path $trackingFuzzGate -Pattern "- Overall:"
+    source_file = $trackingFuzzGate
+}
+
+$mediapipeSanity = Join-Path $ReportDir "mediapipe_sidecar_sanity_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "Tracking Mediapipe Sanity"
+    status_line = Get-StatusFromFile -Path $mediapipeSanity -Pattern "Overall:"
+    source_file = $mediapipeSanity
+}
+
 $unityValidationSummary = Join-Path $ReportDir "unity_xav2_validation_summary.txt"
 $unityStatus = Get-KeyValueFromFile -Path $unityValidationSummary -Prefix "overall_status="
 if ([string]::IsNullOrWhiteSpace($unityStatus)) {
@@ -144,9 +167,17 @@ foreach ($r in $avatarRows) {
 $unityPass = [string]::Equals($unityStatus, "PASS", [System.StringComparison]::OrdinalIgnoreCase)
 $compressionPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Compression Quality" }) | Select-Object -First 1).status_line)) -eq "PASS"
 $parityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "XAV2 Unity/Native Parity" }) | Select-Object -First 1).status_line)) -eq "PASS"
+$trackingHostE2EPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking HostE2E" }) | Select-Object -First 1).status_line)) -eq "PASS"
+$trackingFuzzPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking Parser Fuzz" }) | Select-Object -First 1).status_line)) -eq "PASS"
+$trackingMediapipeSanityPass = (Get-PassFailFromStatusLine -Line ((($rows | Where-Object { $_.track -eq "Tracking Mediapipe Sanity" }) | Select-Object -First 1).status_line)) -eq "PASS"
+$trackingContractAllPass = $trackingHostE2EPass -and $trackingFuzzPass -and $trackingMediapipeSanityPass
 
-$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $unityPass -and $compressionPass -and $parityPass
-$fullReleaseCandidate = $wpfReleaseCandidate -and ($hostTrack.winui_state -eq "PASS")
+$unityXav2AllPass = $unityPass -and $compressionPass -and $parityPass
+$wpfUnityRequirementMet = if ($RequireUnityXav2ForWpfOnly) { $unityXav2AllPass } else { $true }
+$fullUnityRequirementMet = if ($RequireUnityXav2ForFull) { $unityXav2AllPass } else { $true }
+
+$wpfReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and $wpfUnityRequirementMet -and $trackingContractAllPass
+$fullReleaseCandidate = $avatarAllPass -and ($hostTrack.wpf_state -eq "PASS") -and ($hostTrack.winui_state -eq "PASS") -and $fullUnityRequirementMet -and $trackingContractAllPass
 
 $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("s")
@@ -155,9 +186,16 @@ $summary = [PSCustomObject]@{
         unity_xav2_validate_pass = $unityPass
         xav2_compression_quality_pass = $compressionPass
         xav2_unity_native_parity_pass = $parityPass
+        unity_xav2_all_pass = $unityXav2AllPass
+        unity_xav2_required_wpf_only = [bool]$RequireUnityXav2ForWpfOnly
+        unity_xav2_required_full = [bool]$RequireUnityXav2ForFull
         host_mode = $hostTrack.mode
         host_wpf_pass = ($hostTrack.wpf_state -eq "PASS")
         host_winui_pass = ($hostTrack.winui_state -eq "PASS")
+        tracking_host_e2e_pass = $trackingHostE2EPass
+        tracking_parser_fuzz_pass = $trackingFuzzPass
+        tracking_mediapipe_sanity_pass = $trackingMediapipeSanityPass
+        tracking_contract_all_pass = $trackingContractAllPass
         release_candidate_wpf_only = $wpfReleaseCandidate
         release_candidate_full = $fullReleaseCandidate
     }
@@ -174,6 +212,8 @@ $summary | ConvertTo-Json -Depth 5 | Set-Content -Path $OutputJson
 $lines = @()
 $lines += "Release Gate Dashboard"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
+$lines += "Policy.RequireUnityXav2ForWpfOnly: $RequireUnityXav2ForWpfOnly"
+$lines += "Policy.RequireUnityXav2ForFull: $RequireUnityXav2ForFull"
 $lines += "ReleaseCandidateWpfOnly: $(if ($wpfReleaseCandidate) { 'PASS' } else { 'FAIL' })"
 $lines += "ReleaseCandidateFull: $(if ($fullReleaseCandidate) { 'PASS' } else { 'FAIL' })"
 $lines += ""

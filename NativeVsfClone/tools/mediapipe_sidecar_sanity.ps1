@@ -1,7 +1,8 @@
 param(
-    [string]$PythonExe = "python",
+    [string]$PythonExe = "",
     [string]$SidecarScript = ".\tools\mediapipe_webcam_sidecar.py",
     [switch]$SkipImportProbe,
+    [switch]$RequireExplicitPythonExe,
     [string]$SummaryPath = ".\build\reports\mediapipe_sidecar_sanity_summary.txt"
 )
 
@@ -15,10 +16,52 @@ function Resolve-AbsolutePath {
     return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))
 }
 
+function Resolve-PythonExecutable {
+    param(
+        [string]$CliValue,
+        [bool]$RequireExplicit
+    )
+
+    $trimmedCli = $CliValue.Trim()
+    if (-not [string]::IsNullOrWhiteSpace($trimmedCli)) {
+        return [PSCustomObject]@{
+            Executable = $trimmedCli
+            Source = "cli"
+            IsExplicit = $true
+        }
+    }
+
+    $envValue = [Environment]::GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_PYTHON")
+    if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+        return [PSCustomObject]@{
+            Executable = $envValue.Trim()
+            Source = "env:VSFCLONE_MEDIAPIPE_PYTHON"
+            IsExplicit = $true
+        }
+    }
+
+    if ($RequireExplicit) {
+        return [PSCustomObject]@{
+            Executable = ""
+            Source = "missing"
+            IsExplicit = $false
+        }
+    }
+
+    return [PSCustomObject]@{
+        Executable = "python"
+        Source = "default"
+        IsExplicit = $false
+    }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resolvedScript = Resolve-AbsolutePath -Path $SidecarScript -BaseDirectory $repoRoot
 $resolvedSummary = Resolve-AbsolutePath -Path $SummaryPath -BaseDirectory $repoRoot
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $resolvedSummary) | Out-Null
+
+$resolvedPython = Resolve-PythonExecutable -CliValue $PythonExe -RequireExplicit:$RequireExplicitPythonExe
+$resolvedPythonExe = $resolvedPython.Executable
 
 $checks = [System.Collections.Generic.List[string]]::new()
 $overall = $true
@@ -30,23 +73,29 @@ if (Test-Path $resolvedScript) {
     $overall = $false
 }
 
-try {
-    & $PythonExe --version | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $checks.Add("- python_executable: PASS ($PythonExe)")
-    } else {
-        $checks.Add("- python_executable: FAIL ($PythonExe)")
+$checks.Add("- python_source: $($resolvedPython.Source)")
+if ([string]::IsNullOrWhiteSpace($resolvedPythonExe)) {
+    $checks.Add("- python_executable: FAIL (missing explicit python executable; set VSFCLONE_MEDIAPIPE_PYTHON or pass -PythonExe)")
+    $overall = $false
+} else {
+    try {
+        & $resolvedPythonExe --version | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $checks.Add("- python_executable: PASS ($resolvedPythonExe)")
+        } else {
+            $checks.Add("- python_executable: FAIL ($resolvedPythonExe)")
+            $overall = $false
+        }
+    }
+    catch {
+        $checks.Add("- python_executable: FAIL ($resolvedPythonExe): $($_.Exception.Message)")
         $overall = $false
     }
 }
-catch {
-    $checks.Add("- python_executable: FAIL ($PythonExe): $($_.Exception.Message)")
-    $overall = $false
-}
 
-if (-not $SkipImportProbe) {
+if (-not $SkipImportProbe -and -not [string]::IsNullOrWhiteSpace($resolvedPythonExe)) {
     try {
-        & $PythonExe -c "import mediapipe, cv2; print('ok')" | Out-Null
+        & $resolvedPythonExe -c "import mediapipe, cv2; print('ok')" | Out-Null
         if ($LASTEXITCODE -eq 0) {
             $checks.Add("- python_import_probe: PASS (mediapipe+cv2)")
         } else {
@@ -63,7 +112,9 @@ if (-not $SkipImportProbe) {
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("MediaPipe Sidecar Sanity Summary")
 $lines.Add("Generated: $(Get-Date -Format o)")
-$lines.Add("PythonExe: $PythonExe")
+$lines.Add("PythonExe: $resolvedPythonExe")
+$lines.Add("PythonSource: $($resolvedPython.Source)")
+$lines.Add("RequireExplicitPythonExe: $RequireExplicitPythonExe")
 $lines.Add("SidecarScript: $resolvedScript")
 $lines.Add("SkipImportProbe: $SkipImportProbe")
 $lines.Add("")
