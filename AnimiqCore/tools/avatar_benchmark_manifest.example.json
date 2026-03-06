@@ -1,26 +1,26 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "samples": [
     {
       "id": "vrm_normal_01",
       "name": "Kikyo_FT Variant.vrm",
       "path": "sample/Kikyo_FT Variant.vrm",
-      "sample_class": "normal",
-      "must_render_visible": true
+      "sampleClass": "normal",
+      "mustRenderVisible": true
     },
     {
       "id": "vrm_boundary_01",
       "name": "NewOnYou.vrm",
       "path": "sample/NewOnYou.vrm",
-      "sample_class": "boundary",
-      "must_render_visible": true
+      "sampleClass": "boundary",
+      "mustRenderVisible": true
     },
     {
       "id": "vsfavatar_normal_01",
       "name": "NewOnYou.vsfavatar",
       "path": "sample/NewOnYou.vsfavatar",
-      "sample_class": "normal",
-      "must_render_visible": true
+      "sampleClass": "normal",
+      "mustRenderVisible": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-﻿# Avatar Differential Benchmark Harness (VSeeFace vs Animiq) (2026-03-06)
+# Avatar Differential Benchmark Harness (VSeeFace vs Animiq) (2026-03-06)
 
 ## Summary
 
@@ -27,7 +27,10 @@ Added capabilities:
     - `P0`: VSeeFace load OK but Animiq parse/load contract not runtime-ready/NONE
     - `P1`: Animiq loads but quality gap (partial/critical/non-visible)
     - `P2`: warning debt high after successful load
-    - `NONE`: no actionable gap
+    - `PASS`: no actionable gap
+- `tools/vseeface_observation_ingest.ps1`
+  - ingests per-sample VSeeFace JSON rows into canonical observation file
+  - emits auto-generated `rows[]` keyed by sample `id`
 
 ## avatar_tool Contract Extension
 
@@ -46,10 +49,11 @@ Executed:
 - `avatar_tool does_not_exist.vrm --json-out=...` -> non-zero + JSON file emitted (expected)
 - `vseeface_managed_probe.ps1` -> PASS (`build/reports/vseeface_managed_probe.*`)
 - `avatar_engine_differential_benchmark.ps1` -> PASS (`build/reports/avatar_differential_benchmark_summary.*`)
+- `vseeface_observation_ingest.ps1` -> PASS (`build/reports/vseeface_observations.generated.json`)
 
 Observed differential result on current example set:
 
-- `P0=1, P1=0, P2=0, NONE=2`
+- `P0=1, P1=0, P2=0, PASS=2`
 - The `P0` row flags VSFAvatar gap where VSeeFace observation is successful but Animiq row remains non-runtime-ready visible state.
 
 ## Detailed Change Summary
@@ -84,7 +88,7 @@ Observed differential result on current example set:
     - `P0`: VSeeFace success vs Animiq non-ready/non-visible/fail,
     - `P1`: Animiq success but quality/visibility gap,
     - `P2`: Animiq success with elevated warning debt,
-    - `NONE`: no differential action item.
+    - `PASS`: no differential action item.
 
 ### 5) Verification artifact outputs
 
@@ -92,7 +96,25 @@ Observed differential result on current example set:
 - `build/reports/vseeface_managed_probe.txt`
 - `build/reports/avatar_differential_benchmark_summary.json`
 - `build/reports/avatar_differential_benchmark_summary.txt`
+- `build/reports/avatar_differential_error_taxonomy.json`
+- `build/reports/avatar_parity_dashboard.md`
 - `build/reports/avatar_tool_fail_test.json`
+
+## v1.1 Expansion (Strict Parity)
+
+- Differential summary schema now includes:
+  - `gate_profile`, `warning_debt_threshold`,
+  - `pass`, `by_extension`, `top_primary_errors`, `top_warning_codes`,
+  - `parity_rows[]` with normalized engine rows (`engine/load_ok/runtime_ready/visible/...`).
+- Per-row runtime parity fields added:
+  - `animiq_runtime_ready`, `animiq_elapsed_ms`,
+  - `vseeface_runtime_ready`, `vseeface_elapsed_ms`,
+  - `extension`, `must_render_visible`.
+- New strict classifier default:
+  - VSeeFace `load_ok=true` + Animiq not runtime-equivalent -> `P0`.
+  - Post-load quality gap -> `P1`.
+  - Warning debt over threshold -> `P2`.
+  - Otherwise `PASS`.
 
 ## Notes
 

@@ -3,20 +3,70 @@ param(
     [string]$AvatarToolPath = ".\build\Release\avatar_tool.exe",
     [string]$VSeeFaceObservationPath = "",
     [string]$OutputJson = ".\build\reports\avatar_differential_benchmark_summary.json",
-    [string]$OutputTxt = ".\build\reports\avatar_differential_benchmark_summary.txt"
+    [string]$OutputTxt = ".\build\reports\avatar_differential_benchmark_summary.txt",
+    [string]$ErrorTaxonomyJson = ".\build\reports\avatar_differential_error_taxonomy.json",
+    [string]$ParityDashboardMd = ".\build\reports\avatar_parity_dashboard.md",
+    [int]$WarningDebtThreshold = 5,
+    [string]$GateProfile = "strict"
 )
 
 $ErrorActionPreference = "Stop"
 
 function Resolve-AbsolutePath {
     param([string]$Path, [string]$BaseDirectory)
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
     if ([System.IO.Path]::IsPathRooted($Path)) {
         return [System.IO.Path]::GetFullPath($Path)
     }
-    if (Test-Path $Path) {
-        return [System.IO.Path]::GetFullPath($Path)
+    return [System.IO.Path]::GetFullPath($Path)
+}
+
+function Get-SampleValue {
+    param([object]$Sample, [string[]]$Keys, $DefaultValue = $null)
+    foreach ($k in $Keys) {
+        $p = $Sample.PSObject.Properties[$k]
+        if ($null -ne $p -and $null -ne $p.Value -and -not [string]::IsNullOrWhiteSpace("$($p.Value)")) {
+            return $p.Value
+        }
     }
-    return [System.IO.Path]::GetFullPath((Join-Path $BaseDirectory $Path))
+    return $DefaultValue
+}
+
+function To-BoolOrNull {
+    param($Value)
+    if ($null -eq $Value) {
+        return $null
+    }
+    return [bool]$Value
+}
+
+function Increment-Map {
+    param([hashtable]$Map, [string]$Key, [int]$Delta = 1)
+    if ([string]::IsNullOrWhiteSpace($Key)) {
+        return
+    }
+    if ($Map.ContainsKey($Key)) {
+        $Map[$Key] = [int]$Map[$Key] + $Delta
+    } else {
+        $Map[$Key] = $Delta
+    }
+}
+
+function Top-MapEntries {
+    param([hashtable]$Map, [int]$Top = 10)
+    return @(
+        $Map.GetEnumerator() |
+            Sort-Object Value -Descending |
+            Select-Object -First $Top |
+            ForEach-Object {
+                [PSCustomObject]@{
+                    key = "$($_.Key)"
+                    count = [int]$_.Value
+                }
+            }
+    )
 }
 
 if (-not (Test-Path $ManifestPath)) {
@@ -52,46 +102,43 @@ if (-not [string]::IsNullOrWhiteSpace($VSeeFaceObservationPath)) {
 }
 
 $rows = [System.Collections.Generic.List[object]]::new()
+$parityRows = [System.Collections.Generic.List[object]]::new()
 $p0 = 0
 $p1 = 0
 $p2 = 0
-$none = 0
+$pass = 0
+$priorityByExtension = @{}
+$reasonCounts = @{}
+$primaryErrorCounts = @{}
+$warningCodeCounts = @{}
 
 foreach ($sample in $manifest.samples) {
-    $id = "$($sample.id)".Trim()
+    $id = "$(Get-SampleValue -Sample $sample -Keys @('id'))".Trim()
     if ([string]::IsNullOrWhiteSpace($id)) {
         continue
     }
-    $samplePathRaw = "$($sample.path)"
+
+    $sampleClass = "$(Get-SampleValue -Sample $sample -Keys @('sampleClass','sample_class') -DefaultValue 'unknown')"
+    $mustRenderVisible = [bool](Get-SampleValue -Sample $sample -Keys @('mustRenderVisible','must_render_visible') -DefaultValue $false)
+    $samplePathRaw = "$(Get-SampleValue -Sample $sample -Keys @('path'))"
     $samplePathAbs = Resolve-AbsolutePath -Path $samplePathRaw -BaseDirectory $repoRoot
-    if (-not (Test-Path $samplePathAbs)) {
-        $rows.Add([PSCustomObject]@{
-            id = $id
-            sample_class = "$($sample.sample_class)"
-            sample_path = $samplePathAbs
-            animiq_load_ok = $false
-            animiq_parser_stage = "missing-file"
-            animiq_primary_error = "FILE_NOT_FOUND"
-            animiq_critical_warning_count = 0
-            animiq_render_visible = $false
-            vseeface_load_ok = $null
-            vseeface_render_visible = $null
-            vseeface_crash_or_freeze = $null
-            priority = "P0"
-            reason = "sample_file_missing"
-        })
-        $p0++
-        continue
+    $ext = [System.IO.Path]::GetExtension($samplePathAbs).TrimStart('.').ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($ext)) {
+        $ext = "unknown"
+    }
+    if (-not $priorityByExtension.ContainsKey($ext)) {
+        $priorityByExtension[$ext] = [PSCustomObject]@{ total = 0; p0 = 0; p1 = 0; p2 = 0; pass = 0 }
     }
 
-    $tmpJson = Join-Path $env:TEMP ("animiq_benchmark_" + [Guid]::NewGuid().ToString("N") + ".json")
-    $rawOut = & $avatarToolAbs $samplePathAbs "--json-out=$tmpJson" 2>&1
-    $exitCode = $LASTEXITCODE
-    $animiq = $null
-    if (Test-Path $tmpJson) {
-        $animiq = Get-Content -Path $tmpJson -Raw | ConvertFrom-Json
-        Remove-Item -Path $tmpJson -Force -ErrorAction SilentlyContinue
+    $vseeRow = $null
+    if ($vseeRowsById.ContainsKey($id)) {
+        $vseeRow = $vseeRowsById[$id]
     }
+    $vseeLoadOk = if ($null -ne $vseeRow) { To-BoolOrNull $vseeRow.load_ok } else { $null }
+    $vseeRenderVisible = if ($null -ne $vseeRow) { To-BoolOrNull $vseeRow.render_visible } else { $null }
+    $vseeCrash = if ($null -ne $vseeRow) { To-BoolOrNull $vseeRow.crash_or_freeze } else { $null }
+    $vseeElapsedMs = if ($null -ne $vseeRow -and $null -ne $vseeRow.elapsed_ms) { [int]$vseeRow.elapsed_ms } else { $null }
+    $vseeRuntimeReady = if ($null -eq $vseeLoadOk) { $null } else { [bool]($vseeLoadOk -eq $true -and $vseeCrash -ne $true) }
 
     $animiqLoadOk = $false
     $animiqStage = "unknown"
@@ -100,110 +147,282 @@ foreach ($sample in $manifest.samples) {
     $animiqWarningCodeCount = 0
     $animiqRenderVisible = $false
     $animiqCompat = "unknown"
-    if ($null -ne $animiq) {
-        $animiqLoadOk = [bool]$animiq.loadSucceeded
-        $animiqStage = "$($animiq.parserStage)"
-        $animiqPrimary = "$($animiq.primaryError)"
-        $animiqCompat = "$($animiq.compat)"
-        $animiqCritical = [int]$animiq.counts.criticalWarningCount
-        $animiqWarningCodeCount = [int]$animiq.counts.warningCodeCount
-        $animiqRenderVisible = [bool]$animiq.renderVisibleHeuristic
+    $animiqWarningCodes = @()
+    $animiqElapsedMs = 0
+    $exitCode = -1
+    $rawOut = @()
+
+    if (-not (Test-Path $samplePathAbs)) {
+        $animiqPrimary = "FILE_NOT_FOUND"
+        $animiqStage = "missing-file"
     } else {
-        $animiqPrimary = "ANIMIQ_JSON_MISSING"
-        $animiqStage = "failed"
-        $animiqLoadOk = $false
-        $animiqRenderVisible = $false
+        $tmpJson = Join-Path $env:TEMP ("animiq_benchmark_" + [Guid]::NewGuid().ToString("N") + ".json")
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $rawOut = & $avatarToolAbs $samplePathAbs "--json-out=$tmpJson" 2>&1
+        $exitCode = $LASTEXITCODE
+        $sw.Stop()
+        $animiqElapsedMs = [int]$sw.ElapsedMilliseconds
+
+        $animiq = $null
+        if (Test-Path $tmpJson) {
+            $animiq = Get-Content -Path $tmpJson -Raw | ConvertFrom-Json
+            Remove-Item -Path $tmpJson -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($null -ne $animiq) {
+            $animiqLoadOk = [bool]$animiq.loadSucceeded
+            $animiqStage = "$($animiq.parserStage)"
+            $animiqPrimary = "$($animiq.primaryError)"
+            $animiqCompat = "$($animiq.compat)"
+            $animiqCritical = [int]$animiq.counts.criticalWarningCount
+            $animiqWarningCodeCount = [int]$animiq.counts.warningCodeCount
+            $animiqRenderVisible = [bool]$animiq.renderVisibleHeuristic
+            if ($null -ne $animiq.warningCodes) {
+                foreach ($c in $animiq.warningCodes) {
+                    $code = "$c".Trim()
+                    if (-not [string]::IsNullOrWhiteSpace($code)) {
+                        $animiqWarningCodes += $code
+                        Increment-Map -Map $warningCodeCounts -Key $code
+                    }
+                }
+            }
+        } else {
+            $animiqPrimary = "ANIMIQ_JSON_MISSING"
+            $animiqStage = "failed"
+            $animiqLoadOk = $false
+            $animiqRenderVisible = $false
+        }
     }
 
-    $vseeRow = $null
-    if ($vseeRowsById.ContainsKey($id)) {
-        $vseeRow = $vseeRowsById[$id]
+    $animiqRuntimeReady = [bool]($animiqLoadOk -and $animiqStage -eq "runtime-ready" -and $animiqPrimary -eq "NONE")
+
+    if ($animiqPrimary -ne "NONE") {
+        Increment-Map -Map $primaryErrorCounts -Key $animiqPrimary
     }
-    $vseeLoadOk = if ($null -ne $vseeRow) { [bool]$vseeRow.load_ok } else { $null }
-    $vseeRenderVisible = if ($null -ne $vseeRow) { [bool]$vseeRow.render_visible } else { $null }
-    $vseeCrash = if ($null -ne $vseeRow) { [bool]$vseeRow.crash_or_freeze } else { $null }
 
-    $priority = "NONE"
-    $reason = "none"
-
-    if ($vseeLoadOk -eq $true -and ((-not $animiqLoadOk) -or $animiqStage -ne "runtime-ready" -or $animiqPrimary -ne "NONE")) {
-        $priority = "P0"
-        $reason = "vseeface_ok_animiq_load_or_parse_failed"
-        $p0++
-    } elseif ($vseeLoadOk -eq $true -and $animiqLoadOk -and ($animiqCompat -eq "partial" -or $animiqCritical -gt 0 -or -not $animiqRenderVisible)) {
-        $priority = "P1"
-        $reason = "animiq_quality_gap_after_load"
-        $p1++
-    } elseif ($animiqLoadOk -and $animiqWarningCodeCount -gt 5) {
-        $priority = "P2"
-        $reason = "warning_debt_high"
-        $p2++
+    $priority = "PASS"
+    $reason = "pass"
+    if ($vseeLoadOk -eq $true) {
+        if ((-not $animiqRuntimeReady) -or ($vseeRenderVisible -eq $true -and -not $animiqRenderVisible)) {
+            $priority = "P0"
+            $reason = "vseeface_ok_animiq_not_equivalent"
+        } elseif ($animiqCompat -eq "partial" -or $animiqCritical -gt 0 -or ($mustRenderVisible -and -not $animiqRenderVisible)) {
+            $priority = "P1"
+            $reason = "animiq_quality_gap_after_load"
+        } elseif ($animiqWarningCodeCount -gt $WarningDebtThreshold) {
+            $priority = "P2"
+            $reason = "warning_debt_high"
+        }
     } else {
-        $none++
+        if (-not (Test-Path $samplePathAbs)) {
+            $priority = "P0"
+            $reason = "sample_file_missing"
+        } elseif ($animiqWarningCodeCount -gt $WarningDebtThreshold) {
+            $priority = "P2"
+            $reason = "warning_debt_high"
+        }
     }
 
-    $rows.Add([PSCustomObject]@{
+    switch ($priority) {
+        "P0" { $p0++ }
+        "P1" { $p1++ }
+        "P2" { $p2++ }
+        default { $pass++ }
+    }
+
+    Increment-Map -Map $reasonCounts -Key $reason
+    $extBucket = $priorityByExtension[$ext]
+    $extBucket.total = [int]$extBucket.total + 1
+    switch ($priority) {
+        "P0" { $extBucket.p0 = [int]$extBucket.p0 + 1 }
+        "P1" { $extBucket.p1 = [int]$extBucket.p1 + 1 }
+        "P2" { $extBucket.p2 = [int]$extBucket.p2 + 1 }
+        default { $extBucket.pass = [int]$extBucket.pass + 1 }
+    }
+
+    $row = [PSCustomObject]@{
         id = $id
-        sample_class = "$($sample.sample_class)"
+        sample_class = $sampleClass
         sample_path = $samplePathAbs
+        extension = $ext
+        must_render_visible = $mustRenderVisible
         animiq_load_ok = $animiqLoadOk
+        animiq_runtime_ready = $animiqRuntimeReady
         animiq_parser_stage = $animiqStage
         animiq_primary_error = $animiqPrimary
         animiq_compat = $animiqCompat
         animiq_critical_warning_count = $animiqCritical
         animiq_warning_code_count = $animiqWarningCodeCount
+        animiq_warning_codes = $animiqWarningCodes
         animiq_render_visible = $animiqRenderVisible
         animiq_exit_code = $exitCode
+        animiq_elapsed_ms = $animiqElapsedMs
         vseeface_load_ok = $vseeLoadOk
+        vseeface_runtime_ready = $vseeRuntimeReady
         vseeface_render_visible = $vseeRenderVisible
         vseeface_crash_or_freeze = $vseeCrash
+        vseeface_elapsed_ms = $vseeElapsedMs
         priority = $priority
         reason = $reason
         raw_head = if ($rawOut.Count -gt 0) { "$($rawOut[0])" } else { "" }
+    }
+    $rows.Add($row)
+
+    $parityRows.Add([PSCustomObject]@{
+        id = $id
+        sample_class = $sampleClass
+        engine = "animiq"
+        load_ok = $animiqLoadOk
+        runtime_ready = $animiqRuntimeReady
+        visible = $animiqRenderVisible
+        primary_error = $animiqPrimary
+        parser_stage = $animiqStage
+        warning_codes = $animiqWarningCodes
+        critical_warning_count = $animiqCritical
+        elapsed_ms = $animiqElapsedMs
+        crash_or_freeze = $false
     })
+
+    if ($null -ne $vseeRow) {
+        $parityRows.Add([PSCustomObject]@{
+            id = $id
+            sample_class = $sampleClass
+            engine = "vseeface"
+            load_ok = $vseeLoadOk
+            runtime_ready = $vseeRuntimeReady
+            visible = $vseeRenderVisible
+            primary_error = if ($vseeLoadOk -eq $true) { "NONE" } elseif ($vseeCrash -eq $true) { "CRASH_OR_FREEZE" } else { "LOAD_FAILED" }
+            parser_stage = if ($vseeLoadOk -eq $true) { "runtime-ready" } else { "failed" }
+            warning_codes = @()
+            critical_warning_count = 0
+            elapsed_ms = $vseeElapsedMs
+            crash_or_freeze = $vseeCrash
+        })
+    }
 }
 
 $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("o")
+    gate_profile = $GateProfile
+    warning_debt_threshold = $WarningDebtThreshold
     manifest_path = $manifestAbs
     avatar_tool_path = $avatarToolAbs
     vseeface_observation_path = if ([string]::IsNullOrWhiteSpace($VSeeFaceObservationPath)) { "" } else { (Resolve-AbsolutePath -Path $VSeeFaceObservationPath -BaseDirectory $repoRoot) }
     total = $rows.Count
+    pass = $pass
     priority = [PSCustomObject]@{
         p0 = $p0
         p1 = $p1
         p2 = $p2
-        none = $none
+        pass = $pass
     }
+    by_extension = $priorityByExtension
+    top_reasons = @(Top-MapEntries -Map $reasonCounts -Top 10)
+    top_primary_errors = @(Top-MapEntries -Map $primaryErrorCounts -Top 10)
+    top_warning_codes = @(Top-MapEntries -Map $warningCodeCounts -Top 20)
+    parity_rows = $parityRows
     rows = $rows
+}
+
+$errorTaxonomy = [PSCustomObject]@{
+    generated_utc = $summary.generated_utc
+    total = $rows.Count
+    priority = $summary.priority
+    by_reason = @(Top-MapEntries -Map $reasonCounts -Top 100)
+    by_primary_error = @(Top-MapEntries -Map $primaryErrorCounts -Top 100)
+    by_warning_code = @(Top-MapEntries -Map $warningCodeCounts -Top 200)
 }
 
 $outputJsonAbs = Resolve-AbsolutePath -Path $OutputJson -BaseDirectory $repoRoot
 $outputTxtAbs = Resolve-AbsolutePath -Path $OutputTxt -BaseDirectory $repoRoot
-$outDir = Split-Path -Parent $outputJsonAbs
-if (-not (Test-Path $outDir)) {
-    New-Item -ItemType Directory -Path $outDir | Out-Null
-}
+$taxonomyAbs = Resolve-AbsolutePath -Path $ErrorTaxonomyJson -BaseDirectory $repoRoot
+$dashboardAbs = Resolve-AbsolutePath -Path $ParityDashboardMd -BaseDirectory $repoRoot
 
-$summary | ConvertTo-Json -Depth 8 | Set-Content -Path $outputJsonAbs -Encoding UTF8
+@($outputJsonAbs, $outputTxtAbs, $taxonomyAbs, $dashboardAbs) |
+    ForEach-Object {
+        $dir = Split-Path -Parent $_
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir | Out-Null
+        }
+    }
+
+$summary | ConvertTo-Json -Depth 10 | Set-Content -Path $outputJsonAbs -Encoding UTF8
+$errorTaxonomy | ConvertTo-Json -Depth 8 | Set-Content -Path $taxonomyAbs -Encoding UTF8
 
 $lines = @()
 $lines += "Avatar Differential Benchmark Summary"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
+$lines += "GateProfile: $($summary.gate_profile)"
 $lines += "ManifestPath: $($summary.manifest_path)"
 $lines += "AvatarToolPath: $($summary.avatar_tool_path)"
 $lines += "VSeeFaceObservationPath: $($summary.vseeface_observation_path)"
 $lines += "Total: $($summary.total)"
-$lines += "Priority: P0=$($summary.priority.p0), P1=$($summary.priority.p1), P2=$($summary.priority.p2), NONE=$($summary.priority.none)"
+$lines += "Priority: P0=$($summary.priority.p0), P1=$($summary.priority.p1), P2=$($summary.priority.p2), PASS=$($summary.priority.pass)"
+$lines += ""
+$lines += "ByExtension"
+foreach ($k in @($summary.by_extension.Keys | Sort-Object)) {
+    $b = $summary.by_extension[$k]
+    $lines += "- .$k total=$($b.total), p0=$($b.p0), p1=$($b.p1), p2=$($b.p2), pass=$($b.pass)"
+}
 $lines += ""
 $lines += "Rows"
 foreach ($row in $rows) {
-    $lines += "- [$($row.priority)] $($row.id) class=$($row.sample_class)"
-    $lines += "  animiq(load=$($row.animiq_load_ok), stage=$($row.animiq_parser_stage), primary=$($row.animiq_primary_error), compat=$($row.animiq_compat), critical=$($row.animiq_critical_warning_count), visible=$($row.animiq_render_visible))"
-    $lines += "  vseeface(load=$($row.vseeface_load_ok), visible=$($row.vseeface_render_visible), crash=$($row.vseeface_crash_or_freeze))"
+    $lines += "- [$($row.priority)] $($row.id) ext=.$($row.extension) class=$($row.sample_class)"
+    $lines += "  animiq(load=$($row.animiq_load_ok), ready=$($row.animiq_runtime_ready), stage=$($row.animiq_parser_stage), primary=$($row.animiq_primary_error), compat=$($row.animiq_compat), critical=$($row.animiq_critical_warning_count), visible=$($row.animiq_render_visible), ms=$($row.animiq_elapsed_ms))"
+    $lines += "  vseeface(load=$($row.vseeface_load_ok), ready=$($row.vseeface_runtime_ready), visible=$($row.vseeface_render_visible), crash=$($row.vseeface_crash_or_freeze), ms=$($row.vseeface_elapsed_ms))"
     $lines += "  reason=$($row.reason)"
 }
 $lines | Set-Content -Path $outputTxtAbs -Encoding UTF8
 
+$md = @()
+$md += "# Avatar Parity Dashboard"
+$md += ""
+$md += "- Generated UTC: $($summary.generated_utc)"
+$md += "- Gate Profile: $($summary.gate_profile)"
+$md += "- Manifest: ``$($summary.manifest_path)``"
+$md += "- VSeeFace observations: ``$($summary.vseeface_observation_path)``"
+$md += ""
+$md += "## Priority Summary"
+$md += ""
+$md += "| Total | PASS | P0 | P1 | P2 |"
+$md += "|---:|---:|---:|---:|---:|"
+$md += "| $($summary.total) | $($summary.priority.pass) | $($summary.priority.p0) | $($summary.priority.p1) | $($summary.priority.p2) |"
+$md += ""
+$md += "## Extension Breakdown"
+$md += ""
+$md += "| Extension | Total | PASS | P0 | P1 | P2 |"
+$md += "|---|---:|---:|---:|---:|---:|"
+foreach ($k in @($summary.by_extension.Keys | Sort-Object)) {
+    $b = $summary.by_extension[$k]
+    $md += "| .$k | $($b.total) | $($b.pass) | $($b.p0) | $($b.p1) | $($b.p2) |"
+}
+$md += ""
+$md += "## Top Primary Errors"
+$md += ""
+$md += "| Error | Count |"
+$md += "|---|---:|"
+foreach ($e in $summary.top_primary_errors) {
+    $md += "| $($e.key) | $($e.count) |"
+}
+$md += ""
+$md += "## Top Warning Codes"
+$md += ""
+$md += "| WarningCode | Count |"
+$md += "|---|---:|"
+foreach ($w in $summary.top_warning_codes) {
+    $md += "| $($w.key) | $($w.count) |"
+}
+$md += ""
+$md += "## P0 Samples"
+$md += ""
+$md += "| Id | Ext | Reason | AnimiqPrimary | AnimiqStage | VSeeFaceLoad |"
+$md += "|---|---|---|---|---|---|"
+foreach ($r in @($rows | Where-Object { $_.priority -eq 'P0' })) {
+    $md += "| $($r.id) | .$($r.extension) | $($r.reason) | $($r.animiq_primary_error) | $($r.animiq_parser_stage) | $($r.vseeface_load_ok) |"
+}
+$md | Set-Content -Path $dashboardAbs -Encoding UTF8
+
 Write-Host "json=$outputJsonAbs"
 Write-Host "txt=$outputTxtAbs"
+Write-Host "taxonomy=$taxonomyAbs"
+Write-Host "dashboard=$dashboardAbs"
