@@ -116,3 +116,4 @@
 - Newly added: review `2026-03-06_vrm_crash_guard_front_yaw_and_cull_hotfix.md` for invalid node-transform crash guard, VRM front-facing yaw default, and VRM no-cull render hotfix for transparent-looking outfit breakage.
 - Newly added: review `2026-03-06_nativecore_realtime_shadow_pipeline.md` for VSF-style realtime shadow pipeline wiring across Native API/renderer, Host preset+UI propagation, Unity pass-flag alignment, and current WinUI toolchain verification limits.
 - Newly added: review `2026-03-06_animiq_rebrand_and_miq_migration.md` for workspace-wide product rename, `.miq` migration scope, `MIQ2` binary signature contract hardening, and post-migration compatibility policy.
+- Newly added: review `2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md` for per-avatar preview front/back persistence contract (`PreviewFlip180`), load-time yaw reapply path, and WPF/WinUI toggle parity.

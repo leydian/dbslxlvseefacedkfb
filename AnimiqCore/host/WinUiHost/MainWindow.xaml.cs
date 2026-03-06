@@ -224,6 +224,8 @@ public sealed partial class MainWindow : Window
         {
             UpdateAvatarPreview(path);
         }
+
+        SyncAvatarFacingControls();
     }
 
     private void RecentAvatarList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -245,6 +247,32 @@ public sealed partial class MainWindow : Window
         }
 
         EnqueueThumbnailGeneration(path, force: true);
+    }
+
+    private async void AvatarFacingToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy || _isLoadRunning)
+        {
+            return;
+        }
+
+        var path = AvatarPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        var rc = _controller.ToggleAvatarPreviewFlip180(path);
+        if (rc != NcResultCode.Ok)
+        {
+            await ShowMessageAsync("적용 실패", $"아바타 방향 전환에 실패했습니다. ({rc})");
+            return;
+        }
+
+        RefreshRecentAvatarList();
+        SyncRenderControlsFromState();
+        SyncAvatarFacingControls();
+        UpdateUiState();
     }
 
     private void RefreshRecentAvatarList()
@@ -280,6 +308,7 @@ public sealed partial class MainWindow : Window
         }
         _syncingRecentAvatarList = false;
         UpdateAvatarPreview(AvatarPathTextBox.Text.Trim());
+        SyncAvatarFacingControls();
     }
 
     private void UpdateAvatarPreview(string avatarPath)
@@ -323,6 +352,22 @@ public sealed partial class MainWindow : Window
         }
 
         RetryAvatarPreviewButton.IsEnabled = File.Exists(avatarPath) && !_thumbnailPipeline.IsWorkerRunning;
+    }
+
+    private void SyncAvatarFacingControls()
+    {
+        if (AvatarFacingToggleButton is null || AvatarFacingStatusText is null)
+        {
+            return;
+        }
+
+        var path = AvatarPathTextBox.Text.Trim();
+        var hasPath = !string.IsNullOrWhiteSpace(path);
+        var flipEnabled = hasPath && _controller.GetAvatarPreviewFlip180(path);
+        AvatarFacingStatusText.Text = flipEnabled ? "저장: 반전(180)" : "저장: 기본";
+        AvatarFacingToggleButton.Content = flipEnabled
+            ? "앞/뒤 전환 (현재: 반전)"
+            : "앞/뒤 전환 (현재: 기본)";
     }
 
     private static BitmapImage? LoadPreviewBitmap(string path)
@@ -427,6 +472,7 @@ public sealed partial class MainWindow : Window
             EnqueueThumbnailGeneration(loadedPath, force: false);
             RefreshRecentAvatarList();
         }
+        SyncRenderControlsFromState();
         _recoveryHint = string.Empty;
     }
 
@@ -1468,6 +1514,7 @@ public sealed partial class MainWindow : Window
         UnloadButton.IsEnabled = uiState.UnloadEnabled;
         RecentAvatarListBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         RetryAvatarPreviewButton.IsEnabled = !operation.IsBusy && !_isLoadRunning && !_thumbnailPipeline.IsWorkerRunning && File.Exists(AvatarPathTextBox.Text.Trim());
+        AvatarFacingToggleButton.IsEnabled = !operation.IsBusy && !_isLoadRunning && !string.IsNullOrWhiteSpace(AvatarPathTextBox.Text.Trim());
         StartSpoutButton.IsEnabled = uiState.StartSpoutEnabled;
         StopSpoutButton.IsEnabled = uiState.StopSpoutEnabled;
         StartOscButton.IsEnabled = uiState.StartOscEnabled;

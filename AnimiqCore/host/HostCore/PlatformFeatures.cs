@@ -71,7 +71,8 @@ public sealed record RecentAvatarEntry(
     string ThumbnailPath,
     string ThumbnailStatus,
     DateTimeOffset LastUsedUtc,
-    string LastError);
+    string LastError,
+    bool PreviewFlip180 = false);
 
 public sealed record SessionPersistenceModel(
     int Version,
@@ -91,7 +92,7 @@ public sealed record SessionPersistenceModel(
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 10,
+        Version: 11,
         AvatarPath: string.Empty,
         SpoutChannelName: "Animiq",
         OscBindPort: 39539,
@@ -207,7 +208,7 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 10,
+                    Version: 11,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
@@ -251,7 +252,7 @@ public sealed class SessionStateStore
         var showTrackingIpv4Hint = model.Version < 9 ? true : model.UiShowTrackingIpv4Hint;
         return model with
         {
-            Version = Math.Max(10, model.Version),
+            Version = Math.Max(11, model.Version),
             Tracking = NormalizeTracking(model.Tracking, model.Version),
             RecentAvatars = NormalizeRecentAvatars(model.RecentAvatars),
             UiMode = mode,
@@ -371,7 +372,8 @@ public sealed class SessionStateStore
                 value.ThumbnailPath?.Trim() ?? string.Empty,
                 NormalizeThumbnailStatus(value.ThumbnailStatus),
                 value.LastUsedUtc == default ? now : value.LastUsedUtc,
-                value.LastError?.Trim() ?? string.Empty));
+                value.LastError?.Trim() ?? string.Empty,
+                value.PreviewFlip180));
             if (normalized.Count >= 12)
             {
                 break;

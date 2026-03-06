@@ -179,6 +179,50 @@ public sealed partial class HostController
         return _sessionPersistence.RecentAvatars;
     }
 
+    public bool GetAvatarPreviewFlip180(string path)
+    {
+        var normalizedPath = path?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return false;
+        }
+
+        var existing = _sessionPersistence.RecentAvatars.FirstOrDefault(item =>
+            string.Equals(item.AvatarPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
+        return existing?.PreviewFlip180 == true;
+    }
+
+    public bool SetAvatarPreviewFlip180Preference(string path, bool enabled)
+    {
+        var normalizedPath = path?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return false;
+        }
+
+        var current = GetAvatarPreviewFlip180(normalizedPath);
+        if (current == enabled)
+        {
+            return false;
+        }
+
+        var recent = UpsertRecentAvatar(
+            _sessionPersistence.RecentAvatars,
+            normalizedPath,
+            thumbnailStatus: null,
+            thumbnailPath: null,
+            lastError: null,
+            previewFlip180: enabled);
+        _sessionPersistence = _sessionPersistence with
+        {
+            AvatarPath = normalizedPath,
+            RecentAvatars = recent,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+        return true;
+    }
+
     public void RecordAvatarSelection(string path)
     {
         var normalizedPath = path?.Trim() ?? string.Empty;
@@ -192,7 +236,8 @@ public sealed partial class HostController
             normalizedPath,
             thumbnailStatus: null,
             thumbnailPath: null,
-            lastError: null);
+            lastError: null,
+            previewFlip180: null);
         _sessionPersistence = _sessionPersistence with
         {
             AvatarPath = normalizedPath,
@@ -216,7 +261,8 @@ public sealed partial class HostController
             normalizedPath,
             thumbnailStatus: normalizedStatus,
             thumbnailPath: thumbnailPath?.Trim() ?? string.Empty,
-            lastError: lastError?.Trim() ?? string.Empty);
+            lastError: lastError?.Trim() ?? string.Empty,
+            previewFlip180: null);
         _sessionPersistence = _sessionPersistence with
         {
             RecentAvatars = recent,
@@ -230,7 +276,8 @@ public sealed partial class HostController
         string avatarPath,
         string? thumbnailStatus,
         string? thumbnailPath,
-        string? lastError)
+        string? lastError,
+        bool? previewFlip180)
     {
         var existing = current.FirstOrDefault(item =>
             string.Equals(item.AvatarPath, avatarPath, StringComparison.OrdinalIgnoreCase));
@@ -242,7 +289,8 @@ public sealed partial class HostController
             ThumbnailPath: thumbnailPath ?? existing?.ThumbnailPath ?? string.Empty,
             ThumbnailStatus: thumbnailStatus ?? existing?.ThumbnailStatus ?? "none",
             LastUsedUtc: DateTimeOffset.UtcNow,
-            LastError: lastError ?? existing?.LastError ?? string.Empty);
+            LastError: lastError ?? existing?.LastError ?? string.Empty,
+            PreviewFlip180: previewFlip180 ?? existing?.PreviewFlip180 ?? false);
 
         var ordered = new List<RecentAvatarEntry>(MaxRecentAvatarEntries) { entry };
         foreach (var item in current)

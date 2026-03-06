@@ -262,6 +262,10 @@
                                     <TextBlock Text="현재 선택 미리보기" FontWeight="SemiBold"/>
                                     <TextBlock x:Name="AvatarPreviewStatusText" Text="선택된 파일 없음" Margin="0,4,0,8" TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}"/>
                                     <Button x:Name="RetryAvatarPreviewButton" Content="미리보기 재생성" Click="RetryAvatarPreview_Click" MinWidth="120" HorizontalAlignment="Left"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="AvatarFacingToggleButton" Content="앞/뒤 전환 (이 아바타 저장)" Click="AvatarFacingToggle_Click" MinWidth="170"/>
+                                        <TextBlock x:Name="AvatarFacingStatusText" Text="저장: 기본" Margin="8,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
+                                    </WrapPanel>
                                     <TextBlock Text="최근 사용 아바타" FontWeight="SemiBold" Margin="0,10,0,4"/>
                                     <ListBox x:Name="RecentAvatarListBox" Height="100" SelectionChanged="RecentAvatarList_SelectionChanged"/>
                                 </StackPanel>
@@ -918,7 +922,6 @@
         </Grid>
     </Grid>
 </Window>
-
 
 
 

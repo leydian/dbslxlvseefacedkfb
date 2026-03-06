@@ -283,6 +283,7 @@ public sealed partial class HostController
                 // Re-apply host-side render controls after avatar load in case
                 // the native side resets camera/quality state during load.
                 ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
+                _ = ApplyStoredAvatarPreviewFlipIfNeeded(normalizedPath);
                 _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
                 _lastLoadFailureGuidance = string.Empty;
@@ -302,6 +303,26 @@ public sealed partial class HostController
             RefreshState();
             return rc;
         });
+    }
+
+    public NcResultCode ToggleAvatarPreviewFlip180(string path)
+    {
+        var normalizedPath = path?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return NcResultCode.InvalidArgument;
+        }
+
+        var currentEnabled = GetAvatarPreviewFlip180(normalizedPath);
+        _ = SetAvatarPreviewFlip180Preference(normalizedPath, !currentEnabled);
+        if (!SessionState.IsInitialized || !SessionState.ActiveAvatarHandle.HasValue)
+        {
+            return NcResultCode.Ok;
+        }
+
+        var nextYaw = NormalizeSignedDegrees(RenderState.YawDeg + 180.0f);
+        var nextState = RenderState with { YawDeg = nextYaw };
+        return ApplyRenderUiState(nextState);
     }
 
     public NcResultCode UnloadAvatar()
@@ -1519,6 +1540,33 @@ public sealed partial class HostController
     private static float Clamp(float value, float min, float max)
     {
         return Math.Min(max, Math.Max(min, value));
+    }
+
+    private static float NormalizeSignedDegrees(float value)
+    {
+        var normalized = value % 360.0f;
+        if (normalized > 180.0f)
+        {
+            normalized -= 360.0f;
+        }
+        else if (normalized < -180.0f)
+        {
+            normalized += 360.0f;
+        }
+
+        return normalized;
+    }
+
+    private NcResultCode ApplyStoredAvatarPreviewFlipIfNeeded(string avatarPath)
+    {
+        if (!GetAvatarPreviewFlip180(avatarPath))
+        {
+            return NcResultCode.Ok;
+        }
+
+        _renderOptions.YawDeg = NormalizeSignedDegrees(_renderOptions.YawDeg + 180.0f);
+        RenderState = RenderState with { YawDeg = _renderOptions.YawDeg };
+        return ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatarPreviewFlip");
     }
 
     private static void TrimManagedMemory()

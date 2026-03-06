@@ -2,6 +2,64 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Per-avatar preview flip180 persistence + WPF/WinUI front/back toggle
+
+### Summary
+
+Added a per-avatar orientation override so operators can fix back-facing avatars without changing global preview yaw policy.
+
+Primary outcomes:
+
+- per-avatar front/back (`180deg`) toggle is now available in both WPF and WinUI hosts,
+- toggle state persists by absolute avatar path and is re-applied automatically on avatar load,
+- default runtime orientation behavior remains unchanged until operator override is set.
+
+### Changed
+
+- Host persistence schema:
+  - `host/HostCore/PlatformFeatures.cs`
+  - `RecentAvatarEntry` now includes `PreviewFlip180` (`bool`, default `false`)
+  - `SessionPersistenceModel` version raised to `11`
+  - normalize/migration logic updated to carry default-safe field population
+- Host controller persistence + behavior:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - added:
+      - `GetAvatarPreviewFlip180(path)`
+      - `SetAvatarPreviewFlip180Preference(path, enabled)`
+    - recent-avatar upsert path now preserves/updates `PreviewFlip180`
+  - `host/HostCore/HostController.cs`
+    - `LoadAvatar(...)` success path now invokes:
+      - `ApplyStoredAvatarPreviewFlipIfNeeded(path)`
+    - added runtime action:
+      - `ToggleAvatarPreviewFlip180(path)`
+    - added signed-yaw normalization helper:
+      - `NormalizeSignedDegrees(...)`
+- Host UI parity:
+  - `host/WpfHost/MainWindow.xaml(.cs)`
+  - `host/WinUiHost/MainWindow.xaml(.cs)`
+  - avatar panel now includes:
+    - button: `앞/뒤 전환 (이 아바타 저장)`
+    - status text for persisted mode (`기본`/`반전(180)`)
+  - state sync wired to input/recent-selection/load completion and existing busy gating.
+
+### Behavioral Notes
+
+- no nativecore C API changes,
+- no global VRM/MIQ preview-yaw baseline policy changes,
+- stored override applies only to the selected avatar path key.
+
+### Verification
+
+- static wiring checks (`rg`) confirmed API/UI hook-up and cross-host parity.
+- full build validation was blocked in this environment by restore prerequisites:
+  - missing local package mirror path:
+    - `D:\dbslxlvseefacedkfb\NativeVsfClone\build\nuget-mirror`
+  - restricted `nuget.org` access
+  - unresolved packages during restore:
+    - `OpenCvSharp4`
+    - `OpenCvSharp4.runtime.win`
+    - `Microsoft.Windows.SDK.NET.Ref`
+
 ## 2026-03-06 - Unity SDK editor compile hotfix (`Shader.FindPass` -> `Material.GetShaderPassEnabled`)
 
 ### Summary
