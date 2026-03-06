@@ -2,6 +2,95 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking webcam python fallback chain + startup failure diagnostics uplift
+
+### Summary
+
+Improved webcam tracking startup resiliency and operator diagnostics when MediaPipe
+runtime cannot be started reliably in local Windows environments.
+
+This update addresses repeated `Start tracking failed: Io` cases where the root
+cause was hidden behind a generic result code.
+
+### Changed
+
+- HostCore Python launch fallback chain:
+  - `host/HostCore/TrackingInputService.cs`
+  - replaced single `python` default execution path with ordered candidate probing:
+    1. `VSFCLONE_MEDIAPIPE_PYTHON`
+    2. `py -3`
+    3. `.venv\Scripts\python.exe` (app base + current directory)
+    4. `python`
+  - each candidate is pre-validated by process probe (`--version`) before sidecar launch.
+  - failure message now includes attempted candidates and explicit remediation:
+    - set `VSFCLONE_MEDIAPIPE_PYTHON`
+    - run `tools/setup_tracking_python_venv.ps1`
+- Webcam startup error classification hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - during startup warmup, if sidecar exits before first frame:
+    - `LastErrorCode` is now `TRACKING_MEDIAPIPE_START_FAILED`
+    - status includes sidecar exit code and latest stderr line when available
+  - if sidecar stays alive but frames are not ready:
+    - `LastErrorCode` remains `TRACKING_MEDIAPIPE_NO_FRAME`
+- Operator hint and popup detail uplift:
+  - `host/HostCore/TrackingErrorHintCatalog.cs`
+    - `TRACKING_MEDIAPIPE_START_FAILED` hint now includes Python env/venv guidance.
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+    - tracking-start failure dialog now includes:
+      - `NcResultCode`
+      - `TrackingDiagnostics.LastErrorCode`
+      - `TrackingDiagnostics.StatusMessage`
+      - mapped one-line remediation action
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release`: FAIL in current environment (`NU1301`, `api.nuget.org:443` access blocked)
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: FAIL in current environment (`NU1301`, `api.nuget.org:443` access blocked)
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL in current environment (`NU1301`, `api.nuget.org:443` access blocked)
+
+## 2026-03-06 - VSFAvatar preview/output policy split + render gate metric separation
+
+### Summary
+
+Stabilized `.vsfavatar` runtime behavior by splitting placeholder rendering policy between preview and output paths, while expanding gate diagnostics so PASS signals no longer hide output-readiness gaps.
+
+### Changed
+
+- Placeholder warning-code contract:
+  - `src/avatar/vsfavatar_loader.cpp`
+  - emits `VSF_PLACEHOLDER_RENDER_PAYLOAD` when sidecar placeholder payload is applied.
+- Runtime render-resource policy:
+  - `src/nativecore/native_core.cpp`
+  - placeholder-only VSFAvatar payload is blocked for output path by default.
+  - added explicit context in error detail:
+    - `parser_mode`, `parser_stage`, `primary_error`, `mesh_extract_stage`.
+  - no-mesh payload failure detail also includes parser mode/stage context.
+- Preview worker allowlist:
+  - `host/HostCore/AvatarThumbnailWorker.cs`
+  - thumbnail worker enables `VSF_ALLOW_VSF_PLACEHOLDER_RENDER=1` only during worker process execution and restores previous state.
+- Gate/report contract extension:
+  - `tools/vsfavatar_sample_report.ps1`
+    - added `SidecarRenderPayloadMode`.
+  - `tools/vsfavatar_render_gate.ps1`
+    - added split metrics:
+      - `preview_pass_rows`
+      - `output_pass_rows`
+      - `placeholder_dependent_rows`
+      - `output_readiness`
+      - `placeholder_dependency`
+      - `target_render_payload_mode`
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_vsfavatar_preview_output_policy_and_render_gate_split.md`.
+  - updated weekly report index/summary references.
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: FAIL in current environment (`NU1301` / `api.nuget.org:443` blocked)
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet`: PASS
+  - `Overall: PASS`, `output_readiness: FAIL`, `placeholder_dependency: YES`
+
 ## 2026-03-06 - 10-persona action plan artifacts + onboarding KPI release gate policy
 
 ### Summary

@@ -25,9 +25,12 @@ public static class AvatarThumbnailWorker
 
         var width = ParsePositiveInt(args, "--width", 256);
         var height = ParsePositiveInt(args, "--height", 256);
+        var previousPlaceholderPolicy = Environment.GetEnvironmentVariable("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
 
         try
         {
+            // Thumbnail worker is preview-only; allow placeholder payload render here.
+            Environment.SetEnvironmentVariable("VSF_ALLOW_VSF_PLACEHOLDER_RENDER", "1");
             var outputDir = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrWhiteSpace(outputDir))
             {
@@ -90,6 +93,7 @@ public static class AvatarThumbnailWorker
         }
         finally
         {
+            Environment.SetEnvironmentVariable("VSF_ALLOW_VSF_PLACEHOLDER_RENDER", previousPlaceholderPolicy);
             if (handle != 0)
             {
                 _ = NativeCoreInterop.nc_destroy_render_resources(handle);

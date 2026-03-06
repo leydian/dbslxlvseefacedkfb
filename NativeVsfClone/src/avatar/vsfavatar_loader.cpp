@@ -548,6 +548,7 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             pkg.material_payloads.push_back(mat);
         }
         pkg.warnings.push_back("W_RENDER_PAYLOAD: placeholder quad payload applied from sidecar contract.");
+        pkg.warning_codes.push_back("VSF_PLACEHOLDER_RENDER_PAYLOAD");
     }
 
     pkg.warnings.push_back("W_MODE: parser mode=sidecar");

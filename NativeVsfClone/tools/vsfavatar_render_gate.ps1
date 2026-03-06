@@ -51,6 +51,7 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
             PrimaryError = ""
             MeshPayloads = 0
             SidecarMeshExtractStage = ""
+            SidecarRenderPayloadMode = ""
             SidecarTimingMs = ""
         }
         continue
@@ -72,6 +73,10 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
     }
     if ($line -match '^\s+SidecarMeshExtractStage:\s*(.*)$') {
         $currentSample.SidecarMeshExtractStage = $matches[1].Trim()
+        continue
+    }
+    if ($line -match '^\s+SidecarRenderPayloadMode:\s*(.*)$') {
+        $currentSample.SidecarRenderPayloadMode = $matches[1].Trim()
         continue
     }
     if ($line -match '^\s+SidecarTimingMs:\s*(.*)$') {
@@ -97,6 +102,26 @@ $targetSamplePresent = $null -ne $targetRow
 $targetHasContractFields = $targetSamplePresent -and
     (-not [string]::IsNullOrWhiteSpace("$($targetRow.SidecarMeshExtractStage)")) -and
     (-not [string]::IsNullOrWhiteSpace("$($targetRow.SidecarTimingMs)"))
+$previewPassRows = @(
+    $sampleRows | Where-Object {
+        $_.ParserStage -eq "complete" -and (
+            $_.MeshPayloads -gt 0 -or
+            $_.SidecarRenderPayloadMode -eq "placeholder_quad_v1"
+        )
+    }
+)
+$outputPassRows = @(
+    $sampleRows | Where-Object {
+        $_.ParserStage -eq "complete" -and $_.MeshPayloads -gt 0 -and $_.SidecarRenderPayloadMode -ne "placeholder_quad_v1"
+    }
+)
+$placeholderDependentRows = @(
+    $sampleRows | Where-Object {
+        $_.ParserStage -eq "complete" -and $_.MeshPayloads -gt 0 -and $_.SidecarRenderPayloadMode -eq "placeholder_quad_v1"
+    }
+)
+$outputReadiness = if ($outputPassRows.Count -gt 0) { "PASS" } else { "FAIL" }
+$placeholderDependencyStatus = if ($placeholderDependentRows.Count -gt 0) { "YES" } else { "NO" }
 $overall = $atLeastOneRenderable -and $noEmptyPrimaryOnComplete -and $targetSamplePresent -and $targetHasContractFields
 
 $summary = @()
@@ -116,6 +141,11 @@ $summary += ""
 $summary += "Metrics"
 $summary += "- complete_stage_rows: $completeStageCount"
 $summary += "- renderable_mesh_payload_rows: $($renderableMatches.Count)"
+$summary += "- preview_pass_rows: $($previewPassRows.Count)"
+$summary += "- output_pass_rows: $($outputPassRows.Count)"
+$summary += "- placeholder_dependent_rows: $($placeholderDependentRows.Count)"
+$summary += "- output_readiness: $outputReadiness"
+$summary += "- placeholder_dependency: $placeholderDependencyStatus"
 $summary += "- empty_primary_rows: $emptyPrimaryCount"
 $summary += "- parsed_sample_rows: $($sampleRows.Count)"
 if ($targetSamplePresent) {
@@ -123,12 +153,14 @@ if ($targetSamplePresent) {
     $summary += "- target_primary_error: $($targetRow.PrimaryError)"
     $summary += "- target_mesh_payloads: $($targetRow.MeshPayloads)"
     $summary += "- target_mesh_extract_stage: $($targetRow.SidecarMeshExtractStage)"
+    $summary += "- target_render_payload_mode: $($targetRow.SidecarRenderPayloadMode)"
     $summary += "- target_timing_ms: $($targetRow.SidecarTimingMs)"
 } else {
     $summary += "- target_stage: n/a"
     $summary += "- target_primary_error: n/a"
     $summary += "- target_mesh_payloads: n/a"
     $summary += "- target_mesh_extract_stage: n/a"
+    $summary += "- target_render_payload_mode: n/a"
     $summary += "- target_timing_ms: n/a"
 }
 

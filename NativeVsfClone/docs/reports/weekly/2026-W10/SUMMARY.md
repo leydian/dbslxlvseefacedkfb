@@ -7,7 +7,7 @@
 - `xav2`: 28 reports
 - `host`: 13 reports
 - `ui`: 9 reports
-- `vsfavatar`: 8 reports
+- `vsfavatar`: 9 reports
 - `r01`: 4 reports
 - `vxavatar`: 4 reports
 - `wpf`: 16 reports
@@ -18,7 +18,7 @@
 - `avatar`: 2 reports
 - `platform`: 3 reports
 - `session`: 2 reports
-- `tracking`: 6 reports
+- `tracking`: 7 reports
 - `webcam`: 3 reports
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
@@ -82,6 +82,7 @@
 - Newly added: review `2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md` for WPF/WinUI parse/drop threshold UX completion, native submit error surfacing hardening, and WinUI repro failure hint expansion.
 - Newly added: review `2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md` for HybridAuto default routing, no-input watchdog diagnostics, and per-source packet-age/hint surfacing in WPF/WinUI.
 - Newly added: review `2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md` for webcam sidecar output/publish packaging guarantees, deterministic sidecar path resolution policy, and config-invalid operator hint hardening.
+- Newly added: review `2026-03-06_tracking_webcam_python_fallback_and_start_failure_diagnostics.md` for Python fallback-chain startup policy, sidecar warmup failure-class split (`START_FAILED` vs `NO_FRAME`), and WPF/WinUI tracking-start remediation UX.
 - Newly added: review `2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md` for local IPv4 operator guidance in tracking UI, persistent hide/show preference, and WPF/WinUI parity behavior.
 - Newly added: review `2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md` for strict tracking-contract gating (HostE2E/Fuzz/MediaPipe sanity), explicit MediaPipe Python pinning policy, and release dashboard candidate decision alignment.
 - Newly added: review `2026-03-06_tracking_strict_runtime_venv_runbook.md` for project-local venv pinning standard, strict readiness wrapper execution flow, and failure-code triage runbook.
@@ -89,6 +90,7 @@
 - Newly added: review `2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md` for upper-body auto-pose runtime merge (`manual + auto`), webcam-side shoulder/upper-arm extraction contract, tracking diagnostics extension, and WPF/WinUI operator toggle/status surfacing.
 - Newly added: review `2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md` for iFacial parse-failure cause diagnostics (`VMC` mismatch / unsupported OSC type tags), parser type-tag compatibility widening (`d/h/T/F/N/I`), and actionable in-app remediation hints.
 - Newly added: review `2026-03-06_tracking_stability_hysteresis_and_auto_tuning.md` for HybridAuto source-switch hysteresis/cooldown/hold-time policy, runtime deadband auto-stability tuning, upper-body low-confidence/stale decay smoothing, and operator-facing switch telemetry/hint expansion.
+- Newly added: review `2026-03-06_vsfavatar_preview_output_policy_and_render_gate_split.md` for VSFAvatar placeholder preview/output split policy, `VSF_ALLOW_VSF_PLACEHOLDER_RENDER` scope, and render-gate split metrics (`output_readiness`, `placeholder_dependency`).
 - Newly added: review `2026-03-06_host_perf_hotpath_and_metrics_contract_update.md` for frame-loop allocation reduction, metrics provenance/memory-sample contract expansion, and dist publish hygiene updates.
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.
 - Newly added: review `2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md` for GateK/GateL policy, VRM unresolved warning-code normalization, and stage-1 MToon parity baseline telemetry.

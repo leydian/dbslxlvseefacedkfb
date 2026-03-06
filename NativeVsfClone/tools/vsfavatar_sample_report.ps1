@@ -101,6 +101,7 @@ foreach ($f in $files) {
         "  SidecarSerializedBestScore: $($sidecar.serialized_best_candidate_score)" | Add-Content -Path $OutputPath
         "  SidecarRecoveryAttemptProfile: $($sidecar.recovery_attempt_profile)" | Add-Content -Path $OutputPath
         "  SidecarMeshExtractStage: $($sidecar.mesh_extract_stage)" | Add-Content -Path $OutputPath
+        "  SidecarRenderPayloadMode: $($sidecar.render_payload_mode)" | Add-Content -Path $OutputPath
         "  SidecarTimingMs: $($sidecar.timing_ms)" | Add-Content -Path $OutputPath
         "  SidecarFailedReadOffset: $($sidecar.failed_block_read_offset)" | Add-Content -Path $OutputPath
         "  SidecarFailedCompressedSize: $($sidecar.failed_block_compressed_size)" | Add-Content -Path $OutputPath
@@ -115,6 +116,7 @@ foreach ($f in $files) {
             CSize = [uint64]($sidecar.failed_block_compressed_size)
             USize = [uint64]($sidecar.failed_block_uncompressed_size)
             MeshExtractStage = "$($sidecar.mesh_extract_stage)"
+            RenderPayloadMode = "$($sidecar.render_payload_mode)"
             TimingMs = [uint64]($sidecar.timing_ms)
         }
     } catch {
@@ -129,6 +131,7 @@ foreach ($f in $files) {
             CSize = 0
             USize = 0
             MeshExtractStage = ""
+            RenderPayloadMode = ""
             TimingMs = 0
         }
     }
