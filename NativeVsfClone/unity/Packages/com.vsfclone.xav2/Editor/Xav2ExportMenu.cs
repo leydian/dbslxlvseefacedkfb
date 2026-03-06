@@ -9,13 +9,13 @@ namespace VsfClone.Xav2.Editor
         [MenuItem("Tools/VsfClone/XAV2/Export Selected AvatarRoot", priority = 10)]
         public static void ExportSelectedAvatarRoot()
         {
-            ExportSelectedAvatarRootInternal(relaxed: false);
+            ExportSelectedAvatarRootInternal(relaxed: true);
         }
 
-        [MenuItem("Tools/VsfClone/XAV2/Export Selected AvatarRoot (Relaxed)", priority = 11)]
-        public static void ExportSelectedAvatarRootRelaxed()
+        [MenuItem("Tools/VsfClone/XAV2/Export Selected AvatarRoot (Strict)", priority = 11)]
+        public static void ExportSelectedAvatarRootStrict()
         {
-            ExportSelectedAvatarRootInternal(relaxed: true);
+            ExportSelectedAvatarRootInternal(relaxed: false);
         }
 
         [MenuItem("Tools/VsfClone/XAV2/Export Selected AvatarRoot", validate = true)]
@@ -24,8 +24,8 @@ namespace VsfClone.Xav2.Editor
             return Selection.activeGameObject != null;
         }
 
-        [MenuItem("Tools/VsfClone/XAV2/Export Selected AvatarRoot (Relaxed)", validate = true)]
-        public static bool ValidateExportSelectedAvatarRootRelaxed()
+        [MenuItem("Tools/VsfClone/XAV2/Export Selected AvatarRoot (Strict)", validate = true)]
+        public static bool ValidateExportSelectedAvatarRootStrict()
         {
             return Selection.activeGameObject != null;
         }

@@ -287,7 +287,7 @@ namespace VsfClone.Xav2.Runtime.Tests
         }
 
         [Test]
-        public void TryLoad_TypedMaterialUnsupportedShaderFamily_Fails()
+        public void TryLoad_TypedMaterialUnsupportedShaderFamily_DefaultPolicy_WarnsAndFallsBack()
         {
             var path = WriteTempFile(
                 BuildValidXav2Bytes(
@@ -295,7 +295,36 @@ namespace VsfClone.Xav2.Runtime.Tests
                     typedShaderFamilyOverride: "unsupported-family"));
             try
             {
-                var ok = Xav2RuntimeLoader.TryLoad(path, out _, out var diagnostics);
+                var ok = Xav2RuntimeLoader.TryLoad(path, out var payload, out var diagnostics);
+                Assert.That(ok, Is.True);
+                Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.None));
+                Assert.That(payload.Materials[0].ShaderFamily, Is.EqualTo("standard"));
+                Assert.That(diagnostics.WarningCodes, Does.Contain("XAV2_SHADER_FAMILY_FALLBACK"));
+                Assert.That(diagnostics.CriticalParityViolation, Is.False);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void TryLoad_TypedMaterialUnsupportedShaderFamily_FailPolicy_Fails()
+        {
+            var path = WriteTempFile(
+                BuildValidXav2Bytes(
+                    addTypedMaterialSection: true,
+                    typedShaderFamilyOverride: "unsupported-family"));
+            try
+            {
+                var ok = Xav2RuntimeLoader.TryLoad(
+                    path,
+                    out _,
+                    out var diagnostics,
+                    new Xav2LoadOptions
+                    {
+                        ShaderPolicy = Xav2ShaderPolicy.Fail
+                    });
                 Assert.That(ok, Is.False);
                 Assert.That(diagnostics.ErrorCode, Is.EqualTo(Xav2LoadErrorCode.ParityContractViolation));
                 Assert.That(diagnostics.CriticalParityViolation, Is.True);

@@ -23,6 +23,9 @@ namespace VsfClone.Xav2.Runtime
         private const ushort SectionFlagPayloadCompressedLz4 = 0x0001;
         private const ushort SectionFlagKnownMask = SectionFlagPayloadCompressedLz4;
 
+        /// <summary>
+        /// Loads an XAV2 avatar payload from disk and throws on failure.
+        /// </summary>
         public static Xav2AvatarPayload Load(string path)
         {
             if (TryLoad(path, out var payload, out var diagnostics))
@@ -32,11 +35,17 @@ namespace VsfClone.Xav2.Runtime
             throw BuildLoadException(path, diagnostics);
         }
 
+        /// <summary>
+        /// Loads an XAV2 avatar payload from disk without throwing.
+        /// </summary>
         public static bool TryLoad(string path, out Xav2AvatarPayload payload, out Xav2LoadDiagnostics diagnostics)
         {
             return TryLoad(path, out payload, out diagnostics, new Xav2LoadOptions());
         }
 
+        /// <summary>
+        /// Loads an XAV2 avatar payload from disk using explicit loader options.
+        /// </summary>
         public static bool TryLoad(
             string path,
             out Xav2AvatarPayload payload,
@@ -212,7 +221,7 @@ namespace VsfClone.Xav2.Runtime
                 payload.Materials.Add(mat);
             }
 
-            if (!CanonicalizeMaterialPayloads(payload, diagnostics))
+            if (!CanonicalizeMaterialPayloads(payload, diagnostics, options))
             {
                 return false;
             }
@@ -1122,7 +1131,10 @@ namespace VsfClone.Xav2.Runtime
             }
         }
 
-        private static bool CanonicalizeMaterialPayloads(Xav2AvatarPayload payload, Xav2LoadDiagnostics diagnostics)
+        private static bool CanonicalizeMaterialPayloads(
+            Xav2AvatarPayload payload,
+            Xav2LoadDiagnostics diagnostics,
+            Xav2LoadOptions options)
         {
             if (payload == null)
             {
@@ -1139,11 +1151,25 @@ namespace VsfClone.Xav2.Runtime
 
                 if (!IsParityShaderFamily(material.ShaderFamily))
                 {
-                    diagnostics.CriticalParityViolation = true;
-                    return Fail(
-                        diagnostics,
-                        Xav2LoadErrorCode.ParityContractViolation,
-                        $"Parity contract violation: unsupported shader family '{material.ShaderFamily}' for material '{material.Name}'.");
+                    var policy = options?.ShaderPolicy ?? Xav2ShaderPolicy.WarnFallback;
+                    if (policy == Xav2ShaderPolicy.Fail)
+                    {
+                        diagnostics.CriticalParityViolation = true;
+                        return Fail(
+                            diagnostics,
+                            Xav2LoadErrorCode.ParityContractViolation,
+                            $"Parity contract violation: unsupported shader family '{material.ShaderFamily}' for material '{material.Name}'.");
+                    }
+
+                    var fromFamily = material.ShaderFamily;
+                    material.ShaderFamily = "standard";
+                    if (!AddWarningOrFail(
+                            diagnostics,
+                            options,
+                            $"XAV2_SHADER_FAMILY_FALLBACK: material={material.Name}, from={fromFamily}, to={material.ShaderFamily}"))
+                    {
+                        return false;
+                    }
                 }
 
                 var hasTyped = HasTypedMaterialPayload(material);

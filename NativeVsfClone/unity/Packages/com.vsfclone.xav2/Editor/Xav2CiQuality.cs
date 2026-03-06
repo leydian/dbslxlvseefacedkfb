@@ -190,7 +190,14 @@ namespace VsfClone.Xav2.Editor
                         name = Path.GetFileName(samplePath)
                     };
 
-                    var ok = Xav2RuntimeLoader.TryLoad(samplePath, out var payloadResult, out var diagnostics);
+                    var ok = Xav2RuntimeLoader.TryLoad(
+                        samplePath,
+                        out var payloadResult,
+                        out var diagnostics,
+                        new Xav2LoadOptions
+                        {
+                            ShaderPolicy = Xav2ShaderPolicy.Fail
+                        });
                     entry.ok = ok;
                     entry.error_code = diagnostics.ErrorCode.ToString();
                     entry.parser_stage = diagnostics.ParserStage ?? string.Empty;

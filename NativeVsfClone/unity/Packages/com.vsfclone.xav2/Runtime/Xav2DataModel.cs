@@ -28,24 +28,48 @@ namespace VsfClone.Xav2.Runtime
         Fail
     }
 
-    public sealed class Xav2LoadOptions
+    public enum Xav2ShaderPolicy
     {
-        public bool StrictValidation;
-        public Xav2UnknownSectionPolicy UnknownSectionPolicy = Xav2UnknownSectionPolicy.Warn;
+        WarnFallback = 0,
+        Fail
     }
 
+    /// <summary>
+    /// Loader policy options for <see cref="Xav2RuntimeLoader.TryLoad(string,out Xav2AvatarPayload,out Xav2LoadDiagnostics,Xav2LoadOptions)"/>.
+    /// </summary>
+    public sealed class Xav2LoadOptions
+    {
+        /// <summary>
+        /// Enables strict payload validation. Default is <c>false</c>.
+        /// </summary>
+        public bool StrictValidation { get; set; }
+
+        /// <summary>
+        /// Unknown section handling policy. Default is <see cref="Xav2UnknownSectionPolicy.Warn"/>.
+        /// </summary>
+        public Xav2UnknownSectionPolicy UnknownSectionPolicy { get; set; } = Xav2UnknownSectionPolicy.Warn;
+
+        /// <summary>
+        /// Shader compatibility policy. Default is <see cref="Xav2ShaderPolicy.WarnFallback"/>.
+        /// </summary>
+        public Xav2ShaderPolicy ShaderPolicy { get; set; } = Xav2ShaderPolicy.WarnFallback;
+    }
+
+    /// <summary>
+    /// Structured diagnostics returned by runtime load APIs.
+    /// </summary>
     public sealed class Xav2LoadDiagnostics
     {
-        public Xav2LoadErrorCode ErrorCode = Xav2LoadErrorCode.None;
-        public string ErrorMessage = string.Empty;
-        public string ParserStage = "header";
-        public bool IsPartial;
-        public bool MigrationApplied;
-        public int SourceFormatVersion;
-        public string SourceMaterialParamEncoding = "legacy-json";
-        public bool CriticalParityViolation;
-        public List<string> Warnings = new List<string>();
-        public List<string> WarningCodes = new List<string>();
+        public Xav2LoadErrorCode ErrorCode { get; set; } = Xav2LoadErrorCode.None;
+        public string ErrorMessage { get; set; } = string.Empty;
+        public string ParserStage { get; set; } = "header";
+        public bool IsPartial { get; set; }
+        public bool MigrationApplied { get; set; }
+        public int SourceFormatVersion { get; set; }
+        public string SourceMaterialParamEncoding { get; set; } = "legacy-json";
+        public bool CriticalParityViolation { get; set; }
+        public List<string> Warnings { get; } = new List<string>();
+        public List<string> WarningCodes { get; } = new List<string>();
     }
 
     [Serializable]
