@@ -2,6 +2,45 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 public SDK packaging baseline (v1.0.0)
+
+### Summary
+
+Established a public-facing SDK baseline for `com.vsfclone.xav2` with package metadata hardening, legal/attribution files, public compatibility docs, and bundled UPM samples.
+
+### Changed
+
+- Unity package metadata (`unity/Packages/com.vsfclone.xav2/package.json`):
+  - version bumped to `1.0.0`
+  - added `documentationUrl`, `changelogUrl`, `licensesUrl`, repository metadata
+  - added two UPM samples:
+    - `Runtime Load Sample`
+    - `Export/Import Roundtrip Sample`
+- Package docs/legal:
+  - updated `unity/Packages/com.vsfclone.xav2/README.md` to 5-minute onboarding + diagnostics-first usage
+  - added:
+    - `unity/Packages/com.vsfclone.xav2/LICENSE`
+    - `unity/Packages/com.vsfclone.xav2/NOTICE`
+    - `unity/Packages/com.vsfclone.xav2/ThirdPartyNotices.md`
+- Public contract docs:
+  - `docs/public/compatibility.md`
+  - `docs/public/migration.md`
+  - `docs/public/error-codes.md`
+- Sample code:
+  - `unity/Packages/com.vsfclone.xav2/Samples~/RuntimeLoadSample/RuntimeLoadSample.cs`
+  - `unity/Packages/com.vsfclone.xav2/Samples~/ExportImportRoundtripSample/Editor/Xav2RoundtripSampleMenu.cs`
+- Runtime API contract polish:
+  - `Runtime/Xav2DataModel.cs`
+    - `Xav2LoadOptions` and `Xav2LoadDiagnostics` migrated to property-based contract defaults
+  - `Runtime/Xav2RuntimeLoader.cs`
+    - added XML docs for `Load/TryLoad` public entrypoints
+- Release gate:
+  - added `tools/xav2_package_release_gate.ps1` to enforce package metadata/docs/legal/sample presence
+
+### Verification
+
+- `powershell -ExecutionPolicy Bypass -File .\tools\xav2_package_release_gate.ps1`: PASS
+
 ## 2026-03-06 - Tracking upper-body webcam AutoPose v1 + WPF/WinUI operator wiring
 
 ### Summary
