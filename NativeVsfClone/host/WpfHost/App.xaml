@@ -69,6 +69,14 @@
         <SolidColorBrush x:Key="Color.DebugOverlayText" Color="#1A2530"/>
         <SolidColorBrush x:Key="Color.StepComplete" Color="#227842"/>
         <SolidColorBrush x:Key="Color.StepPending" Color="#35516B"/>
+        <SolidColorBrush x:Key="Color.PanelBase" Color="#F3F7FD"/>
+        <SolidColorBrush x:Key="Color.PanelElevated" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="Color.PanelInset" Color="#EDF3FA"/>
+        <SolidColorBrush x:Key="Color.FocusRing" Color="#4698E5"/>
+        <SolidColorBrush x:Key="Color.DisabledBg" Color="#E5ECF5"/>
+        <SolidColorBrush x:Key="Color.DisabledText" Color="#8A9AAF"/>
+        <SolidColorBrush x:Key="Color.LogAreaBg" Color="#F4F7FC"/>
+        <SolidColorBrush x:Key="Color.LogAreaBorder" Color="#C7D4E5"/>
 
         <Thickness x:Key="Spacing.ControlPadding">10,6</Thickness>
         <Thickness x:Key="Spacing.InputPadding">8,5</Thickness>
@@ -110,8 +118,14 @@
                     <Setter Property="Background" Value="{StaticResource Color.PrimaryPressed}"/>
                     <Setter Property="BorderBrush" Value="{StaticResource Color.PrimaryPressed}"/>
                 </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.FocusRing}"/>
+                    <Setter Property="BorderThickness" Value="2"/>
+                </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Opacity" Value="0.52"/>
+                    <Setter Property="Background" Value="{StaticResource Color.DisabledBg}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.Border}"/>
+                    <Setter Property="Foreground" Value="{StaticResource Color.DisabledText}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -147,12 +161,40 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="GhostButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Color.PanelInset}"/>
+            <Setter Property="Foreground" Value="{StaticResource Color.Text}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Color.Border}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Color.PanelBase}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.BorderStrong}"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Color.PanelElevated}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <Style TargetType="TextBox">
             <Setter Property="Padding" Value="{StaticResource Spacing.InputPadding}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Color.Border}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Background" Value="{StaticResource Color.CardStrong}"/>
             <Setter Property="Foreground" Value="{StaticResource Color.Text}"/>
+            <Style.Triggers>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderBrush" Value="{StaticResource Color.FocusRing}"/>
+                    <Setter Property="BorderThickness" Value="2"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="LogReadOnlyTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Background" Value="{StaticResource Color.LogAreaBg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Color.LogAreaBorder}"/>
+            <Setter Property="Foreground" Value="{StaticResource Color.Text}"/>
+            <Setter Property="Padding" Value="8,6"/>
         </Style>
 
         <Style TargetType="ComboBox">
@@ -174,12 +216,72 @@
             <Setter Property="Background" Value="{StaticResource Color.TabBg}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Color.BorderStrong}"/>
             <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid ClipToBounds="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8,8,0,0"
+                                    Padding="2,2,2,0">
+                                <TabPanel IsItemsHost="True" Background="Transparent"/>
+                            </Border>
+                            <Border Grid.Row="1"
+                                    Background="{DynamicResource Color.PanelElevated}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="0,0,8,8"
+                                    Padding="8">
+                                <ContentPresenter ContentSource="SelectedContent"/>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style TargetType="TabItem">
             <Setter Property="Background" Value="{StaticResource Color.TabBg}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Color.Border}"/>
+            <Setter Property="Foreground" Value="{StaticResource Color.TextMuted}"/>
             <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Margin="0,0,4,0"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6,6,0,0"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource Color.BorderStrong}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource Color.TabActive}"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{DynamicResource Color.BorderStrong}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Color.Text}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource Color.DisabledText}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="{StaticResource Color.TabActive}"/>

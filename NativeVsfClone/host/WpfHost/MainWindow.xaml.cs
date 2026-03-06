@@ -76,6 +76,8 @@ public partial class MainWindow : Window
     private bool _diagnosticsPinnedVisible;
     private bool _isDarkTheme;
     private HostOnboardingStep? _lastTrackedOnboardingStep;
+    private bool _showTrackingIpv4Hint = true;
+    private string _recommendedTrackingIpv4 = string.Empty;
 
     private static string ToPersistSectionKey(UiSection section) => section switch
     {
@@ -1061,6 +1063,42 @@ public partial class MainWindow : Window
         {
             TrackingWebcamDeviceComboBox.SelectedItem = selected;
         }
+    }
+
+    private void RefreshTrackingIpv4Hint()
+    {
+        var (recommendedIpv4, allIpv4) = _controller.GetLocalIpv4Hint();
+        _recommendedTrackingIpv4 = recommendedIpv4;
+        TrackingIpv4RecommendedText.Text = string.IsNullOrWhiteSpace(recommendedIpv4)
+            ? "감지 실패 (직접 입력 필요)"
+            : recommendedIpv4;
+        TrackingIpv4AllText.Text = string.IsNullOrWhiteSpace(allIpv4)
+            ? "-"
+            : allIpv4;
+        TrackingIpv4CopyButton.IsEnabled = !string.IsNullOrWhiteSpace(_recommendedTrackingIpv4);
+    }
+
+    private void ApplyTrackingIpv4HintVisibility()
+    {
+        TrackingIpv4HintPanel.Visibility = _showTrackingIpv4Hint ? Visibility.Visible : Visibility.Collapsed;
+        TrackingIpv4ToggleButton.Content = _showTrackingIpv4Hint ? "IPv4 안내 숨기기" : "IPv4 안내 보기";
+    }
+
+    private void ToggleTrackingIpv4Hint_Click(object sender, RoutedEventArgs e)
+    {
+        _showTrackingIpv4Hint = !_showTrackingIpv4Hint;
+        ApplyTrackingIpv4HintVisibility();
+        _controller.SetUiTrackingIpv4HintVisible(_showTrackingIpv4Hint);
+    }
+
+    private void CopyTrackingIpv4_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_recommendedTrackingIpv4))
+        {
+            return;
+        }
+
+        Clipboard.SetText(_recommendedTrackingIpv4);
     }
 
     private void SetTrackingWebcamDevicesPending(string? preferredKey = null)
@@ -2649,6 +2687,9 @@ public partial class MainWindow : Window
         TrackingPoseDeadbandSlider.Value = session.Tracking.PoseDeadbandDeg;
         TrackingPoseDeadbandValueText.Text = $"{session.Tracking.PoseDeadbandDeg:F2}\u00b0";
         TrackingUpperBodyEnabledCheckBox.IsChecked = session.Tracking.UpperBodyEnabled;
+        _showTrackingIpv4Hint = session.UiShowTrackingIpv4Hint;
+        RefreshTrackingIpv4Hint();
+        ApplyTrackingIpv4HintVisibility();
         SetTrackingWebcamDevicesPending(session.Tracking.CameraDeviceKey);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
@@ -2673,27 +2714,7 @@ public partial class MainWindow : Window
 
     private static string BuildTrackingErrorHint(string lastErrorCode)
     {
-        if (string.IsNullOrWhiteSpace(lastErrorCode))
-        {
-            return string.Empty;
-        }
-
-        return lastErrorCode switch
-        {
-            "TRACKING_PARSE_THRESHOLD_EXCEEDED" => " hint=parse errors exceeded threshold",
-            "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
-            "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
-            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
-            "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
-            "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
-            "TRACKING_NO_ACTIVE_INPUT_SOURCE" => " hint=no active input source; start iFacial send or enable webcam runtime",
-            "TRACKING_IFACIAL_NO_PACKET" => " hint=no iFacial packet received",
-            "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE" => " hint=webcam runtime unavailable (python/mediapipe not ready)",
-            "TRACKING_WEBCAM_NO_FRAME" => " hint=webcam runtime started but no frame",
-            _ when lastErrorCode.StartsWith("NC_SET_TRACKING_FRAME_", StringComparison.Ordinal) => " hint=native tracking submit failed",
-            _ when lastErrorCode.StartsWith("NC_SET_EXPRESSION_WEIGHTS_", StringComparison.Ordinal) => " hint=native expression submit failed",
-            _ => string.Empty,
-        };
+        return TrackingErrorHintCatalog.BuildHint(lastErrorCode);
     }
 
     private void RefreshGuides()
@@ -2771,6 +2792,7 @@ public partial class MainWindow : Window
         {
             var selectedKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key;
             RefreshTrackingWebcamDevices(selectedKey);
+            RefreshTrackingIpv4Hint();
         }
 
         ApplySectionVisibility();
@@ -2804,134 +2826,157 @@ public partial class MainWindow : Window
             }
         }
 
-        if (_isDarkTheme)
+        var darkPalette = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            SetBrush("Color.Surface", "#0F1722");
-            SetBrush("Color.SurfaceAlt", "#132131");
-            SetBrush("Color.Card", "#17273A");
-            SetBrush("Color.CardStrong", "#1B2E44");
-            SetBrush("Color.Border", "#2D445E");
-            SetBrush("Color.BorderStrong", "#3A5675");
-            SetBrush("Color.Text", "#EAF2FC");
-            SetBrush("Color.TextMuted", "#B2C2D6");
-            SetBrush("Color.TextSubtle", "#8EA3BC");
-            SetBrush("Color.Primary", "#4A93D4");
-            SetBrush("Color.PrimaryHover", "#5AA1E0");
-            SetBrush("Color.PrimaryPressed", "#3E83C2");
-            SetBrush("Color.TabBg", "#142235");
-            SetBrush("Color.TabActive", "#1E324A");
-            SetBrush("Color.NavRailBg", "#122031");
-            SetBrush("Color.NavItemBg", "#16283C");
-            SetBrush("Color.NavItemActiveBg", "#20374F");
-            SetBrush("Color.NavItemText", "#B8CAE0");
-            SetBrush("Color.NavItemActiveText", "#F1F7FF");
-            SetBrush("Color.OnboardingBarBg", "#152B41");
-            SetBrush("Color.OnboardingBarBorder", "#35526F");
-            SetBrush("Color.OnboardingBarTitle", "#E8F2FF");
-            SetBrush("Color.OnboardingBarBody", "#BDD3EA");
-            SetBrush("Color.BadgeNeutralBg", "#1D3248");
-            SetBrush("Color.BadgeNeutralText", "#BED3E8");
-            SetBrush("Color.RenderShellBg", "#0A121D");
-            SetBrush("Color.RenderShellBorder", "#3E5B7A");
-            SetBrush("Color.StatusBarBg", "#0E1A28");
-            SetBrush("Color.StatusBarBorder", "#35506C");
-            SetBrush("Color.StatusBarLabel", "#AFC2D8");
-            SetBrush("Color.StatusBarValue", "#F2F8FF");
-            SetBrush("Color.PanelInfoBg", "#1A2C40");
-            SetBrush("Color.PanelInfoBorder", "#32506D");
-            SetBrush("Color.PanelInfoText", "#C2D8EE");
-            SetBrush("Color.PanelInfoAltBg", "#1A2A3C");
-            SetBrush("Color.PanelInfoAltBorder", "#334E6A");
-            SetBrush("Color.PanelInfoAltText", "#D3E3F4");
-            SetBrush("Color.PanelSuccessBg", "#163224");
-            SetBrush("Color.PanelSuccessBorder", "#2F6A4B");
-            SetBrush("Color.PanelSuccessTitle", "#B9EBCF");
-            SetBrush("Color.PanelSuccessText", "#A3DDBE");
-            SetBrush("Color.PanelWarningBg", "#3A2A16");
-            SetBrush("Color.PanelWarningBorder", "#7A5730");
-            SetBrush("Color.PanelWarningText", "#F2D2A6");
-            SetBrush("Color.PanelErrorBg", "#3A1D22");
-            SetBrush("Color.PanelErrorBorder", "#7C3A44");
-            SetBrush("Color.PanelErrorText", "#F5C1C7");
-            SetBrush("Color.ValidationErrorText", "#FF9FA9");
-            SetBrush("Color.CardSoftBg", "#16293D");
-            SetBrush("Color.CardSoftBorder", "#34506D");
-            SetBrush("Color.CardSoftBorderStrong", "#47668A");
-            SetBrush("Color.Splitter", "#3B5776");
-            SetBrush("Color.OverlayHintBg", "#B30A1524");
-            SetBrush("Color.OverlayHintBorder", "#6C89A7");
-            SetBrush("Color.OverlayHintText", "#F0F7FF");
-            SetBrush("Color.DebugOverlayBg", "#E61A2B3D");
-            SetBrush("Color.DebugOverlayBorder", "#5E7D9C");
-            SetBrush("Color.DebugOverlayText", "#EAF3FE");
-            SetBrush("Color.StepComplete", "#70D996");
-            SetBrush("Color.StepPending", "#B7CBE0");
-            ThemeToggleButton.Content = "Light Theme";
-        }
-        else
+            ["Color.Surface"] = "#0F1722",
+            ["Color.SurfaceAlt"] = "#132131",
+            ["Color.Card"] = "#17273A",
+            ["Color.CardStrong"] = "#1B2E44",
+            ["Color.Border"] = "#2D445E",
+            ["Color.BorderStrong"] = "#3A5675",
+            ["Color.Text"] = "#EAF2FC",
+            ["Color.TextMuted"] = "#C1D0E2",
+            ["Color.TextSubtle"] = "#9EB2C9",
+            ["Color.Primary"] = "#4A93D4",
+            ["Color.PrimaryHover"] = "#5AA1E0",
+            ["Color.PrimaryPressed"] = "#3E83C2",
+            ["Color.TabBg"] = "#142235",
+            ["Color.TabActive"] = "#1E324A",
+            ["Color.NavRailBg"] = "#122031",
+            ["Color.NavItemBg"] = "#16283C",
+            ["Color.NavItemActiveBg"] = "#20374F",
+            ["Color.NavItemText"] = "#B8CAE0",
+            ["Color.NavItemActiveText"] = "#F1F7FF",
+            ["Color.OnboardingBarBg"] = "#152B41",
+            ["Color.OnboardingBarBorder"] = "#35526F",
+            ["Color.OnboardingBarTitle"] = "#E8F2FF",
+            ["Color.OnboardingBarBody"] = "#BDD3EA",
+            ["Color.BadgeNeutralBg"] = "#1D3248",
+            ["Color.BadgeNeutralText"] = "#BED3E8",
+            ["Color.RenderShellBg"] = "#0A121D",
+            ["Color.RenderShellBorder"] = "#3E5B7A",
+            ["Color.StatusBarBg"] = "#0E1A28",
+            ["Color.StatusBarBorder"] = "#35506C",
+            ["Color.StatusBarLabel"] = "#AFC2D8",
+            ["Color.StatusBarValue"] = "#F2F8FF",
+            ["Color.PanelInfoBg"] = "#1A2C40",
+            ["Color.PanelInfoBorder"] = "#32506D",
+            ["Color.PanelInfoText"] = "#C2D8EE",
+            ["Color.PanelInfoAltBg"] = "#1A2A3C",
+            ["Color.PanelInfoAltBorder"] = "#334E6A",
+            ["Color.PanelInfoAltText"] = "#D3E3F4",
+            ["Color.PanelSuccessBg"] = "#163224",
+            ["Color.PanelSuccessBorder"] = "#2F6A4B",
+            ["Color.PanelSuccessTitle"] = "#B9EBCF",
+            ["Color.PanelSuccessText"] = "#A3DDBE",
+            ["Color.PanelWarningBg"] = "#3A2A16",
+            ["Color.PanelWarningBorder"] = "#7A5730",
+            ["Color.PanelWarningText"] = "#F2D2A6",
+            ["Color.PanelErrorBg"] = "#3A1D22",
+            ["Color.PanelErrorBorder"] = "#7C3A44",
+            ["Color.PanelErrorText"] = "#F5C1C7",
+            ["Color.ValidationErrorText"] = "#FF9FA9",
+            ["Color.CardSoftBg"] = "#16293D",
+            ["Color.CardSoftBorder"] = "#34506D",
+            ["Color.CardSoftBorderStrong"] = "#47668A",
+            ["Color.Splitter"] = "#3B5776",
+            ["Color.OverlayHintBg"] = "#B30A1524",
+            ["Color.OverlayHintBorder"] = "#6C89A7",
+            ["Color.OverlayHintText"] = "#F0F7FF",
+            ["Color.DebugOverlayBg"] = "#E61A2B3D",
+            ["Color.DebugOverlayBorder"] = "#5E7D9C",
+            ["Color.DebugOverlayText"] = "#EAF3FE",
+            ["Color.StepComplete"] = "#70D996",
+            ["Color.StepPending"] = "#B7CBE0",
+            ["Color.PanelBase"] = "#1C2D42",
+            ["Color.PanelElevated"] = "#1A2B40",
+            ["Color.PanelInset"] = "#142438",
+            ["Color.FocusRing"] = "#7DB8EC",
+            ["Color.DisabledBg"] = "#243447",
+            ["Color.DisabledText"] = "#7E94AE",
+            ["Color.LogAreaBg"] = "#132335",
+            ["Color.LogAreaBorder"] = "#36516D",
+        };
+
+        var lightPalette = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            SetBrush("Color.Surface", "#F6F8FC");
-            SetBrush("Color.SurfaceAlt", "#EEF2F8");
-            SetBrush("Color.Card", "#FBFCFF");
-            SetBrush("Color.CardStrong", "#FFFFFF");
-            SetBrush("Color.Border", "#CFD9E6");
-            SetBrush("Color.BorderStrong", "#B4C4D7");
-            SetBrush("Color.Text", "#1C2530");
-            SetBrush("Color.TextMuted", "#5A6878");
-            SetBrush("Color.TextSubtle", "#728196");
-            SetBrush("Color.Primary", "#0D75C8");
-            SetBrush("Color.PrimaryHover", "#0B68B0");
-            SetBrush("Color.PrimaryPressed", "#095389");
-            SetBrush("Color.TabBg", "#F0F4FA");
-            SetBrush("Color.TabActive", "#FFFFFF");
-            SetBrush("Color.NavRailBg", "#EEF3F9");
-            SetBrush("Color.NavItemBg", "#F8FBFF");
-            SetBrush("Color.NavItemActiveBg", "#FFFFFF");
-            SetBrush("Color.NavItemText", "#3A4E63");
-            SetBrush("Color.NavItemActiveText", "#1C2530");
-            SetBrush("Color.OnboardingBarBg", "#EAF4FF");
-            SetBrush("Color.OnboardingBarBorder", "#BCD8F3");
-            SetBrush("Color.OnboardingBarTitle", "#11395B");
-            SetBrush("Color.OnboardingBarBody", "#2A4A67");
-            SetBrush("Color.BadgeNeutralBg", "#EFF3F9");
-            SetBrush("Color.BadgeNeutralText", "#43586E");
-            SetBrush("Color.RenderShellBg", "#182639");
-            SetBrush("Color.RenderShellBorder", "#5A708B");
-            SetBrush("Color.StatusBarBg", "#24384E");
-            SetBrush("Color.StatusBarBorder", "#546E88");
-            SetBrush("Color.StatusBarLabel", "#D7E5F3");
-            SetBrush("Color.StatusBarValue", "#F4FAFF");
-            SetBrush("Color.PanelInfoBg", "#F3F7FD");
-            SetBrush("Color.PanelInfoBorder", "#D7E3F2");
-            SetBrush("Color.PanelInfoText", "#35516B");
-            SetBrush("Color.PanelInfoAltBg", "#EDF3FA");
-            SetBrush("Color.PanelInfoAltBorder", "#CAD8E8");
-            SetBrush("Color.PanelInfoAltText", "#243548");
-            SetBrush("Color.PanelSuccessBg", "#EEF6EF");
-            SetBrush("Color.PanelSuccessBorder", "#BFDCC2");
-            SetBrush("Color.PanelSuccessTitle", "#1E5130");
-            SetBrush("Color.PanelSuccessText", "#2C6A3F");
-            SetBrush("Color.PanelWarningBg", "#FFF8EE");
-            SetBrush("Color.PanelWarningBorder", "#F3D2A7");
-            SetBrush("Color.PanelWarningText", "#7C4012");
-            SetBrush("Color.PanelErrorBg", "#FFF6F6");
-            SetBrush("Color.PanelErrorBorder", "#F0B7B7");
-            SetBrush("Color.PanelErrorText", "#7F1D1D");
-            SetBrush("Color.ValidationErrorText", "#B03030");
-            SetBrush("Color.CardSoftBg", "#F5F9FE");
-            SetBrush("Color.CardSoftBorder", "#D7E0EA");
-            SetBrush("Color.CardSoftBorderStrong", "#CCD8E6");
-            SetBrush("Color.Splitter", "#B9C8DB");
-            SetBrush("Color.OverlayHintBg", "#D0101720");
-            SetBrush("Color.OverlayHintBorder", "#5A7088");
-            SetBrush("Color.OverlayHintText", "#E8F0F8");
-            SetBrush("Color.DebugOverlayBg", "#EEFFFFFF");
-            SetBrush("Color.DebugOverlayBorder", "#47627E");
-            SetBrush("Color.DebugOverlayText", "#1A2530");
-            SetBrush("Color.StepComplete", "#227842");
-            SetBrush("Color.StepPending", "#35516B");
-            ThemeToggleButton.Content = "Dark Theme";
+            ["Color.Surface"] = "#F6F8FC",
+            ["Color.SurfaceAlt"] = "#EEF2F8",
+            ["Color.Card"] = "#FBFCFF",
+            ["Color.CardStrong"] = "#FFFFFF",
+            ["Color.Border"] = "#CFD9E6",
+            ["Color.BorderStrong"] = "#B4C4D7",
+            ["Color.Text"] = "#1C2530",
+            ["Color.TextMuted"] = "#5A6878",
+            ["Color.TextSubtle"] = "#728196",
+            ["Color.Primary"] = "#0D75C8",
+            ["Color.PrimaryHover"] = "#0B68B0",
+            ["Color.PrimaryPressed"] = "#095389",
+            ["Color.TabBg"] = "#F0F4FA",
+            ["Color.TabActive"] = "#FFFFFF",
+            ["Color.NavRailBg"] = "#EEF3F9",
+            ["Color.NavItemBg"] = "#F8FBFF",
+            ["Color.NavItemActiveBg"] = "#FFFFFF",
+            ["Color.NavItemText"] = "#3A4E63",
+            ["Color.NavItemActiveText"] = "#1C2530",
+            ["Color.OnboardingBarBg"] = "#EAF4FF",
+            ["Color.OnboardingBarBorder"] = "#BCD8F3",
+            ["Color.OnboardingBarTitle"] = "#11395B",
+            ["Color.OnboardingBarBody"] = "#2A4A67",
+            ["Color.BadgeNeutralBg"] = "#EFF3F9",
+            ["Color.BadgeNeutralText"] = "#43586E",
+            ["Color.RenderShellBg"] = "#182639",
+            ["Color.RenderShellBorder"] = "#5A708B",
+            ["Color.StatusBarBg"] = "#24384E",
+            ["Color.StatusBarBorder"] = "#546E88",
+            ["Color.StatusBarLabel"] = "#D7E5F3",
+            ["Color.StatusBarValue"] = "#F4FAFF",
+            ["Color.PanelInfoBg"] = "#F3F7FD",
+            ["Color.PanelInfoBorder"] = "#D7E3F2",
+            ["Color.PanelInfoText"] = "#35516B",
+            ["Color.PanelInfoAltBg"] = "#EDF3FA",
+            ["Color.PanelInfoAltBorder"] = "#CAD8E8",
+            ["Color.PanelInfoAltText"] = "#243548",
+            ["Color.PanelSuccessBg"] = "#EEF6EF",
+            ["Color.PanelSuccessBorder"] = "#BFDCC2",
+            ["Color.PanelSuccessTitle"] = "#1E5130",
+            ["Color.PanelSuccessText"] = "#2C6A3F",
+            ["Color.PanelWarningBg"] = "#FFF8EE",
+            ["Color.PanelWarningBorder"] = "#F3D2A7",
+            ["Color.PanelWarningText"] = "#7C4012",
+            ["Color.PanelErrorBg"] = "#FFF6F6",
+            ["Color.PanelErrorBorder"] = "#F0B7B7",
+            ["Color.PanelErrorText"] = "#7F1D1D",
+            ["Color.ValidationErrorText"] = "#B03030",
+            ["Color.CardSoftBg"] = "#F5F9FE",
+            ["Color.CardSoftBorder"] = "#D7E0EA",
+            ["Color.CardSoftBorderStrong"] = "#CCD8E6",
+            ["Color.Splitter"] = "#B9C8DB",
+            ["Color.OverlayHintBg"] = "#D0101720",
+            ["Color.OverlayHintBorder"] = "#5A7088",
+            ["Color.OverlayHintText"] = "#E8F0F8",
+            ["Color.DebugOverlayBg"] = "#EEFFFFFF",
+            ["Color.DebugOverlayBorder"] = "#47627E",
+            ["Color.DebugOverlayText"] = "#1A2530",
+            ["Color.StepComplete"] = "#227842",
+            ["Color.StepPending"] = "#35516B",
+            ["Color.PanelBase"] = "#F3F7FD",
+            ["Color.PanelElevated"] = "#FFFFFF",
+            ["Color.PanelInset"] = "#EDF3FA",
+            ["Color.FocusRing"] = "#4698E5",
+            ["Color.DisabledBg"] = "#E5ECF5",
+            ["Color.DisabledText"] = "#8A9AAF",
+            ["Color.LogAreaBg"] = "#F4F7FC",
+            ["Color.LogAreaBorder"] = "#C7D4E5",
+        };
+
+        var palette = _isDarkTheme ? darkPalette : lightPalette;
+        foreach (var (key, value) in palette)
+        {
+            SetBrush(key, value);
         }
+
+        ThemeToggleButton.Content = _isDarkTheme ? "Light Theme" : "Dark Theme";
     }
 
     private void ApplySectionVisibility()

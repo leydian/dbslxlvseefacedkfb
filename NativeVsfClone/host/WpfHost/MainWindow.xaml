@@ -526,6 +526,19 @@
                             <TextBlock Grid.Row="10" Grid.Column="0" Text="Upper Body" VerticalAlignment="Center" Margin="0,8,0,0"/>
                             <CheckBox Grid.Row="10" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
                         </Grid>
+                        <Border x:Name="TrackingIpv4HintPanel" BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="iFacialMocap 대상 PC IPv4" FontWeight="SemiBold"/>
+                                <TextBlock Text="Recommended IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
+                                <TextBlock x:Name="TrackingIpv4RecommendedText" Text="-" FontFamily="Consolas" FontWeight="SemiBold"/>
+                                <TextBlock Text="All IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
+                                <TextBlock x:Name="TrackingIpv4AllText" Text="-" FontFamily="Consolas" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="TrackingIpv4CopyButton" Content="IPv4 복사" Click="CopyTrackingIpv4_Click" MinWidth="110"/>
+                            <Button x:Name="TrackingIpv4ToggleButton" Content="IPv4 안내 숨기기" Click="ToggleTrackingIpv4Hint_Click" Margin="8,0,0,0" MinWidth="150"/>
+                        </WrapPanel>
                         <WrapPanel Margin="0,0,0,8">
                             <Button x:Name="StartTrackingButton" Content="Start Tracking" Click="StartTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
                             <Button x:Name="StopTrackingButton" Content="Stop Tracking" Click="StopTracking_Click" Margin="0,0,8,0" MinWidth="110"/>
@@ -651,23 +664,23 @@
                 <TabItem Header="런타임 (Runtime)">
                     <DockPanel>
                         <Button Content="런타임 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyRuntime_Click"/>
-                        <TextBox x:Name="RuntimeDiagnosticsTextBox" IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                        <TextBox x:Name="RuntimeDiagnosticsTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" IsReadOnlyCaretVisible="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
                 <TabItem Header="아바타 (Avatar)">
                     <DockPanel>
                         <Button Content="아바타 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyAvatar_Click"/>
-                        <TextBox x:Name="AvatarDiagnosticsTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                        <TextBox x:Name="AvatarDiagnosticsTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
                 <TabItem Header="로그 (Logs)">
                     <DockPanel>
                         <Button Content="로그 복사" DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,0,0,8" Padding="10,4" Click="CopyLogs_Click"/>
-                        <TextBox x:Name="LogsTextBox" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                        <TextBox x:Name="LogsTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" TextWrapping="NoWrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                     </DockPanel>
                 </TabItem>
                 <TabItem Header="가이드 (Guides)">
-                    <TextBox x:Name="GuidesTextBox" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
+                    <TextBox x:Name="GuidesTextBox" Style="{StaticResource LogReadOnlyTextBoxStyle}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"/>
                 </TabItem>
             </TabControl>
 
