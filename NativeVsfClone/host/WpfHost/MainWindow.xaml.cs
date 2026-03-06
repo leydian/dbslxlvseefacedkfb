@@ -20,7 +20,7 @@ namespace WpfHost;
 
 public partial class MainWindow : Window
 {
-    private sealed record WebcamDeviceItem(string Key, string Label);
+    private sealed record WebcamDeviceItem(string Key, string Label, bool IsAvailable);
     private enum UiSection
     {
         GettingStarted,
@@ -951,7 +951,8 @@ public partial class MainWindow : Window
             sourceLockMode: sourceLockMode,
             latencyProfile: latencyProfile,
             poseFilterProfile: poseFilterProfile,
-            poseDeadbandDeg: (float)TrackingPoseDeadbandSlider.Value);
+            poseDeadbandDeg: (float)TrackingPoseDeadbandSlider.Value,
+            upperBodyEnabled: TrackingUpperBodyEnabledCheckBox.IsChecked == true);
 
         var rc = _controller.StartTracking(
             listenPort,
@@ -1047,12 +1048,14 @@ public partial class MainWindow : Window
                 d.DeviceKey,
                 d.IsAvailable
                     ? $"{d.DisplayName} ({(string.IsNullOrWhiteSpace(d.DeviceKey) ? "default" : d.DeviceKey)})"
-                    : $"{d.DisplayName} ({d.DeviceKey}) - unavailable"))
+                    : $"{d.DisplayName} ({d.DeviceKey}) - unavailable",
+                d.IsAvailable))
             .ToList();
         TrackingWebcamDeviceComboBox.ItemsSource = items;
         TrackingWebcamDeviceComboBox.DisplayMemberPath = nameof(WebcamDeviceItem.Label);
         var target = preferredKey ?? _controller.GetTrackingInputSettings().CameraDeviceKey;
         var selected = items.FirstOrDefault(x => string.Equals(x.Key, target, StringComparison.OrdinalIgnoreCase))
+            ?? items.FirstOrDefault(x => x.IsAvailable)
             ?? items.FirstOrDefault();
         if (selected is not null)
         {
@@ -1065,8 +1068,8 @@ public partial class MainWindow : Window
         var target = preferredKey ?? _controller.GetTrackingInputSettings().CameraDeviceKey;
         var items = new[]
         {
-            new WebcamDeviceItem(string.Empty, "Default Camera (scan pending)"),
-            new WebcamDeviceItem("0", "Camera 0 (scan pending)"),
+            new WebcamDeviceItem(string.Empty, "Default Camera (scan pending)", true),
+            new WebcamDeviceItem("0", "Camera 0 (scan pending)", true),
         };
         TrackingWebcamDeviceComboBox.ItemsSource = items;
         TrackingWebcamDeviceComboBox.DisplayMemberPath = nameof(WebcamDeviceItem.Label);
@@ -1919,11 +1922,12 @@ public partial class MainWindow : Window
         TrackingLatencyProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseFilterProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseDeadbandSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingUpperBodyEnabledCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} err={tracking.LastErrorCode}{trackingHint}";
 
         SessionStatusText.Text = statusText.SessionText;
         AvatarStatusText.Text = statusText.AvatarText;
@@ -2159,7 +2163,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
-        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -2641,6 +2645,7 @@ public partial class MainWindow : Window
         };
         TrackingPoseDeadbandSlider.Value = session.Tracking.PoseDeadbandDeg;
         TrackingPoseDeadbandValueText.Text = $"{session.Tracking.PoseDeadbandDeg:F2}\u00b0";
+        TrackingUpperBodyEnabledCheckBox.IsChecked = session.Tracking.UpperBodyEnabled;
         SetTrackingWebcamDevicesPending(session.Tracking.CameraDeviceKey);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;
@@ -2759,6 +2764,12 @@ public partial class MainWindow : Window
         }
 
         _activeSection = section;
+        if (section == UiSection.Tracking && !_controller.OperationState.IsBusy && !_controller.TrackingDiagnostics.IsActive)
+        {
+            var selectedKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key;
+            RefreshTrackingWebcamDevices(selectedKey);
+        }
+
         ApplySectionVisibility();
         ApplyNavRailState();
         AnimateSectionTransition();

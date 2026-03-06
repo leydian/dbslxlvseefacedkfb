@@ -107,6 +107,7 @@ Domain-level report navigation hub.
 - [2026-03-02_vxavatar_mvp_update.md](./weekly/2026-W10/2026-03-02_vxavatar_mvp_update.md)
 
 ## webcam
+- [2026-03-06_webcam_device_enumeration_and_tracking_refresh.md](./weekly/2026-W10/2026-03-06_webcam_device_enumeration_and_tracking_refresh.md)
 - [2026-03-06_webcam_mediapipe_runtime_integration.md](./weekly/2026-W10/2026-03-06_webcam_mediapipe_runtime_integration.md)
 - [2026-03-06_webcam_onnx_tracking_implementation.md](./weekly/2026-W10/2026-03-06_webcam_onnx_tracking_implementation.md)
 

@@ -19,7 +19,7 @@
 - `platform`: 2 reports
 - `session`: 2 reports
 - `tracking`: 2 reports
-- `webcam`: 2 reports
+- `webcam`: 3 reports
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
 - `nativecore`: 2 reports
@@ -48,6 +48,7 @@
 ## Next Steps
 - Pick three key reports and review promotion to long-term references.
 - Newly added: review `2026-03-06_vrm_runtime_metrics_v2_api.md` for runtime quality metric adoption and gate integration.
+- Newly added: review `2026-03-06_webcam_device_enumeration_and_tracking_refresh.md` for Windows camera enumeration contract, index-key sidecar compatibility, and WPF/WinUI refresh/fallback behavior.
 - Newly added: review `2026-03-06_vrm_springbone_mtoon_runtime_refinement.md` for SpringBone solver and MToon advanced runtime uplift validation notes.
 - Newly added: review `2026-03-06_onboarding_kpi_summary_automation.md` for diagnostics KPI rollup automation and operational gating readiness.
 - Newly added: review `2026-03-06_wpf_avatar_preview_worker_thumbnails.md` for WPF pre-load avatar 3D thumbnail worker architecture, persistence schema v7, and queue/timeout behavior.

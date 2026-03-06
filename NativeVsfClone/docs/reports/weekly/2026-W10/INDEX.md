@@ -107,6 +107,7 @@ Report list for this week.
 - [2026-03-06_vsfavatar_sidecar_v5_contract_and_gate_wiring.md](./2026-03-06_vsfavatar_sidecar_v5_contract_and_gate_wiring.md)
 - [2026-03-06_webcam_mediapipe_runtime_integration.md](./2026-03-06_webcam_mediapipe_runtime_integration.md)
 - [2026-03-06_webcam_onnx_tracking_implementation.md](./2026-03-06_webcam_onnx_tracking_implementation.md)
+- [2026-03-06_webcam_device_enumeration_and_tracking_refresh.md](./2026-03-06_webcam_device_enumeration_and_tracking_refresh.md)
 - [2026-03-06_workspace_change_rollup.md](./2026-03-06_workspace_change_rollup.md)
 - [2026-03-06_workspace_interim_full_change_summary.md](./2026-03-06_workspace_interim_full_change_summary.md)
 - [2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md](./2026-03-06_wpf_consumer_ui_onboarding_and_telemetry.md)

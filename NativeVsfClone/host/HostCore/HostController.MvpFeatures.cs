@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Windows.Devices.Enumeration;
 
 namespace HostCore;
 
@@ -680,16 +681,48 @@ public sealed partial class HostController
 
     public IReadOnlyList<WebcamDeviceOption> GetAvailableWebcamDevices(int maxProbe = 10)
     {
-        var probeCount = Math.Clamp(maxProbe, 1, 32);
-        var list = new List<WebcamDeviceOption>(probeCount + 1)
+        var cap = Math.Clamp(maxProbe, 1, 64);
+        var list = new List<WebcamDeviceOption>(cap + 1)
         {
             new WebcamDeviceOption(string.Empty, "Default Camera", true),
         };
-        for (var i = 0; i < probeCount; i++)
+        try
         {
-            var key = i.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            // Avoid eager native camera open-probe here. Some virtual camera filters can crash the process.
-            list.Add(new WebcamDeviceOption(key, $"Camera {i}", true));
+            // Enumerate webcam devices without opening capture handles to avoid virtual-camera crashes.
+            var devices = DeviceInformation.FindAllAsync(DeviceClass.VideoCapture)
+                .GetAwaiter()
+                .GetResult();
+            var count = Math.Min(cap, devices.Count);
+            if (count == 0)
+            {
+                list[0] = new WebcamDeviceOption(string.Empty, "Default Camera", false);
+                return list;
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                var displayName = devices[i].Name?.Trim();
+                if (string.IsNullOrWhiteSpace(displayName))
+                {
+                    displayName = $"Camera {i}";
+                }
+
+                list.Add(new WebcamDeviceOption(
+                    i.ToString(CultureInfo.InvariantCulture),
+                    displayName,
+                    true));
+            }
+        }
+        catch (Exception ex)
+        {
+            list[0] = new WebcamDeviceOption(string.Empty, "Default Camera (enumeration failed)", false);
+            AddLog(
+                new HostLogEntry(
+                    DateTimeOffset.UtcNow,
+                    "TrackingWebcamEnumerate",
+                    $"Windows camera enumeration failed: {ex.Message}",
+                    NcResultCode.Internal),
+                true);
         }
 
         return list;
@@ -706,7 +739,10 @@ public sealed partial class HostController
         TrackingSourceLockMode? sourceLockMode = null,
         TrackingLatencyProfile? latencyProfile = null,
         PoseFilterProfile? poseFilterProfile = null,
-        float? poseDeadbandDeg = null)
+        float? poseDeadbandDeg = null,
+        bool? upperBodyEnabled = null,
+        float? upperBodyStrength = null,
+        UpperBodySmoothingProfile? upperBodySmoothing = null)
     {
         var current = _sessionPersistence.Tracking;
         var resolvedProfile = latencyProfile ?? current.LatencyProfile;
@@ -715,6 +751,10 @@ public sealed partial class HostController
             float.IsFinite(poseDeadbandDeg ?? current.PoseDeadbandDeg) ? (poseDeadbandDeg ?? current.PoseDeadbandDeg) : 0.9f,
             0.0f,
             3.0f);
+        var resolvedUpperBodyStrength = Math.Clamp(
+            float.IsFinite(upperBodyStrength ?? current.UpperBodyStrength) ? (upperBodyStrength ?? current.UpperBodyStrength) : 1.0f,
+            0.0f,
+            1.5f);
         var normalized = new TrackingInputSettings(
             listenPort == 0 ? (ushort)49983 : listenPort,
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
@@ -727,7 +767,10 @@ public sealed partial class HostController
             sourceLockMode ?? current.SourceLockMode,
             resolvedProfile,
             resolvedPoseFilter,
-            resolvedDeadband);
+            resolvedDeadband,
+            upperBodyEnabled ?? current.UpperBodyEnabled,
+            resolvedUpperBodyStrength,
+            upperBodySmoothing ?? current.UpperBodySmoothing);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -738,7 +781,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, upper_body={normalized.UpperBodyEnabled}, upper_strength={normalized.UpperBodyStrength:F2}, upper_smoothing={normalized.UpperBodySmoothing}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
                 NcResultCode.Ok),
             false);
     }
@@ -773,7 +816,10 @@ public sealed partial class HostController
             current.SourceLockMode,
             current.LatencyProfile,
             current.PoseFilterProfile,
-            current.PoseDeadbandDeg);
+            current.PoseDeadbandDeg,
+            current.UpperBodyEnabled,
+            current.UpperBodyStrength,
+            current.UpperBodySmoothing);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,

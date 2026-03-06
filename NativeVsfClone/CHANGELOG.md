@@ -2,6 +2,41 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Webcam device enumeration + tracking UI refresh hardening
+
+### Summary
+
+Implemented webcam device detection hardening for host tracking configuration by replacing synthetic camera lists with Windows API enumeration and aligning WPF/WinUI selection refresh behavior.
+
+### Changed
+
+- HostCore (`host/HostCore/HostController.MvpFeatures.cs`):
+  - `GetAvailableWebcamDevices(...)` now enumerates real webcams via:
+    - `DeviceInformation.FindAllAsync(DeviceClass.VideoCapture)`
+  - preserved sidecar compatibility by keeping `DeviceKey` as numeric index string (`"0"`, `"1"`, ...).
+  - added safe no-device/enumeration-failure fallback:
+    - returns default camera entry marked unavailable.
+    - logs `TrackingWebcamEnumerate` failure context.
+- WPF host (`host/WpfHost/MainWindow.xaml.cs`):
+  - webcam combo item now tracks `IsAvailable`.
+  - selection fallback now prefers available devices when prior selection is invalid/unavailable.
+  - entering `Tracking` section triggers webcam list refresh when tracking is idle.
+- WinUI host (`host/WinUiHost/MainWindow.xaml.cs`):
+  - webcam combo item now tracks `IsAvailable`.
+  - selection fallback aligned to WPF.
+  - tracking start path refreshes webcam list immediately before applying settings/start.
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_webcam_device_enumeration_and_tracking_refresh.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - `docs/reports/DOMAIN_INDEX.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -v minimal`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -v minimal`: PASS
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -v normal`: FAIL (`XamlCompiler.exe` / `MSB3073`, existing WinUI baseline issue in this environment)
+
 ## 2026-03-06 - Arm pose policy alignment fix (restore arm angle movement, including XAV2)
 
 ### Summary
