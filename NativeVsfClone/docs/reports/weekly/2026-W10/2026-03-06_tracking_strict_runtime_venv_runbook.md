@@ -24,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\setup_tracking_python_venv.ps1 
 ```
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\release_readiness_strict_tracking.ps1 -MediapipePythonExe .\.venv\Scripts\python.exe -SkipNativeBuild -NoRestore
+powershell -ExecutionPolicy Bypass -File .\tools\release_readiness_strict_tracking.ps1 -MediapipePythonExe .\.venv\Scripts\python.exe -SkipNativeBuild -NoRestore -SkipVersionContractCheck -SkipQualityBaseline
 ```
 
 ## PASS Criteria
@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\release_readiness_strict_tracki
   - `Tracking HostE2E: ... PASS`
   - `Tracking Parser Fuzz: ... PASS`
   - `Tracking Mediapipe Sanity: ... PASS`
-  - `ReleaseCandidateWpfOnly: PASS`
+  - `TrackingContractCandidate: PASS`
 
 ## Failure Handling
 

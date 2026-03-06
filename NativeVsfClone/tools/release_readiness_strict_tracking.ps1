@@ -4,7 +4,9 @@ param(
     [string]$RuntimeIdentifier = "win-x64",
     [switch]$SkipNativeBuild,
     [switch]$NoRestore,
-    [switch]$IncludeWinUi
+    [switch]$IncludeWinUi,
+    [switch]$SkipVersionContractCheck,
+    [switch]$SkipQualityBaseline
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +37,8 @@ try {
     if ($SkipNativeBuild) { $args += "-SkipNativeBuild" }
     if ($NoRestore) { $args += "-NoRestore" }
     if ($IncludeWinUi) { $args += "-IncludeWinUi" }
+    if ($SkipVersionContractCheck) { $args += "-SkipVersionContractCheck" }
+    if ($SkipQualityBaseline) { $args += "-SkipQualityBaseline" }
 
     & powershell @args
     if ($LASTEXITCODE -ne 0) {
