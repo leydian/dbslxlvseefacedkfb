@@ -13,6 +13,7 @@ public sealed partial class HostController
     private const int UiFlowTimingSampleCapacity = 20;
     private static readonly TimeSpan TickDiagnosticsPublishInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RuntimeCaptureRefreshInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan CommonCauseTriageDelay = TimeSpan.FromMilliseconds(1200);
 
     private readonly IAvatarSessionService _sessionService;
     private readonly IRenderLoopService _renderLoopService;
@@ -66,6 +67,8 @@ public sealed partial class HostController
     private long _armPoseInputVersion;
     private long _armPoseCapturedVersion;
     private DateTimeOffset _lastArmPoseInputUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset _commonCauseTriageDueUtc = DateTimeOffset.MinValue;
+    private bool _commonCauseTriagePending;
 
     private const int ArmPoseHistoryCapacity = 20;
     private const int ArmPoseSuggestionTopK = 3;
@@ -212,6 +215,7 @@ public sealed partial class HostController
             _poseOffsets = BuildDefaultPoseOffsets();
             _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
             _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
+            _commonCauseTriagePending = false;
             _ = NativeCoreInterop.nc_clear_pose_offsets();
             SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
             _ = PublishDiagnostics(force: true, forceRuntimeRefresh: true);
@@ -286,6 +290,7 @@ public sealed partial class HostController
                 _ = ApplyStoredAvatarPreviewFlipIfNeeded(normalizedPath);
                 _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
+                ScheduleCommonCauseTriage();
                 _lastLoadFailureGuidance = string.Empty;
                 _lastLoadFailureTechnical = string.Empty;
             }
@@ -298,6 +303,10 @@ public sealed partial class HostController
                         $"load failed and active avatar preserved (rc={rc})",
                         rc),
                     false);
+            }
+            else
+            {
+                _commonCauseTriagePending = false;
             }
 
             RefreshState();
@@ -335,6 +344,7 @@ public sealed partial class HostController
             {
                 TrimManagedMemory();
             }
+            _commonCauseTriagePending = false;
             RefreshState();
             return rc;
         });
@@ -990,6 +1000,7 @@ public sealed partial class HostController
         }
 
         RefreshStateFastPath();
+        TryEmitCommonCauseTriage();
         return rc;
         }
         finally
@@ -2029,6 +2040,151 @@ public sealed partial class HostController
             BlinkR = 0.0f,
             MouthOpen = 0.0f,
         };
+    }
+
+    private void ScheduleCommonCauseTriage()
+    {
+        _commonCauseTriageDueUtc = DateTimeOffset.UtcNow + CommonCauseTriageDelay;
+        _commonCauseTriagePending = true;
+    }
+
+    private void TryEmitCommonCauseTriage()
+    {
+        if (!_commonCauseTriagePending || DateTimeOffset.UtcNow < _commonCauseTriageDueUtc)
+        {
+            return;
+        }
+
+        _commonCauseTriagePending = false;
+        if (!_sessionService.ActiveAvatarInfo.HasValue)
+        {
+            return;
+        }
+
+        var info = _sessionService.ActiveAvatarInfo.Value;
+        var armStatus = ResolveArmPoseSignal(info);
+        var shadowStatus = ResolveShadowSignal(info);
+        var rootCause = ClassifyCommonCause(info);
+        var reason = ResolveCommonCauseReason(info, rootCause, armStatus, shadowStatus);
+        var message =
+            $"class={rootCause}, reason={NormalizeSignal(reason)}, format={info.DetectedFormat}, expressions={info.ExpressionCount}, arm={NormalizeSignal(armStatus)}, shadow={NormalizeSignal(shadowStatus)}, tracking_err={NormalizeSignal(_trackingDiagnostics.LastErrorCode)}, warning={NormalizeSignal(info.LastWarningCode)}";
+        AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "CommonCauseTriage", message, NcResultCode.Ok), false);
+    }
+
+    private string ClassifyCommonCause(in NcAvatarInfo info)
+    {
+        if (!_runtimeDiagnostics.RuntimePathMatch || _runtimeDiagnostics.RuntimeModuleStaleVsBuildOutput)
+        {
+            return "runtime_binary_mismatch";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_trackingDiagnostics.LastErrorCode) &&
+            _trackingDiagnostics.LastErrorCode.StartsWith("NC_SET_", StringComparison.Ordinal))
+        {
+            return "native_submit_failure";
+        }
+
+        if (info.ExpressionCount == 0U)
+        {
+            return "payload_policy_gate";
+        }
+
+        var armStatus = ResolveArmPoseSignal(info);
+        var shadowStatus = ResolveShadowSignal(info);
+        if (!string.IsNullOrWhiteSpace(armStatus) || !string.IsNullOrWhiteSpace(shadowStatus))
+        {
+            return "payload_policy_gate";
+        }
+
+        return "none_detected";
+    }
+
+    private string ResolveCommonCauseReason(in NcAvatarInfo info, string classification, string armStatus, string shadowStatus)
+    {
+        return classification switch
+        {
+            "runtime_binary_mismatch" => !_runtimeDiagnostics.RuntimePathMatch
+                ? _runtimeDiagnostics.RuntimePathWarningCode
+                : _runtimeDiagnostics.RuntimeTimestampWarningCode,
+            "native_submit_failure" => _trackingDiagnostics.LastErrorCode,
+            "payload_policy_gate" => info.ExpressionCount == 0U
+                ? "EXPRESSION_COUNT_ZERO"
+                : !string.IsNullOrWhiteSpace(armStatus)
+                    ? armStatus
+                    : shadowStatus,
+            _ => "none",
+        };
+    }
+
+    private static string ResolveArmPoseSignal(in NcAvatarInfo info)
+    {
+        var armCode = ExtractSignalCode(info.LastWarningCode, "ARM_POSE_");
+        if (!string.IsNullOrWhiteSpace(armCode))
+        {
+            return armCode;
+        }
+        return ExtractSignalCode(info.LastWarning, "ARM_POSE_");
+    }
+
+    private static string ResolveShadowSignal(in NcAvatarInfo info)
+    {
+        var shadowCode = ExtractSignalCode(info.LastWarningCode, "SHADOW_DISABLED_");
+        if (!string.IsNullOrWhiteSpace(shadowCode))
+        {
+            return shadowCode;
+        }
+
+        shadowCode = ExtractSignalCode(info.LastWarning, "SHADOW_DISABLED_");
+        if (!string.IsNullOrWhiteSpace(shadowCode))
+        {
+            return shadowCode;
+        }
+
+        if (string.IsNullOrWhiteSpace(info.ActivePasses))
+        {
+            return string.Empty;
+        }
+
+        return info.ActivePasses.Contains("shadow", StringComparison.OrdinalIgnoreCase)
+            ? "SHADOW_PASS_ACTIVE"
+            : "SHADOW_PASS_NOT_REPORTED";
+    }
+
+    private static string ExtractSignalCode(string text, string marker)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(marker))
+        {
+            return string.Empty;
+        }
+
+        var idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+        {
+            return string.Empty;
+        }
+
+        var end = idx;
+        while (end < text.Length)
+        {
+            var ch = text[end];
+            if (!(char.IsLetterOrDigit(ch) || ch is '_' or '-'))
+            {
+                break;
+            }
+            end++;
+        }
+
+        if (end <= idx)
+        {
+            return string.Empty;
+        }
+
+        return text[idx..end];
+    }
+
+    private static string NormalizeSignal(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "none" : value.Trim();
     }
 
     private void TrackResult(string source, NcResultCode rc)

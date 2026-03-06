@@ -53,6 +53,7 @@ Domain-level report navigation hub.
 
 ## runtime
 - [2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md](./weekly/2026-W10/2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md)
+- [2026-03-06_runtime_common_cause_triage_classifier_and_wpf_surface.md](./weekly/2026-W10/2026-03-06_runtime_common_cause_triage_classifier_and_wpf_surface.md)
 
 ## session
 - [2026-03-06_session_change_summary.md](./weekly/2026-W10/2026-03-06_session_change_summary.md)

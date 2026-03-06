@@ -90,6 +90,7 @@ Report list for this week.
 - [2026-03-06_release_roi_execution_hardening.md](./2026-03-06_release_roi_execution_hardening.md)
 - [2026-03-06_release_tooling_implementation_winui_triage_and_gate_automation.md](./2026-03-06_release_tooling_implementation_winui_triage_and_gate_automation.md)
 - [2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md](./2026-03-06_runtime_nativecore_mismatch_recovery_and_publish_guard.md)
+- [2026-03-06_runtime_common_cause_triage_classifier_and_wpf_surface.md](./2026-03-06_runtime_common_cause_triage_classifier_and_wpf_surface.md)
 - [2026-03-06_session_change_summary.md](./2026-03-06_session_change_summary.md)
 - [2026-03-06_shader_family_backend_split_liltoon_mtoon.md](./2026-03-06_shader_family_backend_split_liltoon_mtoon.md)
 - [2026-03-06_shader_family_backend_split_poiyomi_standard.md](./2026-03-06_shader_family_backend_split_poiyomi_standard.md)

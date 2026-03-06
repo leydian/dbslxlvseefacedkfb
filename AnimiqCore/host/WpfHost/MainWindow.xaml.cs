@@ -2551,6 +2551,7 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
         runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, switches={tracking.RecentSourceSwitchCount}, switch_reason={tracking.LastSourceSwitchReason}, switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, ifm_keys_ok={tracking.IfmAcceptedKeySample}, ifm_keys_drop={tracking.IfmDroppedKeySample}, err={tracking.LastErrorCode}");
+        runtimeSb.AppendLine(BuildCommonCauseTriageLine(snapshot, tracking));
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -2665,6 +2666,92 @@ public partial class MainWindow : Window
             return info.LastWarningCode;
         }
         return ExtractWarningCode(info.LastWarning);
+    }
+
+    private static string BuildCommonCauseTriageLine(DiagnosticsSnapshot snapshot, TrackingDiagnostics tracking)
+    {
+        var runtime = snapshot.Runtime;
+        if (!runtime.RuntimePathMatch || runtime.RuntimeModuleStaleVsBuildOutput)
+        {
+            var reason = !runtime.RuntimePathMatch ? runtime.RuntimePathWarningCode : runtime.RuntimeTimestampWarningCode;
+            return $"CommonCauseTriage: class=runtime_binary_mismatch, reason={NormalizeDiagField(reason)}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(tracking.LastErrorCode) &&
+            tracking.LastErrorCode.StartsWith("NC_SET_", StringComparison.Ordinal))
+        {
+            return $"CommonCauseTriage: class=native_submit_failure, reason={tracking.LastErrorCode}";
+        }
+
+        if (!snapshot.AvatarInfo.HasValue)
+        {
+            return "CommonCauseTriage: class=none_detected, reason=no_avatar";
+        }
+
+        var info = snapshot.AvatarInfo.Value;
+        var armStatus = ResolveSignalCode(info, "ARM_POSE_");
+        var shadowStatus = ResolveSignalCode(info, "SHADOW_DISABLED_");
+        var reason = "none";
+        var classification = "none_detected";
+
+        if (info.ExpressionCount == 0U)
+        {
+            classification = "payload_policy_gate";
+            reason = "EXPRESSION_COUNT_ZERO";
+        }
+        else if (!string.IsNullOrWhiteSpace(armStatus))
+        {
+            classification = "payload_policy_gate";
+            reason = armStatus;
+        }
+        else if (!string.IsNullOrWhiteSpace(shadowStatus))
+        {
+            classification = "payload_policy_gate";
+            reason = shadowStatus;
+        }
+
+        var shadowSignal = !string.IsNullOrWhiteSpace(shadowStatus)
+            ? shadowStatus
+            : (info.ActivePasses?.Contains("shadow", StringComparison.OrdinalIgnoreCase) == true ? "SHADOW_PASS_ACTIVE" : "SHADOW_PASS_NOT_REPORTED");
+        return
+            $"CommonCauseTriage: class={classification}, reason={NormalizeDiagField(reason)}, format={info.DetectedFormat}, expressions={info.ExpressionCount}, arm={NormalizeDiagField(armStatus)}, shadow={NormalizeDiagField(shadowSignal)}, warning={NormalizeDiagField(info.LastWarningCode)}";
+    }
+
+    private static string ResolveSignalCode(NcAvatarInfo info, string marker)
+    {
+        var fromCode = ExtractSignalCode(info.LastWarningCode, marker);
+        if (!string.IsNullOrWhiteSpace(fromCode))
+        {
+            return fromCode;
+        }
+        return ExtractSignalCode(info.LastWarning, marker);
+    }
+
+    private static string ExtractSignalCode(string text, string marker)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(marker))
+        {
+            return string.Empty;
+        }
+
+        var idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+        {
+            return string.Empty;
+        }
+
+        var end = idx;
+        while (end < text.Length)
+        {
+            var ch = text[end];
+            if (!(char.IsLetterOrDigit(ch) || ch is '_' or '-'))
+            {
+                break;
+            }
+            end++;
+        }
+
+        return end > idx ? text[idx..end] : string.Empty;
     }
 
     private static string NormalizeDiagField(string text)
