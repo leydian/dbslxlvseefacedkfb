@@ -19,7 +19,8 @@ function Resolve-AbsolutePath {
 function Resolve-PythonExecutable {
     param(
         [string]$CliValue,
-        [bool]$RequireExplicit
+        [bool]$RequireExplicit,
+        [string]$RepoRoot
     )
 
     $trimmedCli = $CliValue.Trim()
@@ -48,6 +49,20 @@ function Resolve-PythonExecutable {
         }
     }
 
+    $localVenvCandidates = @(
+        (Join-Path $RepoRoot ".venv\Scripts\python.exe"),
+        (Join-Path $RepoRoot "build\tracking-venv\Scripts\python.exe")
+    )
+    foreach ($candidate in $localVenvCandidates) {
+        if (Test-Path $candidate) {
+            return [PSCustomObject]@{
+                Executable = $candidate
+                Source = "local_venv"
+                IsExplicit = $false
+            }
+        }
+    }
+
     return [PSCustomObject]@{
         Executable = "python"
         Source = "default"
@@ -60,7 +75,7 @@ $resolvedScript = Resolve-AbsolutePath -Path $SidecarScript -BaseDirectory $repo
 $resolvedSummary = Resolve-AbsolutePath -Path $SummaryPath -BaseDirectory $repoRoot
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $resolvedSummary) | Out-Null
 
-$resolvedPython = Resolve-PythonExecutable -CliValue $PythonExe -RequireExplicit:$RequireExplicitPythonExe
+$resolvedPython = Resolve-PythonExecutable -CliValue $PythonExe -RequireExplicit:$RequireExplicitPythonExe -RepoRoot $repoRoot
 $resolvedPythonExe = $resolvedPython.Executable
 
 $checks = [System.Collections.Generic.List[string]]::new()

@@ -91,46 +91,46 @@ public static class HostUiPolicy
         {
             return new HostNextActionHint(
                 HostNextRecommendedAction.WaitBusy,
-                "Working",
-                $"{operation.CurrentOperation} in progress. Wait for completion.");
+                "작업 중",
+                $"{operation.CurrentOperation} 작업이 진행 중입니다. 완료될 때까지 기다려 주세요.");
         }
 
         if (!session.IsInitialized)
         {
             return new HostNextActionHint(
                 HostNextRecommendedAction.InitializeSession,
-                "Step 1",
-                "Click Initialize to start the session.");
+                "1단계",
+                "세션 시작 버튼을 눌러 주세요.");
         }
 
         if (!validation.AvatarPathValid)
         {
             return new HostNextActionHint(
                 HostNextRecommendedAction.SelectAvatarFile,
-                "Step 2",
-                "Select a valid avatar file path.");
+                "2단계",
+                "올바른 아바타 파일 경로를 선택해 주세요.");
         }
 
         if (!session.ActiveAvatarHandle.HasValue)
         {
             return new HostNextActionHint(
                 HostNextRecommendedAction.LoadAvatar,
-                "Step 2",
-                "Click Load to import the selected avatar.");
+                "2단계",
+                "선택한 아바타를 불러와 주세요.");
         }
 
         if (!outputs.SpoutActive && !outputs.OscActive)
         {
             return new HostNextActionHint(
                 HostNextRecommendedAction.StartOutputs,
-                "Step 3",
-                "Start Spout or OSC output for broadcast.");
+                "3단계",
+                "출력을 시작해 방송 준비를 완료해 주세요.");
         }
 
         return new HostNextActionHint(
             HostNextRecommendedAction.Ready,
-            "Ready",
-            "Broadcast pipeline is running.");
+            "준비 완료",
+            "방송 출력이 정상 실행 중입니다.");
     }
 
     public static HostOnboardingState BuildOnboardingState(
@@ -144,12 +144,12 @@ public static class HostUiPolicy
             return new HostOnboardingState(
                 HostOnboardingStep.Blocked,
                 HostPrimaryActionKind.None,
-                "Working",
-                $"{operation.CurrentOperation} in progress.",
-                "Current operation must finish before the next step.",
-                "Wait for completion",
-                "Current task is running.",
-                "Operation in progress.",
+                "잠시만 기다려 주세요",
+                $"{operation.CurrentOperation} 작업을 진행 중입니다.",
+                "현재 작업이 끝나야 다음 단계로 넘어갈 수 있어요.",
+                "작업 완료 후 다시 시도",
+                "현재 작업을 진행 중입니다.",
+                "작업 진행 중",
                 HostActionability.Blocked);
         }
 
@@ -158,11 +158,11 @@ public static class HostUiPolicy
             return new HostOnboardingState(
                 HostOnboardingStep.Initialize,
                 HostPrimaryActionKind.InitializeSession,
-                "Step 1. Start Session",
-                "Click Start Session to prepare camera and output runtime.",
+                "1단계. 세션 시작",
+                "먼저 세션 시작 버튼을 눌러 준비를 완료해 주세요.",
                 string.Empty,
                 string.Empty,
-                "Start session to unlock avatar import.",
+                "세션을 시작하면 아바타 불러오기가 열립니다.",
                 string.Empty,
                 HostActionability.Immediate);
         }
@@ -172,12 +172,12 @@ public static class HostUiPolicy
             return new HostOnboardingState(
                 HostOnboardingStep.LoadAvatar,
                 HostPrimaryActionKind.None,
-                "Step 2. Load Avatar",
-                "Pick a valid avatar file, then continue.",
+                "2단계. 아바타 불러오기",
+                "올바른 아바타 파일을 선택해 주세요.",
                 validation.AvatarPathError,
-                "Select a valid avatar file",
-                "Fix avatar path before loading.",
-                "Avatar path invalid.",
+                "정상 파일 경로 선택",
+                "경로를 수정한 뒤 다시 불러오세요.",
+                "아바타 경로를 확인해 주세요.",
                 HostActionability.Blocked);
         }
 
@@ -186,11 +186,11 @@ public static class HostUiPolicy
             return new HostOnboardingState(
                 HostOnboardingStep.LoadAvatar,
                 HostPrimaryActionKind.LoadAvatar,
-                "Step 2. Load Avatar",
-                "Click Load Avatar to import the selected file.",
+                "2단계. 아바타 불러오기",
+                "선택한 파일을 불러와 주세요.",
                 string.Empty,
                 string.Empty,
-                "Load the selected avatar file.",
+                "아바타를 불러오면 마지막 단계로 이동합니다.",
                 string.Empty,
                 HostActionability.Immediate);
         }
@@ -200,11 +200,11 @@ public static class HostUiPolicy
             return new HostOnboardingState(
                 HostOnboardingStep.StartOutput,
                 HostPrimaryActionKind.StartOutput,
-                "Step 3. Start Broadcast",
-                "Click Start Output. The app tries Spout first, then OSC if needed.",
+                "3단계. 출력 시작",
+                "출력 시작을 누르면 방송 출력 준비가 완료됩니다.",
                 string.Empty,
                 string.Empty,
-                "Start output to complete onboarding.",
+                "출력을 시작하면 준비가 완료됩니다.",
                 string.Empty,
                 HostActionability.Immediate);
         }
@@ -212,11 +212,11 @@ public static class HostUiPolicy
         return new HostOnboardingState(
             HostOnboardingStep.Ready,
             HostPrimaryActionKind.None,
-            "Ready",
-            "Broadcast output is running.",
+            "준비 완료",
+            "지금 바로 사용할 수 있어요.",
             string.Empty,
             string.Empty,
-            "Onboarding complete.",
+            "초기 설정이 모두 완료되었습니다.",
             string.Empty,
             HostActionability.Immediate);
     }

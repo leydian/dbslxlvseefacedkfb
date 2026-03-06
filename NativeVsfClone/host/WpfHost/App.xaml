@@ -5,33 +5,33 @@
         <FontFamily x:Key="Font.Body">Segoe UI Variable Text</FontFamily>
         <FontFamily x:Key="Font.Display">Segoe UI Variable Display</FontFamily>
 
-        <SolidColorBrush x:Key="Color.Surface" Color="#F6F8FC"/>
-        <SolidColorBrush x:Key="Color.SurfaceAlt" Color="#EEF2F8"/>
-        <SolidColorBrush x:Key="Color.Card" Color="#FBFCFF"/>
-        <SolidColorBrush x:Key="Color.CardStrong" Color="#FFFFFFFF"/>
-        <SolidColorBrush x:Key="Color.Border" Color="#CFD9E6"/>
-        <SolidColorBrush x:Key="Color.BorderStrong" Color="#B4C4D7"/>
-        <SolidColorBrush x:Key="Color.Text" Color="#1C2530"/>
-        <SolidColorBrush x:Key="Color.TextMuted" Color="#5A6878"/>
-        <SolidColorBrush x:Key="Color.TextSubtle" Color="#728196"/>
-        <SolidColorBrush x:Key="Color.Primary" Color="#0D75C8"/>
-        <SolidColorBrush x:Key="Color.PrimaryHover" Color="#0B68B0"/>
-        <SolidColorBrush x:Key="Color.PrimaryPressed" Color="#095389"/>
+        <SolidColorBrush x:Key="Color.Surface" Color="#F2F6FC"/>
+        <SolidColorBrush x:Key="Color.SurfaceAlt" Color="#EAF1FA"/>
+        <SolidColorBrush x:Key="Color.Card" Color="#F8FBFF"/>
+        <SolidColorBrush x:Key="Color.CardStrong" Color="#FEFFFF"/>
+        <SolidColorBrush x:Key="Color.Border" Color="#C7D7EB"/>
+        <SolidColorBrush x:Key="Color.BorderStrong" Color="#AFC4DE"/>
+        <SolidColorBrush x:Key="Color.Text" Color="#1A2736"/>
+        <SolidColorBrush x:Key="Color.TextMuted" Color="#53687D"/>
+        <SolidColorBrush x:Key="Color.TextSubtle" Color="#6D8297"/>
+        <SolidColorBrush x:Key="Color.Primary" Color="#0B6FC2"/>
+        <SolidColorBrush x:Key="Color.PrimaryHover" Color="#0A62AB"/>
+        <SolidColorBrush x:Key="Color.PrimaryPressed" Color="#084F89"/>
         <SolidColorBrush x:Key="Color.PrimaryText" Color="#FFFFFF"/>
         <SolidColorBrush x:Key="Color.Success" Color="#1E8A54"/>
         <SolidColorBrush x:Key="Color.Warning" Color="#A56B1A"/>
         <SolidColorBrush x:Key="Color.Error" Color="#AD3B3B"/>
         <SolidColorBrush x:Key="Color.TabBg" Color="#F0F4FA"/>
         <SolidColorBrush x:Key="Color.TabActive" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="Color.NavRailBg" Color="#EEF3F9"/>
-        <SolidColorBrush x:Key="Color.NavItemBg" Color="#F8FBFF"/>
+        <SolidColorBrush x:Key="Color.NavRailBg" Color="#E8F0FA"/>
+        <SolidColorBrush x:Key="Color.NavItemBg" Color="#F4F9FF"/>
         <SolidColorBrush x:Key="Color.NavItemActiveBg" Color="#FFFFFF"/>
         <SolidColorBrush x:Key="Color.NavItemText" Color="#3A4E63"/>
         <SolidColorBrush x:Key="Color.NavItemActiveText" Color="#1C2530"/>
-        <SolidColorBrush x:Key="Color.OnboardingBarBg" Color="#EAF4FF"/>
-        <SolidColorBrush x:Key="Color.OnboardingBarBorder" Color="#BCD8F3"/>
-        <SolidColorBrush x:Key="Color.OnboardingBarTitle" Color="#11395B"/>
-        <SolidColorBrush x:Key="Color.OnboardingBarBody" Color="#2A4A67"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarBg" Color="#E4F1FF"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarBorder" Color="#B2D1F0"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarTitle" Color="#0F365B"/>
+        <SolidColorBrush x:Key="Color.OnboardingBarBody" Color="#244B71"/>
         <SolidColorBrush x:Key="Color.BadgeNeutralBg" Color="#EFF3F9"/>
         <SolidColorBrush x:Key="Color.BadgeNeutralText" Color="#43586E"/>
         <SolidColorBrush x:Key="Color.RenderShellBg" Color="#182639"/>
@@ -40,12 +40,12 @@
         <SolidColorBrush x:Key="Color.StatusBarBorder" Color="#546E88"/>
         <SolidColorBrush x:Key="Color.StatusBarLabel" Color="#D7E5F3"/>
         <SolidColorBrush x:Key="Color.StatusBarValue" Color="#F4FAFF"/>
-        <SolidColorBrush x:Key="Color.PanelInfoBg" Color="#F3F7FD"/>
-        <SolidColorBrush x:Key="Color.PanelInfoBorder" Color="#D7E3F2"/>
-        <SolidColorBrush x:Key="Color.PanelInfoText" Color="#35516B"/>
-        <SolidColorBrush x:Key="Color.PanelInfoAltBg" Color="#EDF3FA"/>
-        <SolidColorBrush x:Key="Color.PanelInfoAltBorder" Color="#CAD8E8"/>
-        <SolidColorBrush x:Key="Color.PanelInfoAltText" Color="#243548"/>
+        <SolidColorBrush x:Key="Color.PanelInfoBg" Color="#EEF5FE"/>
+        <SolidColorBrush x:Key="Color.PanelInfoBorder" Color="#D0E0F2"/>
+        <SolidColorBrush x:Key="Color.PanelInfoText" Color="#2F4F6F"/>
+        <SolidColorBrush x:Key="Color.PanelInfoAltBg" Color="#E8F0FA"/>
+        <SolidColorBrush x:Key="Color.PanelInfoAltBorder" Color="#C4D5EA"/>
+        <SolidColorBrush x:Key="Color.PanelInfoAltText" Color="#223A55"/>
         <SolidColorBrush x:Key="Color.PanelSuccessBg" Color="#EEF6EF"/>
         <SolidColorBrush x:Key="Color.PanelSuccessBorder" Color="#BFDCC2"/>
         <SolidColorBrush x:Key="Color.PanelSuccessTitle" Color="#1E5130"/>

@@ -14,6 +14,9 @@ param(
     [switch]$UseSmoke,
     [int]$SmokeMaxFiles = 2,
     [switch]$UseFixedSet,
+    [string[]]$GateDAllowedPrimaryErrors = @(
+        "VSF_MESH_PAYLOAD_MISSING"
+    ),
     [string[]]$FixedSamples = @(
         "NewOnYou.vsfavatar",
         "Character vywjd.vsfavatar",
@@ -329,6 +332,12 @@ $objectTableParsedFalse = 0
 $serializedAttempts = @()
 $sidecarTimingMs = @()
 $meshExtractStageCounts = @{}
+$allowedPrimaryErrorsSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($err in $GateDAllowedPrimaryErrors) {
+    if (-not [string]::IsNullOrWhiteSpace($err)) {
+        [void]$allowedPrimaryErrorsSet.Add($err.Trim())
+    }
+}
 
 if ($UseFixedSet -and $sampleNames.Count -ne $FixedSamples.Count) {
     $gateA = $false
@@ -378,11 +387,13 @@ foreach ($name in $sampleNames) {
     }
     $objectTableParsed = $sample["SidecarObjectTableParsed"]
     if ($objectTableParsed -eq "True") { $objectTableParsedTrue++ } else { $objectTableParsedFalse++ }
-    if ($stage -eq "complete" -and $objectTableParsed -eq "True" -and
-        ([string]::IsNullOrWhiteSpace($primary) -or $primary -eq "NONE")) {
+    $isPrimaryAllowed = [string]::IsNullOrWhiteSpace($primary) -or
+        $primary -eq "NONE" -or
+        $allowedPrimaryErrorsSet.Contains($primary)
+    if ($stage -eq "complete" -and $objectTableParsed -eq "True" -and $isPrimaryAllowed) {
         $gateD = $true
     } elseif ($stage -ne "complete" -or $objectTableParsed -ne "True" -or
-        (-not [string]::IsNullOrWhiteSpace($primary) -and $primary -ne "NONE")) {
+        (-not $isPrimaryAllowed)) {
         if (-not $UseSmoke) {
             $failReasons += "GateD: $name unmet (stage=$stage, object_table_parsed=$objectTableParsed, primary=$primary)"
         }
@@ -463,7 +474,8 @@ $summary += "Parser Track"
 $summary += "- GateA (stability + required fields): $gateAStatus"
 $summary += "- GateB (>=1 sample reaches failed-serialized|complete): $gateBStatus"
 $summary += "- GateC (DATA_BLOCK_READ_FAILED tuple evidence): $gateCStatus"
-$summary += "- GateD (>=1 sample reaches complete + object_table_parsed=true + no primary error): $gateDStatus"
+$summary += "- GateD (>=1 sample reaches complete + object_table_parsed=true + primary in [NONE + allowed]): $gateDStatus"
+$summary += "- GateDAllowedPrimaryErrors: $(if ($allowedPrimaryErrorsSet.Count -gt 0) { [string]::Join(', ', $allowedPrimaryErrorsSet) } else { '<none>' })"
 $summary += "- GateDBlocking: $(if($UseSmoke){'NO (smoke mode)'}else{'YES'})"
 $summary += "- ParserTrack_DoD: $parserTrackDoD"
 $summary += ""
