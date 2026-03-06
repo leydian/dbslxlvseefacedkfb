@@ -293,3 +293,30 @@ This update resolves a set of XAV2 runtime parity regressions observed with VRM-
 Operational note:
 - Runtime DLL replacement alone does not rewrite existing `.xav2` payloads.
 - To pick up typed schema normalization fixes, re-export VRM to XAV2 with updated `vrm_to_xav2`.
+
+## 2026-03-06 Follow-up Stabilization (Runtime)
+
+Additional runtime hardening was applied after parity fixes to address legacy/edge XAV2 behavior:
+
+- VRM-derived XAV2 static skinning policy:
+  - For `sourceExt=.vrm`, static skinning is disabled in runtime (`bind-pose` rendering preferred).
+  - Reason: mixed per-mesh static skinning outcomes can desynchronize face/hair/body placement.
+  - Expected warning: `SKINNING_STATIC_DISABLED`.
+
+- Legacy skinning convention fallback:
+  - For legacy XAV2 without `skinSpaceBasis`, runtime convention hint prefers VRM-origin defaults
+    (`dx_row_major` when `sourceExt=.vrm`) instead of forcing glTF path.
+
+- Outlier mesh handling consistency:
+  - Meshes excluded by preview bounds filter are now also excluded in draw phase.
+  - Added detached cluster filtering using robust center statistics (median-based) to suppress
+    floating accessory clusters that corrupt framing.
+  - Related warning codes:
+    - `XAV2_BOUNDS_OUTLIER_DRAW_SKIPPED`
+    - `XAV2_DETACHED_MESH_OUTLIER_SKIPPED`
+    - `XAV2_DETACHED_CLUSTER_SKIPPED`
+
+- AutoFit bust framing stability:
+  - `focus_y` in `AutoFitBust` now blends bounds-derived and robust-center-derived anchors for XAV2,
+    especially when outlier meshes are excluded.
+  - Goal: reduce "avatar sunk into ground" framing after outlier filtering.

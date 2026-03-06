@@ -2534,6 +2534,11 @@ bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
     // Auto mode: enable XAV2 static skinning when payloads are present.
     // Per-mesh collapse guards will reject unsafe posed output.
     if (avatar_pkg.source_type == AvatarSourceType::Xav2) {
+        if (avatar_pkg.source_ext == ".vrm") {
+            // Keep VRM-derived XAV2 on bind-pose vertices for now.
+            // Mixed per-mesh static skinning outcomes can desync face/hair/body alignment.
+            return false;
+        }
         return !avatar_pkg.skin_payloads.empty() && !avatar_pkg.skeleton_payloads.empty();
     }
     return false;
@@ -3473,7 +3478,12 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         avatar_skinning_convention_locked = true;
     }
     if (is_legacy_xav2_without_basis && !ShouldAutoDetectXav2SkinningConvention()) {
-        avatar_skinning_convention = SkinningMatrixConvention::GltfColumnMajor;
+        // Legacy files may omit basis metadata; prefer VRM-origin defaults.
+        if (avatar_pkg.source_ext == ".vrm") {
+            avatar_skinning_convention = SkinningMatrixConvention::DxRowMajor;
+        } else {
+            avatar_skinning_convention = SkinningMatrixConvention::GltfColumnMajor;
+        }
         avatar_skinning_convention_locked = true;
     }
     bool avatar_skinning_convention_ambiguous = false;
@@ -3755,7 +3765,10 @@ bool ApplyArmPoseToAvatar(
         arm_pose_convention_hint == SkinningMatrixConvention::Unknown &&
         NormalizeRefKey(avatar_pkg.skin_space_basis) != "mesh_local";
     if (legacy_xav2_unknown_basis && !ShouldAutoDetectXav2SkinningConvention()) {
-        arm_pose_convention_hint = SkinningMatrixConvention::GltfColumnMajor;
+        arm_pose_convention_hint =
+            avatar_pkg.source_ext == ".vrm"
+                ? SkinningMatrixConvention::DxRowMajor
+                : SkinningMatrixConvention::GltfColumnMajor;
     }
     if (avatar_pkg.source_type == AvatarSourceType::Xav2 &&
         arm_pose_convention_hint == SkinningMatrixConvention::Unknown &&
@@ -5815,10 +5828,58 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cx = (avatar_bmin.x + avatar_bmax.x) * 0.5f;
         const float cy = (avatar_bmin.y + avatar_bmax.y) * 0.5f;
         const float cz = (avatar_bmin.z + avatar_bmax.z) * 0.5f;
-        const float focus_y =
-            (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
-                ? (avatar_bmin.y + safe_extent_y * (0.68f + quality.headroom * 0.2f))
-                : cy;
+        std::vector<float> robust_center_x_samples;
+        std::vector<float> robust_center_y_samples;
+        std::vector<float> robust_center_z_samples;
+        robust_center_x_samples.reserve(mesh_it->second.size());
+        robust_center_y_samples.reserve(mesh_it->second.size());
+        robust_center_z_samples.reserve(mesh_it->second.size());
+        for (const auto& mesh : mesh_it->second) {
+            if (std::isfinite(mesh.center.x) && std::isfinite(mesh.center.y) && std::isfinite(mesh.center.z)) {
+                robust_center_x_samples.push_back(mesh.center.x);
+                robust_center_y_samples.push_back(mesh.center.y);
+                robust_center_z_samples.push_back(mesh.center.z);
+            }
+        }
+        auto median_of = [](std::vector<float>& values, float fallback) {
+            if (values.empty()) {
+                return fallback;
+            }
+            const std::size_t mid = values.size() / 2U;
+            std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(mid), values.end());
+            return values[mid];
+        };
+        const float robust_cx = median_of(robust_center_x_samples, cx);
+        const float robust_cy = median_of(robust_center_y_samples, cy);
+        const float robust_cz = median_of(robust_center_z_samples, cz);
+        std::vector<float> center_dist_samples;
+        center_dist_samples.reserve(mesh_it->second.size());
+        for (const auto& mesh : mesh_it->second) {
+            const float dx = mesh.center.x - robust_cx;
+            const float dy = mesh.center.y - robust_cy;
+            const float dz = mesh.center.z - robust_cz;
+            const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (std::isfinite(dist)) {
+                center_dist_samples.push_back(dist);
+            }
+        }
+        const float median_center_dist = median_of(center_dist_samples, 0.0f);
+        float bust_anchor = 0.68f + quality.headroom * 0.2f;
+        if (it->second.source_type == AvatarSourceType::Xav2 && excluded_bounds_mesh_count > 0U) {
+            bust_anchor = std::min(bust_anchor, 0.60f + quality.headroom * 0.15f);
+        }
+        float focus_y = cy;
+        if (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST) {
+            const float focus_from_bounds = avatar_bmin.y + safe_extent_y * bust_anchor;
+            // Robust center keeps framing stable when outlier meshes are excluded.
+            const float focus_from_cluster = robust_cy - safe_extent_y * 0.03f;
+            if (it->second.source_type == AvatarSourceType::Xav2) {
+                const float blend = excluded_bounds_mesh_count > 0U ? 0.70f : 0.45f;
+                focus_y = focus_from_bounds * (1.0f - blend) + focus_from_cluster * blend;
+            } else {
+                focus_y = focus_from_bounds;
+            }
+        }
         // Keep preview centered even if multiple handles are present.
         // Host UI currently operates in single-avatar mode, and slot offsets
         // can push the visible avatar out of frame after reload/recovery paths.
@@ -5876,9 +5937,17 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         ++avatar_slot;
         std::uint32_t material_index_oob_count = 0U;
         std::uint32_t mesh_extent_outlier_skipped_count = 0U;
+        std::uint32_t mesh_detached_outlier_skipped_count = 0U;
+        std::uint32_t mesh_detached_cluster_skipped_count = 0U;
+        std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
+        std::vector<std::string> detached_mesh_names;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
+            if (mesh_index < preview_bounds_excluded.size() && preview_bounds_excluded[mesh_index] != 0U) {
+                ++mesh_bounds_outlier_draw_skipped_count;
+                continue;
+            }
             if (it->second.source_type == AvatarSourceType::Xav2) {
                 const float ex = std::max(mesh.bounds_max.x - mesh.bounds_min.x, 0.0f);
                 const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
@@ -5886,6 +5955,42 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 const float emax = std::max(ex, std::max(ey, ez));
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
                     ++mesh_extent_outlier_skipped_count;
+                    continue;
+                }
+                const float avatar_extent = std::max(safe_extent_x, std::max(safe_extent_y, safe_extent_z));
+                const float dcx = mesh.center.x - robust_cx;
+                const float dcy = mesh.center.y - robust_cy;
+                const float dcz = mesh.center.z - robust_cz;
+                const float robust_dist = std::sqrt(dcx * dcx + dcy * dcy + dcz * dcz);
+                const float detached_cluster_threshold =
+                    std::max(0.8f, median_center_dist * 3.0f);
+                const float detached_cluster_size_cap =
+                    std::max(0.5f, median_extent * 2.0f);
+                if (std::isfinite(robust_dist) &&
+                    robust_dist > detached_cluster_threshold &&
+                    emax <= detached_cluster_size_cap) {
+                    ++mesh_detached_cluster_skipped_count;
+                    if (detached_mesh_names.size() < 6U) {
+                        detached_mesh_names.push_back(mesh.mesh_name.empty() ? std::to_string(mesh_index) : mesh.mesh_name);
+                    }
+                    continue;
+                }
+                const float dx = mesh.center.x - cx;
+                const float dy = mesh.center.y - cy;
+                const float dz = mesh.center.z - cz;
+                const float center_dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+                const bool detached_small_piece =
+                    std::isfinite(center_dist) &&
+                    std::isfinite(avatar_extent) &&
+                    avatar_extent > 0.05f &&
+                    center_dist > (avatar_extent * 5.5f) &&
+                    emax < (avatar_extent * 0.45f);
+                if (detached_small_piece) {
+                    ++mesh_detached_outlier_skipped_count;
+                    if (detached_mesh_names.size() < 6U) {
+                        detached_mesh_names.push_back(mesh.mesh_name.empty() ? std::to_string(mesh_index) : mesh.mesh_name);
+                    }
+                    continue;
                 }
             }
             std::size_t material_index = std::numeric_limits<std::size_t>::max();
@@ -5967,6 +6072,40 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_MESH_EXTENT_OUTLIER_SKIPPED");
             }
         }
+        if (mesh_detached_outlier_skipped_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_DETACHED_MESH_OUTLIER_SKIPPED: meshes=" << mesh_detached_outlier_skipped_count;
+                if (!detached_mesh_names.empty()) {
+                    warning << ", names=";
+                    for (std::size_t i = 0U; i < detached_mesh_names.size(); ++i) {
+                        if (i > 0U) {
+                            warning << "|";
+                        }
+                        warning << detached_mesh_names[i];
+                    }
+                }
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_DETACHED_MESH_OUTLIER_SKIPPED");
+            }
+        }
+        if (mesh_detached_cluster_skipped_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_DETACHED_CLUSTER_SKIPPED: meshes=" << mesh_detached_cluster_skipped_count;
+                if (!detached_mesh_names.empty()) {
+                    warning << ", names=";
+                    for (std::size_t i = 0U; i < detached_mesh_names.size(); ++i) {
+                        if (i > 0U) {
+                            warning << "|";
+                        }
+                        warning << detached_mesh_names[i];
+                    }
+                }
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_DETACHED_CLUSTER_SKIPPED");
+            }
+        }
         if (bounds_outlier_excluded_count > 0U) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
@@ -5982,6 +6121,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                     }
                 }
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_BOUNDS_OUTLIER_EXCLUDED");
+            }
+        }
+        if (mesh_bounds_outlier_draw_skipped_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_BOUNDS_OUTLIER_DRAW_SKIPPED: meshes=" << mesh_bounds_outlier_draw_skipped_count;
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_BOUNDS_OUTLIER_DRAW_SKIPPED");
             }
         }
     }
@@ -6789,6 +6936,74 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
         vsfclone::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "render", "unknown avatar handle", true);
         return NC_ERROR_INVALID_ARGUMENT;
     }
+    const char* parser_mode_raw = std::getenv("VSF_PARSER_MODE");
+    const char* parser_mode = (parser_mode_raw != nullptr && *parser_mode_raw != '\0') ? parser_mode_raw : "sidecar";
+    std::string mesh_extract_stage;
+    for (const auto& warning : it->second.warnings) {
+        constexpr const char* kMeshStagePrefix = "W_MESH_EXTRACT_STAGE:";
+        const std::string prefix(kMeshStagePrefix);
+        if (warning.rfind(prefix, 0U) == 0U) {
+            mesh_extract_stage = warning.substr(prefix.size());
+            while (!mesh_extract_stage.empty() &&
+                   std::isspace(static_cast<unsigned char>(mesh_extract_stage.front())) != 0) {
+                mesh_extract_stage.erase(mesh_extract_stage.begin());
+            }
+            while (!mesh_extract_stage.empty() &&
+                   std::isspace(static_cast<unsigned char>(mesh_extract_stage.back())) != 0) {
+                mesh_extract_stage.pop_back();
+            }
+            break;
+        }
+    }
+    const char* allow_placeholder_raw = std::getenv("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
+    bool allow_vsf_placeholder_render = false;
+    if (allow_placeholder_raw != nullptr) {
+        std::string value(allow_placeholder_raw);
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        allow_vsf_placeholder_render = value == "1" || value == "true" || value == "yes" || value == "on";
+    }
+    bool placeholder_payload_only = false;
+    if (it->second.source_type == vsfclone::avatar::AvatarSourceType::VsfAvatar &&
+        !it->second.mesh_payloads.empty()) {
+        bool all_placeholder = true;
+        for (const auto& mesh : it->second.mesh_payloads) {
+            if (mesh.name != "VSF_PLACEHOLDER_QUAD") {
+                all_placeholder = false;
+                break;
+            }
+        }
+        bool has_placeholder_warning_code = false;
+        for (const auto& code : it->second.warning_codes) {
+            std::string lowered = code;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (lowered == "vsf_placeholder_render_payload") {
+                has_placeholder_warning_code = true;
+                break;
+            }
+        }
+        placeholder_payload_only = all_placeholder || has_placeholder_warning_code;
+    }
+    if (placeholder_payload_only && !allow_vsf_placeholder_render) {
+        std::ostringstream detail;
+        detail << "vsfavatar placeholder payload is preview-only; output render blocked"
+               << " (format=vsfavatar"
+               << ", parser_mode=" << parser_mode
+               << ", parser_stage=" << (it->second.parser_stage.empty() ? "unknown" : it->second.parser_stage)
+               << ", primary_error=" << (it->second.primary_error_code.empty() ? "NONE" : it->second.primary_error_code)
+               << ", mesh_extract_stage=" << (mesh_extract_stage.empty() ? "unknown" : mesh_extract_stage)
+               << ", mesh_payload_count=" << it->second.mesh_payloads.size()
+               << ")";
+        vsfclone::nativecore::SetError(
+            NC_ERROR_UNSUPPORTED,
+            "render",
+            detail.str(),
+            true);
+        return NC_ERROR_UNSUPPORTED;
+    }
     if (it->second.mesh_payloads.empty()) {
         const char* format_name = "unknown";
         switch (it->second.source_type) {
@@ -6813,8 +7028,10 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
         std::ostringstream detail;
         detail << "avatar has no renderable mesh payloads"
                << " (format=" << format_name
+               << ", parser_mode=" << parser_mode
                << ", parser_stage=" << (it->second.parser_stage.empty() ? "unknown" : it->second.parser_stage)
                << ", primary_error=" << (it->second.primary_error_code.empty() ? "NONE" : it->second.primary_error_code)
+               << ", mesh_extract_stage=" << (mesh_extract_stage.empty() ? "unknown" : mesh_extract_stage)
                << ", mesh_count=" << it->second.meshes.size()
                << ", material_count=" << it->second.materials.size()
                << ")";
