@@ -2,6 +2,39 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking UDP dual-stack bind fallback + fallback-lockdown documentation
+
+### Summary
+
+Documented and finalized tracking listener stabilization changes that make UDP bind behavior explicit (`udp6-dual` -> `udp4` fallback) and prevent misleading hybrid fallback state when webcam runtime is unavailable.
+
+### Changed
+
+- Runtime tracking implementation:
+  - `host/HostCore/TrackingInputService.cs`
+  - added `CreateUdpListener(...)` dual-stack bind strategy with IPv4 fallback
+  - surfaced bind mode in tracking status (`udp6-dual`, `udp4`)
+  - aligned startup/fallback status messaging to include bind mode
+  - tightened webcam-runtime-unavailable branch to lock source contract to iFacial-only mode
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_udp_dualstack_bind_and_fallback_lockdown.md`
+- Updated weekly index/summary:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - tracking report count updated to `10`
+
+### Verification
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release --nologo`: PASS
+- `dotnet build .\host\WpfHost\WpfHost.csproj -c Release --nologo`: PASS
+- `tools/tracking_parser_fuzz_gate.ps1`: PASS (`Overall: PASS`)
+- WinUI blocker recheck remains unchanged:
+  - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999Count: 2`
+- release dashboard remains:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+
 ## 2026-03-06 - Release execution recheck documentation (WinUI/Unity/KPI status refresh)
 
 ### Summary

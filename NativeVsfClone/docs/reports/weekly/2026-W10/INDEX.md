@@ -102,6 +102,7 @@ Report list for this week.
 - [2026-03-06_tracking_mediapipe_start_failed_user_env_pin_fix.md](./2026-03-06_tracking_mediapipe_start_failed_user_env_pin_fix.md)
 - [2026-03-06_tracking_mediapipe_no_frame_root_cause_and_venv_rebuild.md](./2026-03-06_tracking_mediapipe_no_frame_root_cause_and_venv_rebuild.md)
 - [2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md](./2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md)
+- [2026-03-06_tracking_udp_dualstack_bind_and_fallback_lockdown.md](./2026-03-06_tracking_udp_dualstack_bind_and_fallback_lockdown.md)
 - [2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md](./2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md)
 - [2026-03-06_tracking_strict_runtime_venv_runbook.md](./2026-03-06_tracking_strict_runtime_venv_runbook.md)
 - [2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md](./2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md)

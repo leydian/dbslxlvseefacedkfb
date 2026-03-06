@@ -18,7 +18,7 @@
 - `avatar`: 2 reports
 - `platform`: 3 reports
 - `session`: 2 reports
-- `tracking`: 9 reports
+- `tracking`: 10 reports
 - `webcam`: 3 reports
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
@@ -87,6 +87,7 @@
 - Newly added: review `2026-03-06_tracking_mediapipe_start_failed_user_env_pin_fix.md` for machine-level `VSFCLONE_MEDIAPIPE_PYTHON` pinning procedure, sidecar `code=2` triage path, and sanity validation evidence (`Overall: PASS`).
 - Newly added: review `2026-03-06_tracking_mediapipe_no_frame_root_cause_and_venv_rebuild.md` for `TRACKING_MEDIAPIPE_NO_FRAME` 실원인(`mp.solutions` 미존재) 분석, Python 3.11 + clean venv 재구성 절차, MediaPipe 호환 버전 핀다운, 그리고 sidecar 첫 프레임 JSON 배출 검증.
 - Newly added: review `2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md` for local IPv4 operator guidance in tracking UI, persistent hide/show preference, and WPF/WinUI parity behavior.
+- Newly added: review `2026-03-06_tracking_udp_dualstack_bind_and_fallback_lockdown.md` for UDP dual-stack bind fallback policy, bind-mode diagnostics visibility, and webcam-runtime-unavailable hybrid fallback lockdown behavior.
 - Newly added: review `2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md` for strict tracking-contract gating (HostE2E/Fuzz/MediaPipe sanity), explicit MediaPipe Python pinning policy, and release dashboard candidate decision alignment.
 - Newly added: review `2026-03-06_tracking_strict_runtime_venv_runbook.md` for project-local venv pinning standard, strict readiness wrapper execution flow, and failure-code triage runbook.
 - Newly added: review `2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md` for strict tracking runtime activation steps, fuzz-gate TFM compatibility fix, and tracking-contract PASS verification evidence.

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -44,6 +45,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private double _latencyAvgMs;
     private double _latencyP95Ms;
     private string _switchBlockedReason = string.Empty;
+    private string _udpBindMode = "unknown";
 
     private NcTrackingFrame _rawFrame = BuildNeutralFrame();
     private NcTrackingFrame _smoothedFrame = BuildNeutralFrame();
@@ -192,7 +194,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
             try
             {
-                _udpClient = new UdpClient(_options.ListenPort);
+                _udpClient = CreateUdpListener(_options.ListenPort, out _udpBindMode);
             }
             catch (Exception ex)
             {
@@ -214,8 +216,8 @@ public sealed class TrackingInputService : ITrackingInputService
             {
                 IsActive = true,
                 SourceType = _options.SourceType,
-                SourceStatus = $"udp-listening:{_options.ListenPort}",
-                StatusMessage = $"listening:{_options.ListenPort}",
+                SourceStatus = $"udp-listening:{_options.ListenPort}:{_udpBindMode}",
+                StatusMessage = $"listening:{_options.ListenPort} ({_udpBindMode})",
                 ActiveSource = "ifacial",
                 ConfidenceSummary = BuildConfidenceSummary(),
             };
@@ -225,7 +227,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 _diagnostics = _diagnostics with
                 {
                     SourceStatus = "ifacial-active",
-                    StatusMessage = $"listening:{_options.ListenPort}",
+                    StatusMessage = $"listening:{_options.ListenPort} ({_udpBindMode})",
                 };
                 return NcResultCode.Ok;
             }
@@ -239,22 +241,69 @@ public sealed class TrackingInputService : ITrackingInputService
                 {
                     IsActive = true,
                     SourceStatus = "ifacial-active:webcam-fallback-ready",
-                    StatusMessage = $"listening:{_options.ListenPort}; fallback=webcam-ready",
+                    StatusMessage = $"listening:{_options.ListenPort} ({_udpBindMode}); fallback=webcam-ready",
                 };
             }
             else
             {
                 _webcamRuntimeUnavailable = true;
+                _options = _options with
+                {
+                    SourceType = TrackingSourceType.OscIfacial,
+                    SourceLockMode = TrackingSourceLockMode.IfacialLocked,
+                    AutoStabilityTuningEnabled = false,
+                };
                 _diagnostics = _diagnostics with
                 {
                     IsActive = true,
-                    SourceStatus = "ifacial-active:webcam-fallback-unavailable",
-                    StatusMessage = $"listening:{_options.ListenPort}; fallback=webcam-unavailable",
-                    LastErrorCode = "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE",
+                    SourceType = TrackingSourceType.OscIfacial,
+                    SourceStatus = "ifacial-active:webcam-fallback-disabled",
+                    StatusMessage = $"listening:{_options.ListenPort} ({_udpBindMode}); fallback=disabled(webcam-runtime-unavailable)",
+                    LastErrorCode = string.Empty,
+                    ActiveSource = "ifacial",
                 };
             }
             return NcResultCode.Ok;
         }
+    }
+
+    private static UdpClient CreateUdpListener(ushort listenPort, out string bindMode)
+    {
+        try
+        {
+            var ipv4 = new UdpClient(AddressFamily.InterNetwork);
+            ipv4.Client.ExclusiveAddressUse = false;
+            ipv4.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            ipv4.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
+            bindMode = "udp4";
+            return ipv4;
+        }
+        catch (SocketException)
+        {
+            // Fallback to dual-stack listener for environments where IPv4-only bind fails.
+        }
+
+        try
+        {
+            var dualStack = new UdpClient(AddressFamily.InterNetworkV6);
+            dualStack.Client.ExclusiveAddressUse = false;
+            dualStack.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            dualStack.Client.DualMode = true;
+            dualStack.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenPort));
+            bindMode = "udp6-dual";
+            return dualStack;
+        }
+        catch (SocketException)
+        {
+            // Fall through to final bind attempt.
+        }
+
+        var finalIpv4 = new UdpClient(AddressFamily.InterNetwork);
+        finalIpv4.Client.ExclusiveAddressUse = false;
+        finalIpv4.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        finalIpv4.Client.Bind(new IPEndPoint(IPAddress.Any, listenPort));
+        bindMode = "udp4-final";
+        return finalIpv4;
     }
 
     public NcResultCode Stop()
