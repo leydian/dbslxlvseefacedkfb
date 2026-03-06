@@ -2,6 +2,35 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Arm pose policy alignment fix (restore arm angle movement, including XAV2)
+
+### Summary
+
+Fixed a regression where arm angle sliders appeared functional in host UI but produced no visible arm movement at runtime.
+The arm pose runtime gate now follows the same static-skinning policy used by mesh build paths, and XAV2 is no longer force-skipped.
+
+### Changed
+
+- Native runtime (`src/nativecore/native_core.cpp`):
+  - `ApplyArmPoseToAvatar(...)` gate policy changed:
+    - before: required `ShouldApplyExperimentalStaticSkinning()` (effectively force-on env only)
+    - after: uses `ShouldApplyStaticSkinningForAvatarMeshes(avatar_pkg)` (auto/on/off policy alignment)
+  - removed XAV2 early-return safety bypass in arm pose apply path:
+    - before: XAV2 arm pose always skipped
+    - after: XAV2 arm pose applies when static-skinning policy is enabled and payload prerequisites are met
+  - added explicit warning contract when arm pose is skipped by policy:
+    - warning code: `ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY`
+    - warning message:
+      `W_RENDER: ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY: arm pose skipped due to static skinning policy.`
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_arm_pose_policy_alignment_fix.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+
 ## 2026-03-06 - XAV2 pass-flags fail-safe + strict tracking wrapper follow-up
 
 ### Summary
