@@ -2,6 +2,71 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking local IPv4 hint + persistent hide toggle (WPF/WinUI)
+
+### Summary
+
+Added local IPv4 operator guidance in tracking UI for iFacialMocap destination setup,
+with copy action and persistent show/hide preference across restarts.
+
+### Changed
+
+- HostCore persistence contract:
+  - `host/HostCore/PlatformFeatures.cs`
+  - added `UiShowTrackingIpv4Hint` to `SessionPersistenceModel`
+  - session model version updated to `9` and migration fallback for old versions
+- HostCore UI support APIs:
+  - `host/HostCore/HostController.MvpFeatures.cs`
+  - added `GetLocalIpv4Hint()` (recommended + full IPv4 list)
+  - added `SetUiTrackingIpv4HintVisible(bool)`
+  - added local IPv4 enumeration (active NICs, IPv4 only, dedupe)
+- WPF operator UX:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - tracking panel now includes:
+    - recommended/all IPv4 hint text
+    - `IPv4 복사` button
+    - `IPv4 안내 숨기기/보기` toggle
+  - toggle state restored from session and persisted on change
+- WinUI operator UX parity:
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - same IPv4 hint/copy/toggle behavior with persisted state restore
+- Documentation:
+  - added `docs/reports/weekly/2026-W10/2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md`
+  - updated weekly `INDEX.md` and `SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL at existing WinUI baseline (`XamlCompiler.exe` / `MSB3073`)
+
+## 2026-03-06 - Tracking error-hint contract unification + XAV2 typed-v2 edge matrix expansion
+
+### Summary
+
+Closed two release-board `IN_PROGRESS` quality items by centralizing tracking error-hint mapping into HostCore and expanding runtime typed-v2 negative/edge validation coverage for `.xav2`.
+
+### Changed
+
+- Cross-layer tracking error hint contract:
+  - added `host/HostCore/TrackingErrorHintCatalog.cs`
+  - updated `host/WpfHost/MainWindow.xaml.cs` to use shared hint resolver
+  - updated `host/WinUiHost/MainWindow.xaml.cs` to use shared hint resolver
+- `.xav2` typed-v2 runtime validation tests:
+  - updated `unity/Packages/com.vsfclone.xav2/Tests/Runtime/Xav2RuntimeLoaderTests.cs`
+  - added edge tests:
+    - typed-v2 missing required color in strict mode -> fail
+    - typed-v2 unsupported shader family with fail policy -> fail
+    - typed-v2 schema-invalid trailing bytes in strict mode -> fail
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release`: PASS
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -c Release`: FAIL at existing WinUI baseline (`WMC9999` / `XamlCompiler.exe` exit code 1)
+
 ## 2026-03-06 - Tracking webcam sidecar packaging + path resolution hardening
 
 ### Summary

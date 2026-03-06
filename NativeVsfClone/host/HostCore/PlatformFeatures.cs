@@ -86,10 +86,11 @@ public sealed record SessionPersistenceModel(
     string UiActiveSection,
     string UiThemeMode,
     bool UiDiagnosticsPinned,
+    bool UiShowTrackingIpv4Hint,
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 8,
+        Version: 9,
         AvatarPath: string.Empty,
         SpoutChannelName: "VsfClone",
         OscBindPort: 39539,
@@ -102,6 +103,7 @@ public sealed record SessionPersistenceModel(
         UiActiveSection: "getting_started",
         UiThemeMode: "light",
         UiDiagnosticsPinned: false,
+        UiShowTrackingIpv4Hint: true,
         LastUpdatedUtc: DateTimeOffset.UtcNow);
 }
 
@@ -204,7 +206,7 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 8,
+                    Version: 9,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
@@ -217,6 +219,7 @@ public sealed class SessionStateStore
                     UiActiveSection: "getting_started",
                     UiThemeMode: "light",
                     UiDiagnosticsPinned: false,
+                    UiShowTrackingIpv4Hint: true,
                     LastUpdatedUtc: legacy.LastUpdatedUtc));
             }
         }
@@ -244,14 +247,16 @@ public sealed class SessionStateStore
     {
         var mode = NormalizeUiMode(model.UiMode);
         var lastUpdated = model.LastUpdatedUtc == default ? DateTimeOffset.UtcNow : model.LastUpdatedUtc;
+        var showTrackingIpv4Hint = model.Version < 9 ? true : model.UiShowTrackingIpv4Hint;
         return model with
         {
-            Version = Math.Max(8, model.Version),
+            Version = Math.Max(9, model.Version),
             Tracking = NormalizeTracking(model.Tracking),
             RecentAvatars = NormalizeRecentAvatars(model.RecentAvatars),
             UiMode = mode,
             UiActiveSection = NormalizeUiActiveSection(model.UiActiveSection),
             UiThemeMode = NormalizeUiThemeMode(model.UiThemeMode),
+            UiShowTrackingIpv4Hint = showTrackingIpv4Hint,
             LastUpdatedUtc = lastUpdated,
         };
     }

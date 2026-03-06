@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Globalization;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Windows.Devices.Enumeration;
@@ -94,6 +96,32 @@ public sealed partial class HostController
             LastUpdatedUtc = DateTimeOffset.UtcNow,
         };
         PersistSessionSnapshot();
+    }
+
+    public void SetUiTrackingIpv4HintVisible(bool visible)
+    {
+        if (_sessionPersistence.UiShowTrackingIpv4Hint == visible)
+        {
+            return;
+        }
+
+        _sessionPersistence = _sessionPersistence with
+        {
+            UiShowTrackingIpv4Hint = visible,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+    }
+
+    public (string recommendedIpv4, string allIpv4) GetLocalIpv4Hint()
+    {
+        var candidates = EnumerateLocalIpv4Candidates();
+        if (candidates.Count == 0)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        return (candidates[0], string.Join(", ", candidates));
     }
 
     public void InitializeMvpFeatures()
@@ -1554,6 +1582,61 @@ public sealed partial class HostController
         return string.Equals(value?.Trim(), "dark", StringComparison.OrdinalIgnoreCase)
             ? "dark"
             : "light";
+    }
+
+    private static IReadOnlyList<string> EnumerateLocalIpv4Candidates()
+    {
+        var candidates = new List<string>();
+        var dedupe = new HashSet<string>(StringComparer.Ordinal);
+
+        try
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.OperationalStatus != OperationalStatus.Up ||
+                    nic.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                    nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                {
+                    continue;
+                }
+
+                IPInterfaceProperties ipProperties;
+                try
+                {
+                    ipProperties = nic.GetIPProperties();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var unicast in ipProperties.UnicastAddresses)
+                {
+                    var address = unicast.Address;
+                    if (address.AddressFamily != AddressFamily.InterNetwork)
+                    {
+                        continue;
+                    }
+
+                    var text = address.ToString();
+                    if (string.IsNullOrWhiteSpace(text) || text == "0.0.0.0")
+                    {
+                        continue;
+                    }
+
+                    if (dedupe.Add(text))
+                    {
+                        candidates.Add(text);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best effort only.
+        }
+
+        return candidates;
     }
 
     private void ApplySidecarEnvironment(SidecarSettings settings)

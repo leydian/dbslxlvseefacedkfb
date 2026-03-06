@@ -90,6 +90,7 @@ Report list for this week.
 - [2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md](./2026-03-06_tracking_threshold_ui_and_winui_failure_refinement.md)
 - [2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md](./2026-03-06_tracking_hybrid_auto_input_watchdog_and_ui_hints.md)
 - [2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md](./2026-03-06_tracking_webcam_sidecar_packaging_and_path_resolution_fix.md)
+- [2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md](./2026-03-06_tracking_ipv4_hint_toggle_wpf_winui.md)
 - [2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md](./2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md)
 - [2026-03-06_tracking_strict_runtime_venv_runbook.md](./2026-03-06_tracking_strict_runtime_venv_runbook.md)
 - [2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md](./2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md)

@@ -57,6 +57,8 @@ public sealed partial class MainWindow : Window
     private bool _syncingRecentAvatarList;
     private HostOnboardingStep? _lastTrackedOnboardingStep;
     private string _recoveryHint = string.Empty;
+    private bool _showTrackingIpv4Hint = true;
+    private string _recommendedTrackingIpv4 = string.Empty;
 
     public MainWindow()
     {
@@ -737,29 +739,47 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static string BuildTrackingErrorHint(string lastErrorCode)
+    private void RefreshTrackingIpv4Hint()
     {
-        if (string.IsNullOrWhiteSpace(lastErrorCode))
+        var (recommendedIpv4, allIpv4) = _controller.GetLocalIpv4Hint();
+        _recommendedTrackingIpv4 = recommendedIpv4;
+        TrackingIpv4RecommendedText.Text = string.IsNullOrWhiteSpace(recommendedIpv4)
+            ? "감지 실패 (직접 입력 필요)"
+            : recommendedIpv4;
+        TrackingIpv4AllText.Text = string.IsNullOrWhiteSpace(allIpv4)
+            ? "-"
+            : allIpv4;
+        TrackingIpv4CopyButton.IsEnabled = !string.IsNullOrWhiteSpace(_recommendedTrackingIpv4);
+    }
+
+    private void ApplyTrackingIpv4HintVisibility()
+    {
+        TrackingIpv4HintPanel.Visibility = _showTrackingIpv4Hint ? Visibility.Visible : Visibility.Collapsed;
+        TrackingIpv4ToggleButton.Content = _showTrackingIpv4Hint ? "IPv4 안내 숨기기" : "IPv4 안내 보기";
+    }
+
+    private void ToggleTrackingIpv4Hint_Click(object sender, RoutedEventArgs e)
+    {
+        _showTrackingIpv4Hint = !_showTrackingIpv4Hint;
+        ApplyTrackingIpv4HintVisibility();
+        _controller.SetUiTrackingIpv4HintVisible(_showTrackingIpv4Hint);
+    }
+
+    private void CopyTrackingIpv4_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_recommendedTrackingIpv4))
         {
-            return string.Empty;
+            return;
         }
 
-        return lastErrorCode switch
-        {
-            "TRACKING_PARSE_THRESHOLD_EXCEEDED" => " hint=parse errors exceeded threshold",
-            "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
-            "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
-            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
-            "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
-            "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
-            "TRACKING_NO_ACTIVE_INPUT_SOURCE" => " hint=no active input source; start iFacial send or enable webcam runtime",
-            "TRACKING_IFACIAL_NO_PACKET" => " hint=no iFacial packet received",
-            "TRACKING_WEBCAM_RUNTIME_UNAVAILABLE" => " hint=webcam runtime unavailable (python/mediapipe not ready)",
-            "TRACKING_WEBCAM_NO_FRAME" => " hint=webcam runtime started but no frame",
-            _ when lastErrorCode.StartsWith("NC_SET_TRACKING_FRAME_", StringComparison.Ordinal) => " hint=native tracking submit failed",
-            _ when lastErrorCode.StartsWith("NC_SET_EXPRESSION_WEIGHTS_", StringComparison.Ordinal) => " hint=native expression submit failed",
-            _ => string.Empty,
-        };
+        var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        package.SetText(_recommendedTrackingIpv4);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+    }
+
+    private static string BuildTrackingErrorHint(string lastErrorCode)
+    {
+        return TrackingErrorHintCatalog.BuildHint(lastErrorCode);
     }
 
     private void CopyLogs_Click(object sender, RoutedEventArgs e)
@@ -1834,6 +1854,9 @@ public sealed partial class MainWindow : Window
         TrackingParseWarnThresholdTextBox.Text = session.Tracking.ParseErrorWarnThreshold.ToString(CultureInfo.InvariantCulture);
         TrackingDropWarnThresholdTextBox.Text = session.Tracking.DroppedPacketWarnThreshold.ToString(CultureInfo.InvariantCulture);
         TrackingUpperBodyEnabledCheckBox.IsChecked = session.Tracking.UpperBodyEnabled;
+        _showTrackingIpv4Hint = session.UiShowTrackingIpv4Hint;
+        RefreshTrackingIpv4Hint();
+        ApplyTrackingIpv4HintVisibility();
         RefreshTrackingWebcamDevices(session.Tracking.CameraDeviceKey);
 
         SidecarPathTextBox.Text = session.Sidecar.SidecarPath;

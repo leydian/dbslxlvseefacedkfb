@@ -5,7 +5,7 @@
     Title="VsfClone Host (WinUI)">
     <Grid Padding="12" MinWidth="1240" MinHeight="760">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="420"/>
+            <ColumnDefinition Width="520"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
@@ -324,6 +324,19 @@
                         <TextBlock Grid.Row="6" Grid.Column="0" Text="Upper Body" VerticalAlignment="Center" Margin="0,8,0,0"/>
                         <CheckBox Grid.Row="6" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
                     </Grid>
+                    <Border x:Name="TrackingIpv4HintPanel" BorderThickness="1" BorderBrush="#D7E0EA" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="iFacialMocap 대상 PC IPv4" FontWeight="SemiBold"/>
+                            <TextBlock Text="Recommended IPv4:" Margin="0,4,0,0" Foreground="#5E6B78"/>
+                            <TextBlock x:Name="TrackingIpv4RecommendedText" Text="-" FontFamily="Consolas" FontWeight="SemiBold"/>
+                            <TextBlock Text="All IPv4:" Margin="0,4,0,0" Foreground="#5E6B78"/>
+                            <TextBlock x:Name="TrackingIpv4AllText" Text="-" FontFamily="Consolas" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                        <Button x:Name="TrackingIpv4CopyButton" Content="IPv4 복사" Click="CopyTrackingIpv4_Click" MinWidth="110"/>
+                        <Button x:Name="TrackingIpv4ToggleButton" Content="IPv4 안내 숨기기" Click="ToggleTrackingIpv4Hint_Click" MinWidth="150"/>
+                    </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
                         <Button x:Name="StartTrackingButton" Content="트래킹 시작" Click="StartTracking_Click" MinWidth="110"/>
                         <Button x:Name="StopTrackingButton" Content="트래킹 중지" Click="StopTracking_Click" MinWidth="110"/>
