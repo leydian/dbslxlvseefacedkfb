@@ -2,6 +2,32 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Release execution recheck documentation (WinUI/Unity/KPI status refresh)
+
+### Summary
+
+Added a follow-up execution report that captures the latest run-time release decision state after re-running WinUI triage, XAV2 corpus/gate checks, KPI checks, and dashboard refresh.
+
+### Changed
+
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_recheck_winui_unity_kpi_status.md`
+- Updated weekly index:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+- Updated weekly summary:
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - release report count updated to `6`
+
+### Verification
+
+- Confirmed dashboard refresh snapshot:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+  - `OnboardingKpiStatus: INSUFFICIENT_SAMPLES`
+- Confirmed WinUI triage snapshot:
+  - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999Count: 2`
+
 ## 2026-03-06 - Tracking NO_FRAME incident documentation + runtime rebuild remediation
 
 ### Summary
