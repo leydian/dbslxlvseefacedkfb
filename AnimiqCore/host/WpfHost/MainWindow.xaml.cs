@@ -755,6 +755,8 @@ public partial class MainWindow : Window
                 $"Runtime path mismatch ({runtime.RuntimePathWarningCode}). Launch the dist/wpf build and retry.",
                 $"Loaded nativecore path: {NormalizeDiagField(runtime.NativeCoreModulePath)}\n" +
                 $"Expected nativecore path: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}\n" +
+                $"Loaded nativecore SHA256: {NormalizeDiagField(runtime.NativeCoreModuleSha256)}\n" +
+                $"Expected nativecore SHA256: {NormalizeDiagField(runtime.ExpectedNativeCoreModuleSha256)}\n" +
                 $"WarningCode: {NormalizeDiagField(runtime.RuntimePathWarningCode)}");
             return;
         }
@@ -766,8 +768,11 @@ public partial class MainWindow : Window
                 "Runtime nativecore.dll is older than current build output. Republish dist/wpf and retry.",
                 $"Loaded nativecore path: {NormalizeDiagField(runtime.NativeCoreModulePath)}\n" +
                 $"Loaded nativecore timestamp(UTC): {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}\n" +
+                $"Loaded nativecore SHA256: {NormalizeDiagField(runtime.NativeCoreModuleSha256)}\n" +
                 $"Build nativecore path: {NormalizeDiagField(runtime.BuildNativeCoreModulePath)}\n" +
                 $"Build nativecore timestamp(UTC): {NormalizeDiagField(runtime.BuildNativeCoreModuleTimestampUtc)}\n" +
+                $"Build nativecore SHA256: {NormalizeDiagField(runtime.BuildNativeCoreModuleSha256)}\n" +
+                $"Expected nativecore SHA256: {NormalizeDiagField(runtime.ExpectedNativeCoreModuleSha256)}\n" +
                 $"WarningCode: {NormalizeDiagField(runtime.RuntimeTimestampWarningCode)}");
             return;
         }
@@ -2606,10 +2611,14 @@ public partial class MainWindow : Window
             runtime.SpoutLastErrorCode,
             runtime.NativeCoreModulePath,
             runtime.NativeCoreModuleTimestampUtc,
+            runtime.NativeCoreModuleSha256,
             runtime.BuildNativeCoreModulePath,
             runtime.BuildNativeCoreModuleTimestampUtc,
+            runtime.BuildNativeCoreModuleSha256,
             runtime.ExpectedNativeCoreModulePath,
+            runtime.ExpectedNativeCoreModuleSha256,
             runtime.RuntimePathMatch,
+            runtime.RuntimeHashMatchExpected,
             runtime.RuntimeModuleStaleVsBuildOutput,
             runtime.RuntimePathWarningCode,
             runtime.RuntimeTimestampWarningCode,
@@ -2632,10 +2641,14 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
         runtimeSb.AppendLine($"NativeCoreModulePath: {NormalizeDiagField(runtime.NativeCoreModulePath)}");
         runtimeSb.AppendLine($"NativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}");
+        runtimeSb.AppendLine($"NativeCoreModuleSha256: {NormalizeDiagField(runtime.NativeCoreModuleSha256)}");
         runtimeSb.AppendLine($"BuildNativeCoreModulePath: {NormalizeDiagField(runtime.BuildNativeCoreModulePath)}");
         runtimeSb.AppendLine($"BuildNativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.BuildNativeCoreModuleTimestampUtc)}");
+        runtimeSb.AppendLine($"BuildNativeCoreModuleSha256: {NormalizeDiagField(runtime.BuildNativeCoreModuleSha256)}");
         runtimeSb.AppendLine($"ExpectedNativeCoreModulePath: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}");
+        runtimeSb.AppendLine($"ExpectedNativeCoreModuleSha256: {NormalizeDiagField(runtime.ExpectedNativeCoreModuleSha256)}");
         runtimeSb.AppendLine($"RuntimePathMatch: {runtime.RuntimePathMatch}");
+        runtimeSb.AppendLine($"RuntimeHashMatchExpected: {runtime.RuntimeHashMatchExpected}");
         runtimeSb.AppendLine($"RuntimeModuleStaleVsBuildOutput: {runtime.RuntimeModuleStaleVsBuildOutput}");
         runtimeSb.AppendLine($"RuntimePathWarningCode: {NormalizeDiagField(runtime.RuntimePathWarningCode)}");
         runtimeSb.AppendLine($"RuntimeTimestampWarningCode: {NormalizeDiagField(runtime.RuntimeTimestampWarningCode)}");

@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace HostCore;
 
@@ -22,10 +23,14 @@ public sealed record DiagnosticsModel(
     string SpoutLastErrorCode,
     string NativeCoreModulePath,
     string NativeCoreModuleTimestampUtc,
+    string NativeCoreModuleSha256,
     string BuildNativeCoreModulePath,
     string BuildNativeCoreModuleTimestampUtc,
+    string BuildNativeCoreModuleSha256,
     string ExpectedNativeCoreModulePath,
+    string ExpectedNativeCoreModuleSha256,
     bool RuntimePathMatch,
+    bool RuntimeHashMatchExpected,
     bool RuntimeModuleStaleVsBuildOutput,
     string RuntimePathWarningCode,
     string RuntimeTimestampWarningCode,
@@ -53,6 +58,10 @@ public sealed record DiagnosticsModel(
             string.Empty,
             string.Empty,
             string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            false,
             false,
             false,
             "HOST_RUNTIME_PATH_UNKNOWN",
@@ -79,12 +88,26 @@ public sealed record DiagnosticsModel(
         var expectedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "nativecore.dll"));
         var buildOutputPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "build", "Release", "nativecore.dll"));
         var normalizedLoaded = string.IsNullOrWhiteSpace(nativeCorePath) ? string.Empty : Path.GetFullPath(nativeCorePath);
+        var loadedHash = ComputeSha256HexIfFileExists(normalizedLoaded);
+        var expectedHash = ComputeSha256HexIfFileExists(expectedPath);
+        var buildHash = ComputeSha256HexIfFileExists(buildOutputPath);
         var pathMatch = !string.IsNullOrWhiteSpace(normalizedLoaded) &&
                         string.Equals(normalizedLoaded, expectedPath, StringComparison.OrdinalIgnoreCase);
+        var hashMatchExpected = !string.IsNullOrWhiteSpace(loadedHash) &&
+                                !string.IsNullOrWhiteSpace(expectedHash) &&
+                                string.Equals(loadedHash, expectedHash, StringComparison.OrdinalIgnoreCase);
         var buildTimestampUtc = string.Empty;
         var staleVsBuild = false;
         var timestampWarningCode = "none";
-        if (File.Exists(buildOutputPath) && File.Exists(expectedPath)) {
+        if (!string.IsNullOrWhiteSpace(buildHash) && !string.IsNullOrWhiteSpace(expectedHash)) {
+            staleVsBuild = !string.Equals(expectedHash, buildHash, StringComparison.OrdinalIgnoreCase);
+            if (staleVsBuild) {
+                timestampWarningCode = "HOST_RUNTIME_DIST_HASH_MISMATCH_BUILD_OUTPUT";
+            }
+            if (File.Exists(buildOutputPath)) {
+                buildTimestampUtc = new FileInfo(buildOutputPath).LastWriteTimeUtc.ToString("o");
+            }
+        } else if (File.Exists(buildOutputPath) && File.Exists(expectedPath)) {
             var buildItem = new FileInfo(buildOutputPath);
             var distItem = new FileInfo(expectedPath);
             buildTimestampUtc = buildItem.LastWriteTimeUtc.ToString("o");
@@ -94,6 +117,8 @@ public sealed record DiagnosticsModel(
             }
         } else if (!File.Exists(buildOutputPath)) {
             timestampWarningCode = "HOST_RUNTIME_BUILD_OUTPUT_UNKNOWN";
+        } else if (!File.Exists(expectedPath)) {
+            timestampWarningCode = "HOST_RUNTIME_DIST_PATH_MISSING";
         }
         var warningCode = pathMatch
             ? string.Empty
@@ -143,10 +168,14 @@ public sealed record DiagnosticsModel(
             SpoutLastErrorCode: spout.LastErrorCode ?? string.Empty,
             NativeCoreModulePath: nativeCorePath,
             NativeCoreModuleTimestampUtc: nativeCoreTimestampUtc,
+            NativeCoreModuleSha256: loadedHash,
             BuildNativeCoreModulePath: buildOutputPath,
             BuildNativeCoreModuleTimestampUtc: buildTimestampUtc,
+            BuildNativeCoreModuleSha256: buildHash,
             ExpectedNativeCoreModulePath: expectedPath,
+            ExpectedNativeCoreModuleSha256: expectedHash,
             RuntimePathMatch: pathMatch,
+            RuntimeHashMatchExpected: hashMatchExpected,
             RuntimeModuleStaleVsBuildOutput: staleVsBuild,
             RuntimePathWarningCode: warningCode,
             RuntimeTimestampWarningCode: timestampWarningCode,
@@ -162,5 +191,23 @@ public sealed record DiagnosticsModel(
 
         _ = NativeCoreInterop.nc_get_spout_diagnostics(out var spout);
         return FromNative(stats, spout);
+    }
+
+    private static string ComputeSha256HexIfFileExists(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var bytes = File.ReadAllBytes(path);
+            return Convert.ToHexString(SHA256.HashData(bytes));
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }

@@ -1,10 +1,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <limits>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
+#include <vector>
 
 #include "animiq/avatar/avatar_loader_facade.h"
 #include "animiq/avatar/avatar_package.h"
@@ -154,7 +158,49 @@ bool TryParsePolicy(
 void PrintUsage() {
     std::cout << "Usage:\n"
               << "  avatar_tool <path_to_avatar_file> [--miq-unknown-section-policy=warn|ignore|fail]\n"
-              << "             [--dump-warnings | --dump-warnings-limit=<N>]\n";
+              << "             [--dump-warnings | --dump-warnings-limit=<N>]\n"
+              << "             [--emit-json] [--json-out=<path>]\n";
+}
+
+std::string JsonEscape(std::string_view raw) {
+    std::string out;
+    out.reserve(raw.size() + 8U);
+    for (unsigned char c : raw) {
+        switch (c) {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\b':
+                out += "\\b";
+                break;
+            case '\f':
+                out += "\\f";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                if (c < 0x20U) {
+                    out += "\\u00";
+                    constexpr char kHex[] = "0123456789ABCDEF";
+                    out.push_back(kHex[(c >> 4U) & 0x0FU]);
+                    out.push_back(kHex[c & 0x0FU]);
+                } else {
+                    out.push_back(static_cast<char>(c));
+                }
+                break;
+        }
+    }
+    return out;
 }
 
 }  // namespace
@@ -168,10 +214,13 @@ int main(int argc, char** argv) {
     std::string path;
     animiq::avatar::AvatarLoadOptions load_options {};
     std::size_t warning_dump_limit = 0U;
+    bool emit_json = false;
+    std::string json_out_path;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         constexpr const char* kPolicyArg = "--miq-unknown-section-policy=";
         constexpr const char* kDumpWarningsLimitArg = "--dump-warnings-limit=";
+        constexpr const char* kJsonOutArg = "--json-out=";
         if (arg.rfind(kPolicyArg, 0) == 0) {
             const std::string raw = arg.substr(std::char_traits<char>::length(kPolicyArg));
             if (!TryParsePolicy(raw, &load_options.miq_unknown_section_policy)) {
@@ -198,6 +247,18 @@ int main(int argc, char** argv) {
             }
             continue;
         }
+        if (arg == "--emit-json") {
+            emit_json = true;
+            continue;
+        }
+        if (arg.rfind(kJsonOutArg, 0) == 0) {
+            json_out_path = arg.substr(std::char_traits<char>::length(kJsonOutArg));
+            if (json_out_path.empty()) {
+                std::cerr << "invalid --json-out: empty path\n";
+                return 1;
+            }
+            continue;
+        }
         if (path.empty()) {
             path = arg;
             continue;
@@ -213,6 +274,7 @@ int main(int argc, char** argv) {
 
     animiq::avatar::AvatarLoaderFacade loader;
     const auto loaded = loader.Load(path, load_options);
+    const bool load_succeeded = loaded.ok;
     if (!loaded.ok) {
         std::cerr << "Load failed: " << loaded.error << "\n";
         return 3;
@@ -339,8 +401,11 @@ int main(int argc, char** argv) {
     std::size_t warning_warn_count = 0U;
     std::size_t warning_error_count = 0U;
     std::size_t critical_warning_count = 0U;
+    std::vector<WarningMeta> warning_metas;
+    warning_metas.reserve(info.warning_codes.size());
     for (std::size_t i = 0; i < info.warning_codes.size(); ++i) {
         const auto meta = ClassifyWarningCode(info.warning_codes[i]);
+        warning_metas.push_back(meta);
         if (std::string(meta.severity) == "info") {
             ++warning_info_count;
         } else if (std::string(meta.severity) == "warn") {
@@ -407,6 +472,68 @@ int main(int argc, char** argv) {
     std::cout << "  MissingFeatures: " << info.missing_features.size() << "\n";
     if (!info.missing_features.empty()) {
         std::cout << "  LastMissingFeature: " << info.missing_features.back() << "\n";
+    }
+
+    if (emit_json || !json_out_path.empty()) {
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"loadSucceeded\": " << (load_succeeded ? "true" : "false") << ",\n";
+        json << "  \"path\": \"" << JsonEscape(path) << "\",\n";
+        json << "  \"displayName\": \"" << JsonEscape(info.display_name) << "\",\n";
+        json << "  \"format\": \"" << ToFormatName(info.source_type) << "\",\n";
+        json << "  \"compat\": \"" << ToCompatName(info.compat_level) << "\",\n";
+        json << "  \"parserStage\": \"" << JsonEscape(info.parser_stage) << "\",\n";
+        json << "  \"primaryError\": \"" << JsonEscape(info.primary_error_code) << "\",\n";
+        json << "  \"warningCodes\": [";
+        for (std::size_t i = 0U; i < info.warning_codes.size(); ++i) {
+            if (i > 0U) {
+                json << ", ";
+            }
+            json << "\"" << JsonEscape(info.warning_codes[i]) << "\"";
+        }
+        json << "],\n";
+        json << "  \"warningCodeMeta\": [";
+        for (std::size_t i = 0U; i < warning_metas.size(); ++i) {
+            if (i > 0U) {
+                json << ", ";
+            }
+            json << "{"
+                 << "\"severity\":\"" << warning_metas[i].severity << "\","
+                 << "\"category\":\"" << warning_metas[i].category << "\","
+                 << "\"critical\":" << (warning_metas[i].critical ? "true" : "false")
+                 << "}";
+        }
+        json << "],\n";
+        json << "  \"counts\": {\n";
+        json << "    \"meshes\": " << info.meshes.size() << ",\n";
+        json << "    \"materials\": " << info.materials.size() << ",\n";
+        json << "    \"meshPayloads\": " << info.mesh_payloads.size() << ",\n";
+        json << "    \"materialPayloads\": " << info.material_payloads.size() << ",\n";
+        json << "    \"texturePayloads\": " << info.texture_payloads.size() << ",\n";
+        json << "    \"expressionCount\": " << info.expressions.size() << ",\n";
+        json << "    \"expressionBindTotal\": " << expression_bind_total << ",\n";
+        json << "    \"warningCount\": " << info.warnings.size() << ",\n";
+        json << "    \"warningCodeCount\": " << info.warning_codes.size() << ",\n";
+        json << "    \"criticalWarningCount\": " << critical_warning_count << "\n";
+        json << "  }\n";
+        json << "}";
+
+        const std::string json_text = json.str();
+        if (!json_out_path.empty()) {
+            std::ofstream out(json_out_path, std::ios::binary);
+            if (!out) {
+                std::cerr << "failed to write json report: " << json_out_path << "\n";
+                return 4;
+            }
+            out << json_text;
+            if (!out.good()) {
+                std::cerr << "failed to flush json report: " << json_out_path << "\n";
+                return 4;
+            }
+        }
+        if (emit_json) {
+            std::cout << json_text << "\n";
+        }
     }
 
     return 0;

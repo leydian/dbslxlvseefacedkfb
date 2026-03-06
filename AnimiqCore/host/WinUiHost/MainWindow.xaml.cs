@@ -422,7 +422,9 @@ public sealed partial class MainWindow : Window
                 "불러오기 차단 (Load Blocked)",
                 $"Runtime path mismatch ({NormalizeDiagField(runtime.RuntimePathWarningCode)}).\n" +
                 $"Loaded: {NormalizeDiagField(runtime.NativeCoreModulePath)}\n" +
-                $"Expected: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}");
+                $"Expected: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}\n" +
+                $"Loaded SHA256: {NormalizeDiagField(runtime.NativeCoreModuleSha256)}\n" +
+                $"Expected SHA256: {NormalizeDiagField(runtime.ExpectedNativeCoreModuleSha256)}");
             return;
         }
         if (runtime.RuntimeModuleStaleVsBuildOutput)
@@ -432,7 +434,10 @@ public sealed partial class MainWindow : Window
                 "불러오기 차단 (Load Blocked)",
                 $"Runtime nativecore.dll is older than build output ({NormalizeDiagField(runtime.RuntimeTimestampWarningCode)}).\n" +
                 $"RuntimeUtc: {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}\n" +
-                $"BuildUtc: {NormalizeDiagField(runtime.BuildNativeCoreModuleTimestampUtc)}");
+                $"BuildUtc: {NormalizeDiagField(runtime.BuildNativeCoreModuleTimestampUtc)}\n" +
+                $"Runtime SHA256: {NormalizeDiagField(runtime.NativeCoreModuleSha256)}\n" +
+                $"Build SHA256: {NormalizeDiagField(runtime.BuildNativeCoreModuleSha256)}\n" +
+                $"Expected SHA256: {NormalizeDiagField(runtime.ExpectedNativeCoreModuleSha256)}");
             return;
         }
 
@@ -1785,10 +1790,14 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
         runtimeSb.AppendLine($"NativeCoreModulePath: {NormalizeDiagField(runtime.NativeCoreModulePath)}");
         runtimeSb.AppendLine($"NativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}");
+        runtimeSb.AppendLine($"NativeCoreModuleSha256: {NormalizeDiagField(runtime.NativeCoreModuleSha256)}");
         runtimeSb.AppendLine($"ExpectedNativeCoreModulePath: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}");
+        runtimeSb.AppendLine($"ExpectedNativeCoreModuleSha256: {NormalizeDiagField(runtime.ExpectedNativeCoreModuleSha256)}");
         runtimeSb.AppendLine($"BuildNativeCoreModulePath: {NormalizeDiagField(runtime.BuildNativeCoreModulePath)}");
         runtimeSb.AppendLine($"BuildNativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.BuildNativeCoreModuleTimestampUtc)}");
+        runtimeSb.AppendLine($"BuildNativeCoreModuleSha256: {NormalizeDiagField(runtime.BuildNativeCoreModuleSha256)}");
         runtimeSb.AppendLine($"RuntimePathMatch: {runtime.RuntimePathMatch}");
+        runtimeSb.AppendLine($"RuntimeHashMatchExpected: {runtime.RuntimeHashMatchExpected}");
         runtimeSb.AppendLine($"RuntimeModuleStaleVsBuildOutput: {runtime.RuntimeModuleStaleVsBuildOutput}");
         runtimeSb.AppendLine($"RuntimePathWarningCode: {NormalizeDiagField(runtime.RuntimePathWarningCode)}");
         runtimeSb.AppendLine($"RuntimeTimestampWarningCode: {NormalizeDiagField(runtime.RuntimeTimestampWarningCode)}");
