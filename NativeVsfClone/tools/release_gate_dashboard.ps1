@@ -155,6 +155,28 @@ $rows += [PSCustomObject]@{
     source_file = $parityGate
 }
 
+$renderPerfGate = Join-Path $ReportDir "render_perf_gate_summary.txt"
+$rows += [PSCustomObject]@{
+    track = "Render Perf (Overall)"
+    status_line = Get-StatusFromFile -Path $renderPerfGate -Pattern "- Overall:"
+    source_file = $renderPerfGate
+}
+$rows += [PSCustomObject]@{
+    track = "Render Perf (P95 Private MB)"
+    status_line = "P95PrivateMb: $(Get-KeyValueFromFile -Path $renderPerfGate -Prefix 'P95PrivateMb:')"
+    source_file = $renderPerfGate
+}
+$rows += [PSCustomObject]@{
+    track = "Render Perf (P95 WorkingSet MB)"
+    status_line = "P95WorkingSetMb: $(Get-KeyValueFromFile -Path $renderPerfGate -Prefix 'P95WorkingSetMb:')"
+    source_file = $renderPerfGate
+}
+$rows += [PSCustomObject]@{
+    track = "Host Dist (WPF MB)"
+    status_line = "WPFDistMb: $(Get-KeyValueFromFile -Path $hostReport -Prefix 'WPF dist size mb:')"
+    source_file = $hostReport
+}
+
 $avatarRows = @($rows | Where-Object { $_.track -in @("VSFAvatar", "VRM", "VXAvatar") })
 $avatarAllPass = $true
 foreach ($r in $avatarRows) {

@@ -111,7 +111,10 @@ public sealed record FrameMetric(
     uint PassCount,
     uint RenderReadyAvatarCount,
     bool SpoutActive,
-    bool OscActive);
+    bool OscActive,
+    float WorkingSetMb,
+    float PrivateMb,
+    string AutoQualityStep);
 
 public sealed record TelemetrySettings(
     bool OptIn,
@@ -129,14 +132,26 @@ public sealed record AutoQualityPolicy(
     int ConsecutiveFrameLimit,
     int CooldownSeconds,
     float RecoveryFrameMsThreshold,
-    int RecoveryConsecutiveFrameLimit)
+    int RecoveryConsecutiveFrameLimit,
+    bool AutoTuneEnabled = true,
+    int WindowSampleCount = 600,
+    float DegradeP95FrameMs = 28.0f,
+    float DegradeDropRatio = 0.02f,
+    float RecoverP95FrameMs = 20.0f,
+    float RecoverDropRatio = 0.01f)
 {
     public static AutoQualityPolicy CreateDefault() => new(
         HighFrameMsThreshold: 24.0f,
         ConsecutiveFrameLimit: 90,
         CooldownSeconds: 20,
         RecoveryFrameMsThreshold: 18.0f,
-        RecoveryConsecutiveFrameLimit: 360);
+        RecoveryConsecutiveFrameLimit: 360,
+        AutoTuneEnabled: true,
+        WindowSampleCount: 600,
+        DegradeP95FrameMs: 28.0f,
+        DegradeDropRatio: 0.02f,
+        RecoverP95FrameMs: 20.0f,
+        RecoverDropRatio: 0.01f);
 }
 
 public sealed class SessionStateStore
@@ -426,7 +441,23 @@ public sealed class AutoQualityPolicyStore
         var cooldown = Math.Clamp(value.CooldownSeconds, 5, 300);
         var recoveryFrame = Math.Clamp(value.RecoveryFrameMsThreshold, 8.0f, frame);
         var recoveryCount = Math.Clamp(value.RecoveryConsecutiveFrameLimit, 10, 2400);
-        return new AutoQualityPolicy(frame, count, cooldown, recoveryFrame, recoveryCount);
+        var windowSampleCount = Math.Clamp(value.WindowSampleCount, 120, 1800);
+        var degradeP95 = Math.Clamp(value.DegradeP95FrameMs, 12.0f, 80.0f);
+        var degradeDropRatio = Math.Clamp(value.DegradeDropRatio, 0.0f, 1.0f);
+        var recoverP95 = Math.Clamp(value.RecoverP95FrameMs, 8.0f, degradeP95);
+        var recoverDropRatio = Math.Clamp(value.RecoverDropRatio, 0.0f, degradeDropRatio);
+        return new AutoQualityPolicy(
+            frame,
+            count,
+            cooldown,
+            recoveryFrame,
+            recoveryCount,
+            value.AutoTuneEnabled,
+            windowSampleCount,
+            degradeP95,
+            degradeDropRatio,
+            recoverP95,
+            recoverDropRatio);
     }
 }
 

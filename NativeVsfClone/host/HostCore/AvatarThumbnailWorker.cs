@@ -7,6 +7,9 @@ namespace HostCore;
 
 public static class AvatarThumbnailWorker
 {
+    private const int ThumbnailCacheMaxEntries = 256;
+    private const long ThumbnailCacheMaxBytes = 128L * 1024L * 1024L;
+
     public static int Run(string[] args)
     {
         if (!TryGetArg(args, "--avatar", out var avatarPath) ||
@@ -103,8 +106,44 @@ public static class AvatarThumbnailWorker
             "VsfCloneHost",
             "thumbnails");
         Directory.CreateDirectory(root);
+        PruneThumbnailCache(root, ThumbnailCacheMaxEntries, ThumbnailCacheMaxBytes);
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(avatarPath.ToLowerInvariant())));
         return Path.Combine(root, $"{hash}.png");
+    }
+
+    private static void PruneThumbnailCache(string root, int maxEntries, long maxBytes)
+    {
+        try
+        {
+            var files = new DirectoryInfo(root)
+                .GetFiles("*.png", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .ToList();
+            if (files.Count == 0)
+            {
+                return;
+            }
+
+            var totalBytes = files.Sum(file => file.Length);
+            for (var i = files.Count - 1; i >= 0; i--)
+            {
+                var overEntryCap = files.Count > maxEntries;
+                var overSizeCap = totalBytes > maxBytes;
+                if (!overEntryCap && !overSizeCap)
+                {
+                    break;
+                }
+
+                var target = files[i];
+                totalBytes -= target.Length;
+                files.RemoveAt(i);
+                target.Delete();
+            }
+        }
+        catch
+        {
+            // Cache cleanup is best-effort; failures should not block thumbnail generation.
+        }
     }
 
     public static async Task<bool> RunWorkerProcessAsync(

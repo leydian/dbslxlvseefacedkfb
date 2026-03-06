@@ -1,6 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$RuntimeIdentifier = "win-x64",
+    [ValidateSet("default", "lightweight")][string]$Profile = "default",
     [switch]$SkipNativeBuild,
     [switch]$IncludeWinUi,
     [switch]$NoRestore,
@@ -15,6 +16,9 @@ param(
     [int]$WpfLaunchSmokeDurationSeconds = 6,
     [string]$WpfLaunchSmokeReportPath = ".\build\reports\wpf_launch_smoke_latest.txt",
     [bool]$WpfPublishSingleFile = $false,
+    [bool]$WpfPublishTrimmed = $false,
+    [bool]$WpfPublishReadyToRun = $false,
+    [bool]$WpfSelfContained = $true,
     [int]$WinUiRestoreRetryCount = 1,
     [int]$NuGetProbeTimeoutSeconds = 8
 )
@@ -56,6 +60,18 @@ function Assert-Command {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required command not found: $Name"
     }
+}
+
+function Get-DirectorySizeMb {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) {
+        return 0.0
+    }
+    $sum = (Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+    if ($null -eq $sum) {
+        return 0.0
+    }
+    return [Math]::Round(($sum / 1MB), 2)
 }
 
 function Invoke-CMakeCommand {
@@ -365,8 +381,13 @@ New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
 
 $log = [System.Collections.Generic.List[string]]::new()
 $hostPublishMode = if ($IncludeWinUi) { "WPF_PLUS_WINUI" } else { "WPF_ONLY" }
+$resolvedWpfSelfContained = if ($Profile -eq "lightweight") { $false } else { [bool]$WpfSelfContained }
+$resolvedWpfPublishSingleFile = if ($Profile -eq "lightweight") { $false } else { [bool]$WpfPublishSingleFile }
+$resolvedWpfPublishTrimmed = if ($Profile -eq "lightweight") { $false } else { [bool]$WpfPublishTrimmed }
+$resolvedWpfPublishReadyToRun = if ($Profile -eq "lightweight") { $false } else { [bool]$WpfPublishReadyToRun }
 $log.Add("Host publish run: $(Get-Date -Format o)")
 $log.Add("HostPublishMode: $hostPublishMode")
+$log.Add("Profile: $Profile")
 $log.Add("Configuration: $Configuration")
 $log.Add("RuntimeIdentifier: $RuntimeIdentifier")
 $log.Add("IncludeWinUi: $IncludeWinUi")
@@ -388,7 +409,10 @@ $log.Add("RunWpfLaunchSmoke: $RunWpfLaunchSmoke")
 $log.Add("WpfLaunchSmokeFailOnError: $WpfLaunchSmokeFailOnError")
 $log.Add("WpfLaunchSmokeDurationSeconds: $WpfLaunchSmokeDurationSeconds")
 $log.Add("WpfLaunchSmokeReportPath: $resolvedWpfLaunchSmokeReportPath")
-$log.Add("WpfPublishSingleFile: $WpfPublishSingleFile")
+$log.Add("WpfPublishSingleFile: $resolvedWpfPublishSingleFile")
+$log.Add("WpfPublishTrimmed: $resolvedWpfPublishTrimmed")
+$log.Add("WpfPublishReadyToRun: $resolvedWpfPublishReadyToRun")
+$log.Add("WpfSelfContained: $resolvedWpfSelfContained")
 $log.Add("WinUiRestoreRetryCount: $WinUiRestoreRetryCount")
 $log.Add("NuGetProbeTimeoutSeconds: $NuGetProbeTimeoutSeconds")
 
@@ -616,8 +640,10 @@ function Get-WinUiRootCauseHints {
         if (Select-String -Path $DiagLogPath -Pattern "NU1301" -SimpleMatch -Quiet) {
             $hints.Add("NuGet source access failed (NU1301). Verify network/proxy and source config.")
         }
-        if ((Select-String -Path $DiagLogPath -Pattern "401" -SimpleMatch -Quiet) -or
-            (Select-String -Path $DiagLogPath -Pattern "403" -SimpleMatch -Quiet)) {
+        if ((Select-String -Path $DiagLogPath -Pattern "Response status code does not indicate success: 401" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "Response status code does not indicate success: 403" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "403 (Forbidden)" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "401 (Unauthorized)" -SimpleMatch -Quiet)) {
             $hints.Add("NuGet feed returned authorization failure (401/403). Check credential provider/session token.")
         }
     }
@@ -853,8 +879,10 @@ function Get-WinUiFailureClass {
     }
 
     if (Test-Path $DiagLogPath) {
-        if ((Select-String -Path $DiagLogPath -Pattern "401" -SimpleMatch -Quiet) -or
-            (Select-String -Path $DiagLogPath -Pattern "403" -SimpleMatch -Quiet)) {
+        if ((Select-String -Path $DiagLogPath -Pattern "Response status code does not indicate success: 401" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "Response status code does not indicate success: 403" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "403 (Forbidden)" -SimpleMatch -Quiet) -or
+            (Select-String -Path $DiagLogPath -Pattern "401 (Unauthorized)" -SimpleMatch -Quiet)) {
             return [ordered]@{ Class = "NUGET_AUTH_FAILURE"; Confidence = "medium" }
         }
         if ((Select-String -Path $DiagLogPath -Pattern "NU1101" -SimpleMatch -Quiet) -or
@@ -1056,11 +1084,17 @@ try {
         $wpfProject,
         "-c", $Configuration,
         "-r", $RuntimeIdentifier,
-        "--self-contained", "true",
-        "/p:PublishSingleFile=$($WpfPublishSingleFile.ToString().ToLowerInvariant())",
-        "/p:PublishTrimmed=false",
+        "--self-contained", $resolvedWpfSelfContained.ToString().ToLowerInvariant(),
+        "/p:PublishSingleFile=$($resolvedWpfPublishSingleFile.ToString().ToLowerInvariant())",
+        "/p:PublishTrimmed=$($resolvedWpfPublishTrimmed.ToString().ToLowerInvariant())",
+        "/p:PublishReadyToRun=$($resolvedWpfPublishReadyToRun.ToString().ToLowerInvariant())",
+        "/p:EnableCompressionInSingleFile=true",
         "-o", $wpfDist
     )
+    if ($Profile -eq "lightweight") {
+        $wpfPublishArgs += "/p:DebugType=none"
+        $wpfPublishArgs += "/p:DebugSymbols=false"
+    }
     $wpfPublishArgs += $nugetPublishArgs
     if ($NoRestore) {
         $wpfPublishArgs += "--no-restore"
@@ -1077,6 +1111,7 @@ try {
     Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $wpfDist -Log $log
     $log.Add("WPF dist: $wpfDist")
     $log.Add("WPF exe: $(Join-Path $wpfDist 'WpfHost.exe')")
+    $log.Add("WPF dist size mb: $(Get-DirectorySizeMb -Path $wpfDist)")
     if ($RunWpfLaunchSmoke) {
         if (-not (Test-Path $wpfLaunchSmokeScript)) {
             $log.Add("WPF launch smoke: skipped (script not found: $wpfLaunchSmokeScript)")
@@ -1177,6 +1212,7 @@ if ($IncludeWinUi) {
         Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $winUiDist -Log $log
         $log.Add("WinUI dist: $winUiDist")
         $log.Add("WinUI exe: $(Join-Path $winUiDist 'WinUiHost.exe')")
+        $log.Add("WinUI dist size mb: $(Get-DirectorySizeMb -Path $winUiDist)")
     } catch {
         $publishErrorText = $_ | Out-String
         $log.Add("WinUI publish: failed")

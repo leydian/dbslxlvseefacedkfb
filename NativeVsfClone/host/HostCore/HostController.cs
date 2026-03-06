@@ -196,6 +196,10 @@ public sealed partial class HostController
 
             var rc = _sessionService.Shutdown();
             TrackResult("Shutdown", rc);
+            if (rc == NcResultCode.Ok)
+            {
+                TrimManagedMemory();
+            }
             ResetFirstBroadcastFlow();
             _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
             RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
@@ -297,6 +301,10 @@ public sealed partial class HostController
         {
             var rc = _sessionService.UnloadAvatar();
             TrackResult("UnloadAvatar", rc);
+            if (rc == NcResultCode.Ok)
+            {
+                TrimManagedMemory();
+            }
             RefreshState();
             return rc;
         });
@@ -1365,6 +1373,20 @@ public sealed partial class HostController
     private static float Clamp(float value, float min, float max)
     {
         return Math.Min(max, Math.Max(min, value));
+    }
+
+    private static void TrimManagedMemory()
+    {
+        try
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
     }
 
     private static float ClampPitchForBone(PoseBoneKind bone, float pitchDeg)

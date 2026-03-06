@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 
 namespace HostCore;
@@ -12,6 +13,8 @@ public sealed record DiagnosticsModel(
     float GpuFrameMs,
     float CpuFrameMs,
     float MaterialResolveMs,
+    float WorkingSetMb,
+    float PrivateMb,
     uint PassCount,
     string SpoutBackend,
     bool SpoutStrictMode,
@@ -19,26 +22,82 @@ public sealed record DiagnosticsModel(
     string SpoutLastErrorCode,
     string NativeCoreModulePath,
     string NativeCoreModuleTimestampUtc,
+    string BuildNativeCoreModulePath,
+    string BuildNativeCoreModuleTimestampUtc,
     string ExpectedNativeCoreModulePath,
     bool RuntimePathMatch,
-    string RuntimePathWarningCode)
+    bool RuntimeModuleStaleVsBuildOutput,
+    string RuntimePathWarningCode,
+    string RuntimeTimestampWarningCode)
 {
     public static DiagnosticsModel Empty =>
-        new(string.Empty, 0U, false, false, 0.0f, 0.0f, 0.0f, 0.0f, 0U, "unknown", false, 0UL, string.Empty, string.Empty, string.Empty, string.Empty, false, "HOST_RUNTIME_PATH_UNKNOWN");
+        new(
+            string.Empty,
+            0U,
+            false,
+            false,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0U,
+            "unknown",
+            false,
+            0UL,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            false,
+            false,
+            "HOST_RUNTIME_PATH_UNKNOWN",
+            "none");
 
     public static DiagnosticsModel FromNative(in NcRuntimeStats stats, in NcSpoutDiagnostics spout)
     {
         var nativeCorePath = NativeCoreInterop.GetLoadedNativeCorePath();
         var nativeCoreTimestampUtc = NativeCoreInterop.GetLoadedNativeCoreTimestampUtc();
         var expectedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "nativecore.dll"));
+        var buildOutputPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "build", "Release", "nativecore.dll"));
         var normalizedLoaded = string.IsNullOrWhiteSpace(nativeCorePath) ? string.Empty : Path.GetFullPath(nativeCorePath);
         var pathMatch = !string.IsNullOrWhiteSpace(normalizedLoaded) &&
                         string.Equals(normalizedLoaded, expectedPath, StringComparison.OrdinalIgnoreCase);
+        var buildTimestampUtc = string.Empty;
+        var staleVsBuild = false;
+        var timestampWarningCode = "none";
+        if (File.Exists(buildOutputPath) && File.Exists(expectedPath)) {
+            var buildItem = new FileInfo(buildOutputPath);
+            var distItem = new FileInfo(expectedPath);
+            buildTimestampUtc = buildItem.LastWriteTimeUtc.ToString("o");
+            staleVsBuild = distItem.LastWriteTimeUtc < buildItem.LastWriteTimeUtc;
+            if (staleVsBuild) {
+                timestampWarningCode = "HOST_RUNTIME_DIST_OLDER_THAN_BUILD_OUTPUT";
+            }
+        } else if (!File.Exists(buildOutputPath)) {
+            timestampWarningCode = "HOST_RUNTIME_BUILD_OUTPUT_UNKNOWN";
+        }
         var warningCode = pathMatch
             ? string.Empty
             : string.IsNullOrWhiteSpace(normalizedLoaded)
                 ? "HOST_RUNTIME_PATH_UNKNOWN"
                 : "HOST_RUNTIME_MISMATCH_DIST_EXPECTED";
+        var workingSetMb = 0.0f;
+        var privateMb = 0.0f;
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            workingSetMb = (float)(process.WorkingSet64 / (1024.0 * 1024.0));
+            privateMb = (float)(process.PrivateMemorySize64 / (1024.0 * 1024.0));
+        }
+        catch
+        {
+            // Keep zeros if process metrics collection fails.
+        }
+
         return new DiagnosticsModel(
             LastError: NativeCoreInterop.FormatLastError(),
             RenderReadyAvatarCount: stats.RenderReadyAvatarCount,
@@ -48,6 +107,8 @@ public sealed record DiagnosticsModel(
             GpuFrameMs: stats.GpuFrameMs,
             CpuFrameMs: stats.CpuFrameMs,
             MaterialResolveMs: stats.MaterialResolveMs,
+            WorkingSetMb: workingSetMb,
+            PrivateMb: privateMb,
             PassCount: stats.PassCount,
             SpoutBackend: NativeCoreInterop.FormatSpoutBackend(spout.BackendKind),
             SpoutStrictMode: spout.StrictMode != 0U,
@@ -55,9 +116,13 @@ public sealed record DiagnosticsModel(
             SpoutLastErrorCode: spout.LastErrorCode ?? string.Empty,
             NativeCoreModulePath: nativeCorePath,
             NativeCoreModuleTimestampUtc: nativeCoreTimestampUtc,
+            BuildNativeCoreModulePath: buildOutputPath,
+            BuildNativeCoreModuleTimestampUtc: buildTimestampUtc,
             ExpectedNativeCoreModulePath: expectedPath,
             RuntimePathMatch: pathMatch,
-            RuntimePathWarningCode: warningCode);
+            RuntimeModuleStaleVsBuildOutput: staleVsBuild,
+            RuntimePathWarningCode: warningCode,
+            RuntimeTimestampWarningCode: timestampWarningCode);
     }
 
     public static DiagnosticsModel Capture()

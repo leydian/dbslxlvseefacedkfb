@@ -7,6 +7,8 @@ param(
     [double]$MaxP95FrameMs = 20.0,
     [double]$MaxP99FrameMs = 28.0,
     [double]$MaxFrameDropRatio = 0.02,
+    [double]$MaxPrivateMb = 0.0,
+    [double]$MaxWorkingSetMb = 0.0,
     [double]$DropFrameThresholdMs = 33.3,
     [int]$MinSamples = 120
 )
@@ -76,10 +78,22 @@ if ($rows.Count -lt $MinSamples) {
 }
 
 $values = [System.Collections.Generic.List[double]]::new()
+$privateValues = [System.Collections.Generic.List[double]]::new()
+$workingSetValues = [System.Collections.Generic.List[double]]::new()
 foreach ($r in $rows) {
     $v = 0.0
     if ([double]::TryParse("$($r.frame_ms)", [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$v)) {
         $values.Add($v)
+    }
+
+    $pv = 0.0
+    if ([double]::TryParse("$($r.private_mb)", [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$pv)) {
+        $privateValues.Add($pv)
+    }
+
+    $wv = 0.0
+    if ([double]::TryParse("$($r.working_set_mb)", [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$wv)) {
+        $workingSetValues.Add($wv)
     }
 }
 if ($values.Count -lt $MinSamples) {
@@ -94,11 +108,17 @@ $avg = ($sorted | Measure-Object -Average).Average
 $max = ($sorted | Measure-Object -Maximum).Maximum
 $dropCount = @($sorted | Where-Object { $_ -gt $DropFrameThresholdMs }).Count
 $dropRatio = [Math]::Round(($dropCount / [double]$sorted.Count), 6)
+$avgPrivateMb = if ($privateValues.Count -gt 0) { ($privateValues | Measure-Object -Average).Average } else { 0.0 }
+$p95PrivateMb = if ($privateValues.Count -gt 0) { Get-Percentile -SortedValues @($privateValues | Sort-Object) -Percent 95 } else { 0.0 }
+$avgWorkingSetMb = if ($workingSetValues.Count -gt 0) { ($workingSetValues | Measure-Object -Average).Average } else { 0.0 }
+$p95WorkingSetMb = if ($workingSetValues.Count -gt 0) { Get-Percentile -SortedValues @($workingSetValues | Sort-Object) -Percent 95 } else { 0.0 }
 
 $gateP95 = $p95 -le $MaxP95FrameMs
 $gateP99 = $p99 -le $MaxP99FrameMs
 $gateDrop = $dropRatio -le $MaxFrameDropRatio
-$overall = $gateP95 -and $gateP99 -and $gateDrop
+$gatePrivate = ($MaxPrivateMb -le 0.0) -or ($privateValues.Count -eq 0) -or ($p95PrivateMb -le $MaxPrivateMb)
+$gateWorkingSet = ($MaxWorkingSetMb -le 0.0) -or ($workingSetValues.Count -eq 0) -or ($p95WorkingSetMb -le $MaxWorkingSetMb)
+$overall = $gateP95 -and $gateP99 -and $gateDrop -and $gatePrivate -and $gateWorkingSet
 
 $summaryLines = [System.Collections.Generic.List[string]]::new()
 $summaryLines.Add("Render Performance Gate Summary")
@@ -114,11 +134,17 @@ $summaryLines.Add("MaxFrameMs: $([Math]::Round($max, 3))")
 $summaryLines.Add("DropFrameThresholdMs: $DropFrameThresholdMs")
 $summaryLines.Add("DropFrameCount: $dropCount")
 $summaryLines.Add("DropFrameRatio: $dropRatio")
+$summaryLines.Add("AvgPrivateMb: $([Math]::Round($avgPrivateMb, 3))")
+$summaryLines.Add("P95PrivateMb: $([Math]::Round($p95PrivateMb, 3))")
+$summaryLines.Add("AvgWorkingSetMb: $([Math]::Round($avgWorkingSetMb, 3))")
+$summaryLines.Add("P95WorkingSetMb: $([Math]::Round($p95WorkingSetMb, 3))")
 $summaryLines.Add("")
 $summaryLines.Add("Gate Results")
 $summaryLines.Add("- GateP95 (p95 <= $MaxP95FrameMs): $(if ($gateP95) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- GateP99 (p99 <= $MaxP99FrameMs): $(if ($gateP99) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- GateDrop (drop_ratio <= $MaxFrameDropRatio): $(if ($gateDrop) { 'PASS' } else { 'FAIL' })")
+$summaryLines.Add("- GatePrivate (p95_private_mb <= $MaxPrivateMb, disabled when <=0 or no column): $(if ($gatePrivate) { 'PASS' } else { 'FAIL' })")
+$summaryLines.Add("- GateWorkingSet (p95_working_set_mb <= $MaxWorkingSetMb, disabled when <=0 or no column): $(if ($gateWorkingSet) { 'PASS' } else { 'FAIL' })")
 $summaryLines.Add("- Overall: $(if ($overall) { 'PASS' } else { 'FAIL' })")
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $resolvedSummary) | Out-Null
