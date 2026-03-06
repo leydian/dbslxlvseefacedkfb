@@ -194,6 +194,12 @@ public struct NcAvatarRuntimeMetricsV2
     public string PhysicsSolver;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
     public string MtoonRuntimeMode;
+    public int ContractPreviewYawDeg;
+    public uint TransformConfidenceLevel;
+    public uint IsVrmOriginMiq;
+    public uint PreviewBoundsExcludedMeshCount;
+    public uint PreviewHairCandidateMeshCount;
+    public float PreviewHairHeadAlignmentScore;
 }
 
 [StructLayout(LayoutKind.Sequential)]

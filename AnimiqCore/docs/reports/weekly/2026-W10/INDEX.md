@@ -183,4 +183,5 @@ Report list for this week.
 - [2026-03-06_nativecore_realtime_shadow_pipeline.md](./2026-03-06_nativecore_realtime_shadow_pipeline.md)
 - [2026-03-06_animiq_rebrand_and_miq_migration.md](./2026-03-06_animiq_rebrand_and_miq_migration.md)
 - [2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md](./2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md)
+- [2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md](./2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md)
 - [2026-03-06_avatar_coordinate_contract_unification.md](./2026-03-06_avatar_coordinate_contract_unification.md)

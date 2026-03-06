@@ -39,6 +39,7 @@ public sealed partial class HostController
     private string _lastLoadFailureGuidance = string.Empty;
     private string _lastLoadFailureTechnical = string.Empty;
     private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.HybridAuto, "idle");
+    private Arkit52ResolutionSummary? _lastArkit52Summary;
     private List<PoseBoneUiOffset> _poseOffsets = BuildDefaultPoseOffsets();
     private TrackingUpperBodyPose _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
     private NcPoseBoneOffset[] _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
@@ -202,6 +203,7 @@ public sealed partial class HostController
 
             TrackResult("StopTracking", _trackingInputService.Stop());
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            _lastArkit52Summary = null;
 
             var rc = _sessionService.Shutdown();
             TrackResult("Shutdown", rc);
@@ -287,7 +289,7 @@ public sealed partial class HostController
                 // Re-apply host-side render controls after avatar load in case
                 // the native side resets camera/quality state during load.
                 ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
-                _ = ApplyStoredAvatarPreviewFlipIfNeeded(normalizedPath);
+                _ = ResolveAndApplyAvatarPreviewFlipOnLoad(normalizedPath);
                 _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
                 ScheduleCommonCauseTriage();
@@ -449,6 +451,7 @@ public sealed partial class HostController
                 trackingSettings.UpperBodySmoothing);
             var rc = _trackingInputService.Start(options);
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            _lastArkit52Summary = null;
             if (rc == NcResultCode.Ok)
             {
                 SetTrackingState(listenPort, staleTimeoutMs, true);
@@ -465,6 +468,7 @@ public sealed partial class HostController
         {
             var rc = _trackingInputService.Stop();
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            _lastArkit52Summary = null;
             if (rc == NcResultCode.Ok)
             {
                 SetTrackingState(_sessionPersistence.Tracking.ListenPort, _sessionPersistence.Tracking.StaleTimeoutMs, false);
@@ -484,6 +488,7 @@ public sealed partial class HostController
         {
             var rc = _trackingInputService.Recenter();
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
+            _lastArkit52Summary = null;
             TrackResult("RecenterTracking", rc);
             RefreshState();
             return rc;
@@ -882,6 +887,7 @@ public sealed partial class HostController
                 }
             }
         }
+        _lastArkit52Summary = arkit52Summary;
 
         var trackingSettings = _sessionPersistence.Tracking;
         if (trackingSettings.UpperBodyEnabled)
@@ -923,17 +929,7 @@ public sealed partial class HostController
         }
         if (arkit52Summary is not null)
         {
-            _trackingDiagnostics = _trackingDiagnostics with
-            {
-                Arkit52StrictCount = arkit52Summary.StrictCount,
-                Arkit52FallbackCount = arkit52Summary.FallbackCount,
-                Arkit52SubmittedCount = arkit52Summary.SubmittedCount,
-                Arkit52MissingCount = arkit52Summary.MissingCount,
-                Arkit52MissingKeys = arkit52Summary.MissingKeys,
-                Arkit52TopMissingKeys = arkit52Summary.TopMissingKeys,
-                Arkit52QualityScore = arkit52Summary.QualityScore,
-                Arkit52QualityStageMs = arkit52Summary.QualityStageMs,
-            };
+            _trackingDiagnostics = ApplyArkit52Summary(_trackingDiagnostics, arkit52Summary);
         }
         ReconcileTrackingDiagnostics();
 
@@ -1100,8 +1096,30 @@ public sealed partial class HostController
             next = next with { LastErrorCode = _trackingDiagnostics.LastErrorCode };
         }
 
+        if (_lastArkit52Summary is not null)
+        {
+            next = ApplyArkit52Summary(next, _lastArkit52Summary);
+        }
+
         _trackingDiagnostics = next;
         ReconcileTrackingDiagnostics();
+    }
+
+    private static TrackingDiagnostics ApplyArkit52Summary(
+        TrackingDiagnostics tracking,
+        Arkit52ResolutionSummary summary)
+    {
+        return tracking with
+        {
+            Arkit52StrictCount = summary.StrictCount,
+            Arkit52FallbackCount = summary.FallbackCount,
+            Arkit52SubmittedCount = summary.SubmittedCount,
+            Arkit52MissingCount = summary.MissingCount,
+            Arkit52MissingKeys = summary.MissingKeys,
+            Arkit52TopMissingKeys = summary.TopMissingKeys,
+            Arkit52QualityScore = summary.QualityScore,
+            Arkit52QualityStageMs = summary.QualityStageMs,
+        };
     }
 
     public (double LatestMs, double MedianMs, int SampleCount, string OutputKind, string StartedTimestampUtc) GetUiFlowTimingSnapshot()
@@ -1568,9 +1586,65 @@ public sealed partial class HostController
         return normalized;
     }
 
-    private NcResultCode ApplyStoredAvatarPreviewFlipIfNeeded(string avatarPath)
+    private NcResultCode ResolveAndApplyAvatarPreviewFlipOnLoad(string avatarPath)
     {
-        if (!GetAvatarPreviewFlip180(avatarPath))
+        var activeHandle = _sessionService.ActiveAvatarHandle;
+        if (!SessionState.IsInitialized || !activeHandle.HasValue)
+        {
+            return NcResultCode.Ok;
+        }
+
+        var storedFlip = GetAvatarPreviewFlip180(avatarPath);
+        var desiredFlip = storedFlip;
+        var detail = $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, mode=stored";
+        var format = _sessionService.ActiveAvatarInfo?.DetectedFormat ?? NcAvatarFormatHint.Auto;
+        var metricsRc = NativeCoreInterop.nc_get_avatar_runtime_metrics_v2(
+            activeHandle.Value,
+            out var metrics);
+        if (metricsRc == NcResultCode.Ok)
+        {
+            var isVrm = format == NcAvatarFormatHint.Vrm;
+            var isVrmOriginMiq = format == NcAvatarFormatHint.Miq && metrics.IsVrmOriginMiq != 0U;
+            if (isVrm || isVrmOriginMiq)
+            {
+                var contractYaw = Math.Clamp(metrics.ContractPreviewYawDeg, -180, 180);
+                var contractFlip = Math.Abs(contractYaw) >= 90;
+                var highConfidence = metrics.TransformConfidenceLevel >= 2U;
+                var suspiciousBounds = metrics.PreviewBoundsExcludedMeshCount >= 12U;
+                var hasHairSignal = metrics.PreviewHairCandidateMeshCount >= 2U;
+                var weakHairSignal = hasHairSignal && metrics.PreviewHairHeadAlignmentScore < 0.20f;
+                var validationStable = !suspiciousBounds && !weakHairSignal;
+                if (highConfidence || validationStable)
+                {
+                    desiredFlip = contractFlip;
+                    _ = SetAvatarPreviewFlip180Preference(avatarPath, desiredFlip);
+                    detail =
+                        $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, resolved={desiredFlip}, mode=auto-contract" +
+                        $", format={format}, yaw={contractYaw}, confidence={metrics.TransformConfidenceLevel}" +
+                        $", excluded={metrics.PreviewBoundsExcludedMeshCount}, hair={metrics.PreviewHairCandidateMeshCount}, hair_score={metrics.PreviewHairHeadAlignmentScore:0.00}";
+                }
+                else
+                {
+                    detail =
+                        $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, resolved={desiredFlip}, mode=stored-fallback" +
+                        $", format={format}, yaw={contractYaw}, confidence={metrics.TransformConfidenceLevel}" +
+                        $", excluded={metrics.PreviewBoundsExcludedMeshCount}, hair={metrics.PreviewHairCandidateMeshCount}, hair_score={metrics.PreviewHairHeadAlignmentScore:0.00}";
+                }
+            }
+            else
+            {
+                detail =
+                    $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, resolved={desiredFlip}, mode=out-of-scope, format={format}";
+            }
+        }
+        else
+        {
+            detail = $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, mode=stored-metrics-failed, rc={metricsRc}";
+        }
+
+        AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "AvatarPreviewFlipResolve", detail, NcResultCode.Ok), false);
+
+        if (!desiredFlip)
         {
             return NcResultCode.Ok;
         }
@@ -2066,8 +2140,9 @@ public sealed partial class HostController
         var shadowStatus = ResolveShadowSignal(info);
         var rootCause = ClassifyCommonCause(info);
         var reason = ResolveCommonCauseReason(info, rootCause, armStatus, shadowStatus);
+        var actionHint = HostFeatureGateResolver.ResolveOperatorActionHint(rootCause, reason);
         var message =
-            $"class={rootCause}, reason={NormalizeSignal(reason)}, format={info.DetectedFormat}, expressions={info.ExpressionCount}, arm={NormalizeSignal(armStatus)}, shadow={NormalizeSignal(shadowStatus)}, tracking_err={NormalizeSignal(_trackingDiagnostics.LastErrorCode)}, warning={NormalizeSignal(info.LastWarningCode)}";
+            $"class={rootCause}, reason={NormalizeSignal(reason)}, format={info.DetectedFormat}, expressions={info.ExpressionCount}, arm={NormalizeSignal(armStatus)}, shadow={NormalizeSignal(shadowStatus)}, tracking_err={NormalizeSignal(_trackingDiagnostics.LastErrorCode)}, warning={NormalizeSignal(info.LastWarningCode)}, action={NormalizeSignal(actionHint)}";
         AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "CommonCauseTriage", message, NcResultCode.Ok), false);
     }
 

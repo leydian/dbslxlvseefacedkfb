@@ -144,6 +144,12 @@ typedef struct NcAvatarRuntimeMetricsV2 {
     float target_frame_ms;
     char physics_solver[32];
     char mtoon_runtime_mode[32];
+    int32_t contract_preview_yaw_deg;
+    uint32_t transform_confidence_level;
+    uint32_t is_vrm_origin_miq;
+    uint32_t preview_bounds_excluded_mesh_count;
+    uint32_t preview_hair_candidate_mesh_count;
+    float preview_hair_head_alignment_score;
 } NcAvatarRuntimeMetricsV2;
 
 typedef struct NcTrackingFrame {

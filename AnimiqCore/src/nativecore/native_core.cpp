@@ -232,11 +232,21 @@ struct AvatarArmPoseState {
     NcPoseBoneOffset right_hand {};
 };
 
+struct AvatarPreviewOrientationMetrics {
+    std::int32_t contract_preview_yaw_deg = 0;
+    std::uint32_t transform_confidence_level = 0U;
+    std::uint32_t is_vrm_origin_miq = 0U;
+    std::uint32_t preview_bounds_excluded_mesh_count = 0U;
+    std::uint32_t preview_hair_candidate_mesh_count = 0U;
+    float preview_hair_head_alignment_score = -1.0f;
+};
+
 struct CoreState {
     bool initialized = false;
     std::uint64_t next_avatar_handle = 1;
     std::unordered_map<std::uint64_t, AvatarPackage> avatars;
     std::unordered_map<std::uint64_t, std::string> avatar_preview_debug;
+    std::unordered_map<std::uint64_t, AvatarPreviewOrientationMetrics> avatar_preview_orientation_metrics;
     std::unordered_map<std::uint64_t, AvatarSecondaryMotionState> secondary_motion_states;
     std::unordered_map<std::uint64_t, AvatarArmPoseState> arm_pose_states;
     std::unordered_set<std::uint64_t> render_ready_avatars;
@@ -548,6 +558,8 @@ ParityDiagnosticsSummary ComputeParityDiagnostics(
     return out;
 }
 
+std::uint32_t TransformConfidenceLevel(TransformConfidence confidence);
+
 void FillAvatarRuntimeMetricsV2(const AvatarPackage& pkg, std::uint64_t handle, NcAvatarRuntimeMetricsV2* out_info) {
     if (out_info == nullptr) {
         return;
@@ -557,6 +569,20 @@ void FillAvatarRuntimeMetricsV2(const AvatarPackage& pkg, std::uint64_t handle, 
     out_info->last_frame_ms = g_state.last_frame_ms;
     CopyString(out_info->physics_solver, sizeof(out_info->physics_solver), "spring-v2-damped");
     CopyString(out_info->mtoon_runtime_mode, sizeof(out_info->mtoon_runtime_mode), "mtoon-advanced-runtime");
+    out_info->contract_preview_yaw_deg = std::max(-180, std::min(180, static_cast<int>(pkg.recommended_preview_yaw_deg)));
+    out_info->transform_confidence_level = TransformConfidenceLevel(pkg.transform_confidence);
+    out_info->is_vrm_origin_miq = (pkg.source_type == AvatarSourceType::Miq && pkg.source_ext == ".vrm") ? 1U : 0U;
+    out_info->preview_hair_head_alignment_score = -1.0f;
+
+    const auto orientation_it = g_state.avatar_preview_orientation_metrics.find(handle);
+    if (orientation_it != g_state.avatar_preview_orientation_metrics.end()) {
+        out_info->contract_preview_yaw_deg = orientation_it->second.contract_preview_yaw_deg;
+        out_info->transform_confidence_level = orientation_it->second.transform_confidence_level;
+        out_info->is_vrm_origin_miq = orientation_it->second.is_vrm_origin_miq;
+        out_info->preview_bounds_excluded_mesh_count = orientation_it->second.preview_bounds_excluded_mesh_count;
+        out_info->preview_hair_candidate_mesh_count = orientation_it->second.preview_hair_candidate_mesh_count;
+        out_info->preview_hair_head_alignment_score = orientation_it->second.preview_hair_head_alignment_score;
+    }
 
     const auto state_it = g_state.secondary_motion_states.find(handle);
     if (state_it != g_state.secondary_motion_states.end()) {
@@ -779,6 +805,19 @@ const char* TransformConfidenceName(TransformConfidence confidence) {
             return "high";
         default:
             return "unknown";
+    }
+}
+
+std::uint32_t TransformConfidenceLevel(TransformConfidence confidence) {
+    switch (confidence) {
+        case TransformConfidence::Low:
+            return 1U;
+        case TransformConfidence::Medium:
+            return 2U;
+        case TransformConfidence::High:
+            return 3U;
+        default:
+            return 0U;
     }
 }
 
@@ -6303,6 +6342,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::uint32_t mesh_vrm_origin_hair_head_realigned_count = 0U;
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
+        std::uint32_t preview_hair_candidate_mesh_count = 0U;
+        std::uint32_t preview_hair_aligned_mesh_count = 0U;
         std::vector<std::string> detached_mesh_names;
         bool avatar_has_shadow_capable_material = false;
         bool avatar_shadow_draw_enqueued = false;
@@ -6316,7 +6357,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float head_ref_x = robust_cx;
         float head_ref_y = robust_cy;
         float head_ref_z = robust_cz;
-        if (is_vrm_origin_miq && enable_vrm_mesh_recentering) {
+        if (is_vrm_origin_miq) {
             float acc_x = 0.0f;
             float acc_y = 0.0f;
             float acc_z = 0.0f;
@@ -6368,6 +6409,32 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 std::max(0.8f, median_center_dist * 3.0f);
             const float detached_cluster_size_cap =
                 std::max(0.5f, median_extent * 2.0f);
+            if (is_vrm_origin_miq && head_ref_valid) {
+                std::string hair_name_key = mesh.mesh_name;
+                std::transform(hair_name_key.begin(), hair_name_key.end(), hair_name_key.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                const bool is_hair_candidate =
+                    hair_name_key.find("hair") != std::string::npos ||
+                    hair_name_key.find("hairpin") != std::string::npos ||
+                    hair_name_key == "front.baked.baked" ||
+                    hair_name_key == "back.baked.baked" ||
+                    hair_name_key == "side.baked.baked";
+                if (is_hair_candidate) {
+                    ++preview_hair_candidate_mesh_count;
+                    const float hx = mesh.center.x - head_ref_x;
+                    const float hy = mesh.center.y - head_ref_y;
+                    const float hz = mesh.center.z - head_ref_z;
+                    const float head_dist = std::sqrt(hx * hx + hy * hy + hz * hz);
+                    const bool hair_aligned =
+                        std::isfinite(head_dist) &&
+                        std::abs(hy) <= std::max(0.12f, safe_extent_y * 0.16f) &&
+                        head_dist <= std::max(0.35f, median_center_dist * 1.6f);
+                    if (hair_aligned) {
+                        ++preview_hair_aligned_mesh_count;
+                    }
+                }
+            }
             const float extreme_detached_cluster_threshold =
                 std::max(2.4f, median_center_dist * 5.5f);
             const float extreme_detached_cluster_size_cap =
@@ -6731,6 +6798,19 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 preview_it->second += ", vrm_hair_head_realigned=" + std::to_string(mesh_vrm_origin_hair_head_realigned_count);
             }
         }
+        float hair_alignment_score = -1.0f;
+        if (preview_hair_candidate_mesh_count > 0U) {
+            hair_alignment_score = static_cast<float>(preview_hair_aligned_mesh_count) /
+                static_cast<float>(preview_hair_candidate_mesh_count);
+        }
+        g_state.avatar_preview_orientation_metrics[handle] = AvatarPreviewOrientationMetrics {
+            std::max(-180, std::min(180, static_cast<int>(it->second.recommended_preview_yaw_deg))),
+            TransformConfidenceLevel(it->second.transform_confidence),
+            is_vrm_origin_miq ? 1U : 0U,
+            bounds_outlier_excluded_count,
+            preview_hair_candidate_mesh_count,
+            hair_alignment_score,
+        };
     }
     for (auto& family_q : family_draws) {
         std::sort(family_q.blend_draws.begin(), family_q.blend_draws.end(), [](const DrawItem& a, const DrawItem& b) {
@@ -7254,6 +7334,8 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
 
     const std::uint64_t handle = animiq::nativecore::g_state.next_avatar_handle++;
     animiq::nativecore::g_state.avatars[handle] = loaded.value;
+    animiq::nativecore::g_state.avatar_preview_debug.erase(handle);
+    animiq::nativecore::g_state.avatar_preview_orientation_metrics.erase(handle);
     animiq::nativecore::g_state.secondary_motion_states.erase(handle);
     animiq::nativecore::g_state.arm_pose_states.erase(handle);
     *out_handle = handle;
@@ -7274,6 +7356,8 @@ NcResultCode nc_unload_avatar(NcAvatarHandle handle) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
     animiq::nativecore::g_state.render_ready_avatars.erase(handle);
+    animiq::nativecore::g_state.avatar_preview_debug.erase(handle);
+    animiq::nativecore::g_state.avatar_preview_orientation_metrics.erase(handle);
     animiq::nativecore::g_state.secondary_motion_states.erase(handle);
     animiq::nativecore::g_state.arm_pose_states.erase(handle);
 #if defined(_WIN32)
@@ -7680,6 +7764,8 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
     }
 
     animiq::nativecore::g_state.render_ready_avatars.insert(handle);
+    animiq::nativecore::g_state.avatar_preview_debug.erase(handle);
+    animiq::nativecore::g_state.avatar_preview_orientation_metrics.erase(handle);
 #if defined(_WIN32)
     auto mesh_it = animiq::nativecore::g_state.renderer.avatar_meshes.find(handle);
     if (mesh_it != animiq::nativecore::g_state.renderer.avatar_meshes.end()) {
@@ -7716,6 +7802,8 @@ NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
     }
 
     animiq::nativecore::g_state.render_ready_avatars.erase(handle);
+    animiq::nativecore::g_state.avatar_preview_debug.erase(handle);
+    animiq::nativecore::g_state.avatar_preview_orientation_metrics.erase(handle);
 #if defined(_WIN32)
     auto mesh_it = animiq::nativecore::g_state.renderer.avatar_meshes.find(handle);
     if (mesh_it != animiq::nativecore::g_state.renderer.avatar_meshes.end()) {

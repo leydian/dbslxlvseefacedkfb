@@ -2,6 +2,51 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Avatar preview flip auto-resolution via contract metrics (VRM + MIQ VRM-origin)
+
+### Summary
+
+Replaced stored-only per-avatar preview flip replay with a contract-driven auto resolver that recalculates front/back on load for `VRM` and `MIQ` avatars flagged as VRM-origin, then persists the resolved result.
+
+Primary outcomes:
+
+- host load path now derives flip from native contract yaw (`contract_preview_yaw_deg`) instead of only stale stored override,
+- native runtime metrics v2 now exports contract/validation fields needed for host decisioning,
+- automatic result can overwrite existing `RecentAvatars.PreviewFlip180` when confidence/validation gate passes,
+- host log now records decision inputs and final mode via `AvatarPreviewFlipResolve`.
+
+### Changed
+
+- Native API:
+  - `include/animiq/nativecore/api.h`
+  - `NcAvatarRuntimeMetricsV2` expanded with contract/validation fields:
+    - `contract_preview_yaw_deg`
+    - `transform_confidence_level`
+    - `is_vrm_origin_miq`
+    - `preview_bounds_excluded_mesh_count`
+    - `preview_hair_candidate_mesh_count`
+    - `preview_hair_head_alignment_score`
+- Native runtime:
+  - `src/nativecore/native_core.cpp`
+  - added per-avatar orientation metrics cache and lifecycle cleanup
+  - `FillAvatarRuntimeMetricsV2(...)` now returns contract yaw/confidence + preview validation signals
+  - render loop now computes VRM-origin MIQ hair/head alignment score for host gating
+- Host interop + load flow:
+  - `host/HostCore/NativeCoreInterop.cs`
+  - `host/HostCore/HostController.cs`
+  - `LoadAvatar(...)` now calls `ResolveAndApplyAvatarPreviewFlipOnLoad(...)`
+  - resolver policy:
+    - scope: `VRM`, `MIQ + is_vrm_origin_miq`
+    - auto source: contract yaw (`abs(yaw) >= 90 => flip`)
+    - apply gate: medium+ transform confidence OR stable bounds/hair validation
+    - persistence override: writes resolved value back to `PreviewFlip180`
+
+### Verification
+
+- `cmake --build AnimiqCore/build_plan_impl --config Release --target nativecore`: PASS
+- `dotnet build AnimiqCore/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build AnimiqCore/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+
 ## 2026-03-06 - Feature gate/UI alignment for arm, realtime shadow, and expression (WPF + WinUI)
 
 ### Summary
