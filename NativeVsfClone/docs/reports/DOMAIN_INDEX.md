@@ -62,6 +62,7 @@ Domain-level report navigation hub.
 - [2026-03-06_spout2_full_interop_scaffold.md](./weekly/2026-W10/2026-03-06_spout2_full_interop_scaffold.md)
 
 ## tracking
+- [2026-03-06_tracking_webcam_python_fallback_and_start_failure_diagnostics.md](./weekly/2026-W10/2026-03-06_tracking_webcam_python_fallback_and_start_failure_diagnostics.md)
 - [2026-03-06_tracking_latency_lock_followup.md](./weekly/2026-W10/2026-03-06_tracking_latency_lock_followup.md)
 - [2026-03-06_tracking_render_followup.md](./weekly/2026-W10/2026-03-06_tracking_render_followup.md)
 

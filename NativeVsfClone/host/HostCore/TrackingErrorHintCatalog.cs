@@ -21,7 +21,7 @@ public static class TrackingErrorHintCatalog
             "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
             "TRACKING_SOURCE_SWITCH_THRASH" => " hint=source switching too frequently; stabilize network/light or lock source temporarily",
             "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
-            "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed",
+            "TRACKING_MEDIAPIPE_START_FAILED" => " hint=webcam sidecar start failed; verify VSFCLONE_MEDIAPIPE_PYTHON or run setup_tracking_python_venv.ps1",
             "TRACKING_MEDIAPIPE_NO_FRAME" => " hint=webcam sidecar produced no frames",
             "TRACKING_NO_ACTIVE_INPUT_SOURCE" => " hint=no active input source; start iFacial send or enable webcam runtime",
             "TRACKING_IFACIAL_NO_PACKET" => " hint=no iFacial packet received",

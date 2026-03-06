@@ -948,15 +948,32 @@ public sealed class TrackingInputService : ITrackingInputService
             {
                 if (!_hasMediapipePacket)
                 {
+                    var sidecarExited = _mediapipeProcess?.HasExited == true;
+                    var sidecarExitCode = _mediapipeProcess?.HasExited == true
+                        ? _mediapipeProcess.ExitCode
+                        : -1;
+                    var normalizedError = _latestMediapipeError.Trim();
+                    var sourceStage = "sidecar-no-frames";
+                    var status = string.IsNullOrWhiteSpace(normalizedError)
+                        ? "mediapipe sidecar started but no frame received"
+                        : $"mediapipe sidecar no frame: {normalizedError}";
+                    var errorCode = "TRACKING_MEDIAPIPE_NO_FRAME";
+                    if (sidecarExited)
+                    {
+                        sourceStage = "sidecar-exited";
+                        status = string.IsNullOrWhiteSpace(normalizedError)
+                            ? $"mediapipe sidecar exited before first frame (code={sidecarExitCode})"
+                            : $"mediapipe sidecar exited before first frame (code={sidecarExitCode}): {normalizedError}";
+                        errorCode = "TRACKING_MEDIAPIPE_START_FAILED";
+                    }
+
                     _diagnostics = _diagnostics with
                     {
                         IsActive = false,
-                        SourceStatus = BuildWebcamSourceStatus("sidecar-no-frames"),
-                        StatusMessage = string.IsNullOrWhiteSpace(_latestMediapipeError)
-                            ? "mediapipe sidecar started but no frame received"
-                            : $"mediapipe sidecar no frame: {_latestMediapipeError}",
+                        SourceStatus = BuildWebcamSourceStatus(sourceStage),
+                        StatusMessage = status,
                         ModelSchemaOk = false,
-                        LastErrorCode = "TRACKING_MEDIAPIPE_NO_FRAME",
+                        LastErrorCode = errorCode,
                     };
                     return NcResultCode.Io;
                 }
@@ -1186,12 +1203,6 @@ public sealed class TrackingInputService : ITrackingInputService
 
     private MediapipeSidecarLaunchConfig BuildMediapipeSidecarLaunchConfig()
     {
-        var pythonExe = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_PYTHON");
-        if (string.IsNullOrWhiteSpace(pythonExe))
-        {
-            pythonExe = "python";
-        }
-
         var scriptPath = ResolveMediapipeSidecarScriptPath(out var searchedPaths);
         if (string.IsNullOrWhiteSpace(scriptPath))
         {
@@ -1202,11 +1213,24 @@ public sealed class TrackingInputService : ITrackingInputService
                 $"mediapipe_webcam_sidecar.py not found. set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT to an absolute path. searched=[{string.Join(", ", searchedPaths)}]");
         }
 
+        var pythonLaunch = ResolveMediapipePythonLaunchConfig();
+        if (!pythonLaunch.IsValid)
+        {
+            return new MediapipeSidecarLaunchConfig(
+                false,
+                string.Empty,
+                string.Empty,
+                pythonLaunch.ErrorMessage);
+        }
+
         var cameraArg = string.IsNullOrWhiteSpace(_options.CameraDeviceKey) ? "0" : _options.CameraDeviceKey.Trim();
-        var args = string.Create(
+        var sidecarArgs = string.Create(
             CultureInfo.InvariantCulture,
             $"\"{scriptPath}\" --camera \"{cameraArg}\" --fps {_options.InferenceFpsCap}");
-        return new MediapipeSidecarLaunchConfig(true, pythonExe, args, string.Empty);
+        var launchArgs = string.IsNullOrWhiteSpace(pythonLaunch.ArgumentPrefix)
+            ? sidecarArgs
+            : $"{pythonLaunch.ArgumentPrefix} {sidecarArgs}";
+        return new MediapipeSidecarLaunchConfig(true, pythonLaunch.Executable, launchArgs, string.Empty);
     }
 
     private static string ResolveMediapipeSidecarScriptPath(out IReadOnlyList<string> searchedPaths)
@@ -1232,6 +1256,145 @@ public sealed class TrackingInputService : ITrackingInputService
         }
 
         return string.Empty;
+    }
+
+    private MediapipePythonLaunchConfig ResolveMediapipePythonLaunchConfig()
+    {
+        var attempted = new List<string>();
+        foreach (var candidate in BuildMediapipePythonCandidates())
+        {
+            if (TryProbePythonCandidate(candidate, out var probeFailure))
+            {
+                return new MediapipePythonLaunchConfig(true, candidate.Executable, candidate.ArgumentPrefix, string.Empty);
+            }
+
+            attempted.Add($"{candidate.DisplayName}: {probeFailure}");
+        }
+
+        var detail = attempted.Count == 0
+            ? "no python candidate configured"
+            : string.Join(" | ", attempted);
+        return new MediapipePythonLaunchConfig(
+            false,
+            string.Empty,
+            string.Empty,
+            $"python runtime not available for webcam tracking. set VSFCLONE_MEDIAPIPE_PYTHON or run tools/setup_tracking_python_venv.ps1. tried=[{detail}]");
+    }
+
+    private static IEnumerable<MediapipePythonCandidate> BuildMediapipePythonCandidates()
+    {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddCandidate(List<MediapipePythonCandidate> list, string executable, string argumentPrefix, string displayName)
+        {
+            var normalizedExe = NormalizeExecutableToken(executable);
+            if (string.IsNullOrWhiteSpace(normalizedExe))
+            {
+                return;
+            }
+
+            var normalizedPrefix = argumentPrefix?.Trim() ?? string.Empty;
+            var dedupeKey = $"{normalizedExe}|{normalizedPrefix}";
+            if (!yielded.Add(dedupeKey))
+            {
+                return;
+            }
+
+            list.Add(new MediapipePythonCandidate(normalizedExe, normalizedPrefix, displayName));
+        }
+
+        var candidates = new List<MediapipePythonCandidate>(capacity: 6);
+        var envPython = Environment.GetEnvironmentVariable("VSFCLONE_MEDIAPIPE_PYTHON");
+        if (!string.IsNullOrWhiteSpace(envPython))
+        {
+            AddCandidate(candidates, envPython, string.Empty, "env:VSFCLONE_MEDIAPIPE_PYTHON");
+        }
+
+        AddCandidate(candidates, "py", "-3", "py -3");
+
+        var venvCandidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe"),
+            Path.Combine(Environment.CurrentDirectory, ".venv", "Scripts", "python.exe"),
+        };
+        foreach (var venvCandidate in venvCandidates)
+        {
+            if (File.Exists(venvCandidate))
+            {
+                AddCandidate(candidates, venvCandidate, string.Empty, $".venv ({venvCandidate})");
+            }
+        }
+
+        AddCandidate(candidates, "python", string.Empty, "python");
+        return candidates;
+    }
+
+    private static string NormalizeExecutableToken(string executable)
+    {
+        var normalized = executable.Trim();
+        if (normalized.Length >= 2 && normalized[0] == '"' && normalized[^1] == '"')
+        {
+            normalized = normalized[1..^1].Trim();
+        }
+
+        return normalized;
+    }
+
+    private static bool TryProbePythonCandidate(MediapipePythonCandidate candidate, out string failure)
+    {
+        failure = string.Empty;
+        try
+        {
+            var versionArgs = string.IsNullOrWhiteSpace(candidate.ArgumentPrefix)
+                ? "--version"
+                : $"{candidate.ArgumentPrefix} --version";
+            var psi = new ProcessStartInfo(candidate.Executable, versionArgs)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+            };
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                failure = "process start returned null";
+                return false;
+            }
+
+            if (!process.WaitForExit(1800))
+            {
+                try
+                {
+                    process.Kill(true);
+                }
+                catch
+                {
+                    // best effort only
+                }
+
+                failure = "version probe timeout";
+                return false;
+            }
+
+            if (process.ExitCode != 0)
+            {
+                var stderr = process.StandardError.ReadToEnd().Trim();
+                var stdout = process.StandardOutput.ReadToEnd().Trim();
+                failure = $"exit={process.ExitCode}; stderr={stderr}; stdout={stdout}";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            failure = ex.Message;
+            return false;
+        }
     }
 
     private Process? StartMediapipeSidecar(MediapipeSidecarLaunchConfig launch)
@@ -2955,6 +3118,17 @@ public sealed class TrackingInputService : ITrackingInputService
         bool IsValid,
         string Executable,
         string Arguments,
+        string ErrorMessage);
+
+    private sealed record MediapipePythonCandidate(
+        string Executable,
+        string ArgumentPrefix,
+        string DisplayName);
+
+    private sealed record MediapipePythonLaunchConfig(
+        bool IsValid,
+        string Executable,
+        string ArgumentPrefix,
         string ErrorMessage);
 
     private sealed record MediapipeFramePacket(

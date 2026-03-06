@@ -676,7 +676,7 @@ public sealed partial class MainWindow : Window
         var rc = _controller.StartTracking(listenPort, settings.StaleTimeoutMs);
         if (rc != NcResultCode.Ok)
         {
-            await ShowMessageAsync("트래킹 (Tracking)", $"Start tracking failed: {rc}");
+            await ShowMessageAsync("트래킹 (Tracking)", BuildTrackingStartFailureMessage(rc));
             return;
         }
     }
@@ -780,6 +780,23 @@ public sealed partial class MainWindow : Window
     private static string BuildTrackingErrorHint(string lastErrorCode)
     {
         return TrackingErrorHintCatalog.BuildHint(lastErrorCode);
+    }
+
+    private string BuildTrackingStartFailureMessage(NcResultCode rc)
+    {
+        var tracking = _controller.TrackingDiagnostics;
+        var hint = BuildTrackingErrorHint(tracking.LastErrorCode);
+        var hintLine = string.IsNullOrWhiteSpace(hint) ? string.Empty : $"{Environment.NewLine}{hint.Trim()}";
+        var codeLine = string.IsNullOrWhiteSpace(tracking.LastErrorCode) ? string.Empty : $"{Environment.NewLine}ErrorCode: {tracking.LastErrorCode}";
+        var statusLine = string.IsNullOrWhiteSpace(tracking.StatusMessage) ? string.Empty : $"{Environment.NewLine}Status: {tracking.StatusMessage}";
+        var remediation = tracking.LastErrorCode switch
+        {
+            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => $"{Environment.NewLine}Action: verify mediapipe_webcam_sidecar.py path and VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT.",
+            "TRACKING_MEDIAPIPE_START_FAILED" => $"{Environment.NewLine}Action: set VSFCLONE_MEDIAPIPE_PYTHON or run tools/setup_tracking_python_venv.ps1.",
+            "TRACKING_MEDIAPIPE_NO_FRAME" => $"{Environment.NewLine}Action: check camera permissions/device lock and retry.",
+            _ => string.Empty,
+        };
+        return $"Start tracking failed: {rc}{codeLine}{statusLine}{hintLine}{remediation}";
     }
 
     private void CopyLogs_Click(object sender, RoutedEventArgs e)

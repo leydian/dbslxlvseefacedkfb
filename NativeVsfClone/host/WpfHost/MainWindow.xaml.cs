@@ -967,7 +967,8 @@ public partial class MainWindow : Window
             staleTimeoutMs: _controller.GetTrackingInputSettings().StaleTimeoutMs);
         if (rc != NcResultCode.Ok)
         {
-            MessageBox.Show(this, $"트래킹 시작 실패: {rc} (Start tracking failed: {rc})", "트래킹 (Tracking)", MessageBoxButton.OK, MessageBoxImage.Warning);
+            var detail = BuildTrackingStartFailureMessage(rc);
+            MessageBox.Show(this, detail, "트래킹 (Tracking)", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
     }
@@ -2738,6 +2739,23 @@ public partial class MainWindow : Window
     private static string BuildTrackingErrorHint(string lastErrorCode)
     {
         return TrackingErrorHintCatalog.BuildHint(lastErrorCode);
+    }
+
+    private string BuildTrackingStartFailureMessage(NcResultCode rc)
+    {
+        var tracking = _controller.TrackingDiagnostics;
+        var hint = BuildTrackingErrorHint(tracking.LastErrorCode);
+        var hintLine = string.IsNullOrWhiteSpace(hint) ? string.Empty : $"{Environment.NewLine}{hint.Trim()}";
+        var codeLine = string.IsNullOrWhiteSpace(tracking.LastErrorCode) ? string.Empty : $"{Environment.NewLine}ErrorCode: {tracking.LastErrorCode}";
+        var statusLine = string.IsNullOrWhiteSpace(tracking.StatusMessage) ? string.Empty : $"{Environment.NewLine}Status: {tracking.StatusMessage}";
+        var remediation = tracking.LastErrorCode switch
+        {
+            "TRACKING_MEDIAPIPE_CONFIG_INVALID" => $"{Environment.NewLine}Action: mediapipe_webcam_sidecar.py 경로와 VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT 설정을 확인하세요.",
+            "TRACKING_MEDIAPIPE_START_FAILED" => $"{Environment.NewLine}Action: VSFCLONE_MEDIAPIPE_PYTHON 설정 또는 tools/setup_tracking_python_venv.ps1 실행 후 재시도하세요.",
+            "TRACKING_MEDIAPIPE_NO_FRAME" => $"{Environment.NewLine}Action: 카메라 권한/점유 상태를 확인하고 다른 앱의 카메라 사용을 종료하세요.",
+            _ => string.Empty,
+        };
+        return $"트래킹 시작 실패: {rc} (Start tracking failed: {rc}){codeLine}{statusLine}{hintLine}{remediation}";
     }
 
     private void RefreshGuides()
