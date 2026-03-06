@@ -2,6 +2,51 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 extreme detached-cluster draw guard + AutoFit bust framing stabilization
+
+### Summary
+
+Addressed the runtime symptom where some XAV2 avatars showed separated floating parts (for example face/hair pieces) and unstable bust framing that looked like the avatar was sunk into the ground.
+
+### Changed
+
+- Runtime render/autofit hardening:
+  - `src/nativecore/native_core.cpp`
+  - tightened XAV2 bounds-cluster exclusion threshold for AutoFit filtering:
+    - before: `max(3.8, median_extent * 4.5)`
+    - after: `max(2.2, median_extent * 2.8)`
+  - added cluster candidate size cap for bounds exclusion:
+    - `sample.extent <= max(0.75, median_extent * 1.4)`
+  - stabilized bust framing anchor (`focus_y`) for XAV2:
+    - robust-center blend raised (`0.70/0.45 -> 0.78/0.52`)
+    - clamp window added: `[avatar_bmin.y + 0.42 * extent_y, avatar_bmin.y + 0.82 * extent_y]`
+  - preserved default draw policy `autofit_only`, but added safety override for extreme detached small clusters:
+    - skip draw when:
+      - `robust_dist > max(2.4, median_center_dist * 5.5)`
+      - `emax <= max(0.35, median_extent * 1.1)`
+  - new warning code:
+    - `XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED`
+  - preview debug diagnostics enriched with:
+    - `bounds_cluster_threshold`
+    - `bounds_cluster_extent_cap`
+    - `extreme_detached_skipped`
+- Docs updated:
+  - `docs/formats/xav2.md`:
+    - documented `autofit_only` safety override behavior
+    - added new warning code to runtime warning contract
+  - added weekly report:
+    - `docs/reports/weekly/2026-W10/2026-03-06_xav2_extreme_detached_cluster_and_autofit_stability.md`
+  - updated weekly index/summary:
+    - `docs/reports/weekly/2026-W10/INDEX.md`
+    - `docs/reports/weekly/2026-W10/SUMMARY.md` (`xav2` count `28 -> 29`)
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- `NativeVsfClone/build/Release/avatar_tool.exe "D:\dbslxlvseefacedkfb\개인작10-2.xav2" --dump-warnings-limit=50`: PASS (`Compat: full`)
+- runtime deployment sync:
+  - `build/Release/nativecore.dll` SHA256 matched `dist/wpf/nativecore.dll` after process stop + copy
+
 ## 2026-03-06 - IFM native text parse compatibility + tracking snapshot sync + XAV2 base-only shadow inference
 
 ### Summary

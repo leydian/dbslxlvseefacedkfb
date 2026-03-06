@@ -312,12 +312,16 @@ Additional runtime hardening was applied after parity fixes to address legacy/ed
   - Draw exclusion policy is runtime-configurable via `VSFCLONE_XAV2_OUTLIER_DRAW_POLICY`:
     - `autofit_only` (default): exclude only from AutoFit bounds/focus, keep draw.
     - `skip_draw`: also exclude outlier meshes during draw (legacy behavior).
+  - Safety override:
+    - even in `autofit_only`, extremely detached small clusters are skipped from draw to avoid
+      visible face/hair/accessory separation artifacts.
   - Added detached cluster filtering using robust center statistics (median-based) to suppress
     floating accessory clusters that corrupt framing.
   - Related warning codes:
     - `XAV2_BOUNDS_OUTLIER_DRAW_SKIPPED`
     - `XAV2_DETACHED_MESH_OUTLIER_SKIPPED`
     - `XAV2_DETACHED_CLUSTER_SKIPPED`
+    - `XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED`
 
 - AutoFit bust framing stability:
   - `focus_y` in `AutoFitBust` now blends bounds-derived and robust-center-derived anchors for XAV2,

@@ -5902,7 +5902,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             : sorted_extents[sorted_extents.size() / 2U];
         const float extent_threshold = std::max(0.5f, median_extent * 20.0f);
         const float draw_extent_threshold = std::max(2.5f, median_extent * 6.0f);
-        const float bounds_cluster_distance_threshold = std::max(3.8f, median_extent * 4.5f);
+        const float bounds_cluster_distance_threshold = std::max(2.2f, median_extent * 2.8f);
+        const float cluster_bounds_extent_cap = std::max(0.75f, median_extent * 1.4f);
         constexpr std::size_t kMinClusterSamplesForBoundsFilter = 6U;
         std::vector<std::uint8_t> preview_bounds_excluded(mesh_it->second.size(), 0U);
         if (it->second.source_type == AvatarSourceType::Xav2) {
@@ -5960,6 +5961,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                     continue;
                 }
                 if (sample.extent > extent_threshold) {
+                    continue;
+                }
+                if (sample.extent > cluster_bounds_extent_cap) {
                     continue;
                 }
                 const auto& m = mesh_it->second[sample.index];
@@ -6178,8 +6182,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             // Robust center keeps framing stable when outlier meshes are excluded.
             const float focus_from_cluster = robust_cy - safe_extent_y * 0.03f;
             if (it->second.source_type == AvatarSourceType::Xav2) {
-                const float blend = excluded_bounds_mesh_count > 0U ? 0.70f : 0.45f;
+                const bool xav2_outlier_filtered = excluded_bounds_mesh_count > 0U;
+                const float blend = xav2_outlier_filtered ? 0.78f : 0.52f;
                 focus_y = focus_from_bounds * (1.0f - blend) + focus_from_cluster * blend;
+                const float focus_min = avatar_bmin.y + safe_extent_y * 0.42f;
+                const float focus_max = avatar_bmin.y + safe_extent_y * 0.82f;
+                focus_y = std::max(focus_min, std::min(focus_max, focus_y));
             } else {
                 focus_y = focus_from_bounds;
             }
@@ -6197,6 +6205,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                           << ", bounds_meshes=" << included_bounds_mesh_count
                           << "/" << mesh_it->second.size()
                           << ", bounds_excluded=" << excluded_bounds_mesh_count
+                          << ", bounds_cluster_threshold=" << bounds_cluster_distance_threshold
+                          << ", bounds_cluster_extent_cap=" << cluster_bounds_extent_cap
                           << ", autofit_degenerate=" << (autofit_degenerate ? "1" : "0")
                           << ", near_origin=" << (near_origin_bounds_used ? "1" : "0")
                           << ", preview_yaw_deg=" << PreviewYawDegreesForAvatarPackage(it->second, nullptr);
@@ -6243,11 +6253,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::uint32_t mesh_extent_outlier_skipped_count = 0U;
         std::uint32_t mesh_detached_outlier_skipped_count = 0U;
         std::uint32_t mesh_detached_cluster_skipped_count = 0U;
+        std::uint32_t mesh_extreme_detached_cluster_skipped_count = 0U;
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         std::vector<std::string> detached_mesh_names;
+        const bool is_xav2_avatar = it->second.source_type == AvatarSourceType::Xav2;
         const bool skip_xav2_outlier_draws =
-            it->second.source_type == AvatarSourceType::Xav2 &&
+            is_xav2_avatar &&
             ResolveXav2OutlierDrawPolicy() == Xav2OutlierDrawPolicy::SkipDraw;
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
@@ -6257,24 +6269,41 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 ++mesh_bounds_outlier_draw_skipped_count;
                 continue;
             }
+            const float ex = std::max(mesh.bounds_max.x - mesh.bounds_min.x, 0.0f);
+            const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
+            const float ez = std::max(mesh.bounds_max.z - mesh.bounds_min.z, 0.0f);
+            const float emax = std::max(ex, std::max(ey, ez));
+            const float dcx = mesh.center.x - robust_cx;
+            const float dcy = mesh.center.y - robust_cy;
+            const float dcz = mesh.center.z - robust_cz;
+            const float robust_dist = std::sqrt(dcx * dcx + dcy * dcy + dcz * dcz);
+            const float detached_cluster_threshold =
+                std::max(0.8f, median_center_dist * 3.0f);
+            const float detached_cluster_size_cap =
+                std::max(0.5f, median_extent * 2.0f);
+            const float extreme_detached_cluster_threshold =
+                std::max(2.4f, median_center_dist * 5.5f);
+            const float extreme_detached_cluster_size_cap =
+                std::max(0.35f, median_extent * 1.1f);
+            const bool extreme_detached_cluster =
+                is_xav2_avatar &&
+                std::isfinite(robust_dist) &&
+                robust_dist > extreme_detached_cluster_threshold &&
+                std::isfinite(emax) &&
+                emax <= extreme_detached_cluster_size_cap;
+            if (extreme_detached_cluster) {
+                ++mesh_extreme_detached_cluster_skipped_count;
+                if (detached_mesh_names.size() < 6U) {
+                    detached_mesh_names.push_back(mesh.mesh_name.empty() ? std::to_string(mesh_index) : mesh.mesh_name);
+                }
+                continue;
+            }
             if (skip_xav2_outlier_draws) {
-                const float ex = std::max(mesh.bounds_max.x - mesh.bounds_min.x, 0.0f);
-                const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
-                const float ez = std::max(mesh.bounds_max.z - mesh.bounds_min.z, 0.0f);
-                const float emax = std::max(ex, std::max(ey, ez));
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
                     ++mesh_extent_outlier_skipped_count;
                     continue;
                 }
                 const float avatar_extent = std::max(safe_extent_x, std::max(safe_extent_y, safe_extent_z));
-                const float dcx = mesh.center.x - robust_cx;
-                const float dcy = mesh.center.y - robust_cy;
-                const float dcz = mesh.center.z - robust_cz;
-                const float robust_dist = std::sqrt(dcx * dcx + dcy * dcy + dcz * dcz);
-                const float detached_cluster_threshold =
-                    std::max(0.8f, median_center_dist * 3.0f);
-                const float detached_cluster_size_cap =
-                    std::max(0.5f, median_extent * 2.0f);
                 if (std::isfinite(robust_dist) &&
                     robust_dist > detached_cluster_threshold &&
                     emax <= detached_cluster_size_cap) {
@@ -6398,6 +6427,23 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_DETACHED_MESH_OUTLIER_SKIPPED");
             }
         }
+        if (mesh_extreme_detached_cluster_skipped_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED: meshes=" << mesh_extreme_detached_cluster_skipped_count;
+                if (!detached_mesh_names.empty()) {
+                    warning << ", names=";
+                    for (std::size_t i = 0U; i < detached_mesh_names.size(); ++i) {
+                        if (i > 0U) {
+                            warning << "|";
+                        }
+                        warning << detached_mesh_names[i];
+                    }
+                }
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_EXTREME_DETACHED_CLUSTER_SKIPPED");
+            }
+        }
         if (mesh_detached_cluster_skipped_count > 0U) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
@@ -6438,6 +6484,12 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 std::ostringstream warning;
                 warning << "W_RENDER: XAV2_BOUNDS_OUTLIER_DRAW_SKIPPED: meshes=" << mesh_bounds_outlier_draw_skipped_count;
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "XAV2_BOUNDS_OUTLIER_DRAW_SKIPPED");
+            }
+        }
+        if (mesh_extreme_detached_cluster_skipped_count > 0U) {
+            auto preview_it = g_state.avatar_preview_debug.find(handle);
+            if (preview_it != g_state.avatar_preview_debug.end() && !preview_it->second.empty()) {
+                preview_it->second += ", extreme_detached_skipped=" + std::to_string(mesh_extreme_detached_cluster_skipped_count);
             }
         }
     }

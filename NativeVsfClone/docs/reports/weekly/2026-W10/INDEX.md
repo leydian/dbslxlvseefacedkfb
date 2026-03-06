@@ -150,6 +150,7 @@ Report list for this week.
 - [2026-03-06_wpf_runtime_path_guard_and_dist_alignment.md](./2026-03-06_wpf_runtime_path_guard_and_dist_alignment.md)
 - [2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md](./2026-03-06_wpf_singlefile_startup_crash_redeploy_fix.md)
 - [2026-03-06_xav2_10of10_gate_execution.md](./2026-03-06_xav2_10of10_gate_execution.md)
+- [2026-03-06_xav2_extreme_detached_cluster_and_autofit_stability.md](./2026-03-06_xav2_extreme_detached_cluster_and_autofit_stability.md)
 - [2026-03-06_xav2_full_parity_contract_enforcement.md](./2026-03-06_xav2_full_parity_contract_enforcement.md)
 - [2026-03-06_xav2_import_rig_accuracy_hardening_followup.md](./2026-03-06_xav2_import_rig_accuracy_hardening_followup.md)
 - [2026-03-06_xav2_import_v4_rig_hardening.md](./2026-03-06_xav2_import_v4_rig_hardening.md)
