@@ -2,6 +2,39 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - XAV2 static skinning regression recovery (safe default-off policy)
+
+### Summary
+
+Resolved a user-facing XAV2 render regression where avatars intermittently collapsed into tube/cylinder-like geometry despite healthy load contracts, by finalizing a safety-first static skinning policy and documenting the full triage path.
+
+### Changed
+
+- Native runtime stabilization (`src/nativecore/native_core.cpp`):
+  - added conservative XAV2 material path env gate:
+    - `VSFCLONE_XAV2_CONSERVATIVE_MATERIAL`
+  - added collapse guard in static skinning validation path with warning contract:
+    - `XAV2_SKINNING_COLLAPSE_GUARD`
+  - relaxed XAV2 bounds cluster exclusion sensitivity (higher threshold + min sample gate).
+  - finalized XAV2 static skinning default in auto mode to OFF (explicit opt-in required).
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_xav2_static_skinning_regression_and_safe_default_off.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `cmake --build NativeVsfClone/build --config Release --target nativecore`: PASS
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `build/Release/nativecore.dll` -> `dist/wpf/nativecore.dll` hash/timestamp integrity: PASS
+- runtime diagnostics after redeploy:
+  - `RuntimePathMatch: True`
+  - `RuntimeModuleStaleVsBuildOutput: False`
+  - `RuntimeTimestampWarningCode: none`
+  - backend fallback recovered in validated run (`SelectedFamilyBackend: liltoon`, fallback count `0`)
+  - operator confirmation: tube/cylinder artifact removed under safe default-off policy
+
 ## 2026-03-06 - Shader family backend split (liltoon/mtoon) with safe fallback
 
 ### Summary
