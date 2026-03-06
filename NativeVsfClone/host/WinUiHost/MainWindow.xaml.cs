@@ -1408,12 +1408,16 @@ public sealed partial class MainWindow : Window
         if (onboarding.Actionability == HostActionability.Blocked)
         {
             ActionabilityBadgeText.Text = "BLOCKED";
-            ActionabilityBadgeText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(ColorHelper.FromArgb(255, 165, 107, 26));
+            ActionabilityBadgeText.Foreground = ResolveBrush("Brush.BadgeBlockedText") ?? ActionabilityBadgeText.Foreground;
+            ActionabilityBadgeBorder.Background = ResolveBrush("Brush.BadgeBlockedBg") ?? ActionabilityBadgeBorder.Background;
+            ActionabilityBadgeBorder.BorderBrush = ResolveBrush("Brush.BadgeBlockedBorder") ?? ActionabilityBadgeBorder.BorderBrush;
         }
         else
         {
             ActionabilityBadgeText.Text = "READY";
-            ActionabilityBadgeText.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(ColorHelper.FromArgb(255, 67, 88, 110));
+            ActionabilityBadgeText.Foreground = ResolveBrush("Brush.BadgeReadyText") ?? ActionabilityBadgeText.Foreground;
+            ActionabilityBadgeBorder.Background = ResolveBrush("Brush.BadgeReadyBg") ?? ActionabilityBadgeBorder.Background;
+            ActionabilityBadgeBorder.BorderBrush = ResolveBrush("Brush.BadgeReadyBorder") ?? ActionabilityBadgeBorder.BorderBrush;
         }
 
         SetOnboardingStepState(OnboardingStep1Text, session.IsInitialized);
@@ -1649,6 +1653,13 @@ public sealed partial class MainWindow : Window
     private static string NormalizeDiagField(string text)
     {
         return string.IsNullOrWhiteSpace(text) ? "none" : text;
+    }
+
+    private Microsoft.UI.Xaml.Media.SolidColorBrush? ResolveBrush(string key)
+    {
+        return Application.Current?.Resources.TryGetValue(key, out var value) == true
+            ? value as Microsoft.UI.Xaml.Media.SolidColorBrush
+            : null;
     }
 
     private async Task<bool> ConfirmAsync(string content)

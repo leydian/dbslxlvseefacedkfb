@@ -14,8 +14,22 @@
         <SolidColorBrush x:Key="Brush.Primary" Color="#0B6FC2"/>
         <SolidColorBrush x:Key="Brush.PrimaryText" Color="#FFFFFF"/>
         <SolidColorBrush x:Key="Brush.Warning" Color="#A56B1A"/>
+        <SolidColorBrush x:Key="Brush.Error" Color="#B03030"/>
         <SolidColorBrush x:Key="Brush.StatusBg" Color="#1F2F43"/>
         <SolidColorBrush x:Key="Brush.StatusText" Color="#E9F3FF"/>
+        <SolidColorBrush x:Key="Brush.OnboardingBg" Color="#EAF4FF"/>
+        <SolidColorBrush x:Key="Brush.OnboardingBorder" Color="#BCD8F3"/>
+        <SolidColorBrush x:Key="Brush.OnboardingTitle" Color="#11395B"/>
+        <SolidColorBrush x:Key="Brush.OnboardingBody" Color="#2A4A67"/>
+        <SolidColorBrush x:Key="Brush.BadgeReadyBg" Color="#EFF3F9"/>
+        <SolidColorBrush x:Key="Brush.BadgeReadyBorder" Color="#CFD9E6"/>
+        <SolidColorBrush x:Key="Brush.BadgeReadyText" Color="#43586E"/>
+        <SolidColorBrush x:Key="Brush.BadgeBlockedBg" Color="#FFF3E3"/>
+        <SolidColorBrush x:Key="Brush.BadgeBlockedBorder" Color="#F0CCA1"/>
+        <SolidColorBrush x:Key="Brush.BadgeBlockedText" Color="#A56B1A"/>
+        <SolidColorBrush x:Key="Brush.StepStripBg" Color="#F3F7FD"/>
+        <SolidColorBrush x:Key="Brush.StepStripBorder" Color="#D7E3F2"/>
+        <SolidColorBrush x:Key="Brush.StepStripText" Color="#35516B"/>
 
         <Style TargetType="Border">
             <Setter Property="CornerRadius" Value="8"/>
@@ -90,20 +104,20 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" BorderThickness="1" BorderBrush="#BCD8F3" Background="#EAF4FF" Padding="10" Margin="0,0,0,8" CornerRadius="6">
+            <Border Grid.Row="0" BorderThickness="1" BorderBrush="{StaticResource Brush.OnboardingBorder}" Background="{StaticResource Brush.OnboardingBg}" Padding="10" Margin="0,0,0,8" CornerRadius="6">
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="QuickNextActionText" Grid.Column="0" Text="Step 1. Start Session" FontSize="17" FontWeight="SemiBold" Foreground="#11395B"/>
-                        <Border Grid.Column="1" Background="#EFF3F9" BorderBrush="#CFD9E6" BorderThickness="1" CornerRadius="10" Padding="8,2">
-                            <TextBlock x:Name="ActionabilityBadgeText" Text="READY" FontSize="11" FontWeight="SemiBold" Foreground="#43586E"/>
+                        <TextBlock x:Name="QuickNextActionText" Grid.Column="0" Text="Step 1. Start Session" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource Brush.OnboardingTitle}"/>
+                        <Border x:Name="ActionabilityBadgeBorder" Grid.Column="1" Background="{StaticResource Brush.BadgeReadyBg}" BorderBrush="{StaticResource Brush.BadgeReadyBorder}" BorderThickness="1" CornerRadius="10" Padding="8,2">
+                            <TextBlock x:Name="ActionabilityBadgeText" Text="READY" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Brush.BadgeReadyText}"/>
                         </Border>
                     </Grid>
-                    <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output runtime." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#2A4A67"/>
-                    <TextBlock x:Name="NextActionSummaryText" Text="Start session to unlock avatar import." Margin="0,3,0,0" TextWrapping="Wrap" Foreground="#2A4A67" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="PrimaryActionDescriptionText" Text="Initialize to prepare rendering and output runtime." Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{StaticResource Brush.OnboardingBody}"/>
+                    <TextBlock x:Name="NextActionSummaryText" Text="Start session to unlock avatar import." Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{StaticResource Brush.OnboardingBody}" FontWeight="SemiBold"/>
                     <TextBlock x:Name="BlockReasonShortText" Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{StaticResource Brush.Warning}" Visibility="Collapsed"/>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
                         <Button x:Name="PrimaryActionButton" Content="세션 시작" Click="PrimaryAction_Click" MinWidth="170" MinHeight="38"/>
@@ -114,7 +128,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="1" BorderThickness="1" BorderBrush="#D7E3F2" Background="#F3F7FD" Padding="8" Margin="0,0,0,8" CornerRadius="6">
+            <Border Grid.Row="1" BorderThickness="1" BorderBrush="{StaticResource Brush.StepStripBorder}" Background="{StaticResource Brush.StepStripBg}" Padding="8" Margin="0,0,0,8" CornerRadius="6">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -123,20 +137,20 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
                         <TextBlock Text="1) 세션 시작" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock x:Name="OnboardingStep1Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                        <TextBlock x:Name="OnboardingStep1Text" Text="대기" Margin="0,2,0,0" Foreground="{StaticResource Brush.StepStripText}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1">
                         <TextBlock Text="2) 아바타 불러오기" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock x:Name="OnboardingStep2Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                        <TextBlock x:Name="OnboardingStep2Text" Text="대기" Margin="0,2,0,0" Foreground="{StaticResource Brush.StepStripText}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2">
                         <TextBlock Text="3) 출력 시작" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock x:Name="OnboardingStep3Text" Text="대기" Margin="0,2,0,0" Foreground="#35516B"/>
+                        <TextBlock x:Name="OnboardingStep3Text" Text="대기" Margin="0,2,0,0" Foreground="{StaticResource Brush.StepStripText}"/>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <Border Grid.Row="2" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="2" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="현재 상태 (Status)" FontSize="16"/>
                     <TextBlock x:Name="QuickStatusText" Text="Session=Stopped | Avatar=None | Outputs=Off" Margin="0,4,0,0" TextWrapping="Wrap"/>
@@ -148,7 +162,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="3" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="3" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="세션 (Session)" FontSize="16"/>
                     <TextBlock Text="세션 수명주기 제어입니다. 아바타를 불러오기 전에 초기화를 실행하세요." TextWrapping="Wrap" Margin="0,4,0,8"/>
@@ -159,7 +173,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="4" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="4" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="아바타 (Avatar)" FontSize="16"/>
                     <TextBlock Text="아바타 파일 경로 (Avatar Path)" Margin="0,4,0,4"/>
@@ -171,8 +185,8 @@
                         <TextBox Grid.Column="0" x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged"/>
                         <Button Grid.Column="1" x:Name="BrowseAvatarButton" Content="찾아보기..." Click="BrowseAvatar_Click" Margin="8,0,0,0"/>
                     </Grid>
-                    <TextBlock x:Name="AvatarPathValidationText" Foreground="#B03030" Margin="0,4,0,0" TextWrapping="Wrap"/>
-                    <Border BorderBrush="#D7E0EA" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                    <TextBlock x:Name="AvatarPathValidationText" Foreground="{StaticResource Brush.Error}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                    <Border BorderBrush="{StaticResource Brush.CardBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,8,0,0">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="132"/>
@@ -210,7 +224,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="5" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,0,0,8">
+            <Border Grid.Row="5" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8" Margin="0,0,0,8">
                 <StackPanel>
                     <TextBlock Text="렌더 (Render)" FontSize="16"/>
                     <CheckBox x:Name="BroadcastModeCheckBox" Content="방송 모드 (Broadcast Mode)" IsChecked="True" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,8,0,8"/>
@@ -304,7 +318,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="6" BorderThickness="1" BorderBrush="#2D3A48" Padding="8">
+            <Border Grid.Row="6" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8">
                 <StackPanel>
                     <TextBlock Text="출력 (Outputs)" FontSize="16"/>
                     <TextBlock Text="Spout" Margin="0,4,0,4"/>
@@ -345,7 +359,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="7" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
+            <Border Grid.Row="7" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8" Margin="0,8,0,0">
                 <StackPanel>
                     <TextBlock Text="트래킹 입력 (Tracking Input)" FontSize="16"/>
                     <Grid Margin="0,8,0,8">
@@ -388,7 +402,7 @@
                         <TextBlock Grid.Row="6" Grid.Column="0" Text="Upper Body" VerticalAlignment="Center" Margin="0,8,0,0"/>
                         <CheckBox Grid.Row="6" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
                     </Grid>
-                    <Border x:Name="TrackingIpv4HintPanel" BorderThickness="1" BorderBrush="#D7E0EA" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                    <Border x:Name="TrackingIpv4HintPanel" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                         <StackPanel>
                             <TextBlock Text="iFacialMocap 대상 PC IPv4" FontWeight="SemiBold"/>
                             <TextBlock Text="Recommended IPv4:" Margin="0,4,0,0" Foreground="#5E6B78"/>
@@ -410,7 +424,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="8" BorderThickness="1" BorderBrush="#2D3A48" Padding="8" Margin="0,8,0,0">
+            <Border Grid.Row="8" BorderThickness="1" BorderBrush="{StaticResource Brush.CardBorder}" Padding="8" Margin="0,8,0,0">
                 <StackPanel>
                     <TextBlock Text="운영/진단 (Platform Ops)" FontSize="16"/>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,8">
@@ -531,7 +545,7 @@
                 </TabViewItem>
             </TabView>
 
-            <Border Grid.Row="2" Padding="8" Background="{StaticResource Brush.StatusBg}" BorderBrush="#2D3A48" BorderThickness="1">
+            <Border Grid.Row="2" Padding="8" Background="{StaticResource Brush.StatusBg}" BorderBrush="{StaticResource Brush.CardBorder}" BorderThickness="1">
                 <StackPanel>
                     <TextBlock x:Name="SessionStatusText" Foreground="{StaticResource Brush.StatusText}"/>
                     <TextBlock x:Name="AvatarStatusText" Foreground="{StaticResource Brush.StatusText}"/>
@@ -546,3 +560,4 @@
         </Grid>
     </Grid>
 </Window>
+

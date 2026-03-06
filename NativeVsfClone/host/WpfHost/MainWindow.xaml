@@ -484,72 +484,103 @@
 
                 <GroupBox x:Name="TrackingGroup" Style="{StaticResource SectionCardStyle}" Header="5) 트래킹 입력" Margin="0,8,0,0">
                     <StackPanel Margin="8">
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="수신 포트" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="입력 소스" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
-                                <ComboBoxItem Content="자동 (모션+웹캠)"/>
-                                <ComboBoxItem Content="모션 전용"/>
-                                <ComboBoxItem Content="웹캠 전용"/>
-                            </ComboBox>
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="웹캠" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <DockPanel Grid.Row="2" Grid.Column="1" Margin="0,8,0,0">
-                                <Button x:Name="RefreshTrackingWebcamButton" Content="새로고침" Width="70" DockPanel.Dock="Right" Margin="8,0,0,0" Click="RefreshTrackingWebcam_Click"/>
-                                <ComboBox x:Name="TrackingWebcamDeviceComboBox"/>
-                            </DockPanel>
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="추론 FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="파싱 경고" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingParseWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="드롭 경고" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <TextBox Grid.Row="5" Grid.Column="1" x:Name="TrackingDropWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="소스 고정" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="6" Grid.Column="1" x:Name="TrackingSourceLockComboBox" Margin="0,8,0,0">
-                                <ComboBoxItem Content="자동"/>
-                                <ComboBoxItem Content="iFacial 고정"/>
-                                <ComboBoxItem Content="웹캠 고정"/>
-                            </ComboBox>
-                            <TextBlock Grid.Row="7" Grid.Column="0" Text="지연 프로필" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="7" Grid.Column="1" x:Name="TrackingLatencyProfileComboBox" Margin="0,8,0,0">
-                                <ComboBoxItem Content="저지연"/>
-                                <ComboBoxItem Content="균형"/>
-                                <ComboBoxItem Content="안정"/>
-                            </ComboBox>
-                            <TextBlock Grid.Row="8" Grid.Column="0" Text="포즈 필터" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <ComboBox Grid.Row="8" Grid.Column="1" x:Name="TrackingPoseFilterProfileComboBox" Margin="0,8,0,0" SelectionChanged="TrackingPoseFilterProfile_SelectionChanged">
-                                <ComboBoxItem Content="반응형"/>
-                                <ComboBoxItem Content="균형"/>
-                                <ComboBoxItem Content="안정"/>
-                            </ComboBox>
-                            <TextBlock Grid.Row="9" Grid.Column="0" Text="불감 구간" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,8,0,0">
-                                <TextBlock x:Name="TrackingPoseDeadbandValueText" Text="0.90°" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
-                                <Slider x:Name="TrackingPoseDeadbandSlider" Minimum="0.0" Maximum="3.0" Value="0.9" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="TrackingPoseDeadbandSlider_ValueChanged"/>
-                            </DockPanel>
-                            <TextBlock Grid.Row="10" Grid.Column="0" Text="상반신" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <CheckBox Grid.Row="10" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
-                            <TextBlock Grid.Row="11" Grid.Column="0" Text="안정화" VerticalAlignment="Center" Margin="0,8,0,0"/>
-                            <CheckBox Grid.Row="11" Grid.Column="1" x:Name="TrackingAutoStabilityCheckBox" Content="자동 안정화 튜닝" Margin="0,8,0,0"/>
-                        </Grid>
+                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="기본 안정화" FontWeight="SemiBold"/>
+                                <TextBlock Text="일반 사용자 기준 핵심 항목만 먼저 제공합니다." Margin="0,2,0,8" Foreground="{DynamicResource Color.TextMuted}"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="안정화 강도" VerticalAlignment="Center"/>
+                                    <DockPanel Grid.Column="1" Margin="0,0,0,0">
+                                        <TextBlock x:Name="TrackingStabilityValueText" Text="70" Width="36" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                        <Slider x:Name="TrackingStabilitySlider" Minimum="0" Maximum="100" Value="70" TickFrequency="1" IsSnapToTickEnabled="False" ValueChanged="TrackingStabilitySlider_ValueChanged"/>
+                                    </DockPanel>
+                                </Grid>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="유실 대기(ms)" VerticalAlignment="Center"/>
+                                    <DockPanel Grid.Column="1" Margin="0,0,0,0">
+                                        <TextBlock x:Name="TrackingStaleTimeoutValueText" Text="500" Width="48" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                        <Slider x:Name="TrackingStaleTimeoutSlider" Minimum="100" Maximum="2000" Value="500" TickFrequency="50" IsSnapToTickEnabled="False" ValueChanged="TrackingStaleTimeoutSlider_ValueChanged"/>
+                                    </DockPanel>
+                                </Grid>
+                                <CheckBox x:Name="TrackingShowPositionCheckBox" Content="트래킹 위치 표시(디버그 오버레이)" Checked="TrackingShowPosition_Changed" Unchecked="TrackingShowPosition_Changed"/>
+                            </StackPanel>
+                        </Border>
+                        <Expander x:Name="TrackingAdvancedExpander" Header="고급 설정" IsExpanded="False">
+                            <Grid Margin="0,8,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="90"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="수신 포트" VerticalAlignment="Center"/>
+                                <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="입력 소스" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrackingSourceComboBox" Margin="0,8,0,0">
+                                    <ComboBoxItem Content="자동 (모션+웹캠)"/>
+                                    <ComboBoxItem Content="모션 전용"/>
+                                    <ComboBoxItem Content="웹캠 전용"/>
+                                </ComboBox>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="웹캠" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <DockPanel Grid.Row="2" Grid.Column="1" Margin="0,8,0,0">
+                                    <Button x:Name="RefreshTrackingWebcamButton" Content="새로고침" Width="70" DockPanel.Dock="Right" Margin="8,0,0,0" Click="RefreshTrackingWebcam_Click"/>
+                                    <ComboBox x:Name="TrackingWebcamDeviceComboBox"/>
+                                </DockPanel>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="추론 FPS" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <TextBox Grid.Row="3" Grid.Column="1" x:Name="TrackingInferenceFpsTextBox" Text="30" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="파싱 경고" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingParseWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text="드롭 경고" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <TextBox Grid.Row="5" Grid.Column="1" x:Name="TrackingDropWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="6" Grid.Column="0" Text="소스 고정" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <ComboBox Grid.Row="6" Grid.Column="1" x:Name="TrackingSourceLockComboBox" Margin="0,8,0,0">
+                                    <ComboBoxItem Content="자동"/>
+                                    <ComboBoxItem Content="iFacial 고정"/>
+                                    <ComboBoxItem Content="웹캠 고정"/>
+                                </ComboBox>
+                                <TextBlock Grid.Row="7" Grid.Column="0" Text="지연 프로필" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <ComboBox Grid.Row="7" Grid.Column="1" x:Name="TrackingLatencyProfileComboBox" Margin="0,8,0,0">
+                                    <ComboBoxItem Content="저지연"/>
+                                    <ComboBoxItem Content="균형"/>
+                                    <ComboBoxItem Content="안정"/>
+                                </ComboBox>
+                                <TextBlock Grid.Row="8" Grid.Column="0" Text="포즈 필터" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <ComboBox Grid.Row="8" Grid.Column="1" x:Name="TrackingPoseFilterProfileComboBox" Margin="0,8,0,0" SelectionChanged="TrackingPoseFilterProfile_SelectionChanged">
+                                    <ComboBoxItem Content="반응형"/>
+                                    <ComboBoxItem Content="균형"/>
+                                    <ComboBoxItem Content="안정"/>
+                                </ComboBox>
+                                <TextBlock Grid.Row="9" Grid.Column="0" Text="불감 구간" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <DockPanel Grid.Row="9" Grid.Column="1" Margin="0,8,0,0">
+                                    <TextBlock x:Name="TrackingPoseDeadbandValueText" Text="0.90°" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                    <Slider x:Name="TrackingPoseDeadbandSlider" Minimum="0.0" Maximum="3.0" Value="0.9" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="TrackingPoseDeadbandSlider_ValueChanged"/>
+                                </DockPanel>
+                                <TextBlock Grid.Row="10" Grid.Column="0" Text="상반신" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <CheckBox Grid.Row="10" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="11" Grid.Column="0" Text="안정화" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <CheckBox Grid.Row="11" Grid.Column="1" x:Name="TrackingAutoStabilityCheckBox" Content="자동 안정화 튜닝" Margin="0,8,0,0"/>
+                            </Grid>
+                        </Expander>
                         <Border x:Name="TrackingIpv4HintPanel" BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
                                 <TextBlock Text="iFacialMocap 연결용 IPv4" FontWeight="SemiBold"/>
@@ -560,6 +591,7 @@
                             </StackPanel>
                         </Border>
                         <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="TrackingResetDefaultsButton" Content="트래킹 기본값 복원" Click="TrackingResetDefaults_Click" Margin="0,0,8,0" MinWidth="130"/>
                             <Button x:Name="TrackingIpv4CopyButton" Content="IPv4 복사" Click="CopyTrackingIpv4_Click" MinWidth="110"/>
                             <Button x:Name="TrackingIpv4ToggleButton" Content="IPv4 안내 숨기기" Click="ToggleTrackingIpv4Hint_Click" Margin="8,0,0,0" MinWidth="150"/>
                         </WrapPanel>

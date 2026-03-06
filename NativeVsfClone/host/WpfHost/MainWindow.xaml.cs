@@ -44,6 +44,7 @@ public partial class MainWindow : Window
     private bool _isSyncingRenderUi;
     private bool _isSyncingPoseUi;
     private bool _isSyncingTrackingPoseFilterUi;
+    private bool _isSyncingTrackingBasicUi;
     private bool _isSyncingPresetUi;
     private bool _isSyncingPosePresetUi;
     private bool _isLogsTabActive;
@@ -78,6 +79,8 @@ public partial class MainWindow : Window
     private HostOnboardingStep? _lastTrackedOnboardingStep;
     private bool _showTrackingIpv4Hint = true;
     private string _recommendedTrackingIpv4 = string.Empty;
+    private const int TrackingDefaultStaleTimeoutMs = 500;
+    private const int TrackingDefaultInferenceFps = 30;
 
     private static string ToPersistSectionKey(UiSection section) => section switch
     {
@@ -153,6 +156,7 @@ public partial class MainWindow : Window
         SyncRenderControlsFromState();
         SyncPoseControlsFromState();
         SyncTrackingPoseFilterControlsFromState();
+        SyncTrackingBasicControlsFromState();
         SyncPosePresetControlsFromState();
         SyncArmSuggestionControlsFromState();
         SyncArmTuningControlsFromState();
@@ -902,8 +906,8 @@ public partial class MainWindow : Window
 
         if (!int.TryParse(TrackingInferenceFpsTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var inferenceFpsCap))
         {
-            inferenceFpsCap = 30;
-            TrackingInferenceFpsTextBox.Text = "30";
+            inferenceFpsCap = TrackingDefaultInferenceFps;
+            TrackingInferenceFpsTextBox.Text = TrackingDefaultInferenceFps.ToString(CultureInfo.InvariantCulture);
         }
         inferenceFpsCap = Math.Clamp(inferenceFpsCap, 5, 120);
         if (!int.TryParse(TrackingParseWarnThresholdTextBox.Text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parseWarnThreshold))
@@ -945,11 +949,14 @@ public partial class MainWindow : Window
         };
 
         var current = _controller.GetTrackingInputSettings();
+        var staleTimeoutMs = TrackingStaleTimeoutSlider is null
+            ? current.StaleTimeoutMs
+            : (int)Math.Round(TrackingStaleTimeoutSlider.Value);
         var cameraKey = (TrackingWebcamDeviceComboBox.SelectedItem as WebcamDeviceItem)?.Key
             ?? current.CameraDeviceKey;
         _controller.ConfigureTrackingInputSettings(
             listenPort,
-            current.StaleTimeoutMs,
+            staleTimeoutMs,
             sourceType,
             cameraKey,
             inferenceFpsCap,
@@ -1022,6 +1029,7 @@ public partial class MainWindow : Window
             current.ListenPort,
             current.StaleTimeoutMs,
             poseFilterProfile: profile);
+        SyncTrackingBasicControlsFromState();
     }
 
     private void TrackingPoseDeadbandSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1047,6 +1055,148 @@ public partial class MainWindow : Window
             current.ListenPort,
             current.StaleTimeoutMs,
             poseDeadbandDeg: (float)deadbandSlider.Value);
+        SyncTrackingBasicControlsFromState();
+    }
+
+    private void TrackingStabilitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TrackingStabilitySlider is null || TrackingStabilityValueText is null)
+        {
+            return;
+        }
+
+        var value = (int)Math.Round(TrackingStabilitySlider.Value);
+        TrackingStabilityValueText.Text = value.ToString(CultureInfo.InvariantCulture);
+        if (!_uiReady || _isSyncingTrackingBasicUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var poseFilterProfile = value switch
+        {
+            <= 33 => PoseFilterProfile.Reactive,
+            <= 66 => PoseFilterProfile.Balanced,
+            _ => PoseFilterProfile.Stable,
+        };
+        var latencyProfile = value switch
+        {
+            <= 33 => TrackingLatencyProfile.LowLatency,
+            <= 66 => TrackingLatencyProfile.Balanced,
+            _ => TrackingLatencyProfile.Stable,
+        };
+        var deadbandDeg = (float)Math.Clamp((value / 100.0) * 2.2 + 0.1, 0.0, 3.0);
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            latencyProfile: latencyProfile,
+            poseFilterProfile: poseFilterProfile,
+            poseDeadbandDeg: deadbandDeg);
+
+        _isSyncingTrackingPoseFilterUi = true;
+        TrackingLatencyProfileComboBox.SelectedIndex = latencyProfile switch
+        {
+            TrackingLatencyProfile.LowLatency => 0,
+            TrackingLatencyProfile.Stable => 2,
+            _ => 1,
+        };
+        TrackingPoseFilterProfileComboBox.SelectedIndex = poseFilterProfile switch
+        {
+            PoseFilterProfile.Reactive => 0,
+            PoseFilterProfile.Balanced => 1,
+            _ => 2,
+        };
+        TrackingPoseDeadbandSlider.Value = deadbandDeg;
+        TrackingPoseDeadbandValueText.Text = $"{deadbandDeg:F2}\u00b0";
+        _isSyncingTrackingPoseFilterUi = false;
+    }
+
+    private void TrackingStaleTimeoutSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TrackingStaleTimeoutSlider is null || TrackingStaleTimeoutValueText is null)
+        {
+            return;
+        }
+
+        var staleTimeoutMs = (int)Math.Round(TrackingStaleTimeoutSlider.Value);
+        TrackingStaleTimeoutValueText.Text = staleTimeoutMs.ToString(CultureInfo.InvariantCulture);
+        if (!_uiReady || _isSyncingTrackingBasicUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            staleTimeoutMs);
+    }
+
+    private void TrackingShowPosition_Changed(object sender, RoutedEventArgs e)
+    {
+        if (TrackingShowPositionCheckBox is null || DebugOverlayCheckBox is null)
+        {
+            return;
+        }
+
+        if (_isSyncingTrackingBasicUi)
+        {
+            return;
+        }
+
+        if (ShouldSkipRenderInteraction())
+        {
+            return;
+        }
+
+        DebugOverlayCheckBox.IsChecked = TrackingShowPositionCheckBox.IsChecked == true;
+        QueueRenderApply();
+    }
+
+    private void TrackingResetDefaults_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        TrackingInferenceFpsTextBox.Text = TrackingDefaultInferenceFps.ToString(CultureInfo.InvariantCulture);
+        TrackingParseWarnThresholdTextBox.Text = "10";
+        TrackingDropWarnThresholdTextBox.Text = "10";
+        TrackingSourceLockComboBox.SelectedIndex = 0;
+        TrackingSourceComboBox.SelectedIndex = 0;
+        TrackingUpperBodyEnabledCheckBox.IsChecked = true;
+        TrackingAutoStabilityCheckBox.IsChecked = true;
+
+        _isSyncingTrackingBasicUi = true;
+        TrackingStabilitySlider.Value = 70;
+        TrackingStabilityValueText.Text = "70";
+        TrackingStaleTimeoutSlider.Value = TrackingDefaultStaleTimeoutMs;
+        TrackingStaleTimeoutValueText.Text = TrackingDefaultStaleTimeoutMs.ToString(CultureInfo.InvariantCulture);
+        _isSyncingTrackingBasicUi = false;
+
+        _isSyncingTrackingPoseFilterUi = true;
+        TrackingLatencyProfileComboBox.SelectedIndex = 2;
+        TrackingPoseFilterProfileComboBox.SelectedIndex = 2;
+        TrackingPoseDeadbandSlider.Value = 0.9;
+        TrackingPoseDeadbandValueText.Text = "0.90°";
+        _isSyncingTrackingPoseFilterUi = false;
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            TrackingDefaultStaleTimeoutMs,
+            sourceType: TrackingSourceType.HybridAuto,
+            inferenceFpsCap: TrackingDefaultInferenceFps,
+            parseErrorWarnThreshold: 10,
+            droppedPacketWarnThreshold: 10,
+            sourceLockMode: TrackingSourceLockMode.Auto,
+            latencyProfile: TrackingLatencyProfile.Stable,
+            poseFilterProfile: PoseFilterProfile.Stable,
+            poseDeadbandDeg: 0.9f,
+            autoStabilityTuningEnabled: true,
+            upperBodyEnabled: true);
+
+        SyncTrackingBasicControlsFromState();
     }
 
     private void RefreshTrackingWebcamDevices(string? preferredKey = null)
@@ -1967,6 +2117,10 @@ public partial class MainWindow : Window
         TrackingLatencyProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseFilterProfileComboBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingPoseDeadbandSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingStabilitySlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingStaleTimeoutSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingResetDefaultsButton.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingShowPositionCheckBox.IsEnabled = !operation.IsBusy;
         TrackingAutoStabilityCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingUpperBodyEnabledCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
@@ -2374,6 +2528,10 @@ public partial class MainWindow : Window
         };
         MirrorModeCheckBox.IsChecked = render.MirrorMode;
         DebugOverlayCheckBox.IsChecked = render.ShowDebugOverlay;
+        if (TrackingShowPositionCheckBox is not null)
+        {
+            TrackingShowPositionCheckBox.IsChecked = render.ShowDebugOverlay;
+        }
         _isSyncingRenderUi = false;
     }
 
@@ -2447,6 +2605,35 @@ public partial class MainWindow : Window
         TrackingPoseDeadbandSlider.Value = tracking.PoseDeadbandDeg;
         TrackingPoseDeadbandValueText.Text = $"{tracking.PoseDeadbandDeg:F2}\u00b0";
         _isSyncingTrackingPoseFilterUi = false;
+        SyncTrackingBasicControlsFromState();
+    }
+
+    private void SyncTrackingBasicControlsFromState()
+    {
+        if (TrackingStabilitySlider is null ||
+            TrackingStabilityValueText is null ||
+            TrackingStaleTimeoutSlider is null ||
+            TrackingStaleTimeoutValueText is null ||
+            TrackingShowPositionCheckBox is null)
+        {
+            return;
+        }
+
+        var tracking = _controller.GetTrackingInputSettings();
+        var baseStability = (tracking.PoseDeadbandDeg / 3.0f) * 100.0f;
+        var stability = tracking.PoseFilterProfile switch
+        {
+            PoseFilterProfile.Reactive => Math.Clamp((baseStability * 0.6f) + 10.0f, 0.0f, 40.0f),
+            PoseFilterProfile.Balanced => Math.Clamp((baseStability * 0.8f) + 20.0f, 35.0f, 80.0f),
+            _ => Math.Clamp((baseStability * 0.9f) + 35.0f, 65.0f, 100.0f),
+        };
+        _isSyncingTrackingBasicUi = true;
+        TrackingStabilitySlider.Value = stability;
+        TrackingStabilityValueText.Text = ((int)Math.Round(stability)).ToString(CultureInfo.InvariantCulture);
+        TrackingStaleTimeoutSlider.Value = tracking.StaleTimeoutMs;
+        TrackingStaleTimeoutValueText.Text = tracking.StaleTimeoutMs.ToString(CultureInfo.InvariantCulture);
+        TrackingShowPositionCheckBox.IsChecked = _controller.RenderState.ShowDebugOverlay;
+        _isSyncingTrackingBasicUi = false;
     }
 
     private void ApplySelectedPoseOffset()
@@ -2709,6 +2896,8 @@ public partial class MainWindow : Window
         };
         TrackingPoseDeadbandSlider.Value = session.Tracking.PoseDeadbandDeg;
         TrackingPoseDeadbandValueText.Text = $"{session.Tracking.PoseDeadbandDeg:F2}\u00b0";
+        TrackingStaleTimeoutSlider.Value = session.Tracking.StaleTimeoutMs;
+        TrackingStaleTimeoutValueText.Text = session.Tracking.StaleTimeoutMs.ToString(CultureInfo.InvariantCulture);
         TrackingAutoStabilityCheckBox.IsChecked = session.Tracking.AutoStabilityTuningEnabled;
         TrackingUpperBodyEnabledCheckBox.IsChecked = session.Tracking.UpperBodyEnabled;
         _showTrackingIpv4Hint = session.UiShowTrackingIpv4Hint;
@@ -2732,6 +2921,7 @@ public partial class MainWindow : Window
         AutoQualityCooldownTextBox.Text = aq.CooldownSeconds.ToString(CultureInfo.InvariantCulture);
         AutoQualityRecoveryThresholdTextBox.Text = aq.RecoveryFrameMsThreshold.ToString("F1", CultureInfo.InvariantCulture);
         AutoQualityRecoveryConsecutiveTextBox.Text = aq.RecoveryConsecutiveFrameLimit.ToString(CultureInfo.InvariantCulture);
+        SyncTrackingBasicControlsFromState();
         ApplyModeVisibility();
         FocusPrimaryControlForSection(_activeSection);
     }
