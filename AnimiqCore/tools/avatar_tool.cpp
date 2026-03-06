@@ -275,8 +275,50 @@ int main(int argc, char** argv) {
     animiq::avatar::AvatarLoaderFacade loader;
     const auto loaded = loader.Load(path, load_options);
     const bool load_succeeded = loaded.ok;
+    auto emit_failure_json = [&](const std::string& error) {
+        if (!(emit_json || !json_out_path.empty())) {
+            return;
+        }
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"loadSucceeded\": false,\n";
+        json << "  \"path\": \"" << JsonEscape(path) << "\",\n";
+        json << "  \"displayName\": \"\",\n";
+        json << "  \"format\": \"Unknown\",\n";
+        json << "  \"compat\": \"failed\",\n";
+        json << "  \"parserStage\": \"failed\",\n";
+        json << "  \"primaryError\": \"" << JsonEscape(error) << "\",\n";
+        json << "  \"warningCodes\": [],\n";
+        json << "  \"warningCodeMeta\": [],\n";
+        json << "  \"counts\": {\n";
+        json << "    \"meshes\": 0,\n";
+        json << "    \"materials\": 0,\n";
+        json << "    \"meshPayloads\": 0,\n";
+        json << "    \"materialPayloads\": 0,\n";
+        json << "    \"texturePayloads\": 0,\n";
+        json << "    \"expressionCount\": 0,\n";
+        json << "    \"expressionBindTotal\": 0,\n";
+        json << "    \"warningCount\": 0,\n";
+        json << "    \"warningCodeCount\": 0,\n";
+        json << "    \"criticalWarningCount\": 0\n";
+        json << "  },\n";
+        json << "  \"renderVisibleHeuristic\": false\n";
+        json << "}";
+
+        const std::string json_text = json.str();
+        if (!json_out_path.empty()) {
+            std::ofstream out(json_out_path, std::ios::binary);
+            if (out) {
+                out << json_text;
+            }
+        }
+        if (emit_json) {
+            std::cout << json_text << "\n";
+        }
+    };
     if (!loaded.ok) {
         std::cerr << "Load failed: " << loaded.error << "\n";
+        emit_failure_json(loaded.error);
         return 3;
     }
     const auto& info = loaded.value;
@@ -476,6 +518,7 @@ int main(int argc, char** argv) {
 
     if (emit_json || !json_out_path.empty()) {
         std::ostringstream json;
+        const bool render_visible_heuristic = !info.mesh_payloads.empty() && info.compat_level != animiq::avatar::AvatarCompatLevel::Failed;
         json << "{\n";
         json << "  \"loadSucceeded\": " << (load_succeeded ? "true" : "false") << ",\n";
         json << "  \"path\": \"" << JsonEscape(path) << "\",\n";
@@ -515,7 +558,8 @@ int main(int argc, char** argv) {
         json << "    \"warningCount\": " << info.warnings.size() << ",\n";
         json << "    \"warningCodeCount\": " << info.warning_codes.size() << ",\n";
         json << "    \"criticalWarningCount\": " << critical_warning_count << "\n";
-        json << "  }\n";
+        json << "  },\n";
+        json << "  \"renderVisibleHeuristic\": " << (render_visible_heuristic ? "true" : "false") << "\n";
         json << "}";
 
         const std::string json_text = json.str();

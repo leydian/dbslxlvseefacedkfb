@@ -15,7 +15,7 @@
 - `vrm`: 14 reports
 - `winui`: 3 reports
 - `workspace`: 3 reports
-- `avatar`: 2 reports
+- `avatar`: 3 reports
 - `platform`: 3 reports
 - `session`: 2 reports
 - `tracking`: 13 reports
@@ -122,3 +122,4 @@
 - Newly added: review `2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md` for per-avatar preview front/back persistence contract (`PreviewFlip180`), load-time yaw reapply path, and WPF/WinUI toggle parity.
 - Newly added: review `2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md` for VRM/MIQ(VRM-origin) load-time auto flip resolver, contract-metrics API extension, and persistence override policy.
 - Newly added: review `2026-03-06_avatar_coordinate_contract_unification.md` for loader-owned coordinate contract fields (`asset axes/handedness/recommended yaw/confidence`), runtime warning-independent preview yaw resolution, and fixed5 verification evidence.
+- Newly added: review `2026-03-06_avatar_differential_benchmark_harness.md` for VSeeFace-vs-Animiq differential benchmark harness, managed DLL fingerprint probe, and `P0/P1/P2/NONE` backlog-priority classifier workflow.

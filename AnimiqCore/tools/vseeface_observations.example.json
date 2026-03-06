@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "engine": {
+    "name": "VSeeFace",
+    "build": "1.13.38c2"
+  },
+  "rows": [
+    {
+      "id": "vrm_normal_01",
+      "load_ok": true,
+      "render_visible": true,
+      "crash_or_freeze": false,
+      "note": "manual observation"
+    },
+    {
+      "id": "vsfavatar_normal_01",
+      "load_ok": true,
+      "render_visible": true,
+      "crash_or_freeze": false,
+      "note": "manual observation"
+    }
+  ]
+}

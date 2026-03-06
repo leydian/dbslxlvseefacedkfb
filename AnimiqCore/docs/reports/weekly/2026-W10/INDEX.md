@@ -187,3 +187,4 @@ Report list for this week.
 - [2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md](./2026-03-06_avatar_preview_flip180_per_avatar_wpf_winui.md)
 - [2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md](./2026-03-06_avatar_preview_flip180_auto_contract_vrm_miq.md)
 - [2026-03-06_avatar_coordinate_contract_unification.md](./2026-03-06_avatar_coordinate_contract_unification.md)
+- [2026-03-06_avatar_differential_benchmark_harness.md](./2026-03-06_avatar_differential_benchmark_harness.md)
