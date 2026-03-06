@@ -1396,16 +1396,19 @@ public partial class MainWindow : Window
     private void ProfileQuality_Click(object sender, RoutedEventArgs e)
     {
         _ = _controller.ApplyRenderProfile("quality");
+        CurrentRenderProfileText.Text = "현재: 화질 우선";
     }
 
     private void ProfilePerformance_Click(object sender, RoutedEventArgs e)
     {
         _ = _controller.ApplyRenderProfile("performance");
+        CurrentRenderProfileText.Text = "현재: 성능 우선";
     }
 
     private void ProfileStability_Click(object sender, RoutedEventArgs e)
     {
         _ = _controller.ApplyRenderProfile("stability");
+        CurrentRenderProfileText.Text = "현재: 안정 우선";
     }
 
     private void ApplySidecar_Click(object sender, RoutedEventArgs e)
@@ -2203,16 +2206,20 @@ public partial class MainWindow : Window
         var session = _controller.SessionState;
         var outputs = _controller.Outputs;
         var operation = _controller.OperationState;
+        var snapshot = _controller.LastSnapshot;
+        var tracking = _controller.TrackingDiagnostics;
         var uiState = HostUiPolicy.EvaluateAvailability(
             session,
             outputs,
             operation,
             _validationState,
             _controller.RenderState,
-            CameraModeComboBox.SelectedIndex == 2);
+            CameraModeComboBox.SelectedIndex == 2,
+            snapshot.Runtime,
+            snapshot.AvatarInfo,
+            tracking);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
         var onboarding = HostUiPolicy.BuildOnboardingState(session, outputs, operation, _validationState);
-        var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
         ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
@@ -2243,19 +2250,19 @@ public partial class MainWindow : Window
         LightIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
         LightRangeSlider.IsEnabled = uiState.RenderControlsEnabled;
         SpotAngleSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ShadowStrengthSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ShadowBiasSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowStrengthSlider.IsEnabled = uiState.RealtimeShadowEnabled;
+        ShadowBiasSlider.IsEnabled = uiState.RealtimeShadowEnabled;
         AmbientIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
-        ShadowEnabledCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowEnabledCheckBox.IsEnabled = uiState.RealtimeShadowEnabled;
         MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         PoseBoneComboBox.IsEnabled = uiState.RenderControlsEnabled;
         PosePitchSlider.IsEnabled = uiState.RenderControlsEnabled;
         PoseYawSlider.IsEnabled = uiState.RenderControlsEnabled;
         PoseRollSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ArmBothPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ArmLeftPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ArmRightPitchSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ArmBothPitchSlider.IsEnabled = uiState.ArmPoseEnabled;
+        ArmLeftPitchSlider.IsEnabled = uiState.ArmPoseEnabled;
+        ArmRightPitchSlider.IsEnabled = uiState.ArmPoseEnabled;
         PoseResetBoneButton.IsEnabled = uiState.RenderControlsEnabled;
         PoseResetAllButton.IsEnabled = uiState.RenderControlsEnabled;
         SavePosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -2263,11 +2270,11 @@ public partial class MainWindow : Window
         DeletePosePresetButton.IsEnabled = uiState.RenderControlsEnabled;
         PosePresetNameTextBox.IsEnabled = uiState.RenderControlsEnabled;
         PosePresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
-        ArmSmoothingCheckBox.IsEnabled = uiState.RenderControlsEnabled;
-        ArmDeadbandSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ApplySuggestedArmPresetButton.IsEnabled = uiState.RenderControlsEnabled;
-        SaveSuggestedArmPresetButton.IsEnabled = uiState.RenderControlsEnabled;
-        SuggestedArmPresetComboBox.IsEnabled = uiState.RenderControlsEnabled;
+        ArmSmoothingCheckBox.IsEnabled = uiState.ArmPoseEnabled;
+        ArmDeadbandSlider.IsEnabled = uiState.ArmPoseEnabled;
+        ApplySuggestedArmPresetButton.IsEnabled = uiState.ArmPoseEnabled;
+        SaveSuggestedArmPresetButton.IsEnabled = uiState.ArmPoseEnabled;
+        SuggestedArmPresetComboBox.IsEnabled = uiState.ArmPoseEnabled;
         SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
         ApplyPresetButton.IsEnabled = uiState.RenderControlsEnabled;
         DeletePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -2305,6 +2312,20 @@ public partial class MainWindow : Window
         TrackingUpperBodyEnabledCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
+        var armGateTooltip = uiState.ArmPoseEnabled ? null : $"팔 포즈 비활성 ({uiState.ArmPoseReasonCode})";
+        ArmBothPitchSlider.ToolTip = armGateTooltip;
+        ArmLeftPitchSlider.ToolTip = armGateTooltip;
+        ArmRightPitchSlider.ToolTip = armGateTooltip;
+        ArmSmoothingCheckBox.ToolTip = armGateTooltip;
+        ArmDeadbandSlider.ToolTip = armGateTooltip;
+        ApplySuggestedArmPresetButton.ToolTip = armGateTooltip;
+        SaveSuggestedArmPresetButton.ToolTip = armGateTooltip;
+        SuggestedArmPresetComboBox.ToolTip = armGateTooltip;
+        var shadowGateTooltip = uiState.RealtimeShadowEnabled ? null : $"실시간 그림자 비활성 ({uiState.RealtimeShadowReasonCode})";
+        ShadowEnabledCheckBox.ToolTip = shadowGateTooltip;
+        ShadowStrengthSlider.ToolTip = shadowGateTooltip;
+        ShadowBiasSlider.ToolTip = shadowGateTooltip;
+        StartTrackingButton.ToolTip = uiState.ExpressionEnabled ? null : $"얼굴 표정 입력 경고 ({uiState.ExpressionReasonCode})";
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
         TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} auto_stability={trackingSettings.AutoStabilityTuningEnabled} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} switches={tracking.RecentSourceSwitchCount} switch_reason={tracking.LastSourceSwitchReason} switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} ifm_keys_ok={tracking.IfmAcceptedKeySample} ifm_keys_drop={tracking.IfmDroppedKeySample} err={tracking.LastErrorCode}{trackingHint}";
@@ -2552,6 +2573,7 @@ public partial class MainWindow : Window
         var tracking = _controller.TrackingDiagnostics;
         runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, switches={tracking.RecentSourceSwitchCount}, switch_reason={tracking.LastSourceSwitchReason}, switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, ifm_keys_ok={tracking.IfmAcceptedKeySample}, ifm_keys_drop={tracking.IfmDroppedKeySample}, err={tracking.LastErrorCode}");
         runtimeSb.AppendLine(BuildCommonCauseTriageLine(snapshot, tracking));
+        runtimeSb.AppendLine(BuildCommonCauseActionLine(snapshot, tracking));
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
         runtimeSb.AppendLine($"LastError: {runtime.LastError}");
         return runtimeSb.ToString();
@@ -2598,9 +2620,11 @@ public partial class MainWindow : Window
     {
         var runtime = snapshot.Runtime;
         var runtimeSb = new StringBuilder();
+        var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, _controller.TrackingDiagnostics);
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
+        runtimeSb.AppendLine($"FeatureGate: class={gates.CommonClass}, reason={NormalizeDiagField(gates.CommonReasonCode)}, arm={gates.ArmPose.Enabled}/{NormalizeDiagField(gates.ArmPose.ReasonCode)}, shadow={gates.RealtimeShadow.Enabled}/{NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, expression={gates.Expression.Enabled}/{NormalizeDiagField(gates.Expression.ReasonCode)}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"SpoutBackend: {runtime.SpoutBackend}");
         runtimeSb.AppendLine($"SpoutStrictMode: {runtime.SpoutStrictMode}");
@@ -2654,6 +2678,10 @@ public partial class MainWindow : Window
             avatarSb.AppendLine($"MaterialParityLastMismatch: {NormalizeDiagField(info.MaterialParityLastMismatch)}");
             avatarSb.AppendLine($"LastRenderPassSummary: {NormalizeDiagField(info.LastRenderPassSummary)}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
+            var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, _controller.TrackingDiagnostics);
+            avatarSb.AppendLine($"FeatureGateArm: enabled={gates.ArmPose.Enabled}, code={NormalizeDiagField(gates.ArmPose.ReasonCode)}, reason={NormalizeDiagField(gates.ArmPose.ReasonText)}");
+            avatarSb.AppendLine($"FeatureGateShadow: enabled={gates.RealtimeShadow.Enabled}, code={NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, reason={NormalizeDiagField(gates.RealtimeShadow.ReasonText)}");
+            avatarSb.AppendLine($"FeatureGateExpression: enabled={gates.Expression.Enabled}, code={NormalizeDiagField(gates.Expression.ReasonCode)}, reason={NormalizeDiagField(gates.Expression.ReasonText)}");
         }
 
         return avatarSb.ToString();
@@ -2670,88 +2698,19 @@ public partial class MainWindow : Window
 
     private static string BuildCommonCauseTriageLine(DiagnosticsSnapshot snapshot, TrackingDiagnostics tracking)
     {
-        var runtime = snapshot.Runtime;
-        if (!runtime.RuntimePathMatch || runtime.RuntimeModuleStaleVsBuildOutput)
-        {
-            var runtimeReason = !runtime.RuntimePathMatch ? runtime.RuntimePathWarningCode : runtime.RuntimeTimestampWarningCode;
-            return $"CommonCauseTriage: class=runtime_binary_mismatch, reason={NormalizeDiagField(runtimeReason)}";
-        }
-
-        if (!string.IsNullOrWhiteSpace(tracking.LastErrorCode) &&
-            tracking.LastErrorCode.StartsWith("NC_SET_", StringComparison.Ordinal))
-        {
-            return $"CommonCauseTriage: class=native_submit_failure, reason={tracking.LastErrorCode}";
-        }
-
-        if (!snapshot.AvatarInfo.HasValue)
-        {
-            return "CommonCauseTriage: class=none_detected, reason=no_avatar";
-        }
-
-        var info = snapshot.AvatarInfo.Value;
-        var armStatus = ResolveSignalCode(info, "ARM_POSE_");
-        var shadowStatus = ResolveSignalCode(info, "SHADOW_DISABLED_");
-        var reason = "none";
-        var classification = "none_detected";
-
-        if (info.ExpressionCount == 0U)
-        {
-            classification = "payload_policy_gate";
-            reason = "EXPRESSION_COUNT_ZERO";
-        }
-        else if (!string.IsNullOrWhiteSpace(armStatus))
-        {
-            classification = "payload_policy_gate";
-            reason = armStatus;
-        }
-        else if (!string.IsNullOrWhiteSpace(shadowStatus))
-        {
-            classification = "payload_policy_gate";
-            reason = shadowStatus;
-        }
-
-        var shadowSignal = !string.IsNullOrWhiteSpace(shadowStatus)
-            ? shadowStatus
-            : (info.ActivePasses?.Contains("shadow", StringComparison.OrdinalIgnoreCase) == true ? "SHADOW_PASS_ACTIVE" : "SHADOW_PASS_NOT_REPORTED");
+        var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, tracking);
+        var format = snapshot.AvatarInfo?.DetectedFormat.ToString() ?? "none";
+        var expressions = snapshot.AvatarInfo?.ExpressionCount ?? 0U;
+        var warning = snapshot.AvatarInfo?.LastWarningCode ?? string.Empty;
         return
-            $"CommonCauseTriage: class={classification}, reason={NormalizeDiagField(reason)}, format={info.DetectedFormat}, expressions={info.ExpressionCount}, arm={NormalizeDiagField(armStatus)}, shadow={NormalizeDiagField(shadowSignal)}, warning={NormalizeDiagField(info.LastWarningCode)}";
+            $"CommonCauseTriage: class={gates.CommonClass}, reason={NormalizeDiagField(gates.CommonReasonCode)}, format={format}, expressions={expressions}, arm={NormalizeDiagField(gates.ArmPose.ReasonCode)}, shadow={NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, warning={NormalizeDiagField(warning)}";
     }
 
-    private static string ResolveSignalCode(NcAvatarInfo info, string marker)
+    private static string BuildCommonCauseActionLine(DiagnosticsSnapshot snapshot, TrackingDiagnostics tracking)
     {
-        var fromCode = ExtractSignalCode(info.LastWarningCode, marker);
-        if (!string.IsNullOrWhiteSpace(fromCode))
-        {
-            return fromCode;
-        }
-        return ExtractSignalCode(info.LastWarning, marker);
-    }
-
-    private static string ExtractSignalCode(string text, string marker)
-    {
-        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(marker))
-        {
-            return string.Empty;
-        }
-
-        var idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
-        {
-            return string.Empty;
-        }
-
-        var end = idx;
-        while (end < text.Length)
-        {
-            var ch = text[end];
-            if (!(char.IsLetterOrDigit(ch) || ch is '_' or '-'))
-            {
-                break;
-            }
-            end++;
-        }
-
-        return end > idx ? text[idx..end] : string.Empty;
+        var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, tracking);
+        var actionHint = HostFeatureGateResolver.ResolveOperatorActionHint(gates.CommonClass, gates.CommonReasonCode);
+        return $"CommonCauseAction: {NormalizeDiagField(actionHint)}";
     }
 
     private static string NormalizeDiagField(string text)

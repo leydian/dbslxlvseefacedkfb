@@ -2,6 +2,55 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Feature gate/UI alignment for arm, realtime shadow, and expression (WPF + WinUI)
+
+### Summary
+
+Aligned host UI availability with actual runtime/avatar/tracking feature gates so controls no longer appear active when the underlying feature is policy-gated or unavailable.
+
+Primary outcomes:
+
+- added centralized feature gate resolver with deterministic reason codes,
+- expanded `HostUiAvailability` to include per-feature enablement + reason fields,
+- WPF arm/shadow controls now follow feature-level gates (with tooltip reason),
+- WinUI shadow controls now follow feature-level gates (with tooltip reason),
+- runtime/avatar diagnostics now surface unified `FeatureGate` lines and shared common-cause classification.
+
+### Changed
+
+- New feature gate resolver:
+  - `host/HostCore/HostFeatureGates.cs`
+  - introduced:
+    - `FeatureGateState`
+    - `FeatureGateSnapshot`
+    - `HostFeatureGateResolver.Evaluate(...)`
+- Host UI availability contract:
+  - `host/HostCore/HostUiPolicy.cs`
+  - added per-feature fields:
+    - `ArmPoseEnabled`, `ArmPoseReasonCode`
+    - `RealtimeShadowEnabled`, `RealtimeShadowReasonCode`
+    - `ExpressionEnabled`, `ExpressionReasonCode`
+  - `EvaluateAvailability(...)` now consumes runtime/avatar/tracking context.
+- WPF host wiring:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - arm/shadow controls gated per feature
+  - disabled-state tooltip reason code surfaced
+  - diagnostics lines include `FeatureGate*`
+  - `CommonCauseTriage` unified to shared resolver output
+- WinUI host wiring:
+  - `host/WinUiHost/MainWindow.xaml.cs`
+  - shadow controls gated per feature
+  - disabled-state tooltip reason code surfaced
+  - diagnostics lines include `FeatureGate*`
+- Detailed report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_feature_gate_ui_alignment_wpf_winui.md`
+
+### Verification
+
+- `dotnet build host/HostCore/HostCore.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WpfHost/WpfHost.csproj -c Release --no-restore`: PASS
+- `dotnet build host/WinUiHost/WinUiHost.csproj -c Release --no-restore`: BLOCKED (`NU1301`, missing local source `...\\NativeVsfClone\\build\\nuget-mirror`)
+
 ## 2026-03-06 - Avatar coordinate contract unification (VRM/MIQ yaw stabilization)
 
 ### Summary

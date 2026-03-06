@@ -1495,16 +1495,20 @@ public sealed partial class MainWindow : Window
         var session = _controller.SessionState;
         var outputs = _controller.Outputs;
         var operation = _controller.OperationState;
+        var snapshot = _controller.LastSnapshot;
+        var tracking = _controller.TrackingDiagnostics;
         var uiState = HostUiPolicy.EvaluateAvailability(
             session,
             outputs,
             operation,
             _validationState,
             _controller.RenderState,
-            CameraModeComboBox.SelectedIndex == 2);
+            CameraModeComboBox.SelectedIndex == 2,
+            snapshot.Runtime,
+            snapshot.AvatarInfo,
+            tracking);
         var statusText = HostUiPolicy.BuildStatusText(session, outputs, operation);
         var onboarding = HostUiPolicy.BuildOnboardingState(session, outputs, operation, _validationState);
-        var tracking = _controller.TrackingDiagnostics;
 
         InitializeButton.IsEnabled = uiState.InitializeEnabled;
         ShutdownButton.IsEnabled = uiState.ShutdownEnabled;
@@ -1535,10 +1539,10 @@ public sealed partial class MainWindow : Window
         LightIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
         LightRangeSlider.IsEnabled = uiState.RenderControlsEnabled;
         SpotAngleSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ShadowStrengthSlider.IsEnabled = uiState.RenderControlsEnabled;
-        ShadowBiasSlider.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowStrengthSlider.IsEnabled = uiState.RealtimeShadowEnabled;
+        ShadowBiasSlider.IsEnabled = uiState.RealtimeShadowEnabled;
         AmbientIntensitySlider.IsEnabled = uiState.RenderControlsEnabled;
-        ShadowEnabledCheckBox.IsEnabled = uiState.RenderControlsEnabled;
+        ShadowEnabledCheckBox.IsEnabled = uiState.RealtimeShadowEnabled;
         MirrorModeCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         DebugOverlayCheckBox.IsEnabled = uiState.RenderControlsEnabled;
         SavePresetButton.IsEnabled = uiState.RenderControlsEnabled;
@@ -1568,6 +1572,11 @@ public sealed partial class MainWindow : Window
         TrackingDropWarnThresholdTextBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingUpperBodyEnabledCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
+        var shadowGateTooltip = uiState.RealtimeShadowEnabled ? null : $"실시간 그림자 비활성 ({uiState.RealtimeShadowReasonCode})";
+        ShadowEnabledCheckBox.ToolTip = shadowGateTooltip;
+        ShadowStrengthSlider.ToolTip = shadowGateTooltip;
+        ShadowBiasSlider.ToolTip = shadowGateTooltip;
+        StartTrackingButton.ToolTip = uiState.ExpressionEnabled ? null : $"얼굴 표정 입력 경고 ({uiState.ExpressionReasonCode})";
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
         TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} active={tracking.ActiveSource} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} switches={tracking.RecentSourceSwitchCount} switch_reason={tracking.LastSourceSwitchReason} switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} ifm_keys_ok={tracking.IfmAcceptedKeySample} ifm_keys_drop={tracking.IfmDroppedKeySample} err={tracking.LastErrorCode}{trackingHint}";
@@ -1760,6 +1769,7 @@ public sealed partial class MainWindow : Window
     private string BuildRuntimeText(DiagnosticsSnapshot snapshot)
     {
         var runtime = snapshot.Runtime;
+        var gates = HostFeatureGateResolver.Evaluate(runtime, snapshot.AvatarInfo, _controller.TrackingDiagnostics);
         var runtimeSb = new StringBuilder();
         runtimeSb.AppendLine($"TimestampUtc: {snapshot.TimestampUtc:O}");
         runtimeSb.AppendLine($"SnapshotVersion: {snapshot.SnapshotVersion}");
@@ -1767,6 +1777,7 @@ public sealed partial class MainWindow : Window
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
+        runtimeSb.AppendLine($"FeatureGate: class={gates.CommonClass}, reason={NormalizeDiagField(gates.CommonReasonCode)}, arm={gates.ArmPose.Enabled}/{NormalizeDiagField(gates.ArmPose.ReasonCode)}, shadow={gates.RealtimeShadow.Enabled}/{NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, expression={gates.Expression.Enabled}/{NormalizeDiagField(gates.Expression.ReasonCode)}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"SpoutBackend: {runtime.SpoutBackend}");
         runtimeSb.AppendLine($"SpoutStrictMode: {runtime.SpoutStrictMode}");
@@ -1822,6 +1833,10 @@ public sealed partial class MainWindow : Window
             avatarSb.AppendLine($"MaterialParityLastMismatch: {NormalizeDiagField(info.MaterialParityLastMismatch)}");
             avatarSb.AppendLine($"LastRenderPassSummary: {NormalizeDiagField(info.LastRenderPassSummary)}");
             avatarSb.AppendLine($"LastMissingFeature: {info.LastMissingFeature}");
+            var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, _controller.TrackingDiagnostics);
+            avatarSb.AppendLine($"FeatureGateArm: enabled={gates.ArmPose.Enabled}, code={NormalizeDiagField(gates.ArmPose.ReasonCode)}, reason={NormalizeDiagField(gates.ArmPose.ReasonText)}");
+            avatarSb.AppendLine($"FeatureGateShadow: enabled={gates.RealtimeShadow.Enabled}, code={NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, reason={NormalizeDiagField(gates.RealtimeShadow.ReasonText)}");
+            avatarSb.AppendLine($"FeatureGateExpression: enabled={gates.Expression.Enabled}, code={NormalizeDiagField(gates.Expression.ReasonCode)}, reason={NormalizeDiagField(gates.Expression.ReasonText)}");
         }
 
         return avatarSb.ToString();

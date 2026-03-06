@@ -11,7 +11,13 @@ public sealed record HostUiAvailability(
     bool StartOscEnabled,
     bool StopOscEnabled,
     bool RenderControlsEnabled,
-    bool ManualCameraMode);
+    bool ManualCameraMode,
+    bool ArmPoseEnabled = false,
+    string ArmPoseReasonCode = "none",
+    bool RealtimeShadowEnabled = false,
+    string RealtimeShadowReasonCode = "none",
+    bool ExpressionEnabled = false,
+    string ExpressionReasonCode = "none");
 
 public sealed record HostUiStatusText(
     string SessionText,
@@ -46,12 +52,16 @@ public static class HostUiPolicy
         HostOperationState operation,
         HostValidationState validation,
         RenderUiState renderState,
-        bool isManualCameraSelected)
+        bool isManualCameraSelected,
+        DiagnosticsModel runtime,
+        NcAvatarInfo? avatarInfo,
+        TrackingDiagnostics tracking)
     {
         var hasAvatar = session.ActiveAvatarHandle.HasValue;
         var isBusy = operation.IsBusy;
         var renderControlsEnabled = session.IsInitialized && !isBusy;
         var manualCameraMode = isManualCameraSelected || renderState.CameraMode == RenderCameraMode.Manual;
+        var gates = HostFeatureGateResolver.Evaluate(runtime, avatarInfo, tracking);
 
         return new HostUiAvailability(
             InitializeEnabled: !session.IsInitialized && !isBusy,
@@ -64,7 +74,13 @@ public static class HostUiPolicy
             StartOscEnabled: session.IsInitialized && hasAvatar && !outputs.OscActive && !isBusy && validation.OscBindPortValid && validation.OscPublishAddressValid,
             StopOscEnabled: outputs.OscActive && !isBusy,
             RenderControlsEnabled: renderControlsEnabled,
-            ManualCameraMode: manualCameraMode);
+            ManualCameraMode: manualCameraMode,
+            ArmPoseEnabled: renderControlsEnabled && gates.ArmPose.Enabled,
+            ArmPoseReasonCode: gates.ArmPose.ReasonCode,
+            RealtimeShadowEnabled: renderControlsEnabled && gates.RealtimeShadow.Enabled,
+            RealtimeShadowReasonCode: gates.RealtimeShadow.ReasonCode,
+            ExpressionEnabled: session.IsInitialized && hasAvatar && !isBusy && gates.Expression.Enabled,
+            ExpressionReasonCode: gates.Expression.ReasonCode);
     }
 
     public static HostUiStatusText BuildStatusText(
