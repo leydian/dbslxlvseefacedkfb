@@ -2149,9 +2149,13 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"SpoutLastErrorCode: {runtime.SpoutLastErrorCode}");
         runtimeSb.AppendLine($"NativeCoreModulePath: {NormalizeDiagField(runtime.NativeCoreModulePath)}");
         runtimeSb.AppendLine($"NativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.NativeCoreModuleTimestampUtc)}");
+        runtimeSb.AppendLine($"BuildNativeCoreModulePath: {NormalizeDiagField(runtime.BuildNativeCoreModulePath)}");
+        runtimeSb.AppendLine($"BuildNativeCoreModuleTimestampUtc: {NormalizeDiagField(runtime.BuildNativeCoreModuleTimestampUtc)}");
         runtimeSb.AppendLine($"ExpectedNativeCoreModulePath: {NormalizeDiagField(runtime.ExpectedNativeCoreModulePath)}");
         runtimeSb.AppendLine($"RuntimePathMatch: {runtime.RuntimePathMatch}");
+        runtimeSb.AppendLine($"RuntimeModuleStaleVsBuildOutput: {runtime.RuntimeModuleStaleVsBuildOutput}");
         runtimeSb.AppendLine($"RuntimePathWarningCode: {NormalizeDiagField(runtime.RuntimePathWarningCode)}");
+        runtimeSb.AppendLine($"RuntimeTimestampWarningCode: {NormalizeDiagField(runtime.RuntimeTimestampWarningCode)}");
         runtimeSb.AppendLine($"OscActive: {runtime.OscActive}");
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
@@ -2182,6 +2186,9 @@ public partial class MainWindow : Window
             avatarSb.AppendLine($"CriticalWarningCount: {info.CriticalWarningCount}");
             avatarSb.AppendLine($"MaterialDiagCount: {info.MaterialDiagCount}");
             avatarSb.AppendLine($"MaterialModes: opaque={info.OpaqueMaterialCount}, mask={info.MaskMaterialCount}, blend={info.BlendMaterialCount}");
+            avatarSb.AppendLine($"FamilyBackendFallbackCount: {info.FamilyBackendFallbackCount}");
+            avatarSb.AppendLine($"SelectedFamilyBackend: {NormalizeDiagField(info.SelectedFamilyBackend)}");
+            avatarSb.AppendLine($"ActivePasses: {NormalizeDiagField(info.ActivePasses)}");
             avatarSb.AppendLine($"LastWarningCode: {ResolveWarningCode(info)}");
             avatarSb.AppendLine($"LastWarningSeverity: {NormalizeDiagField(info.LastWarningSeverity)}");
             avatarSb.AppendLine($"LastWarningCategory: {NormalizeDiagField(info.LastWarningCategory)}");

@@ -2384,6 +2384,21 @@ bool ShouldApplyStaticSkinningForAvatarMeshes(const AvatarPackage& avatar_pkg) {
     return false;
 }
 
+bool ShouldUseConservativeXav2MaterialPath() {
+    const char* raw = std::getenv("VSFCLONE_XAV2_CONSERVATIVE_MATERIAL");
+    if (raw == nullptr) {
+        return false;
+    }
+    std::string token(raw);
+    std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    if (token == "0" || token == "false" || token == "no" || token == "off") {
+        return false;
+    }
+    return token == "1" || token == "true" || token == "yes" || token == "on";
+}
+
 void SanitizeTrackingFrame(NcTrackingFrame* frame) {
     if (frame == nullptr) {
         return;
@@ -2744,6 +2759,7 @@ bool BuildGpuMeshForPayload(
     const avatar::SkeletonRenderPayload* skeleton_payload,
     bool enable_static_skinning,
     bool force_static_skinning_fallback,
+    bool* collapse_guard_triggered,
     ID3D11Device* device,
     GpuMeshResource* out_mesh) {
     if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty() || payload.indices.empty()) {
@@ -2829,13 +2845,19 @@ bool BuildGpuMeshForPayload(
         return s;
     };
     if (skin_payload != nullptr) {
+        if (collapse_guard_triggered != nullptr) {
+            *collapse_guard_triggered = false;
+        }
         const auto pre_stats = compute_position_stats(gpu_vertex_blob);
+        bool skinning_applied = false;
         const bool can_apply_with_skeleton =
             skeleton_payload != nullptr && IsValidSkeletonPosePayload(*skin_payload, *skeleton_payload);
         if (enable_static_skinning && can_apply_with_skeleton) {
             (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, skeleton_payload);
+            skinning_applied = true;
         } else if (enable_static_skinning && force_static_skinning_fallback) {
             (void)ApplyStaticSkinningToVertexBlob(&gpu_vertex_blob, 32U, *skin_payload, nullptr);
+            skinning_applied = true;
         }
         const auto post_stats = compute_position_stats(gpu_vertex_blob);
         const float pre_extent = std::max(0.0001f, pre_stats.extent_max);
@@ -2844,7 +2866,13 @@ bool BuildGpuMeshForPayload(
         // but inflate bounds massively (common when matrix convention mismatches).
         const bool exploded_extent = post_extent > (pre_extent * 20.0f);
         const bool exploded_abs = post_stats.max_abs > std::max(200.0f, pre_stats.max_abs * 20.0f);
-        if (!post_stats.finite || exploded_extent || exploded_abs) {
+        // Guard against collapsed pose output where vertices are squashed into
+        // a thin tube or near-point cloud due to bad skeleton conventions.
+        const bool collapsed_extent = skinning_applied && post_extent < (pre_extent * 0.20f);
+        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent) {
+            if (collapsed_extent && collapse_guard_triggered != nullptr) {
+                *collapse_guard_triggered = true;
+            }
             gpu_vertex_blob = bind_pose_blob;
         }
     }
@@ -2960,6 +2988,7 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
         const avatar::SkinRenderPayload* skin_payload = nullptr;
         const avatar::SkeletonRenderPayload* skeleton_payload = nullptr;
         bool force_static_skinning_fallback = false;
+        bool collapse_guard_triggered = false;
         const auto skin_it = skin_by_mesh.find(NormalizeMeshKey(payload.name));
         if (static_skinning_enabled && !bypass_vrm_static_skinning && skin_it != skin_by_mesh.end()) {
             const auto check = ValidateSkinPayload(payload, *skin_it->second);
@@ -3023,12 +3052,25 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                 skeleton_payload,
                 static_skinning_enabled,
                 force_static_skinning_fallback,
+                &collapse_guard_triggered,
                 device,
                 &mesh)) {
             for (auto& created : meshes) {
                 ReleaseGpuMeshResource(&created);
             }
             return false;
+        }
+        if (collapse_guard_triggered) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: XAV2_SKINNING_COLLAPSE_GUARD: mesh=" << payload.name
+                        << ", posed mesh rejected; keep bind pose.";
+                PushAvatarWarningUnique(
+                    &avatar_it->second,
+                    warning.str(),
+                    "XAV2_SKINNING_COLLAPSE_GUARD");
+            }
         }
         meshes.push_back(mesh);
     }
@@ -3213,13 +3255,24 @@ bool ApplyArmPoseToAvatar(
         const float pre_extent = std::max(0.0001f, pre_stats.extent_max);
         const bool exploded_extent = post_stats.extent_max > (pre_extent * 20.0f);
         const bool exploded_abs = post_stats.max_abs > std::max(200.0f, pre_stats.max_abs * 20.0f);
-        if (!post_stats.finite || exploded_extent || exploded_abs) {
+        const bool collapsed_extent = post_stats.extent_max < (pre_extent * 0.20f);
+        if (!post_stats.finite || exploded_extent || exploded_abs || collapsed_extent) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
-                PushAvatarWarningUnique(
-                    &avatar_it->second,
-                    "W_RENDER: XAV2_SKINNING_EXTENT_GUARD: posed mesh rejected; keep bind pose.",
-                    "XAV2_SKINNING_EXTENT_GUARD");
+                if (collapsed_extent) {
+                    std::ostringstream warning;
+                    warning << "W_RENDER: XAV2_SKINNING_COLLAPSE_GUARD: mesh=" << mesh.mesh_name
+                            << ", posed mesh rejected; keep bind pose.";
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        warning.str(),
+                        "XAV2_SKINNING_COLLAPSE_GUARD");
+                } else {
+                    PushAvatarWarningUnique(
+                        &avatar_it->second,
+                        "W_RENDER: XAV2_SKINNING_EXTENT_GUARD: posed mesh rejected; keep bind pose.",
+                        "XAV2_SKINNING_EXTENT_GUARD");
+                }
             }
             posed_vertices = mesh.bind_pose_vertex_blob;
         }
@@ -3883,9 +3936,11 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
         }
         return out;
     };
+    const bool use_conservative_xav2_material_path = ShouldUseConservativeXav2MaterialPath();
     for (const auto& payload : avatar_pkg.material_payloads) {
         GpuMaterialResource material {};
-        const bool conservative_xav2_material = (avatar_pkg.source_type == AvatarSourceType::Xav2);
+        const bool conservative_xav2_material =
+            avatar_pkg.source_type == AvatarSourceType::Xav2 && use_conservative_xav2_material_path;
         const bool is_vrm_source = avatar_pkg.source_type == AvatarSourceType::Vrm;
         const char* unresolved_texture_code = is_vrm_source
             ? "VRM_MATERIAL_TEXTURE_UNRESOLVED"
@@ -4814,7 +4869,8 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             : sorted_extents[sorted_extents.size() / 2U];
         const float extent_threshold = std::max(0.5f, median_extent * 20.0f);
         const float draw_extent_threshold = std::max(2.5f, median_extent * 6.0f);
-        const float bounds_cluster_distance_threshold = std::max(2.2f, median_extent * 3.0f);
+        const float bounds_cluster_distance_threshold = std::max(3.8f, median_extent * 4.5f);
+        constexpr std::size_t kMinClusterSamplesForBoundsFilter = 6U;
         std::vector<std::uint8_t> preview_bounds_excluded(mesh_it->second.size(), 0U);
         if (it->second.source_type == AvatarSourceType::Xav2) {
             for (const auto& sample : extent_samples) {
@@ -4862,7 +4918,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cluster_cx = pick_median(&center_x_samples);
         const float cluster_cy = pick_median(&center_y_samples);
         const float cluster_cz = pick_median(&center_z_samples);
-        if (it->second.source_type == AvatarSourceType::Xav2 && !center_x_samples.empty()) {
+        const bool allow_cluster_bounds_filter =
+            it->second.source_type == AvatarSourceType::Xav2 &&
+            center_x_samples.size() >= kMinClusterSamplesForBoundsFilter;
+        if (allow_cluster_bounds_filter) {
             for (const auto& sample : extent_samples) {
                 if (preview_bounds_excluded[sample.index] != 0U) {
                     continue;

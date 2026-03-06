@@ -155,7 +155,7 @@ public sealed class RenderPresetStore : IRenderPresetStore
                 Name = normalizedName,
                 FramingTarget = Clamp(preset.FramingTarget, 0.35f, 0.95f),
                 Headroom = Clamp(preset.Headroom, 0.0f, 0.50f),
-                YawDeg = Clamp(preset.YawDeg, -45.0f, 45.0f),
+                YawDeg = Clamp(preset.YawDeg, -180.0f, 180.0f),
                 FovDeg = Clamp(preset.FovDeg, 20.0f, 70.0f),
             });
         }

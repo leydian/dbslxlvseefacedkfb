@@ -82,10 +82,6 @@ namespace VsfClone.Xav2.Editor
             const string strictRoot = "Assets/ImportedXav2DiagStrict";
             const string fallbackRoot = "Assets/ImportedXav2DiagFallback";
 
-            AssetDatabase.DeleteAsset(strictRoot);
-            AssetDatabase.DeleteAsset(fallbackRoot);
-            AssetDatabase.Refresh();
-
             var strictOptions = new Xav2ImportOptions
             {
                 OutputRoot = strictRoot,
@@ -99,10 +95,40 @@ namespace VsfClone.Xav2.Editor
                 RigRecoveryPolicy = Xav2RigRecoveryPolicy.Fallback
             };
 
-            var strictReport = Xav2Importer.Import(inputPath, strictOptions);
-            var fallbackReport = Xav2Importer.Import(inputPath, fallbackOptions);
-            var summary = BuildRigDiagnosticSummary(inputPath, strictReport, fallbackReport);
+            Xav2ImportReport strictReport = null;
+            Xav2ImportReport fallbackReport = null;
+            try
+            {
+                EditorUtility.DisplayProgressBar("XAV2 Rig Diagnosis", "Running strict import...", 0.15f);
+                strictReport = Xav2Importer.Import(inputPath, strictOptions);
 
+                if (EditorUtility.DisplayCancelableProgressBar("XAV2 Rig Diagnosis", "Running fallback import...", 0.65f))
+                {
+                    EditorUtility.DisplayDialog("XAV2 Rig Diagnosis", "Diagnosis cancelled by user.", "OK");
+                    return;
+                }
+
+                fallbackReport = Xav2Importer.Import(inputPath, fallbackOptions);
+            }
+            catch (System.Exception ex)
+            {
+                strictReport ??= new Xav2ImportReport
+                {
+                    Success = false,
+                    ErrorMessage = $"Strict diagnosis threw exception: {ex.Message}"
+                };
+                fallbackReport ??= new Xav2ImportReport
+                {
+                    Success = false,
+                    ErrorMessage = $"Fallback diagnosis not completed: {ex.Message}"
+                };
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+
+            var summary = BuildRigDiagnosticSummary(inputPath, strictReport, fallbackReport);
             Debug.Log($"[XAV2] Rig diagnosis completed.\n{summary}");
             EditorUtility.DisplayDialog("XAV2 Rig Diagnosis", summary, "OK");
         }
