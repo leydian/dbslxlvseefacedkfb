@@ -2,6 +2,35 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking NO_FRAME incident documentation + runtime rebuild remediation
+
+### Summary
+
+Documented the second-stage webcam tracking failure remediation where startup advanced
+past Python launch but failed with `TRACKING_MEDIAPIPE_NO_FRAME`, and captured the
+actual root cause plus validated environment rebuild procedure.
+
+### Changed
+
+- Added detailed incident/remediation report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_mediapipe_no_frame_root_cause_and_venv_rebuild.md`
+- Updated weekly documentation indexes:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+- Captured validated recovery sequence:
+  - install explicit Python `3.11`,
+  - remove and recreate `.venv` with explicit `-PythonExe`,
+  - pin `mediapipe` to sidecar-compatible line (`mediapipe==0.10.11` request; observed runtime `0.10.10` with `solutions` API),
+  - re-pin `VSFCLONE_MEDIAPIPE_PYTHON` to rebuilt `.venv\Scripts\python.exe`.
+
+### Verification
+
+- `tools/mediapipe_sidecar_sanity.ps1`: `Overall: PASS`
+- direct sidecar smoke:
+  - first frame JSON emitted (`schema_version=1`, `frame_id=1`)
+  - confirms sidecar frame loop operational after rebuild
+  
+
 ## 2026-03-06 - Release tooling implementation: WinUI triage + gate automation expansion
 
 ### Summary
