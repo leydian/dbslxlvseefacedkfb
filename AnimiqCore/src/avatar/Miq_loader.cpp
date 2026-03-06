@@ -1325,7 +1325,13 @@ bool MiqLoader::CanLoadPath(const std::string& path) const {
 }
 
 bool MiqLoader::CanLoadBytes(const std::vector<std::uint8_t>& head) const {
-    return head.size() >= 4U && head[0] == 'X' && head[1] == 'A' && head[2] == 'V' && head[3] == '2';
+    if (head.size() < 3U) {
+        return false;
+    }
+    if (!(head[0] == 'M' && head[1] == 'I' && head[2] == 'Q')) {
+        return false;
+    }
+    return true;
 }
 
 core::Result<AvatarPackage> MiqLoader::Load(const std::string& path) const {
@@ -1339,7 +1345,7 @@ core::Result<AvatarPackage> MiqLoader::Load(
     if (!ReadFileBytes(path, &bytes)) {
         return core::Result<AvatarPackage>::Fail("could not open miq file");
     }
-    if (bytes.size() < 10U) {
+    if (bytes.size() < 9U) {
         return core::Result<AvatarPackage>::Fail("miq file is too small");
     }
 
@@ -1352,20 +1358,27 @@ core::Result<AvatarPackage> MiqLoader::Load(
     pkg.source_path = path;
     pkg.display_name = fs::path(path).stem().string();
 
-    if (!(bytes[0] == 'M' && bytes[1] == 'I' && bytes[2] == 'Q' && bytes[3] == '2')) {
+    std::size_t header_size = 0U;
+    if (bytes.size() >= 4U && bytes[0] == 'M' && bytes[1] == 'I' && bytes[2] == 'Q' && bytes[3] == '2') {
+        header_size = 4U;
+    } else if (bytes[0] == 'M' && bytes[1] == 'I' && bytes[2] == 'Q') {
+        // Legacy Unity MIQ header layout: "MIQ" + u16 version + u32 manifest size.
+        header_size = 3U;
+    } else {
         pkg.primary_error_code = "MIQ_SCHEMA_INVALID";
         PushWarning(&pkg, "E_PARSE: MIQ_SCHEMA_INVALID: magic header mismatch.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
-    const auto version = ReadU16Le(bytes, 4U);
-    const auto manifest_size = ReadU32Le(bytes, 6U);
+
+    const auto version = ReadU16Le(bytes, header_size);
+    const auto manifest_size = ReadU32Le(bytes, header_size + 2U);
     if (!version || !manifest_size || (*version != 1U && *version != 2U && *version != 3U && *version != 4U && *version != 5U)) {
         pkg.primary_error_code = "MIQ_SCHEMA_INVALID";
         PushWarning(&pkg, "E_PARSE: MIQ_SCHEMA_INVALID: unsupported version.");
         return core::Result<AvatarPackage>::Ok(pkg);
     }
     const std::uint16_t format_version = *version;
-    const std::size_t manifest_offset = 10U;
+    const std::size_t manifest_offset = header_size + 2U + 4U;
     const std::size_t manifest_end = manifest_offset + static_cast<std::size_t>(*manifest_size);
     if (manifest_end > bytes.size()) {
         pkg.primary_error_code = "MIQ_SCHEMA_INVALID";

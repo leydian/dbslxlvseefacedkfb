@@ -2673,8 +2673,8 @@ public partial class MainWindow : Window
         var runtime = snapshot.Runtime;
         if (!runtime.RuntimePathMatch || runtime.RuntimeModuleStaleVsBuildOutput)
         {
-            var reason = !runtime.RuntimePathMatch ? runtime.RuntimePathWarningCode : runtime.RuntimeTimestampWarningCode;
-            return $"CommonCauseTriage: class=runtime_binary_mismatch, reason={NormalizeDiagField(reason)}";
+            var runtimeReason = !runtime.RuntimePathMatch ? runtime.RuntimePathWarningCode : runtime.RuntimeTimestampWarningCode;
+            return $"CommonCauseTriage: class=runtime_binary_mismatch, reason={NormalizeDiagField(runtimeReason)}";
         }
 
         if (!string.IsNullOrWhiteSpace(tracking.LastErrorCode) &&

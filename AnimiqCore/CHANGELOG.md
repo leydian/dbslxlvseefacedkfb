@@ -2,6 +2,48 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - MIQ legacy header compatibility hotfix + WPF redeploy
+
+### Summary
+
+Fixed a runtime incompatibility where valid `.miq` files could fail with `MIQ_SCHEMA_INVALID` / host `Unsupported` due to mixed MIQ header expectations between exporter/runtime components.
+
+Primary outcomes:
+
+- native MIQ loader now accepts both `MIQ2` and legacy `MIQ` header layouts,
+- stale byte-probe contract (`XAV2`) was removed from MIQ loader signature detection,
+- reported sample file now loads to `Compat: full` with `PrimaryError: NONE`,
+- WPF host was republished to `dist/wpf` with launch smoke pass.
+
+### Changed
+
+- Native MIQ loader compatibility:
+  - `src/avatar/Miq_loader.cpp`
+  - `CanLoadBytes(...)` now detects MIQ family bytes (`MIQ`) instead of stale `XAV2`.
+  - load path now supports two header layouts:
+    - `MIQ2` (4-byte header),
+    - `MIQ` (legacy 3-byte header).
+  - `version` / `manifest_size` offsets are computed from detected header size.
+- WPF host compile unblock during republish:
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - fixed local variable shadowing (`CS0136`) in `BuildCommonCauseTriageLine(...)` by renaming inner `reason` to `runtimeReason`.
+
+### Verification
+
+- repro before fix (`avatar_tool` + reported sample `.miq`):
+  - `Compat: failed`
+  - `ParserStage: parse`
+  - `PrimaryError: MIQ_SCHEMA_INVALID`
+  - warning: `magic header mismatch`
+- validation after fix (`build_plan_impl/Release/avatar_tool.exe` on same sample):
+  - `Compat: full`
+  - `ParserStage: runtime-ready`
+  - `PrimaryError: NONE`
+- host publish:
+  - `tools/publish_hosts.ps1`: PASS (WPF)
+  - `dist/wpf/WpfHost.exe` regenerated
+  - `build/reports/host_publish_latest.txt` confirms WPF launch smoke `PASS` and `nativecore.dll` hash parity.
+
 ## 2026-03-06 - Per-avatar preview flip180 persistence + WPF/WinUI front/back toggle
 
 ### Summary

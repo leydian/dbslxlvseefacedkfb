@@ -177,6 +177,7 @@ Report list for this week.
 - [2026-03-06_miq_public_sdk_packaging_v100.md](./2026-03-06_miq_public_sdk_packaging_v100.md)
 - [2026-03-06_miq_unity_lts_matrix_gate_policy.md](./2026-03-06_miq_unity_lts_matrix_gate_policy.md)
 - [2026-03-06_miq_lts_kpi_risk_signal_and_dashboard_failclosed.md](./2026-03-06_miq_lts_kpi_risk_signal_and_dashboard_failclosed.md)
+- [2026-03-06_miq_header_compat_hotfix_and_wpf_redeploy.md](./2026-03-06_miq_header_compat_hotfix_and_wpf_redeploy.md)
 - [2026-03-06_vrm_to_miq_quality_runtime_validation_hardening.md](./2026-03-06_vrm_to_miq_quality_runtime_validation_hardening.md)
 - [2026-03-06_vrm_runtime_metrics_v2_api.md](./2026-03-06_vrm_runtime_metrics_v2_api.md)
 - [2026-03-06_nativecore_realtime_shadow_pipeline.md](./2026-03-06_nativecore_realtime_shadow_pipeline.md)
