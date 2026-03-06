@@ -15,6 +15,9 @@ public sealed class TrackingInputService : ITrackingInputService
     private const ushort DefaultListenPort = 49983;
     private const int DefaultStaleTimeoutMs = 500;
     private const int NoActiveInputWarnDelayMs = 3000;
+    private const int NoPacketRebindThresholdMs = 5000;
+    private const int NoPacketRebindCooldownMs = 3000;
+    private const int ReceiveWatchdogPollMs = 250;
     private const int CalibrationWarmupFrames = 90;
     private const int LatencySampleWindow = 240;
 
@@ -25,6 +28,7 @@ public sealed class TrackingInputService : ITrackingInputService
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
     private Task? _receiveTask;
+    private Task? _receiveWatchdogTask;
     private TrackingStartOptions _options = new(DefaultListenPort, DefaultStaleTimeoutMs, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced);
     private TrackingDiagnostics _diagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.HybridAuto, "idle");
 
@@ -46,6 +50,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private double _latencyP95Ms;
     private string _switchBlockedReason = string.Empty;
     private string _udpBindMode = "unknown";
+    private DateTimeOffset _lastUdpRebindAttemptUtc = DateTimeOffset.MinValue;
+    private int _receiveLoopRestartCount;
 
     private NcTrackingFrame _rawFrame = BuildNeutralFrame();
     private NcTrackingFrame _smoothedFrame = BuildNeutralFrame();
@@ -210,6 +216,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
             _cts = new CancellationTokenSource();
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+            _receiveWatchdogTask = Task.Run(() => ReceiveWatchdogLoopAsync(_cts.Token));
             _activeRuntimeSource = TrackingRuntimeSource.Ifacial;
             _activeSourceSinceUtc = DateTimeOffset.UtcNow;
             _diagnostics = _diagnostics with
@@ -325,6 +332,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
             _udpClient = null;
             _receiveTask = null;
+            _receiveWatchdogTask = null;
             DisposeWebcamRuntime();
             _activeRuntimeSource = TrackingRuntimeSource.None;
             _diagnostics = _diagnostics with
@@ -682,6 +690,8 @@ public sealed class TrackingInputService : ITrackingInputService
         _lastSourceSwitchReason = string.Empty;
         _sourceSwitchCooldownUntilUtc = DateTimeOffset.MinValue;
         _lastStabilityTuneUtc = DateTimeOffset.MinValue;
+        _lastUdpRebindAttemptUtc = DateTimeOffset.MinValue;
+        _receiveLoopRestartCount = 0;
         _diagnostics = new TrackingDiagnostics(
             true,
             "unknown",
@@ -724,11 +734,26 @@ public sealed class TrackingInputService : ITrackingInputService
             UdpReceiveResult result;
             try
             {
-                if (_udpClient is null)
+                UdpClient? activeClient;
+                lock (_sync)
+                {
+                    activeClient = _udpClient;
+                }
+
+                if (activeClient is null)
                 {
                     break;
                 }
-                result = await _udpClient.ReceiveAsync(token);
+
+                var receiveTask = activeClient.ReceiveAsync(token).AsTask();
+                var completed = await Task.WhenAny(receiveTask, Task.Delay(ReceiveWatchdogPollMs, token));
+                if (!ReferenceEquals(completed, receiveTask))
+                {
+                    TryRebindIfacialSocketWhenNoPackets();
+                    continue;
+                }
+
+                result = await receiveTask;
             }
             catch (OperationCanceledException)
             {
@@ -744,6 +769,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 {
                     _diagnostics = _diagnostics with { StatusMessage = $"receive failed: {ex.Message}" };
                 }
+                TryRebindIfacialSocketWhenNoPackets();
                 await Task.Delay(10, CancellationToken.None);
                 continue;
             }
@@ -839,6 +865,97 @@ public sealed class TrackingInputService : ITrackingInputService
                     FallbackCount = _fallbackCount,
                     CalibrationState = _calibrationState,
                     ConfidenceSummary = BuildConfidenceSummary(),
+                };
+            }
+        }
+    }
+
+    private async Task ReceiveWatchdogLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(1000, token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            lock (_sync)
+            {
+                if (_cts is null || _udpClient is null || _receiveTask is null)
+                {
+                    continue;
+                }
+
+                if (!_receiveTask.IsCompleted)
+                {
+                    continue;
+                }
+
+                _receiveLoopRestartCount++;
+                _receiveTask = Task.Run(() => ReceiveLoopAsync(_cts.Token));
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = $"receive-loop-restarted:{_receiveLoopRestartCount}",
+                    StatusMessage = $"receive loop restarted ({_receiveLoopRestartCount})",
+                    LastErrorCode = string.Empty,
+                };
+            }
+        }
+    }
+
+    private void TryRebindIfacialSocketWhenNoPackets()
+    {
+        lock (_sync)
+        {
+            if (_udpClient is null)
+            {
+                return;
+            }
+
+            var noPacketAgeMs = GetPacketAgeMs(_lastIfacialPacketUtc);
+            if (noPacketAgeMs < NoPacketRebindThresholdMs)
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (_lastUdpRebindAttemptUtc != DateTimeOffset.MinValue &&
+                (now - _lastUdpRebindAttemptUtc).TotalMilliseconds < NoPacketRebindCooldownMs)
+            {
+                return;
+            }
+
+            _lastUdpRebindAttemptUtc = now;
+            try
+            {
+                _udpClient.Close();
+            }
+            catch
+            {
+                // Best-effort close.
+            }
+
+            try
+            {
+                _udpClient = CreateUdpListener(_options.ListenPort, out _udpBindMode);
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = $"udp-rebind:{_options.ListenPort}:{_udpBindMode}",
+                    StatusMessage = $"rebound:{_options.ListenPort} ({_udpBindMode}) after no-packet={noPacketAgeMs}ms",
+                    LastErrorCode = string.Empty,
+                };
+            }
+            catch (Exception ex)
+            {
+                _diagnostics = _diagnostics with
+                {
+                    SourceStatus = "udp-rebind-failed",
+                    StatusMessage = $"rebind failed: {ex.Message}",
+                    LastErrorCode = "TRACKING_UDP_REBIND_FAILED",
                 };
             }
         }
@@ -2343,6 +2460,32 @@ public sealed class TrackingInputService : ITrackingInputService
         if (message.Values.Count == 0)
         {
             return false;
+        }
+
+        // Some iPhone tracking senders provide a plain 52-float vector payload.
+        // Map it directly by canonical ARKit order.
+        if (message.Values.Count >= Arkit52Channels.CanonicalOrder.Count)
+        {
+            var allFloat = true;
+            for (var i = 0; i < Arkit52Channels.CanonicalOrder.Count; i++)
+            {
+                if (message.Values[i].Kind != OscValueKind.Float)
+                {
+                    allFloat = false;
+                    break;
+                }
+            }
+
+            if (allFloat)
+            {
+                for (var i = 0; i < Arkit52Channels.CanonicalOrder.Count; i++)
+                {
+                    updates.Add(new KeyValuePair<string, float>(
+                        NormalizeKey(Arkit52Channels.CanonicalOrder[i]),
+                        message.Values[i].FloatValue));
+                }
+                return true;
+            }
         }
 
         // pair pattern: [string key, float value]*

@@ -11,7 +11,7 @@
 - `r01`: 4 reports
 - `vxavatar`: 4 reports
 - `wpf`: 16 reports
-- `release`: 6 reports
+- `release`: 7 reports
 - `vrm`: 14 reports
 - `winui`: 3 reports
 - `workspace`: 3 reports
@@ -50,6 +50,7 @@
 - Newly added: review `2026-03-06_platform_10persona_action_plan_evaluation.md` for 10-persona scoring, P1/P2 action mapping, and owner/window alignment.
 - Newly added: review `2026-03-06_release_onboarding_kpi_gate_and_error_remediation_contract.md` for onboarding KPI fail-closed gate policy and error remediation contract wiring.
 - Newly added: review `2026-03-06_release_execution_recheck_winui_unity_kpi_status.md` for latest `WpfOnly/Full` candidate state, WinUI `WMC9999` triage evidence, Unity XAV2 gate status, and onboarding KPI insufficiency confirmation.
+- Newly added: review `2026-03-06_release_execution_active_round3_wpf_only_hold_and_full_blockers.md` for post-tracking-stabilization recheck evidence, `WPF_ONLY` candidate hold status, and remaining full-release blocker bundle (WinUI/Unity/KPI).
 - Newly added: review `2026-03-06_completion_90pct_execution_update.md` for board-status closure evidence, verification results, and remaining WinUI blocker classification.
 - Newly added: review `2026-03-06_vrm_runtime_metrics_v2_api.md` for runtime quality metric adoption and gate integration.
 - Newly added: review `2026-03-06_webcam_device_enumeration_and_tracking_refresh.md` for Windows camera enumeration contract, index-key sidecar compatibility, and WPF/WinUI refresh/fallback behavior.

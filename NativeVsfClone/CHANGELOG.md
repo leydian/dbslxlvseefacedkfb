@@ -2,6 +2,69 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking receive watchdog/rebind + WPF visual refresh integration
+
+### Summary
+
+Integrated additional host tracking resiliency updates and WPF UI resource/style refresh changes into the current release-validation pass.
+
+### Changed
+
+- Tracking runtime hardening:
+  - `host/HostCore/TrackingInputService.cs`
+  - added no-packet watchdog polling in UDP receive loop
+  - added auto-rebind policy for stale/no-packet intervals with cooldown:
+    - `NoPacketRebindThresholdMs`
+    - `NoPacketRebindCooldownMs`
+    - `ReceiveWatchdogPollMs`
+  - added rebind diagnostic status/error reporting (`udp-rebind`, `TRACKING_UDP_REBIND_FAILED`)
+  - added direct 52-float vector mapping fallback for ARKit canonical order messages
+- WPF visual/theme refresh:
+  - `host/WpfHost/App.xaml`
+  - `host/WpfHost/MainWindow.xaml`
+  - updated color token set, control templates, navigation rail/button styling, backdrop gradient and panel visual presentation.
+
+### Verification
+
+- `dotnet build .\host\HostCore\HostCore.csproj -c Release --nologo`: PASS
+- `dotnet build .\host\WpfHost\WpfHost.csproj -c Release --nologo`: PASS
+- `tools/tracking_parser_fuzz_gate.ps1`: PASS
+- `tools/host_e2e_gate.ps1 -SkipNativeBuild -NoRestore`: PASS
+- dashboard after refresh:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL` (Unity/KPI blockers unchanged)
+
+## 2026-03-06 - Release execution active round 3 (WPF-only hold + full blockers reconfirm)
+
+### Summary
+
+Executed the immediate release-priority validation bundle after the latest tracking changes and documented the current go/no-go state with refreshed artifacts.
+
+### Changed
+
+- Added weekly report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_release_execution_active_round3_wpf_only_hold_and_full_blockers.md`
+- Updated weekly index:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+- Updated weekly summary:
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+  - release report count updated to `7`
+
+### Verification
+
+- `tools/tracking_parser_fuzz_gate.ps1`: PASS
+- `tools/host_e2e_gate.ps1 -SkipNativeBuild -NoRestore`: PASS
+- WinUI triage/min-repro still converged:
+  - `FailureClass: TOOLCHAIN_XAML_PLATFORM_UNSUPPORTED`
+  - `WMC9999` reproducible
+- Unity-dependent XAV2 gates remain blocked by missing editor path:
+  - `UNITY_2021_3_18F1_EDITOR_PATH` not set
+- Onboarding KPI still insufficient:
+  - `sessions=1` (`min_sessions=5`)
+- Dashboard remains:
+  - `ReleaseCandidateWpfOnly: PASS`
+  - `ReleaseCandidateFull: FAIL`
+
 ## 2026-03-06 - Tracking UDP dual-stack bind fallback + fallback-lockdown documentation
 
 ### Summary

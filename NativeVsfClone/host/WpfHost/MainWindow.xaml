@@ -5,9 +5,9 @@
         Title="VsfClone Host (WPF)" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
     <Window.Resources>
         <LinearGradientBrush x:Key="Brush.AppBackdrop" StartPoint="0,0" EndPoint="1,1">
-            <GradientStop Color="#F6FAFF" Offset="0.0"/>
-            <GradientStop Color="#EAF2FB" Offset="0.55"/>
-            <GradientStop Color="#E4EDF8" Offset="1.0"/>
+            <GradientStop Color="#F0F4FF" Offset="0.0"/>
+            <GradientStop Color="#F5F0FF" Offset="0.5"/>
+            <GradientStop Color="#EDE9FE" Offset="1.0"/>
         </LinearGradientBrush>
 
         <Style x:Key="SectionCardStyle" TargetType="GroupBox" BasedOn="{StaticResource {x:Type GroupBox}}">
@@ -18,35 +18,53 @@
         </Style>
 
         <Style x:Key="NavRailButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="{DynamicResource Color.NavItemBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Color.Border}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Foreground" Value="{DynamicResource Color.NavItemText}"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Padding" Value="11,7"/>
-            <Setter Property="Margin" Value="0,0,0,8"/>
-            <Setter Property="MinWidth" Value="124"/>
-            <Style.Triggers>
-                <Trigger Property="IsKeyboardFocused" Value="True">
-                    <Setter Property="BorderBrush" Value="{DynamicResource Color.Primary}"/>
-                    <Setter Property="BorderThickness" Value="2"/>
-                </Trigger>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Opacity" Value="0.96"/>
-                </Trigger>
-            </Style.Triggers>
+            <Setter Property="Padding" Value="10,9"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="MinWidth" Value="148"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource Color.NavItemBg}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="{DynamicResource Color.CardSoftBg}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{DynamicResource Color.FocusRing}"/>
+                                <Setter TargetName="Root" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
     <Grid Margin="14">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="ControlsColumn" Width="640" />
-            <ColumnDefinition x:Name="SplitterColumn" Width="14" />
+            <ColumnDefinition x:Name="SplitterColumn" Width="12" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
         <Border Grid.ColumnSpan="3" Background="{StaticResource Brush.AppBackdrop}" CornerRadius="12" />
 
         <Grid Grid.Column="0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="156"/>
+                <ColumnDefinition Width="180"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
@@ -56,31 +74,31 @@
                     Background="{DynamicResource Color.NavRailBg}"
                     BorderBrush="{DynamicResource Color.Border}"
                     BorderThickness="1"
-                    CornerRadius="8"
+                    CornerRadius="12"
                     Padding="10">
                 <StackPanel>
-                    <TextBlock Text="작업공간" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
-                    <TextBlock Text="빠른 제어" Margin="0,4,0,8" FontSize="18" FontWeight="SemiBold"/>
-                    <Border Background="{DynamicResource Color.CardStrong}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,10">
+                    <TextBlock Text="작  업  공  간" Foreground="{DynamicResource Color.TextSubtle}" FontWeight="Bold" FontSize="11"/>
+                    <TextBlock Text="빠른 제어" Margin="0,4,0,8" FontSize="20" FontWeight="SemiBold"/>
+                    <Border Background="{DynamicResource Color.CardStrong}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="10" Padding="8,6" Margin="0,0,0,10">
                         <StackPanel>
                             <TextBlock Text="권장 흐름" FontWeight="SemiBold" FontSize="12"/>
                             <TextBlock Text="세션 -> 아바타 -> 출력" Margin="0,2,0,0" FontSize="11" Foreground="{DynamicResource Color.TextMuted}"/>
                         </StackPanel>
                     </Border>
-                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="시작하기" Click="NavGettingStarted_Click" ToolTip="Ctrl+1"/>
-                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="세션/아바타" Click="NavSessionAvatar_Click" ToolTip="Ctrl+2"/>
-                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="렌더 설정" Click="NavRender_Click" ToolTip="Ctrl+3"/>
-                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="출력 설정" Click="NavOutputs_Click" ToolTip="Ctrl+4"/>
-                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="트래킹" Click="NavTracking_Click" ToolTip="Ctrl+5"/>
-                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="고급 운영" Click="NavPlatformOps_Click" ToolTip="Ctrl+6"/>
+                    <Button x:Name="NavGettingStartedButton" Style="{StaticResource NavRailButtonStyle}" Content="⚡  시작하기" Click="NavGettingStarted_Click" ToolTip="Ctrl+1"/>
+                    <Button x:Name="NavSessionAvatarButton" Style="{StaticResource NavRailButtonStyle}" Content="🎭  세션/아바타" Click="NavSessionAvatar_Click" ToolTip="Ctrl+2"/>
+                    <Button x:Name="NavRenderButton" Style="{StaticResource NavRailButtonStyle}" Content="🖥  렌더 설정" Click="NavRender_Click" ToolTip="Ctrl+3"/>
+                    <Button x:Name="NavOutputsButton" Style="{StaticResource NavRailButtonStyle}" Content="📡  출력 설정" Click="NavOutputs_Click" ToolTip="Ctrl+4"/>
+                    <Button x:Name="NavTrackingButton" Style="{StaticResource NavRailButtonStyle}" Content="🎯  트래킹" Click="NavTracking_Click" ToolTip="Ctrl+5"/>
+                    <Button x:Name="NavOpsButton" Style="{StaticResource NavRailButtonStyle}" Content="⚙  고급 운영" Click="NavPlatformOps_Click" ToolTip="Ctrl+6"/>
                     <Separator Margin="0,4,0,8"/>
-                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="진단 패널" Click="ToggleDiagnosticsPanel_Click" ToolTip="Ctrl+D"/>
+                    <Button x:Name="ToggleDiagnosticsButton" Style="{StaticResource NavRailButtonStyle}" Content="📊  진단 패널" Click="ToggleDiagnosticsPanel_Click" ToolTip="Ctrl+D"/>
                 </StackPanel>
             </Border>
 
             <Border Grid.Column="1" Background="{DynamicResource Color.BorderStrong}" CornerRadius="3"/>
 
-            <Border x:Name="ControlPanelFrame" Grid.Column="2" Background="{DynamicResource Color.Card}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="10" Padding="10">
+            <Border x:Name="ControlPanelFrame" Grid.Column="2" Background="{DynamicResource Color.Card}" BorderThickness="0" CornerRadius="16" Padding="10">
             <ScrollViewer x:Name="ControlPanelScrollViewer" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,0,2">
                 <GroupBox x:Name="ModeGroup" Style="{StaticResource SectionCardStyle}" Header="화면 설정" Margin="0,0,0,8">
@@ -98,7 +116,7 @@
                 <GroupBox x:Name="QuickActionsGroup" Style="{StaticResource SectionCardStyle}" Header="시작하기" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="처음에는 이 3단계만 따라오면 됩니다: 세션 시작 -> 아바타 불러오기 -> 출력 시작" TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
-                        <Border Background="{DynamicResource Color.OnboardingBarBg}" BorderBrush="{DynamicResource Color.OnboardingBarBorder}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,8">
+                        <Border Background="{DynamicResource Color.OnboardingBarBg}" BorderBrush="{DynamicResource Color.OnboardingBarBorder}" BorderThickness="1" CornerRadius="12" Padding="12" Margin="0,0,0,8">
                             <StackPanel>
                                 <DockPanel LastChildFill="True">
                                     <Border DockPanel.Dock="Right" Background="{DynamicResource Color.BadgeNeutralBg}" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="10" Padding="8,3" Margin="8,0,0,0">
@@ -118,42 +136,42 @@
                             </StackPanel>
                         </Border>
                         <UniformGrid Columns="3" Margin="0,0,0,8">
-                            <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="6" Padding="9" Margin="0,0,6,0">
+                            <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="8" Padding="9" Margin="0,0,6,0">
                                 <StackPanel>
                                     <TextBlock Text="1) 세션 시작" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock x:Name="OnboardingStep1Text" Text="다음 단계" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
                                 </StackPanel>
                             </Border>
-                            <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="6" Padding="9" Margin="0,0,6,0">
+                            <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="8" Padding="9" Margin="0,0,6,0">
                                 <StackPanel>
                                     <TextBlock Text="2) 아바타 불러오기" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock x:Name="OnboardingStep2Text" Text="대기 중" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
                                 </StackPanel>
                             </Border>
-                            <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="6" Padding="9">
+                            <Border Background="{DynamicResource Color.PanelInfoBg}" BorderBrush="{DynamicResource Color.PanelInfoBorder}" BorderThickness="1" CornerRadius="8" Padding="9">
                                 <StackPanel>
                                     <TextBlock Text="3) 출력 시작" FontWeight="SemiBold" FontSize="12"/>
                                     <TextBlock x:Name="OnboardingStep3Text" Text="대기 중" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelInfoText}"/>
                                 </StackPanel>
                             </Border>
                         </UniformGrid>
-                        <Border Background="{DynamicResource Color.PanelInfoAltBg}" BorderBrush="{DynamicResource Color.PanelInfoAltBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                        <Border Background="{DynamicResource Color.PanelInfoAltBg}" BorderBrush="{DynamicResource Color.PanelInfoAltBorder}" BorderThickness="1" CornerRadius="8" Padding="8,6">
                             <TextBlock x:Name="QuickStatusText" Text="세션: 중지 | 아바타: 없음 | 출력: 꺼짐" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelInfoAltText}" FontWeight="SemiBold"/>
                         </Border>
-                        <Border Background="{DynamicResource Color.PanelSuccessBg}" BorderBrush="{DynamicResource Color.PanelSuccessBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
+                        <Border Background="{DynamicResource Color.PanelSuccessBg}" BorderBrush="{DynamicResource Color.PanelSuccessBorder}" BorderThickness="1" CornerRadius="8" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock Text="첫 방송 시작 시간" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelSuccessTitle}"/>
                                 <TextBlock x:Name="FirstBroadcastTimingText" Text="최근: 측정 대기" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelSuccessText}"/>
                                 <TextBlock x:Name="FlowMedianTimingText" Text="중앙값(최근 20회): 측정 대기" Margin="0,2,0,0" Foreground="{DynamicResource Color.PanelSuccessText}"/>
                             </StackPanel>
                         </Border>
-                        <Border x:Name="ActionBlockReasonPanel" Background="{DynamicResource Color.PanelWarningBg}" BorderBrush="{DynamicResource Color.PanelWarningBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
+                        <Border x:Name="ActionBlockReasonPanel" Background="{DynamicResource Color.PanelWarningBg}" BorderBrush="{DynamicResource Color.PanelWarningBorder}" BorderThickness="1" CornerRadius="8" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock Text="현재 차단 사유" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelWarningText}"/>
                                 <TextBlock x:Name="ActionBlockReasonText" Text="없음" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelWarningText}" Margin="0,2,0,0"/>
                             </StackPanel>
                         </Border>
-                        <Border x:Name="BeginnerFailureHintPanel" Visibility="Collapsed" Background="{DynamicResource Color.PanelErrorBg}" BorderBrush="{DynamicResource Color.PanelErrorBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
+                        <Border x:Name="BeginnerFailureHintPanel" Visibility="Collapsed" Background="{DynamicResource Color.PanelErrorBg}" BorderBrush="{DynamicResource Color.PanelErrorBorder}" BorderThickness="1" CornerRadius="8" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock Text="조치가 필요합니다" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelErrorText}" Margin="0,0,0,2"/>
                                 <TextBlock x:Name="BeginnerFailureHintText" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelErrorText}"/>
@@ -163,7 +181,7 @@
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
-                        <Border x:Name="OnboardingRecoveryPanel" Visibility="Collapsed" Background="{DynamicResource Color.PanelWarningBg}" BorderBrush="{DynamicResource Color.PanelWarningBorder}" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
+                        <Border x:Name="OnboardingRecoveryPanel" Visibility="Collapsed" Background="{DynamicResource Color.PanelWarningBg}" BorderBrush="{DynamicResource Color.PanelWarningBorder}" BorderThickness="1" CornerRadius="8" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock Text="복구 안내" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelWarningText}"/>
                                 <TextBlock x:Name="OnboardingRecoveryText" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelWarningText}" Margin="0,2,0,0"/>
@@ -191,13 +209,13 @@
                             <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged" />
                         </DockPanel>
                         <TextBlock x:Name="AvatarPathValidationText" Foreground="{DynamicResource Color.ValidationErrorText}" Margin="0,0,0,8" TextWrapping="Wrap"/>
-                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,0,8">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="132"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Border Width="120" Height="120" BorderBrush="{DynamicResource Color.CardSoftBorderStrong}" BorderThickness="1" Background="{DynamicResource Color.CardSoftBg}" CornerRadius="4" VerticalAlignment="Top">
+                                <Border Width="120" Height="120" BorderBrush="{DynamicResource Color.CardSoftBorderStrong}" BorderThickness="1" Background="{DynamicResource Color.CardSoftBg}" CornerRadius="8" VerticalAlignment="Top">
                                     <Image x:Name="AvatarPreviewImage" Stretch="UniformToFill"/>
                                 </Border>
                                 <StackPanel Grid.Column="1" Margin="8,0,0,0">
@@ -231,7 +249,7 @@
 
                 <GroupBox x:Name="RenderGroup" Style="{StaticResource SectionCardStyle}" Header="3) 화면" Margin="0,0,0,8">
                     <StackPanel Margin="8">
-                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
                                 <TextBlock Text="기본" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                 <CheckBox x:Name="BroadcastModeCheckBox" Content="방송 화면 최적화" Checked="BroadcastMode_Changed" Unchecked="BroadcastMode_Changed" Margin="0,0,0,8"/>
@@ -484,7 +502,7 @@
 
                 <GroupBox x:Name="TrackingGroup" Style="{StaticResource SectionCardStyle}" Header="5) 트래킹 입력" Margin="0,8,0,0">
                     <StackPanel Margin="8">
-                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                        <Border BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
                                 <TextBlock Text="기본 안정화" FontWeight="SemiBold"/>
                                 <TextBlock Text="일반 사용자 기준 핵심 항목만 먼저 제공합니다." Margin="0,2,0,8" Foreground="{DynamicResource Color.TextMuted}"/>
@@ -581,7 +599,7 @@
                                 <CheckBox Grid.Row="11" Grid.Column="1" x:Name="TrackingAutoStabilityCheckBox" Content="자동 안정화 튜닝" Margin="0,8,0,0"/>
                             </Grid>
                         </Expander>
-                        <Border x:Name="TrackingIpv4HintPanel" BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,8">
+                        <Border x:Name="TrackingIpv4HintPanel" BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,0,8">
                             <StackPanel>
                                 <TextBlock Text="iFacialMocap 연결용 IPv4" FontWeight="SemiBold"/>
                                 <TextBlock Text="권장 IPv4:" Margin="0,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
@@ -684,7 +702,7 @@
             </Border>
         </Grid>
 
-        <GridSplitter x:Name="MainGridSplitter" Grid.Column="1" Width="14" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource Color.Splitter}" />
+        <GridSplitter x:Name="MainGridSplitter" Grid.Column="1" Width="12" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource Color.Splitter}" />
 
         <Grid Grid.Column="2">
             <Grid.RowDefinitions>
@@ -707,12 +725,12 @@
                         Background="{DynamicResource Color.OverlayHintBg}"
                         BorderBrush="{DynamicResource Color.OverlayHintBorder}"
                         BorderThickness="1"
-                        CornerRadius="4">
+                        CornerRadius="8">
                     <TextBlock Text="렌더 전용 모드 · F11로 UI 복귀"
                                Foreground="{DynamicResource Color.OverlayHintText}"
                                FontWeight="SemiBold"/>
                 </Border>
-                <Border x:Name="DebugOverlayPanel" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="8" Background="{DynamicResource Color.DebugOverlayBg}" BorderBrush="{DynamicResource Color.DebugOverlayBorder}" BorderThickness="1" CornerRadius="6">
+                <Border x:Name="DebugOverlayPanel" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="8" Background="{DynamicResource Color.DebugOverlayBg}" BorderBrush="{DynamicResource Color.DebugOverlayBorder}" BorderThickness="1" CornerRadius="8">
                     <TextBlock x:Name="DebugOverlayText" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource Color.DebugOverlayText}" TextWrapping="Wrap" Width="420"/>
                 </Border>
             </Grid>
