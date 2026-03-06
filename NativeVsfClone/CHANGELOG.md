@@ -2,6 +2,31 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking MediaPipe START_FAILED runtime remediation documentation + env pin procedure
+
+### Summary
+
+Documented and operationally validated remediation for webcam tracking startup failures
+where MediaPipe sidecar exits before first frame with `code=2` on Windows machines
+that cannot invoke default `py -3`/`python`.
+
+### Changed
+
+- Added detailed incident/remediation report:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_mediapipe_start_failed_user_env_pin_fix.md`
+- Updated weekly documentation indexes:
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+- Standardized machine-level runtime fix procedure:
+  - set `VSFCLONE_MEDIAPIPE_PYTHON` (User scope) to project `.venv\Scripts\python.exe`
+  - validate with `tools/mediapipe_sidecar_sanity.ps1` and expect `Overall: PASS`
+
+### Verification
+
+- Runtime sanity verification completed in this workspace:
+  - `build/reports/mediapipe_sidecar_sanity_summary.txt`
+  - result: `Overall: PASS`
+
 ## 2026-03-06 - Tracking webcam python fallback chain + startup failure diagnostics uplift
 
 ### Summary
