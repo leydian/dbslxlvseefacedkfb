@@ -9,17 +9,10 @@
       "mustRenderVisible": true
     },
     {
-      "id": "vrm_boundary_01",
-      "name": "NewOnYou.vrm",
-      "path": "sample/NewOnYou.vrm",
+      "id": "miq_normal_01",
+      "name": "NewOnYou.miq",
+      "path": "sample/NewOnYou.miq",
       "sampleClass": "boundary",
-      "mustRenderVisible": true
-    },
-    {
-      "id": "vsfavatar_normal_01",
-      "name": "NewOnYou.vsfavatar",
-      "path": "sample/NewOnYou.vsfavatar",
-      "sampleClass": "normal",
       "mustRenderVisible": true
     }
   ]

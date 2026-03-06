@@ -4,6 +4,8 @@
 
 This pass adds a differential benchmark harness that compares Animiq runtime outcomes against VSeeFace observation rows on the same sample IDs.
 
+Current default scope is `VRM + MIQ` only for official parity counts. `.vsfavatar` rows are excluded from the strict parity KPI.
+
 Added capabilities:
 
 - managed DLL probe for VSeeFace runtime package fingerprinting,
@@ -23,6 +25,7 @@ Added capabilities:
 - `tools/avatar_engine_differential_benchmark.ps1`
   - runs `avatar_tool` per manifest sample
   - joins VSeeFace observation rows by sample `id`
+  - applies supported-extension filtering (default: `vrm,miq`)
   - classifies gaps:
     - `P0`: VSeeFace load OK but Animiq parse/load contract not runtime-ready/NONE
     - `P1`: Animiq loads but quality gap (partial/critical/non-visible)
@@ -53,8 +56,8 @@ Executed:
 
 Observed differential result on current example set:
 
-- `P0=1, P1=0, P2=0, PASS=2`
-- The `P0` row flags VSFAvatar gap where VSeeFace observation is successful but Animiq row remains non-runtime-ready visible state.
+- `P0=1, P1=0, P2=0, PASS=1` (official scope: `vrm,miq`)
+- Current `P0` is `miq_normal_01` with `primary=FILE_NOT_FOUND` because the example manifest path is a placeholder (`sample/NewOnYou.miq`) and should be replaced by a real local MIQ sample.
 
 ## Detailed Change Summary
 
@@ -104,6 +107,7 @@ Observed differential result on current example set:
 
 - Differential summary schema now includes:
   - `gate_profile`, `warning_debt_threshold`,
+  - `supported_extensions`, `excluded_rows`,
   - `pass`, `by_extension`, `top_primary_errors`, `top_warning_codes`,
   - `parity_rows[]` with normalized engine rows (`engine/load_ok/runtime_ready/visible/...`).
 - Per-row runtime parity fields added:

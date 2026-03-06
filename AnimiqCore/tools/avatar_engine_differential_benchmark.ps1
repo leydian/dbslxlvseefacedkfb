@@ -7,7 +7,8 @@ param(
     [string]$ErrorTaxonomyJson = ".\build\reports\avatar_differential_error_taxonomy.json",
     [string]$ParityDashboardMd = ".\build\reports\avatar_parity_dashboard.md",
     [int]$WarningDebtThreshold = 5,
-    [string]$GateProfile = "strict"
+    [string]$GateProfile = "strict",
+    [string[]]$SupportedExtensions = @("vrm", "miq")
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,6 +104,7 @@ if (-not [string]::IsNullOrWhiteSpace($VSeeFaceObservationPath)) {
 
 $rows = [System.Collections.Generic.List[object]]::new()
 $parityRows = [System.Collections.Generic.List[object]]::new()
+$excludedRows = [System.Collections.Generic.List[object]]::new()
 $p0 = 0
 $p1 = 0
 $p2 = 0
@@ -125,6 +127,16 @@ foreach ($sample in $manifest.samples) {
     $ext = [System.IO.Path]::GetExtension($samplePathAbs).TrimStart('.').ToLowerInvariant()
     if ([string]::IsNullOrWhiteSpace($ext)) {
         $ext = "unknown"
+    }
+    if ($SupportedExtensions -notcontains $ext) {
+        $excludedRows.Add([PSCustomObject]@{
+            id = $id
+            sample_class = $sampleClass
+            sample_path = $samplePathAbs
+            extension = $ext
+            reason = "unsupported_extension_excluded"
+        })
+        continue
     }
     if (-not $priorityByExtension.ContainsKey($ext)) {
         $priorityByExtension[$ext] = [PSCustomObject]@{ total = 0; p0 = 0; p1 = 0; p2 = 0; pass = 0 }
@@ -305,11 +317,13 @@ $summary = [PSCustomObject]@{
     generated_utc = (Get-Date).ToUniversalTime().ToString("o")
     gate_profile = $GateProfile
     warning_debt_threshold = $WarningDebtThreshold
+    supported_extensions = @($SupportedExtensions)
     manifest_path = $manifestAbs
     avatar_tool_path = $avatarToolAbs
     vseeface_observation_path = if ([string]::IsNullOrWhiteSpace($VSeeFaceObservationPath)) { "" } else { (Resolve-AbsolutePath -Path $VSeeFaceObservationPath -BaseDirectory $repoRoot) }
     total = $rows.Count
     pass = $pass
+    excluded_rows = $excludedRows.Count
     priority = [PSCustomObject]@{
         p0 = $p0
         p1 = $p1
@@ -320,6 +334,7 @@ $summary = [PSCustomObject]@{
     top_reasons = @(Top-MapEntries -Map $reasonCounts -Top 10)
     top_primary_errors = @(Top-MapEntries -Map $primaryErrorCounts -Top 10)
     top_warning_codes = @(Top-MapEntries -Map $warningCodeCounts -Top 20)
+    excluded = $excludedRows
     parity_rows = $parityRows
     rows = $rows
 }
@@ -353,10 +368,12 @@ $lines = @()
 $lines += "Avatar Differential Benchmark Summary"
 $lines += "GeneratedUTC: $($summary.generated_utc)"
 $lines += "GateProfile: $($summary.gate_profile)"
+$lines += "SupportedExtensions: $($summary.supported_extensions -join ',')"
 $lines += "ManifestPath: $($summary.manifest_path)"
 $lines += "AvatarToolPath: $($summary.avatar_tool_path)"
 $lines += "VSeeFaceObservationPath: $($summary.vseeface_observation_path)"
 $lines += "Total: $($summary.total)"
+$lines += "ExcludedRows: $($summary.excluded_rows)"
 $lines += "Priority: P0=$($summary.priority.p0), P1=$($summary.priority.p1), P2=$($summary.priority.p2), PASS=$($summary.priority.pass)"
 $lines += ""
 $lines += "ByExtension"
@@ -379,8 +396,10 @@ $md += "# Avatar Parity Dashboard"
 $md += ""
 $md += "- Generated UTC: $($summary.generated_utc)"
 $md += "- Gate Profile: $($summary.gate_profile)"
+$md += "- Supported extensions: $($summary.supported_extensions -join ',')"
 $md += "- Manifest: ``$($summary.manifest_path)``"
 $md += "- VSeeFace observations: ``$($summary.vseeface_observation_path)``"
+$md += "- Excluded rows: $($summary.excluded_rows)"
 $md += ""
 $md += "## Priority Summary"
 $md += ""
