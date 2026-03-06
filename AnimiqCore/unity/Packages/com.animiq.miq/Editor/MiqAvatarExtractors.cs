@@ -917,21 +917,26 @@ namespace Animiq.Miq.Editor
         private static string BuildPassFlags(Material material)
         {
             var sb = new StringBuilder("base");
+            if (material == null)
+            {
+                return sb.ToString();
+            }
+
             var shader = material?.shader;
             if (shader == null)
             {
                 return sb.ToString();
             }
 
-            if (shader.FindPass("DepthOnly") >= 0 || shader.FindPass("DepthForwardOnly") >= 0)
+            if (material.GetShaderPassEnabled("DepthOnly") || material.GetShaderPassEnabled("DepthForwardOnly"))
             {
                 sb.Append("|depth");
             }
-            if (shader.FindPass("ShadowCaster") >= 0)
+            if (material.GetShaderPassEnabled("ShadowCaster"))
             {
                 sb.Append("|shadowcaster");
             }
-            if (shader.FindPass("ForwardAdd") >= 0)
+            if (material.GetShaderPassEnabled("ForwardAdd"))
             {
                 sb.Append("|forwardadd");
             }

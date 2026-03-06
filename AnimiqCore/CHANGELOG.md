@@ -2,6 +2,44 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Unity SDK editor compile hotfix (`Shader.FindPass` -> `Material.GetShaderPassEnabled`)
+
+### Summary
+
+Fixed a Unity Editor compilation blocker in `com.animiq.miq` that prevented MIQ tools menu registration.
+
+- symptom: `Tools/Animiq/MIQ` menu not visible in Unity
+- root cause: invalid API usage `Shader.FindPass(...)` in editor extractor code
+- impact: Editor assembly compile failure (`CS1061`) stopped menu attributes from loading
+
+### Changed
+
+- Editor extractor pass-flag path updated:
+  - `unity/Packages/com.animiq.miq/Editor/MiqAvatarExtractors.cs`
+  - `BuildPassFlags(Material material)` now uses:
+    - `material.GetShaderPassEnabled("DepthOnly")`
+    - `material.GetShaderPassEnabled("DepthForwardOnly")`
+    - `material.GetShaderPassEnabled("ShadowCaster")`
+    - `material.GetShaderPassEnabled("ForwardAdd")`
+- Added explicit null guard for `material` before pass inspection.
+- Removed all `Shader.FindPass(...)` usages from package editor code.
+
+### Behavioral Notes
+
+- `passFlags` contract remains unchanged (`base`, `|depth`, `|shadowcaster`, `|forwardadd`).
+- pass detection semantics are now based on pass enable-state on the material/shader path, which is Unity 2021.3-compatible.
+- no public API, package metadata, or runtime loader contract changes.
+
+### Verification
+
+- static code scan:
+  - `rg -n "FindPass\\(" unity/Packages/com.animiq.miq -S`: no matches
+- updated call sites present in extractor pass builder:
+  - `material.GetShaderPassEnabled(...)` for depth/shadowcaster/forwardadd
+- expected Unity outcome after script recompile:
+  - no `CS1061` on `MiqAvatarExtractors.cs`
+  - `Tools/Animiq/MIQ/*` menu entries restored
+
 ## 2026-03-06 - Animiq rebrand and `.miq` format migration (workspace-wide)
 
 ### Summary
