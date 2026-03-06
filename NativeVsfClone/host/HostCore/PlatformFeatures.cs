@@ -59,7 +59,10 @@ public sealed record TrackingInputSettings(
     TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
     TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced,
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
-    float PoseDeadbandDeg = 0.9f);
+    float PoseDeadbandDeg = 0.9f,
+    bool UpperBodyEnabled = true,
+    float UpperBodyStrength = 1.0f,
+    UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced);
 
 public sealed record RecentAvatarEntry(
     string AvatarPath,
@@ -207,7 +210,7 @@ public sealed class SessionStateStore
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, 1.0f, UpperBodySmoothingProfile.Balanced),
                     RecentAvatars: Array.Empty<RecentAvatarEntry>(),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
@@ -257,7 +260,7 @@ public sealed class SessionStateStore
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, 1.0f, UpperBodySmoothingProfile.Balanced);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
@@ -278,6 +281,10 @@ public sealed class SessionStateStore
         var parseThreshold = Math.Clamp(value.ParseErrorWarnThreshold <= 0 ? 10 : value.ParseErrorWarnThreshold, 1, 10000);
         var droppedThreshold = Math.Clamp(value.DroppedPacketWarnThreshold <= 0 ? 10 : value.DroppedPacketWarnThreshold, 1, 10000);
         var deadbandDeg = Math.Clamp(float.IsFinite(value.PoseDeadbandDeg) ? value.PoseDeadbandDeg : 0.9f, 0.0f, 3.0f);
+        var upperBodyStrength = Math.Clamp(float.IsFinite(value.UpperBodyStrength) ? value.UpperBodyStrength : 1.0f, 0.0f, 1.5f);
+        var upperBodySmoothing = Enum.IsDefined(typeof(UpperBodySmoothingProfile), value.UpperBodySmoothing)
+            ? value.UpperBodySmoothing
+            : UpperBodySmoothingProfile.Balanced;
         return new TrackingInputSettings(
             port,
             stale,
@@ -290,7 +297,10 @@ public sealed class SessionStateStore
             sourceLockMode,
             latencyProfile,
             poseFilterProfile,
-            deadbandDeg);
+            deadbandDeg,
+            value.UpperBodyEnabled,
+            upperBodyStrength,
+            upperBodySmoothing);
     }
 
     private static string NormalizeUiMode(string value)

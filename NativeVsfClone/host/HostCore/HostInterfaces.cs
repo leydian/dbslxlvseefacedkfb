@@ -71,6 +71,13 @@ public enum PoseFilterProfile
     Stable = 2,
 }
 
+public enum UpperBodySmoothingProfile
+{
+    Reactive = 0,
+    Balanced = 1,
+    Stable = 2,
+}
+
 public sealed record TrackingStartOptions(
     ushort ListenPort,
     int StaleTimeoutMs,
@@ -82,7 +89,10 @@ public sealed record TrackingStartOptions(
     TrackingSourceLockMode SourceLockMode = TrackingSourceLockMode.Auto,
     TrackingLatencyProfile LatencyProfile = TrackingLatencyProfile.Balanced,
     PoseFilterProfile PoseFilterProfile = PoseFilterProfile.Stable,
-    float PoseDeadbandDeg = 0.9f);
+    float PoseDeadbandDeg = 0.9f,
+    bool UpperBodyEnabled = true,
+    float UpperBodyStrength = 1.0f,
+    UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced);
 
 public sealed record WebcamDeviceOption(
     string DeviceKey,
@@ -128,7 +138,26 @@ public sealed record TrackingDiagnostics(
     double Arkit52QualityScore = 0.0,
     double Arkit52QualityStageMs = 0.0,
     int IfacialPacketAgeMs = int.MaxValue,
-    int WebcamPacketAgeMs = int.MaxValue);
+    int WebcamPacketAgeMs = int.MaxValue,
+    bool UpperBodyTrackingActive = false,
+    double UpperBodyConfidence = 0.0,
+    int UpperBodyPacketAgeMs = int.MaxValue,
+    string UpperBodyStatus = "idle",
+    string UpperBodyLastError = "");
+
+public readonly record struct TrackingUpperBodyPose(
+    bool IsValid,
+    float LeftShoulderPitchDeg,
+    float RightShoulderPitchDeg,
+    float LeftUpperArmPitchDeg,
+    float RightUpperArmPitchDeg,
+    double Confidence,
+    int PacketAgeMs,
+    string Status)
+{
+    public static TrackingUpperBodyPose Neutral(int packetAgeMs = int.MaxValue, string status = "idle")
+        => new(false, 0.0f, 0.0f, 0.0f, 0.0f, 0.0, packetAgeMs, status);
+}
 
 public interface ITrackingInputService
 {
@@ -137,5 +166,6 @@ public interface ITrackingInputService
     NcResultCode Recenter();
     bool TryGetLatestFrame(out NcTrackingFrame frame);
     bool TryGetLatestExpressionWeights(out IReadOnlyDictionary<string, float> weights);
+    bool TryGetLatestUpperBodyPose(out TrackingUpperBodyPose pose);
     TrackingDiagnostics GetDiagnostics();
 }

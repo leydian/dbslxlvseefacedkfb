@@ -2,6 +2,67 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-06 - Tracking upper-body webcam AutoPose v1 + WPF/WinUI operator wiring
+
+### Summary
+
+Added upper-body automatic tracking (shoulder + upper-arm pitch) to the host tracking pipeline with webcam-side pose extraction, runtime pose merge over manual offsets, and operator-facing toggle/diagnostics in both WPF and WinUI hosts.
+
+### Changed
+
+- Host tracking contract and persistence:
+  - `host/HostCore/HostInterfaces.cs`
+    - added `UpperBodySmoothingProfile`
+    - extended `TrackingStartOptions` with `UpperBodyEnabled`, `UpperBodyStrength`, `UpperBodySmoothing`
+    - extended `TrackingDiagnostics` with upper-body active/confidence/age/status/error fields
+    - added `TrackingUpperBodyPose`
+    - added `ITrackingInputService.TryGetLatestUpperBodyPose(...)`
+  - `host/HostCore/PlatformFeatures.cs`
+    - extended `TrackingInputSettings` for upper-body options
+    - default + normalization path now preserves upper-body settings across session persistence
+  - `host/HostCore/HostController.MvpFeatures.cs`
+    - tracking settings configuration now accepts/persists upper-body options and logs them
+
+- Tracking runtime and pose merge:
+  - `host/HostCore/TrackingInputService.cs`
+    - added upper-body pose state, smoothing profile tuning, stale decay-to-neutral, and diagnostics publishing
+    - implemented webcam upper-body packet consumption and `TryGetLatestUpperBodyPose(...)`
+  - `host/HostCore/HostController.cs`
+    - tracking start now forwards upper-body options into `TrackingStartOptions`
+    - tick path now merges runtime upper-body auto-pose with manual pose offsets and submits merged `nc_set_pose_offsets(...)`
+    - added pose payload cache/equality guard to avoid redundant native submissions
+    - stop/reset paths restore manual-only pose submission state
+
+- Webcam sidecar contract:
+  - `tools/mediapipe_webcam_sidecar.py`
+    - added `mediapipe.pose` processing
+    - emits:
+      - `left_shoulder_pitch_deg`
+      - `right_shoulder_pitch_deg`
+      - `left_upperarm_pitch_deg`
+      - `right_upperarm_pitch_deg`
+      - `upper_body_confidence`
+
+- WPF/WinUI operator surface:
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WinUiHost/MainWindow.xaml`
+  - `host/WinUiHost/MainWindow.xaml.cs`
+    - added upper-body enable toggle in tracking panel
+    - persisted toggle through tracking config/session defaults
+    - surfaced upper-body diagnostics in tracking status/runtime text
+
+- Weekly documentation:
+  - `docs/reports/weekly/2026-W10/2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md`
+  - `docs/reports/weekly/2026-W10/INDEX.md`
+  - `docs/reports/weekly/2026-W10/SUMMARY.md`
+
+### Verification
+
+- `dotnet build NativeVsfClone/host/HostCore/HostCore.csproj -c Debug`: PASS
+- `dotnet build NativeVsfClone/host/WpfHost/WpfHost.csproj -c Debug`: PASS
+- `dotnet build NativeVsfClone/host/WinUiHost/WinUiHost.csproj -c Debug`: FAIL at WinUI XAML compiler stage (`XamlCompiler.exe` exit code 1; no location detail emitted in current run)
+
 ## 2026-03-06 - Webcam device enumeration + tracking UI refresh hardening
 
 ### Summary

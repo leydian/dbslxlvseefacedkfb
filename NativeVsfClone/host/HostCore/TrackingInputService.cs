@@ -89,6 +89,23 @@ public sealed class TrackingInputService : ITrackingInputService
     private float _poseAdaptiveMinAlpha = 0.18f;
     private float _poseAdaptiveMaxAlpha = 0.52f;
     private float _poseAdaptiveGain = 0.024f;
+    private bool _upperBodyEnabled = true;
+    private float _upperBodyStrength = 1.0f;
+    private UpperBodySmoothingProfile _upperBodySmoothing = UpperBodySmoothingProfile.Balanced;
+    private float _upperBodyAlpha = 0.35f;
+    private DateTimeOffset _lastUpperBodyPacketUtc = DateTimeOffset.MinValue;
+    private float _rawLeftShoulderPitch;
+    private float _rawRightShoulderPitch;
+    private float _rawLeftUpperArmPitch;
+    private float _rawRightUpperArmPitch;
+    private float _smoothedLeftShoulderPitch;
+    private float _smoothedRightShoulderPitch;
+    private float _smoothedLeftUpperArmPitch;
+    private float _smoothedRightUpperArmPitch;
+    private bool _hasSmoothedUpperBody;
+    private double _upperBodyConfidence;
+    private string _upperBodyStatus = "idle";
+    private string _upperBodyLastError = string.Empty;
     private int _recenterStabilizeFramesRemaining;
     private DateTimeOffset _trackingStartedUtc = DateTimeOffset.MinValue;
     private bool _webcamRuntimeUnavailable;
@@ -117,9 +134,18 @@ public sealed class TrackingInputService : ITrackingInputService
                 LatencyProfile = Enum.IsDefined(typeof(TrackingLatencyProfile), options.LatencyProfile)
                     ? options.LatencyProfile
                     : TrackingLatencyProfile.Balanced,
+                UpperBodyEnabled = options.UpperBodyEnabled,
+                UpperBodyStrength = Math.Clamp(float.IsFinite(options.UpperBodyStrength) ? options.UpperBodyStrength : 1.0f, 0.0f, 1.5f),
+                UpperBodySmoothing = Enum.IsDefined(typeof(UpperBodySmoothingProfile), options.UpperBodySmoothing)
+                    ? options.UpperBodySmoothing
+                    : UpperBodySmoothingProfile.Balanced,
             };
             ApplyLatencyProfileTuning(_options.LatencyProfile);
             ApplyPoseFilterTuning(_options.PoseFilterProfile, _options.PoseDeadbandDeg);
+            ApplyUpperBodySmoothingTuning(_options.UpperBodySmoothing);
+            _upperBodyEnabled = _options.UpperBodyEnabled;
+            _upperBodyStrength = _options.UpperBodyStrength;
+            _upperBodySmoothing = _options.UpperBodySmoothing;
             ResetRuntimeState();
             _trackingStartedUtc = DateTimeOffset.UtcNow;
             _webcamRuntimeUnavailable = false;
@@ -247,6 +273,11 @@ public sealed class TrackingInputService : ITrackingInputService
                 IfacialPacketAgeMs = int.MaxValue,
                 WebcamPacketAgeMs = int.MaxValue,
                 ConfidenceSummary = BuildConfidenceSummary(),
+                UpperBodyTrackingActive = false,
+                UpperBodyConfidence = 0.0,
+                UpperBodyPacketAgeMs = int.MaxValue,
+                UpperBodyStatus = _upperBodyEnabled ? "stopped" : "disabled",
+                UpperBodyLastError = string.Empty,
             };
             return NcResultCode.Ok;
         }
@@ -327,6 +358,11 @@ public sealed class TrackingInputService : ITrackingInputService
                 SwitchBlockedReason = _switchBlockedReason,
                 PoseFilterProfile = _options.PoseFilterProfile,
                 PoseDeadbandDeg = _poseDeadbandDeg,
+                UpperBodyTrackingActive = _upperBodyEnabled && _upperBodyConfidence >= 0.12,
+                UpperBodyConfidence = _upperBodyConfidence,
+                UpperBodyPacketAgeMs = GetPacketAgeMs(_lastUpperBodyPacketUtc),
+                UpperBodyStatus = _upperBodyStatus,
+                UpperBodyLastError = _upperBodyLastError,
             };
             ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
 
@@ -347,6 +383,58 @@ public sealed class TrackingInputService : ITrackingInputService
 
             weights = new Dictionary<string, float>(_expressionSnapshot, StringComparer.OrdinalIgnoreCase);
             return true;
+        }
+    }
+
+    public bool TryGetLatestUpperBodyPose(out TrackingUpperBodyPose pose)
+    {
+        lock (_sync)
+        {
+            if (!_upperBodyEnabled)
+            {
+                pose = TrackingUpperBodyPose.Neutral(int.MaxValue, "disabled");
+                return false;
+            }
+
+            var ageMs = GetPacketAgeMs(_lastUpperBodyPacketUtc);
+            if (ageMs == int.MaxValue)
+            {
+                pose = TrackingUpperBodyPose.Neutral(int.MaxValue, "no-webcam-upper-body");
+                return false;
+            }
+
+            if (ageMs > _options.StaleTimeoutMs)
+            {
+                // Decay to neutral when fresh webcam upper-body input is not available.
+                _smoothedLeftShoulderPitch = Ema(_smoothedLeftShoulderPitch, 0.0f, 0.18f);
+                _smoothedRightShoulderPitch = Ema(_smoothedRightShoulderPitch, 0.0f, 0.18f);
+                _smoothedLeftUpperArmPitch = Ema(_smoothedLeftUpperArmPitch, 0.0f, 0.18f);
+                _smoothedRightUpperArmPitch = Ema(_smoothedRightUpperArmPitch, 0.0f, 0.18f);
+                var hasResidual = HasUpperBodyResidual();
+                _upperBodyStatus = hasResidual ? "stale-decay" : "stale-neutral";
+                _upperBodyConfidence = Math.Clamp(_upperBodyConfidence * 0.82, 0.0, 1.0);
+                pose = new TrackingUpperBodyPose(
+                    hasResidual,
+                    _smoothedLeftShoulderPitch,
+                    _smoothedRightShoulderPitch,
+                    _smoothedLeftUpperArmPitch,
+                    _smoothedRightUpperArmPitch,
+                    _upperBodyConfidence,
+                    ageMs,
+                    _upperBodyStatus);
+                return hasResidual;
+            }
+
+            pose = new TrackingUpperBodyPose(
+                _upperBodyConfidence >= 0.12,
+                _smoothedLeftShoulderPitch,
+                _smoothedRightShoulderPitch,
+                _smoothedLeftUpperArmPitch,
+                _smoothedRightUpperArmPitch,
+                _upperBodyConfidence,
+                ageMs,
+                _upperBodyStatus);
+            return pose.IsValid;
         }
     }
 
@@ -385,6 +473,11 @@ public sealed class TrackingInputService : ITrackingInputService
                 SwitchBlockedReason = _switchBlockedReason,
                 PoseFilterProfile = _options.PoseFilterProfile,
                 PoseDeadbandDeg = _poseDeadbandDeg,
+                UpperBodyTrackingActive = _upperBodyEnabled && _upperBodyConfidence >= 0.12,
+                UpperBodyConfidence = _upperBodyConfidence,
+                UpperBodyPacketAgeMs = GetPacketAgeMs(_lastUpperBodyPacketUtc),
+                UpperBodyStatus = _upperBodyStatus,
+                UpperBodyLastError = _upperBodyLastError,
             };
             ApplyNoInputWarningIfNeeded(ifacialAgeMs, webcamAgeMs);
             return _diagnostics;
@@ -433,6 +526,19 @@ public sealed class TrackingInputService : ITrackingInputService
         _switchBlockedReason = string.Empty;
         _lastIfacialPacketUtc = DateTimeOffset.MinValue;
         _lastWebcamPacketUtc = DateTimeOffset.MinValue;
+        _lastUpperBodyPacketUtc = DateTimeOffset.MinValue;
+        _rawLeftShoulderPitch = 0.0f;
+        _rawRightShoulderPitch = 0.0f;
+        _rawLeftUpperArmPitch = 0.0f;
+        _rawRightUpperArmPitch = 0.0f;
+        _smoothedLeftShoulderPitch = 0.0f;
+        _smoothedRightShoulderPitch = 0.0f;
+        _smoothedLeftUpperArmPitch = 0.0f;
+        _smoothedRightUpperArmPitch = 0.0f;
+        _hasSmoothedUpperBody = false;
+        _upperBodyConfidence = 0.0;
+        _upperBodyStatus = _upperBodyEnabled ? "initializing" : "disabled";
+        _upperBodyLastError = string.Empty;
         _activeRuntimeSource = TrackingRuntimeSource.None;
         _fallbackCount = 0;
         _ifacialRecoveryStreak = 0;
@@ -629,6 +735,7 @@ public sealed class TrackingInputService : ITrackingInputService
                         EvaluateSourceArbitration(0);
                     }
 
+                    ApplyMediapipeUpperBodyOnly(packet);
                     if (ShouldConsumeWebcamFrame())
                     {
                         ApplyMediapipePacket(packet);
@@ -660,6 +767,11 @@ public sealed class TrackingInputService : ITrackingInputService
                         ActiveSource = ToActiveSourceLabel(_activeRuntimeSource),
                         ConfidenceSummary = BuildConfidenceSummary(),
                     };
+                    if (_upperBodyEnabled)
+                    {
+                        _upperBodyLastError = "TRACKING_WEBCAM_UPPER_BODY_PACKET_ERROR";
+                        _upperBodyStatus = "packet-error";
+                    }
                 }
             }
 
@@ -866,6 +978,55 @@ public sealed class TrackingInputService : ITrackingInputService
                 SwitchBlockedReason = _switchBlockedReason,
             };
         }
+    }
+
+    private void ApplyMediapipeUpperBodyOnly(MediapipeFramePacket packet)
+    {
+        lock (_sync)
+        {
+            UpdateUpperBodyPoseFromPacket(packet);
+        }
+    }
+
+    private void UpdateUpperBodyPoseFromPacket(MediapipeFramePacket packet)
+    {
+        if (!_upperBodyEnabled)
+        {
+            _upperBodyStatus = "disabled";
+            _upperBodyConfidence = 0.0;
+            return;
+        }
+
+        _rawLeftShoulderPitch = ClampShoulderPitch(packet.LeftShoulderPitchDeg);
+        _rawRightShoulderPitch = ClampShoulderPitch(packet.RightShoulderPitchDeg);
+        _rawLeftUpperArmPitch = ClampUpperArmPitch(packet.LeftUpperArmPitchDeg);
+        _rawRightUpperArmPitch = ClampUpperArmPitch(packet.RightUpperArmPitchDeg);
+
+        if (!_hasSmoothedUpperBody)
+        {
+            _smoothedLeftShoulderPitch = _rawLeftShoulderPitch;
+            _smoothedRightShoulderPitch = _rawRightShoulderPitch;
+            _smoothedLeftUpperArmPitch = _rawLeftUpperArmPitch;
+            _smoothedRightUpperArmPitch = _rawRightUpperArmPitch;
+            _hasSmoothedUpperBody = true;
+        }
+        else
+        {
+            _smoothedLeftShoulderPitch = Ema(_smoothedLeftShoulderPitch, _rawLeftShoulderPitch, _upperBodyAlpha);
+            _smoothedRightShoulderPitch = Ema(_smoothedRightShoulderPitch, _rawRightShoulderPitch, _upperBodyAlpha);
+            _smoothedLeftUpperArmPitch = Ema(_smoothedLeftUpperArmPitch, _rawLeftUpperArmPitch, _upperBodyAlpha);
+            _smoothedRightUpperArmPitch = Ema(_smoothedRightUpperArmPitch, _rawRightUpperArmPitch, _upperBodyAlpha);
+        }
+
+        _smoothedLeftShoulderPitch = ClampShoulderPitch(_smoothedLeftShoulderPitch * _upperBodyStrength);
+        _smoothedRightShoulderPitch = ClampShoulderPitch(_smoothedRightShoulderPitch * _upperBodyStrength);
+        _smoothedLeftUpperArmPitch = ClampUpperArmPitch(_smoothedLeftUpperArmPitch * _upperBodyStrength);
+        _smoothedRightUpperArmPitch = ClampUpperArmPitch(_smoothedRightUpperArmPitch * _upperBodyStrength);
+
+        _upperBodyConfidence = Math.Clamp(packet.UpperBodyConfidence, 0.0f, 1.0f);
+        _lastUpperBodyPacketUtc = _lastWebcamPacketUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _lastWebcamPacketUtc;
+        _upperBodyStatus = _upperBodyConfidence >= 0.12 ? "active" : "low-confidence";
+        _upperBodyLastError = string.Empty;
     }
 
     private void ApplyMediapipeBlendshapeResult(MediapipeFramePacket packet)
@@ -1102,9 +1263,19 @@ public sealed class TrackingInputService : ITrackingInputService
             var inferenceMs = 0.0;
             var sourceConfidence = 0.75;
             var sourceTimestampUnixMs = 0L;
+            var leftShoulderPitchDeg = 0.0;
+            var rightShoulderPitchDeg = 0.0;
+            var leftUpperArmPitchDeg = 0.0;
+            var rightUpperArmPitchDeg = 0.0;
+            var upperBodyConfidence = 0.0;
             _ = TryReadNumber(root, "capture_fps", out captureFps);
             _ = TryReadNumber(root, "inference_ms", out inferenceMs);
             _ = TryReadNumber(root, "confidence", out sourceConfidence);
+            _ = TryReadNumber(root, "left_shoulder_pitch_deg", out leftShoulderPitchDeg);
+            _ = TryReadNumber(root, "right_shoulder_pitch_deg", out rightShoulderPitchDeg);
+            _ = TryReadNumber(root, "left_upperarm_pitch_deg", out leftUpperArmPitchDeg);
+            _ = TryReadNumber(root, "right_upperarm_pitch_deg", out rightUpperArmPitchDeg);
+            _ = TryReadNumber(root, "upper_body_confidence", out upperBodyConfidence);
             if (TryReadNumber(root, "source_ts_unix_ms", out var sourceTsRaw))
             {
                 sourceTimestampUnixMs = (long)sourceTsRaw;
@@ -1143,7 +1314,12 @@ public sealed class TrackingInputService : ITrackingInputService
                 Clamp01((float)sourceConfidence),
                 sourceTimestampUnixMs,
                 parseWatch.Elapsed.TotalMilliseconds,
-                blendshapes);
+                blendshapes,
+                (float)leftShoulderPitchDeg,
+                (float)rightShoulderPitchDeg,
+                (float)leftUpperArmPitchDeg,
+                (float)rightUpperArmPitchDeg,
+                Clamp01((float)upperBodyConfidence));
             return true;
         }
         catch
@@ -2034,6 +2210,34 @@ public sealed class TrackingInputService : ITrackingInputService
         }
     }
 
+    private void ApplyUpperBodySmoothingTuning(UpperBodySmoothingProfile profile)
+    {
+        _upperBodyAlpha = profile switch
+        {
+            UpperBodySmoothingProfile.Reactive => 0.58f,
+            UpperBodySmoothingProfile.Stable => 0.24f,
+            _ => 0.38f,
+        };
+    }
+
+    private bool HasUpperBodyResidual()
+    {
+        return Math.Abs(_smoothedLeftShoulderPitch) >= 0.15f ||
+               Math.Abs(_smoothedRightShoulderPitch) >= 0.15f ||
+               Math.Abs(_smoothedLeftUpperArmPitch) >= 0.15f ||
+               Math.Abs(_smoothedRightUpperArmPitch) >= 0.15f;
+    }
+
+    private static float ClampShoulderPitch(float value)
+    {
+        return Math.Clamp(value, -55.0f, 55.0f);
+    }
+
+    private static float ClampUpperArmPitch(float value)
+    {
+        return Math.Clamp(value, -90.0f, 90.0f);
+    }
+
     private float SmoothPoseAxis(float current, float incoming, float baseAlpha)
     {
         var delta = incoming - current;
@@ -2248,7 +2452,12 @@ public sealed class TrackingInputService : ITrackingInputService
         float SourceConfidence,
         long SourceTimestampUnixMs,
         double ParseMs,
-        IReadOnlyDictionary<string, float> BlendshapeWeights);
+        IReadOnlyDictionary<string, float> BlendshapeWeights,
+        float LeftShoulderPitchDeg,
+        float RightShoulderPitchDeg,
+        float LeftUpperArmPitchDeg,
+        float RightUpperArmPitchDeg,
+        float UpperBodyConfidence);
 
     private readonly record struct ChannelCalibrationProfile(
         float WarmupAlpha,

@@ -479,6 +479,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Listen Port" VerticalAlignment="Center"/>
                             <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
@@ -522,6 +523,8 @@
                                 <TextBlock x:Name="TrackingPoseDeadbandValueText" Text="0.90°" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                                 <Slider x:Name="TrackingPoseDeadbandSlider" Minimum="0.0" Maximum="3.0" Value="0.9" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="TrackingPoseDeadbandSlider_ValueChanged"/>
                             </DockPanel>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Upper Body" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                            <CheckBox Grid.Row="10" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
                             <Button x:Name="StartTrackingButton" Content="Start Tracking" Click="StartTracking_Click" Margin="0,0,8,0" MinWidth="110"/>

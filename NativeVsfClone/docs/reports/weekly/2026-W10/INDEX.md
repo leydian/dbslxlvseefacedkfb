@@ -92,6 +92,7 @@ Report list for this week.
 - [2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md](./2026-03-06_tracking_full_contract_strict_gate_and_python_pinning.md)
 - [2026-03-06_tracking_strict_runtime_venv_runbook.md](./2026-03-06_tracking_strict_runtime_venv_runbook.md)
 - [2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md](./2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md)
+- [2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md](./2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md)
 - [2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md](./2026-03-06_vrm_material_diagnostics_and_wpf_redeploy.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_refinement.md](./2026-03-06_vrm_springbone_mtoon_runtime_refinement.md)
 - [2026-03-06_vrm_springbone_mtoon_runtime_uplift.md](./2026-03-06_vrm_springbone_mtoon_runtime_uplift.md)

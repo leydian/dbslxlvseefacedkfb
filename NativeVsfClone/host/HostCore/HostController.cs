@@ -38,6 +38,8 @@ public sealed partial class HostController
     private string _lastLoadFailureTechnical = string.Empty;
     private TrackingDiagnostics _trackingDiagnostics = new(false, "unknown", 0.0, 0.0, 0.0, int.MaxValue, true, 0, 0, 0, "stopped", TrackingSourceType.HybridAuto, "idle");
     private List<PoseBoneUiOffset> _poseOffsets = BuildDefaultPoseOffsets();
+    private TrackingUpperBodyPose _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
+    private NcPoseBoneOffset[] _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
     private string _lastTrackingFormat = "unknown";
     private ulong _lastTrackingParseErrors;
     private bool _lastTrackingActive;
@@ -149,6 +151,7 @@ public sealed partial class HostController
             {
                 MarkOnboardingInitialized();
                 ApplyRenderOptionsInternal("ApplyRenderOptionsInit");
+                _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsInit");
             }
             else
@@ -204,6 +207,8 @@ public sealed partial class HostController
             _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
             RenderState = BuildRenderUiState(_renderOptions, true, BackgroundPreset.DarkBlue, false);
             _poseOffsets = BuildDefaultPoseOffsets();
+            _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
+            _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
             _ = NativeCoreInterop.nc_clear_pose_offsets();
             SessionState = new HostSessionState(false, false, null, NcResultCode.Ok, 0.0, 0.0, 1.0, 1.0, 0U, 0U);
             _ = PublishDiagnostics(force: true, forceRuntimeRefresh: true);
@@ -275,6 +280,7 @@ public sealed partial class HostController
                 // Re-apply host-side render controls after avatar load in case
                 // the native side resets camera/quality state during load.
                 ApplyRenderOptionsInternal("ApplyRenderOptionsLoadAvatar");
+                _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
                 _lastLoadFailureGuidance = string.Empty;
                 _lastLoadFailureTechnical = string.Empty;
@@ -402,7 +408,10 @@ public sealed partial class HostController
                 trackingSettings.SourceLockMode,
                 trackingSettings.LatencyProfile,
                 trackingSettings.PoseFilterProfile,
-                trackingSettings.PoseDeadbandDeg);
+                trackingSettings.PoseDeadbandDeg,
+                trackingSettings.UpperBodyEnabled,
+                trackingSettings.UpperBodyStrength,
+                trackingSettings.UpperBodySmoothing);
             var rc = _trackingInputService.Start(options);
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
             if (rc == NcResultCode.Ok)
@@ -424,6 +433,9 @@ public sealed partial class HostController
             if (rc == NcResultCode.Ok)
             {
                 SetTrackingState(_sessionPersistence.Tracking.ListenPort, _sessionPersistence.Tracking.StaleTimeoutMs, false);
+                _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral(status: "stopped");
+                _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
+                _ = ApplyPoseOffsetsInternal("StopTrackingResetPoseOffsets");
             }
             TrackResult("StopTracking", rc);
             RefreshState();
@@ -603,6 +615,8 @@ public sealed partial class HostController
     public NcResultCode ResetAllPoseOffsets()
     {
         _poseOffsets = BuildDefaultPoseOffsets();
+        _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
+        _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
         _armPoseFilterState.Clear();
         var rc = ApplyPoseOffsetsInternal("ResetAllPoseOffsets");
         RefreshState();
@@ -821,6 +835,35 @@ public sealed partial class HostController
                 }
             }
         }
+
+        var trackingSettings = _sessionPersistence.Tracking;
+        if (trackingSettings.UpperBodyEnabled)
+        {
+            if (_trackingInputService.TryGetLatestUpperBodyPose(out var upperBodyPose))
+            {
+                _lastAutoUpperBodyPose = upperBodyPose;
+            }
+            else
+            {
+                _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral(status: "inactive");
+            }
+        }
+        else
+        {
+            _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral(status: "disabled");
+        }
+
+        var runtimePosePayload = BuildRuntimePosePayload(_lastAutoUpperBodyPose);
+        var poseRc = SubmitPosePayload(runtimePosePayload);
+        if (poseRc != NcResultCode.Ok)
+        {
+            if (string.IsNullOrWhiteSpace(nativeSubmitErrorCode))
+            {
+                nativeSubmitErrorCode = $"NC_SET_POSE_OFFSETS_{poseRc}";
+            }
+            TrackResult("SetPoseOffsetsRuntime", poseRc);
+        }
+
         _trackingDiagnostics = _trackingInputService.GetDiagnostics();
         if (!string.IsNullOrWhiteSpace(nativeSubmitErrorCode))
         {
@@ -1702,16 +1745,72 @@ public sealed partial class HostController
             return NcResultCode.Ok;
         }
 
-        var payload = _poseOffsets.Select(static p => new NcPoseBoneOffset
-        {
-            BoneId = ToNativePoseBone(p.Bone),
-            PitchDeg = p.PitchDeg,
-            YawDeg = p.YawDeg,
-            RollDeg = p.RollDeg,
-        }).ToArray();
-        var rc = NativeCoreInterop.nc_set_pose_offsets(payload, (uint)payload.Length);
+        var payload = BuildRuntimePosePayload(TrackingUpperBodyPose.Neutral(status: "manual"));
+        var rc = SubmitPosePayload(payload);
         TrackResult(source, rc);
         return rc;
+    }
+
+    private NcPoseBoneOffset[] BuildRuntimePosePayload(TrackingUpperBodyPose autoUpperBodyPose)
+    {
+        return _poseOffsets.Select(p =>
+        {
+            var autoPitch = p.Bone switch
+            {
+                PoseBoneKind.LeftShoulder => autoUpperBodyPose.LeftShoulderPitchDeg,
+                PoseBoneKind.RightShoulder => autoUpperBodyPose.RightShoulderPitchDeg,
+                PoseBoneKind.LeftUpperArm => autoUpperBodyPose.LeftUpperArmPitchDeg,
+                PoseBoneKind.RightUpperArm => autoUpperBodyPose.RightUpperArmPitchDeg,
+                _ => 0.0f,
+            };
+            return new NcPoseBoneOffset
+            {
+                BoneId = ToNativePoseBone(p.Bone),
+                PitchDeg = ClampPitchForBone(p.Bone, p.PitchDeg + autoPitch),
+                YawDeg = p.YawDeg,
+                RollDeg = p.RollDeg,
+            };
+        }).ToArray();
+    }
+
+    private NcResultCode SubmitPosePayload(NcPoseBoneOffset[] payload)
+    {
+        if (PosePayloadEquals(payload, _lastSubmittedPosePayload))
+        {
+            return NcResultCode.Ok;
+        }
+
+        var rc = NativeCoreInterop.nc_set_pose_offsets(payload, (uint)payload.Length);
+        if (rc == NcResultCode.Ok)
+        {
+            _lastSubmittedPosePayload = payload.ToArray();
+        }
+        return rc;
+    }
+
+    private static bool PosePayloadEquals(IReadOnlyList<NcPoseBoneOffset> a, IReadOnlyList<NcPoseBoneOffset> b)
+    {
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (a[i].BoneId != b[i].BoneId)
+            {
+                return false;
+            }
+
+            if (Math.Abs(a[i].PitchDeg - b[i].PitchDeg) > 0.001f ||
+                Math.Abs(a[i].YawDeg - b[i].YawDeg) > 0.001f ||
+                Math.Abs(a[i].RollDeg - b[i].RollDeg) > 0.001f)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static List<PoseBoneUiOffset> BuildDefaultPoseOffsets()

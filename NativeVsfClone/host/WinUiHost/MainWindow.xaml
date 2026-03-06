@@ -296,6 +296,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Column="0" Text="Listen Port" VerticalAlignment="Center"/>
                         <TextBox Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
@@ -320,6 +321,8 @@
                         <TextBox Grid.Row="4" Grid.Column="1" x:Name="TrackingParseWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
                         <TextBlock Grid.Row="5" Grid.Column="0" Text="Drop Warn" VerticalAlignment="Center" Margin="0,8,0,0"/>
                         <TextBox Grid.Row="5" Grid.Column="1" x:Name="TrackingDropWarnThresholdTextBox" Text="10" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Upper Body" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                        <CheckBox Grid.Row="6" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
                     </Grid>
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
                         <Button x:Name="StartTrackingButton" Content="트래킹 시작" Click="StartTracking_Click" MinWidth="110"/>

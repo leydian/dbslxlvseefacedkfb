@@ -40,6 +40,14 @@ def _clamp01(value):
     return value
 
 
+def _clamp(value, lo, hi):
+    if value < lo:
+        return lo
+    if value > hi:
+        return hi
+    return value
+
+
 def _blank_blendshape_payload():
     payload = {}
     for key in ARKIT_52:
@@ -83,6 +91,13 @@ def main():
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,
         )
+        pose = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
 
         while True:
             cycle_start = time.perf_counter()
@@ -105,7 +120,35 @@ def main():
             infer_start = time.perf_counter()
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = face_mesh.process(rgb)
+            pose_result = pose.process(rgb)
             infer_ms = (time.perf_counter() - infer_start) * 1000.0
+
+            left_shoulder_pitch_deg = 0.0
+            right_shoulder_pitch_deg = 0.0
+            left_upperarm_pitch_deg = 0.0
+            right_upperarm_pitch_deg = 0.0
+            upper_body_confidence = 0.0
+            if pose_result.pose_landmarks:
+                plm = pose_result.pose_landmarks.landmark
+                l_sh = plm[11]
+                r_sh = plm[12]
+                l_el = plm[13]
+                r_el = plm[14]
+                shoulder_span = max(1e-4, abs(l_sh.x - r_sh.x))
+                left_norm = (l_sh.y - l_el.y) / shoulder_span
+                right_norm = (r_sh.y - r_el.y) / shoulder_span
+                left_upperarm_pitch_deg = _clamp(left_norm * 65.0, -90.0, 90.0)
+                right_upperarm_pitch_deg = _clamp(right_norm * 65.0, -90.0, 90.0)
+                left_shoulder_pitch_deg = _clamp(left_upperarm_pitch_deg * 0.55, -55.0, 55.0)
+                right_shoulder_pitch_deg = _clamp(right_upperarm_pitch_deg * 0.55, -55.0, 55.0)
+                upper_body_confidence = _clamp01(
+                    min(
+                        getattr(l_sh, "visibility", 0.0),
+                        getattr(r_sh, "visibility", 0.0),
+                        getattr(l_el, "visibility", 0.0),
+                        getattr(r_el, "visibility", 0.0),
+                    )
+                )
 
             if not result.multi_face_landmarks:
                 payload = {
@@ -125,6 +168,11 @@ def main():
                     "capture_fps": smoothed_capture_fps,
                     "inference_ms": infer_ms,
                     "confidence": 0.10,
+                    "left_shoulder_pitch_deg": 0.0,
+                    "right_shoulder_pitch_deg": 0.0,
+                    "left_upperarm_pitch_deg": 0.0,
+                    "right_upperarm_pitch_deg": 0.0,
+                    "upper_body_confidence": upper_body_confidence,
                     "blendshapes": _blank_blendshape_payload(),
                 }
             else:
@@ -184,6 +232,11 @@ def main():
                     "capture_fps": smoothed_capture_fps,
                     "inference_ms": infer_ms,
                     "confidence": confidence,
+                    "left_shoulder_pitch_deg": left_shoulder_pitch_deg,
+                    "right_shoulder_pitch_deg": right_shoulder_pitch_deg,
+                    "left_upperarm_pitch_deg": left_upperarm_pitch_deg,
+                    "right_upperarm_pitch_deg": right_upperarm_pitch_deg,
+                    "upper_body_confidence": upper_body_confidence,
                     "blendshapes": blend,
                 }
 
