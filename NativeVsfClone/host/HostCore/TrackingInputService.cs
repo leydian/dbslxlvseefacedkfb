@@ -655,21 +655,34 @@ public sealed class TrackingInputService : ITrackingInputService
                 _diagnostics = _diagnostics with { ReceivedPackets = receivedPackets };
 
                 var parseWatch = Stopwatch.StartNew();
-                if (!TryParsePacket(result.Buffer, out var updates, out var formatName))
+                if (!TryParsePacket(result.Buffer, out var updates, out var formatName, out var parseFailure))
                 {
                 parseWatch.Stop();
                 UpdateParseStageMs(parseWatch.Elapsed.TotalMilliseconds);
+                var parseErrors = _diagnostics.ParseErrors + 1;
+                var parseThresholdExceeded = parseErrors >= (ulong)_options.ParseErrorWarnThreshold;
+                var (sourceStatus, statusMessage, lastErrorCode) = parseFailure switch
+                {
+                    PacketParseFailure.ProtocolMismatchVmc => (
+                        parseThresholdExceeded ? "udp-parse-threshold-exceeded:vmc" : "udp-parse-failed:vmc",
+                        "packet parse failed (likely VMC protocol input)",
+                        "TRACKING_PROTOCOL_MISMATCH_VMC"),
+                    PacketParseFailure.UnsupportedTypeTag => (
+                        parseThresholdExceeded ? "udp-parse-threshold-exceeded:typetag" : "udp-parse-failed:typetag",
+                        "packet parse failed (unsupported OSC type tag)",
+                        "TRACKING_OSC_TYPE_UNSUPPORTED"),
+                    _ => (
+                        parseThresholdExceeded ? "udp-parse-threshold-exceeded" : "udp-parse-failed",
+                        "packet parse failed",
+                        parseThresholdExceeded ? "TRACKING_PARSE_THRESHOLD_EXCEEDED" : "TRACKING_PARSE_FAILED"),
+                };
                 _diagnostics = _diagnostics with
                 {
-                    ParseErrors = _diagnostics.ParseErrors + 1,
+                    ParseErrors = parseErrors,
                     DroppedPackets = _diagnostics.DroppedPackets + 1,
-                    SourceStatus = (_diagnostics.ParseErrors + 1 >= (ulong)_options.ParseErrorWarnThreshold)
-                        ? "udp-parse-threshold-exceeded"
-                        : "udp-parse-failed",
-                    StatusMessage = "packet parse failed",
-                    LastErrorCode = (_diagnostics.ParseErrors + 1 >= (ulong)_options.ParseErrorWarnThreshold)
-                        ? "TRACKING_PARSE_THRESHOLD_EXCEEDED"
-                        : "TRACKING_PARSE_FAILED",
+                    SourceStatus = sourceStatus,
+                    StatusMessage = statusMessage,
+                    LastErrorCode = lastErrorCode,
                 };
                 _ifacialConsecutiveFailures++;
                 continue;
@@ -1422,24 +1435,42 @@ public sealed class TrackingInputService : ITrackingInputService
         return false;
     }
 
-    private bool TryParsePacket(byte[] packet, out List<KeyValuePair<string, float>> updates, out string formatName)
+    private bool TryParsePacket(
+        byte[] packet,
+        out List<KeyValuePair<string, float>> updates,
+        out string formatName,
+        out PacketParseFailure parseFailure)
     {
         updates = new List<KeyValuePair<string, float>>();
         formatName = "unknown";
+        parseFailure = PacketParseFailure.Unknown;
 
         if (packet.Length == 0)
         {
+            parseFailure = PacketParseFailure.EmptyPacket;
             return false;
         }
 
         if (IsOscBundle(packet))
         {
             formatName = "format-b";
-            return TryParseBundle(packet, updates);
+            if (TryParseBundle(packet, updates, out parseFailure))
+            {
+                return true;
+            }
+
+            parseFailure = parseFailure == PacketParseFailure.Unknown
+                ? PacketParseFailure.UnsupportedPacket
+                : parseFailure;
+            return false;
         }
 
-        if (!TryParseOscMessage(packet, out var message))
+        if (!TryParseOscMessage(packet, out var message, out parseFailure))
         {
+            if (parseFailure == PacketParseFailure.Unknown && LooksLikeVmcPacket(packet))
+            {
+                parseFailure = PacketParseFailure.ProtocolMismatchVmc;
+            }
             return false;
         }
 
@@ -1455,6 +1486,13 @@ public sealed class TrackingInputService : ITrackingInputService
             return true;
         }
 
+        if (LooksLikeVmcAddress(message.Address))
+        {
+            parseFailure = PacketParseFailure.ProtocolMismatchVmc;
+            return false;
+        }
+
+        parseFailure = PacketParseFailure.NoMappedChannels;
         return false;
     }
 
@@ -1475,11 +1513,13 @@ public sealed class TrackingInputService : ITrackingInputService
                packet[7] == 0;
     }
 
-    private bool TryParseBundle(byte[] packet, List<KeyValuePair<string, float>> updates)
+    private bool TryParseBundle(byte[] packet, List<KeyValuePair<string, float>> updates, out PacketParseFailure parseFailure)
     {
+        parseFailure = PacketParseFailure.Unknown;
         // bundle = "#bundle\0" + timetag(8) + element[size+payload]*
         if (packet.Length < 16)
         {
+            parseFailure = PacketParseFailure.UnsupportedPacket;
             return false;
         }
 
@@ -1491,6 +1531,7 @@ public sealed class TrackingInputService : ITrackingInputService
             index += 4;
             if (size <= 0 || index + size > packet.Length)
             {
+                parseFailure = PacketParseFailure.UnsupportedPacket;
                 return false;
             }
 
@@ -1500,7 +1541,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
             if (IsOscBundle(slice))
             {
-                if (!TryParseBundle(slice, updates))
+                if (!TryParseBundle(slice, updates, out parseFailure))
                 {
                     return false;
                 }
@@ -1508,13 +1549,30 @@ public sealed class TrackingInputService : ITrackingInputService
                 continue;
             }
 
-            if (!TryParseOscMessage(slice, out var message))
+            if (!TryParseOscMessage(slice, out var message, out parseFailure))
             {
+                if (parseFailure == PacketParseFailure.Unknown && LooksLikeVmcPacket(slice))
+                {
+                    parseFailure = PacketParseFailure.ProtocolMismatchVmc;
+                }
                 continue;
             }
-            any |= TryExtractFormatA(message, updates) || TryExtractFormatB(message, updates);
+            if (TryExtractFormatA(message, updates) || TryExtractFormatB(message, updates))
+            {
+                any = true;
+                continue;
+            }
+
+            if (LooksLikeVmcAddress(message.Address))
+            {
+                parseFailure = PacketParseFailure.ProtocolMismatchVmc;
+            }
         }
 
+        if (!any && parseFailure == PacketParseFailure.Unknown)
+        {
+            parseFailure = PacketParseFailure.NoMappedChannels;
+        }
         return any;
     }
 
@@ -1526,25 +1584,30 @@ public sealed class TrackingInputService : ITrackingInputService
                buffer[index + 3];
     }
 
-    private static bool TryParseOscMessage(byte[] packet, out OscMessage message)
+    private static bool TryParseOscMessage(byte[] packet, out OscMessage message, out PacketParseFailure parseFailure)
     {
+        parseFailure = PacketParseFailure.Unknown;
         message = new OscMessage(string.Empty, string.Empty, Array.Empty<OscValue>());
         if (packet.Length < 8)
         {
+            parseFailure = PacketParseFailure.UnsupportedPacket;
             return false;
         }
 
         var index = 0;
         if (!TryReadOscString(packet, ref index, out var address))
         {
+            parseFailure = PacketParseFailure.UnsupportedPacket;
             return false;
         }
         if (!TryReadOscString(packet, ref index, out var typeTag))
         {
+            parseFailure = PacketParseFailure.UnsupportedPacket;
             return false;
         }
         if (string.IsNullOrWhiteSpace(typeTag) || typeTag[0] != ',')
         {
+            parseFailure = PacketParseFailure.UnsupportedPacket;
             return false;
         }
 
@@ -1557,6 +1620,7 @@ public sealed class TrackingInputService : ITrackingInputService
                 case 'f':
                     if (index + 4 > packet.Length)
                     {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
                         return false;
                     }
                     var raw = ((uint)packet[index] << 24) |
@@ -1567,6 +1631,7 @@ public sealed class TrackingInputService : ITrackingInputService
                     var f = BitConverter.Int32BitsToSingle((int)raw);
                     if (float.IsNaN(f) || float.IsInfinity(f))
                     {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
                         return false;
                     }
                     values.Add(new OscValue(OscValueKind.Float, f, string.Empty));
@@ -1574,20 +1639,71 @@ public sealed class TrackingInputService : ITrackingInputService
                 case 'i':
                     if (index + 4 > packet.Length)
                     {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
                         return false;
                     }
                     var i32 = ReadInt32BigEndian(packet, index);
                     index += 4;
                     values.Add(new OscValue(OscValueKind.Float, i32, string.Empty));
                     break;
+                case 'd':
+                    if (index + 8 > packet.Length)
+                    {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
+                        return false;
+                    }
+                    var dRaw = ((ulong)packet[index] << 56) |
+                               ((ulong)packet[index + 1] << 48) |
+                               ((ulong)packet[index + 2] << 40) |
+                               ((ulong)packet[index + 3] << 32) |
+                               ((ulong)packet[index + 4] << 24) |
+                               ((ulong)packet[index + 5] << 16) |
+                               ((ulong)packet[index + 6] << 8) |
+                               packet[index + 7];
+                    index += 8;
+                    var d = BitConverter.Int64BitsToDouble((long)dRaw);
+                    if (double.IsNaN(d) || double.IsInfinity(d))
+                    {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
+                        return false;
+                    }
+                    values.Add(new OscValue(OscValueKind.Float, (float)d, string.Empty));
+                    break;
+                case 'h':
+                    if (index + 8 > packet.Length)
+                    {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
+                        return false;
+                    }
+                    var i64 = ((long)packet[index] << 56) |
+                              ((long)packet[index + 1] << 48) |
+                              ((long)packet[index + 2] << 40) |
+                              ((long)packet[index + 3] << 32) |
+                              ((long)packet[index + 4] << 24) |
+                              ((long)packet[index + 5] << 16) |
+                              ((long)packet[index + 6] << 8) |
+                              packet[index + 7];
+                    index += 8;
+                    values.Add(new OscValue(OscValueKind.Float, i64, string.Empty));
+                    break;
                 case 's':
                     if (!TryReadOscString(packet, ref index, out var s))
                     {
+                        parseFailure = PacketParseFailure.UnsupportedPacket;
                         return false;
                     }
                     values.Add(new OscValue(OscValueKind.String, 0.0f, s));
                     break;
+                case 'T':
+                    values.Add(new OscValue(OscValueKind.Float, 1.0f, string.Empty));
+                    break;
+                case 'F':
+                case 'N':
+                case 'I':
+                    values.Add(new OscValue(OscValueKind.Float, 0.0f, string.Empty));
+                    break;
                 default:
+                    parseFailure = PacketParseFailure.UnsupportedTypeTag;
                     return false;
             }
         }
@@ -1627,6 +1743,36 @@ public sealed class TrackingInputService : ITrackingInputService
 
         index = end;
         return true;
+    }
+
+    private static bool LooksLikeVmcPacket(byte[] packet)
+    {
+        if (packet.Length < 2 || packet[0] != (byte)'/')
+        {
+            return false;
+        }
+
+        var maxProbeLength = Math.Min(packet.Length, 96);
+        var firstNul = Array.IndexOf(packet, (byte)0, 0, maxProbeLength);
+        var textLength = firstNul > 0 ? firstNul : maxProbeLength;
+        if (textLength <= 0)
+        {
+            return false;
+        }
+
+        var address = Encoding.UTF8.GetString(packet, 0, textLength);
+        return LooksLikeVmcAddress(address);
+    }
+
+    private static bool LooksLikeVmcAddress(string address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return false;
+        }
+
+        return address.StartsWith("/VMC/", StringComparison.OrdinalIgnoreCase) ||
+               address.StartsWith("VMC/", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool TryExtractFormatA(OscMessage message, List<KeyValuePair<string, float>> updates)
@@ -2661,5 +2807,15 @@ public sealed class TrackingInputService : ITrackingInputService
     {
         Float = 0,
         String = 1,
+    }
+
+    private enum PacketParseFailure
+    {
+        Unknown = 0,
+        EmptyPacket = 1,
+        UnsupportedPacket = 2,
+        UnsupportedTypeTag = 3,
+        ProtocolMismatchVmc = 4,
+        NoMappedChannels = 5,
     }
 }

@@ -18,7 +18,7 @@
 - `avatar`: 2 reports
 - `platform`: 3 reports
 - `session`: 2 reports
-- `tracking`: 4 reports
+- `tracking`: 5 reports
 - `webcam`: 3 reports
 - `consumer`: 1 reports
 - `ifacialmocap`: 1 reports
@@ -87,6 +87,7 @@
 - Newly added: review `2026-03-06_tracking_strict_runtime_venv_runbook.md` for project-local venv pinning standard, strict readiness wrapper execution flow, and failure-code triage runbook.
 - Newly added: review `2026-03-06_tracking_strict_runtime_activation_and_gate_pass.md` for strict tracking runtime activation steps, fuzz-gate TFM compatibility fix, and tracking-contract PASS verification evidence.
 - Newly added: review `2026-03-06_tracking_upper_body_webcam_autopose_wpf_winui.md` for upper-body auto-pose runtime merge (`manual + auto`), webcam-side shoulder/upper-arm extraction contract, tracking diagnostics extension, and WPF/WinUI operator toggle/status surfacing.
+- Newly added: review `2026-03-06_tracking_ifacial_parse_mismatch_diagnostics_and_osc_typetag_compat.md` for iFacial parse-failure cause diagnostics (`VMC` mismatch / unsupported OSC type tags), parser type-tag compatibility widening (`d/h/T/F/N/I`), and actionable in-app remediation hints.
 - Newly added: review `2026-03-06_host_perf_hotpath_and_metrics_contract_update.md` for frame-loop allocation reduction, metrics provenance/memory-sample contract expansion, and dist publish hygiene updates.
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.
 - Newly added: review `2026-03-06_vrm_mtoon_gate_hardening_and_stage1_baseline.md` for GateK/GateL policy, VRM unresolved warning-code normalization, and stage-1 MToon parity baseline telemetry.

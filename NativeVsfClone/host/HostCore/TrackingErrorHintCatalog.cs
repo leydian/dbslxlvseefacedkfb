@@ -14,6 +14,9 @@ public static class TrackingErrorHintCatalog
         return lastErrorCode switch
         {
             "TRACKING_PARSE_THRESHOLD_EXCEEDED" => " hint=parse errors exceeded threshold",
+            "TRACKING_PARSE_FAILED" => " hint=packet parse failed; verify iFacialMocap send mode and port",
+            "TRACKING_PROTOCOL_MISMATCH_VMC" => " hint=received VMC packets; switch sender to iFacialMocap OSC mode",
+            "TRACKING_OSC_TYPE_UNSUPPORTED" => " hint=OSC type tag unsupported; disable non-iFacial stream or VMC extensions",
             "TRACKING_DROP_THRESHOLD_EXCEEDED" => " hint=dropped packets exceeded threshold",
             "TRACKING_NO_MAPPED_CHANNELS" => " hint=source packet had no mapped channels",
             "TRACKING_MEDIAPIPE_CONFIG_INVALID" => " hint=webcam runtime config invalid (missing mediapipe_webcam_sidecar.py; set VSFCLONE_MEDIAPIPE_SIDECAR_SCRIPT)",
