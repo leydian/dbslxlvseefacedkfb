@@ -855,6 +855,39 @@ bool ApplyPositionTransformToVertexBlob(
         std::memcpy(transformed.data() + base + 4U, &ty, sizeof(float));
         std::memcpy(transformed.data() + base + 8U, &tz, sizeof(float));
     }
+    // Normals are stored at bytes [12,24) for stride-24/32 payloads.
+    // Transform direction vectors by the matrix 3x3 part only.
+    if (vertex_stride >= 24U) {
+        for (std::size_t i = 0U; i < vertex_count; ++i) {
+            const std::size_t base = i * static_cast<std::size_t>(vertex_stride) + 12U;
+            float nx = 0.0f;
+            float ny = 0.0f;
+            float nz = 0.0f;
+            std::memcpy(&nx, vertex_blob->data() + base, sizeof(float));
+            std::memcpy(&ny, vertex_blob->data() + base + 4U, sizeof(float));
+            std::memcpy(&nz, vertex_blob->data() + base + 8U, sizeof(float));
+            const float tnx = (m[0] * nx) + (m[4] * ny) + (m[8] * nz);
+            const float tny = (m[1] * nx) + (m[5] * ny) + (m[9] * nz);
+            const float tnz = (m[2] * nx) + (m[6] * ny) + (m[10] * nz);
+            const float len = std::sqrt((tnx * tnx) + (tny * tny) + (tnz * tnz));
+            float rnx = 0.0f;
+            float rny = 0.0f;
+            float rnz = 0.0f;
+            if (std::isfinite(len) && len > 1e-6f) {
+                const float inv = 1.0f / len;
+                rnx = tnx * inv;
+                rny = tny * inv;
+                rnz = tnz * inv;
+            }
+            if (!std::isfinite(rnx) || !std::isfinite(rny) || !std::isfinite(rnz) ||
+                std::abs(rnx) > 1.0e6f || std::abs(rny) > 1.0e6f || std::abs(rnz) > 1.0e6f) {
+                return false;
+            }
+            std::memcpy(transformed.data() + base, &rnx, sizeof(float));
+            std::memcpy(transformed.data() + base + 4U, &rny, sizeof(float));
+            std::memcpy(transformed.data() + base + 8U, &rnz, sizeof(float));
+        }
+    }
     *vertex_blob = std::move(transformed);
     return true;
 }
@@ -1146,6 +1179,45 @@ bool ExtractPositions(const std::vector<std::uint8_t>& bin,
         out_vertex_blob->insert(out_vertex_blob->end(), bytes, bytes + sizeof(v));
     }
     *out_vertex_count = a.count;
+    return true;
+}
+
+bool ExtractNormals(const std::vector<std::uint8_t>& bin,
+                    const std::vector<AccessorMeta>& accessors,
+                    const std::vector<BufferViewMeta>& views,
+                    std::size_t accessor_index,
+                    std::vector<std::array<float, 3U>>* out_normals,
+                    std::string* out_error) {
+    if (accessor_index >= accessors.size()) {
+        *out_error = "normal accessor index out of range";
+        return false;
+    }
+    const auto& a = accessors[accessor_index];
+    if (a.component_type != 5126U || a.type != "VEC3") {
+        *out_error = "NORMAL accessor must be FLOAT VEC3";
+        return false;
+    }
+    if (a.buffer_view >= views.size()) {
+        *out_error = "normal bufferView index out of range";
+        return false;
+    }
+    const auto& bv = views[a.buffer_view];
+    const std::size_t start = static_cast<std::size_t>(bv.byte_offset) + static_cast<std::size_t>(a.byte_offset);
+    const std::size_t stride = bv.byte_stride > 0U ? bv.byte_stride : 12U;
+    const std::size_t needed = start + (static_cast<std::size_t>(a.count) - 1U) * stride + 12U;
+    if (a.count == 0U || needed > bin.size()) {
+        *out_error = "normal accessor data out of range";
+        return false;
+    }
+    out_normals->clear();
+    out_normals->reserve(a.count);
+    for (std::uint32_t i = 0U; i < a.count; ++i) {
+        const std::size_t base = start + static_cast<std::size_t>(i) * stride;
+        const float nx = ReadF32Le(bin, base);
+        const float ny = ReadF32Le(bin, base + 4U);
+        const float nz = ReadF32Le(bin, base + 8U);
+        out_normals->push_back({nx, ny, nz});
+    }
     return true;
 }
 
@@ -3410,16 +3482,27 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
-            if (mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i]) {
-                if (ApplyPositionTransformToVertexBlob(
-                        &mesh_payload.vertex_blob,
-                        mesh_payload.vertex_stride,
-                        mesh_node_transforms[mesh_i])) {
-                    mesh_node_transform_applied[mesh_i] = true;
-                } else {
+            // Intentionally skip baking node-global transforms for VRM meshes.
+            // Runtime preview yaw remains the single alignment mechanism.
+
+            // Extract NORMAL attribute (VEC3 FLOAT) from glTF primitive.
+            // VRM files carry per-vertex normals that are correct for the mesh's
+            // winding order. Using them avoids the inverted-normal artefact that
+            // arises from generating normals via cross-product on meshes whose
+            // triangle winding does not match DirectX CW convention.
+            std::vector<std::array<float, 3U>> vrm_normals;
+            bool has_vrm_normals = false;
+            const auto* nrm_v = FindKey(*attrs_v, "NORMAL");
+            if (nrm_v != nullptr && nrm_v->type == JsonValue::Type::Number) {
+                const std::size_t nrm_accessor =
+                    static_cast<std::size_t>(static_cast<std::uint32_t>(nrm_v->number_value));
+                std::string nrm_error;
+                has_vrm_normals =
+                    ExtractNormals(bin_chunk.bytes, accessors, views, nrm_accessor, &vrm_normals, &nrm_error) &&
+                    vrm_normals.size() == static_cast<std::size_t>(vtx_count);
+                if (!has_vrm_normals) {
                     pkg.warnings.push_back(
-                        "W_NODE: VRM_NODE_TRANSFORM_INVALID: mesh=" + mesh_payload.name + ", action=skipped");
-                    pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_INVALID");
+                        "W_PAYLOAD: VRM_NORMAL_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + nrm_error);
                 }
             }
 
@@ -3429,20 +3512,66 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 std::vector<std::array<float, 2U>> uvs;
                 if (ExtractTexcoord0(bin_chunk.bytes, accessors, views, uv_accessor, &uvs, &read_error) &&
                     uvs.size() == static_cast<std::size_t>(vtx_count)) {
-                    std::vector<std::uint8_t> interleaved;
-                    interleaved.reserve(static_cast<std::size_t>(vtx_count) * 20U);
                     const auto* pos_bytes = mesh_payload.vertex_blob.data();
-                    for (std::uint32_t i = 0U; i < vtx_count; ++i) {
-                        const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
-                        interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
-                        const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uvs[i].data());
-                        interleaved.insert(interleaved.end(), uv_bytes, uv_bytes + 8U);
+                    if (has_vrm_normals) {
+                        // Build stride-32 [pos(12)][nrm(12)][uv(8)] matching
+                        // MIQ exporter layout and GPU input layout expectations.
+                        std::vector<std::uint8_t> interleaved;
+                        interleaved.reserve(static_cast<std::size_t>(vtx_count) * 32U);
+                        for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                            const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
+                            interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
+                            const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(vrm_normals[i].data());
+                            interleaved.insert(interleaved.end(), nrm_bytes, nrm_bytes + 12U);
+                            const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uvs[i].data());
+                            interleaved.insert(interleaved.end(), uv_bytes, uv_bytes + 8U);
+                        }
+                        mesh_payload.vertex_blob = std::move(interleaved);
+                        mesh_payload.vertex_stride = 32U;
+                    } else {
+                        // No NORMAL data available; keep stride-20 [pos(12)][uv(8)]
+                        // so BuildGpuMeshForPayload generates normals from triangles.
+                        std::vector<std::uint8_t> interleaved;
+                        interleaved.reserve(static_cast<std::size_t>(vtx_count) * 20U);
+                        for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                            const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
+                            interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
+                            const auto* uv_bytes = reinterpret_cast<const std::uint8_t*>(uvs[i].data());
+                            interleaved.insert(interleaved.end(), uv_bytes, uv_bytes + 8U);
+                        }
+                        mesh_payload.vertex_blob = std::move(interleaved);
+                        mesh_payload.vertex_stride = 20U;
                     }
-                    mesh_payload.vertex_blob = std::move(interleaved);
-                    mesh_payload.vertex_stride = 20U;
                 } else {
                     pkg.warnings.push_back("W_PAYLOAD: VRM_TEXCOORD0_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
+                    // UV extraction failed but normals succeeded: build stride-24 [pos(12)][nrm(12)].
+                    if (has_vrm_normals) {
+                        std::vector<std::uint8_t> interleaved;
+                        interleaved.reserve(static_cast<std::size_t>(vtx_count) * 24U);
+                        const auto* pos_bytes2 = mesh_payload.vertex_blob.data();
+                        for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                            const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
+                            interleaved.insert(interleaved.end(), pos_bytes2 + pos_off, pos_bytes2 + pos_off + 12U);
+                            const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(vrm_normals[i].data());
+                            interleaved.insert(interleaved.end(), nrm_bytes, nrm_bytes + 12U);
+                        }
+                        mesh_payload.vertex_blob = std::move(interleaved);
+                        mesh_payload.vertex_stride = 24U;
+                    }
                 }
+            } else if (has_vrm_normals) {
+                // TEXCOORD_0 absent but normals present: build stride-24 [pos(12)][nrm(12)].
+                std::vector<std::uint8_t> interleaved;
+                interleaved.reserve(static_cast<std::size_t>(vtx_count) * 24U);
+                const auto* pos_bytes = mesh_payload.vertex_blob.data();
+                for (std::uint32_t i = 0U; i < vtx_count; ++i) {
+                    const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
+                    interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
+                    const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(vrm_normals[i].data());
+                    interleaved.insert(interleaved.end(), nrm_bytes, nrm_bytes + 12U);
+                }
+                mesh_payload.vertex_blob = std::move(interleaved);
+                mesh_payload.vertex_stride = 24U;
             }
 
             std::size_t idx_accessor = std::numeric_limits<std::size_t>::max();
@@ -3657,9 +3786,19 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
 
     pkg.parser_stage = "payload";
     std::uint32_t transformed_mesh_count = 0U;
+    std::uint32_t skipped_mesh_transform_count = 0U;
+    std::string sample_skipped_mesh = "unknown";
     for (std::size_t i = 0U; i < mesh_node_transform_applied.size(); ++i) {
         if (mesh_node_transform_applied[i]) {
             ++transformed_mesh_count;
+        }
+        if (i < mesh_has_node_transform.size() &&
+            mesh_has_node_transform[i] &&
+            !mesh_node_transform_applied[i]) {
+            ++skipped_mesh_transform_count;
+            if (sample_skipped_mesh == "unknown" && i < mesh_names_by_index.size()) {
+                sample_skipped_mesh = mesh_names_by_index[i];
+            }
         }
     }
     if (transformed_mesh_count > 0U) {
@@ -3675,6 +3814,12 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             "W_NODE: VRM_NODE_TRANSFORM_APPLIED: meshes=" + std::to_string(transformed_mesh_count) +
             ", sampleMesh=" + sample_applied_mesh);
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_APPLIED");
+    }
+    if (skipped_mesh_transform_count > 0U) {
+        pkg.warnings.push_back(
+            "W_NODE: VRM_NODE_TRANSFORM_SKIPPED: meshes=" + std::to_string(skipped_mesh_transform_count) +
+            ", sampleMesh=" + sample_skipped_mesh);
+        pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIPPED");
     }
     pkg.warnings.push_back("W_NODE: VRM_NODE_TRANSFORM_BASIS: global");
     if (skinned_primitive_count > 0U) {

@@ -103,6 +103,16 @@
                                        FontSize="11" Margin="0,2,0,0"/>
                         </StackPanel>
                     </Border>
+                    <!-- 모델 창 분리 버튼 (진단 버튼 위) -->
+                    <Border DockPanel.Dock="Bottom"
+                            Padding="10,0,10,4"
+                            BorderThickness="0">
+                        <Button x:Name="PopOutRenderButton"
+                                Style="{StaticResource NavRailButtonStyle}"
+                                Content="🖼  모델 창 분리"
+                                Click="PopOutRender_Click"
+                                ToolTip="아바타 렌더만 별도 창으로 표시"/>
+                    </Border>
                     <!-- Diagnostics button (bottom) -->
                     <Border DockPanel.Dock="Bottom"
                             Padding="10,8,10,10"
@@ -216,6 +226,7 @@
                                 <TextBlock Text="조치가 필요합니다" FontWeight="SemiBold" Foreground="{DynamicResource Color.PanelErrorText}" Margin="0,0,0,2"/>
                                 <TextBlock x:Name="BeginnerFailureHintText" TextWrapping="Wrap" Foreground="{DynamicResource Color.PanelErrorText}"/>
                                 <WrapPanel Margin="0,8,0,0">
+                                    <Button x:Name="RunQuickRecoveryButton" Style="{StaticResource SecondaryButtonStyle}" Content="빠른 복구 실행" Click="RunQuickRecovery_Click" HorizontalAlignment="Left" MinWidth="140"/>
                                     <Button x:Name="OpenDiagnosticsFromHintButton" Style="{StaticResource TertiaryButtonStyle}" Content="고급 진단 열기" Click="OpenDiagnosticsFromHint_Click" HorizontalAlignment="Left" MinWidth="160"/>
                                     <Button x:Name="DismissFailureHintButton" Style="{StaticResource SecondaryButtonStyle}" Content="닫기" Click="DismissFailureHint_Click" Margin="8,0,0,0" HorizontalAlignment="Left" MinWidth="90"/>
                                 </WrapPanel>
@@ -234,10 +245,10 @@
                 <GroupBox x:Name="SessionGroup" Style="{StaticResource SectionCardStyle}" Header="1) 세션" Margin="0,0,0,8">
                     <StackPanel Margin="8">
                         <TextBlock Text="세션 시작/종료를 제어합니다." TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}" Margin="0,0,0,8"/>
-                        <WrapPanel>
-                            <Button x:Name="InitializeButton" Content="세션 시작" Click="Initialize_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="ShutdownButton" Content="세션 종료" Click="Shutdown_Click" MinWidth="130"/>
-                        </WrapPanel>
+                        <UniformGrid Columns="2">
+                            <Button x:Name="InitializeButton" Content="세션 시작" Click="Initialize_Click" Margin="0,0,4,0"/>
+                            <Button x:Name="ShutdownButton" Content="세션 종료" Click="Shutdown_Click" Style="{StaticResource SecondaryButtonStyle}" Margin="4,0,0,0"/>
+                        </UniformGrid>
                     </StackPanel>
                 </GroupBox>
 
@@ -245,7 +256,7 @@
                     <StackPanel Margin="8">
                         <TextBlock Text="아바타 파일 경로" FontWeight="SemiBold"/>
                         <DockPanel Margin="0,4,0,8">
-                            <Button x:Name="BrowseAvatarButton" Content="찾아보기..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                            <Button x:Name="BrowseAvatarButton" Content="찾아보기..." Click="BrowseAvatar_Click" Width="84" DockPanel.Dock="Right" Margin="8,0,0,0" Style="{StaticResource TertiaryButtonStyle}"/>
                             <TextBox x:Name="AvatarPathTextBox" Text="..\..\..\..\sample\Kikyo_FT Variant.vrm" TextChanged="InputTextChanged" />
                         </DockPanel>
                         <TextBlock x:Name="AvatarPathValidationText" Foreground="{DynamicResource Color.ValidationErrorText}" Margin="0,0,0,8" TextWrapping="Wrap"/>
@@ -261,21 +272,21 @@
                                 <StackPanel Grid.Column="1" Margin="8,0,0,0">
                                     <TextBlock Text="현재 선택 미리보기" FontWeight="SemiBold"/>
                                     <TextBlock x:Name="AvatarPreviewStatusText" Text="선택된 파일 없음" Margin="0,4,0,8" TextWrapping="Wrap" Foreground="{DynamicResource Color.TextMuted}"/>
-                                    <Button x:Name="RetryAvatarPreviewButton" Content="미리보기 재생성" Click="RetryAvatarPreview_Click" MinWidth="120" HorizontalAlignment="Left"/>
+                                    <Button x:Name="RetryAvatarPreviewButton" Content="미리보기 재생성" Click="RetryAvatarPreview_Click" MinWidth="120" HorizontalAlignment="Left" Style="{StaticResource SecondaryButtonStyle}"/>
                                     <WrapPanel Margin="0,8,0,0">
-                                        <Button x:Name="AvatarFacingToggleButton" Content="앞/뒤 전환 (이 아바타 저장)" Click="AvatarFacingToggle_Click" MinWidth="170"/>
+                                        <Button x:Name="AvatarFacingToggleButton" Content="앞/뒤 전환 (이 아바타 저장)" Click="AvatarFacingToggle_Click" MinWidth="170" Style="{StaticResource TertiaryButtonStyle}"/>
                                         <TextBlock x:Name="AvatarFacingStatusText" Text="저장: 기본" Margin="8,4,0,0" Foreground="{DynamicResource Color.TextMuted}"/>
                                     </WrapPanel>
                                     <TextBlock Text="최근 사용 아바타" FontWeight="SemiBold" Margin="0,10,0,4"/>
-                                    <ListBox x:Name="RecentAvatarListBox" Height="100" SelectionChanged="RecentAvatarList_SelectionChanged"/>
+                                    <ListBox x:Name="RecentAvatarListBox" Height="90" Padding="4" BorderThickness="1" SelectionChanged="RecentAvatarList_SelectionChanged"/>
                                 </StackPanel>
                             </Grid>
                         </Border>
-                        <WrapPanel>
-                            <Button x:Name="LoadButton" Content="불러오기" Click="Load_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="CancelLoadButton" Content="불러오기 취소" Click="CancelLoad_Click" Margin="0,0,8,0" MinWidth="130"/>
-                            <Button x:Name="UnloadButton" Content="내리기" Click="Unload_Click" MinWidth="130"/>
-                        </WrapPanel>
+                        <UniformGrid Columns="3">
+                            <Button x:Name="LoadButton" Content="불러오기" Click="Load_Click" Margin="0,0,4,0"/>
+                            <Button x:Name="CancelLoadButton" Content="불러오기 취소" Click="CancelLoad_Click" Margin="4,0,4,0" Style="{StaticResource SecondaryButtonStyle}"/>
+                            <Button x:Name="UnloadButton" Content="내리기" Click="Unload_Click" Margin="4,0,0,0" Style="{StaticResource TertiaryButtonStyle}"/>
+                        </UniformGrid>
                         <Grid Margin="0,8,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="90"/>
@@ -287,7 +298,9 @@
                             <TextBlock Grid.Column="2" Text="ms" Margin="6,0,0,0" VerticalAlignment="Center"/>
                         </Grid>
                         <ProgressBar x:Name="LoadProgressBar" Margin="0,8,0,4" Minimum="0" Maximum="100" Height="10" Value="0"/>
-                        <TextBlock x:Name="LoadProgressText" Text="불러오기 상태: 대기" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap"/>
+                        <Border Background="{DynamicResource Color.PanelInfoAltBg}" BorderBrush="{DynamicResource Color.PanelInfoAltBorder}" BorderThickness="1" CornerRadius="10" Padding="8,4">
+                            <TextBlock x:Name="LoadProgressText" Text="불러오기 상태: 대기" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap"/>
+                        </Border>
                     </StackPanel>
                 </GroupBox>
 
@@ -765,11 +778,12 @@
                         <TextBlock x:Name="PreflightHintText" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                         <TextBlock Text="렌더 프로파일" FontWeight="SemiBold"/>
-                        <WrapPanel Margin="0,4,0,8">
-                            <Button Content="화질 우선" Click="ProfileQuality_Click" Margin="0,0,8,0" MinWidth="92"/>
-                            <Button Content="성능 우선" Click="ProfilePerformance_Click" Margin="0,0,8,0" MinWidth="92"/>
-                            <Button Content="안정 우선" Click="ProfileStability_Click" MinWidth="92"/>
-                        </WrapPanel>
+                        <UniformGrid Columns="3" Margin="0,4,0,0">
+                            <Button Content="화질 우선" Click="ProfileQuality_Click" Margin="0,0,4,0"/>
+                            <Button Content="성능 우선" Click="ProfilePerformance_Click" Margin="4,0,4,0"/>
+                            <Button Content="안정 우선" Click="ProfileStability_Click" Margin="4,0,0,0"/>
+                        </UniformGrid>
+                        <TextBlock x:Name="CurrentRenderProfileText" Text="현재: —" Foreground="{DynamicResource Color.TextMuted}" Margin="0,4,0,8" FontSize="12"/>
 
                         <TextBlock Text="Sidecar 설정" FontWeight="SemiBold"/>
                         <Grid Margin="0,4,0,8">
@@ -794,14 +808,16 @@
                             <TextBox Grid.Row="2" Grid.Column="1" x:Name="SidecarTimeoutTextBox" Text="15000" Margin="0,8,0,0"/>
                         </Grid>
                         <WrapPanel Margin="0,0,0,8">
-                            <CheckBox x:Name="SidecarStrictCheckBox" Content="엄격 모드 (대체 경로 없음)" Margin="0,0,12,0"/>
-                            <Button Content="Sidecar 적용" Click="ApplySidecar_Click" MinWidth="112"/>
+                            <CheckBox x:Name="SidecarStrictCheckBox" Content="엄격 모드 (대체 경로 없음)"/>
                         </WrapPanel>
+                        <Button Content="Sidecar 적용" Click="ApplySidecar_Click" HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
 
                         <TextBlock Text="텔레메트리" FontWeight="SemiBold"/>
-                        <WrapPanel Margin="0,4,0,0">
+                        <WrapPanel Margin="0,4,0,4">
                             <CheckBox x:Name="TelemetryOptInCheckBox" Content="수집 동의" Margin="0,0,8,0"/>
-                            <CheckBox x:Name="TelemetryRedactCheckBox" Content="민감정보 가림" IsChecked="True" Margin="0,0,8,0"/>
+                            <CheckBox x:Name="TelemetryRedactCheckBox" Content="민감정보 가림" IsChecked="True"/>
+                        </WrapPanel>
+                        <WrapPanel Margin="0,6,0,0">
                             <Button Content="텔레메트리 적용" Click="ApplyTelemetry_Click" Margin="0,0,8,0" MinWidth="112"/>
                             <Button Content="텔레메트리 내보내기" Click="ExportTelemetry_Click" MinWidth="120"/>
                         </WrapPanel>
@@ -813,6 +829,9 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
@@ -827,7 +846,7 @@
                             <TextBlock Grid.Row="4" Grid.Column="0" Text="복구 연속 수" Margin="0,8,0,0"/>
                             <TextBox Grid.Row="4" Grid.Column="1" x:Name="AutoQualityRecoveryConsecutiveTextBox" Text="240" Margin="0,8,0,0"/>
                         </Grid>
-                        <Button Content="자동 품질 정책 적용" Click="ApplyAutoQualityPolicy_Click" MinWidth="170"/>
+                        <Button Content="자동 품질 정책 적용" Click="ApplyAutoQualityPolicy_Click" MinWidth="170" HorizontalAlignment="Stretch"/>
                     </StackPanel>
                 </GroupBox>
             </StackPanel>
@@ -922,7 +941,6 @@
         </Grid>
     </Grid>
 </Window>
-
 
 
 

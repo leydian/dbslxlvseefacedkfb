@@ -1,7 +1,9 @@
 #include "animiq/avatar/avatar_loader_facade.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
+#include <string>
 #include <vector>
 
 #include "vrm_loader.h"
@@ -25,6 +27,73 @@ std::vector<std::uint8_t> ReadHeadBytes(const std::string& path, std::size_t max
     return out;
 }
 
+const char* SourceTypeContractName(AvatarSourceType source_type) {
+    switch (source_type) {
+        case AvatarSourceType::Vrm:
+            return "vrm";
+        case AvatarSourceType::Miq:
+            return "miq";
+        default:
+            return "other";
+    }
+}
+
+bool IsContractManagedSource(AvatarSourceType source_type) {
+    return source_type == AvatarSourceType::Vrm || source_type == AvatarSourceType::Miq;
+}
+
+void AppendWarningCodeUnique(AvatarPackage* pkg, const std::string& code) {
+    if (pkg == nullptr || code.empty()) {
+        return;
+    }
+    const auto it = std::find(pkg->warning_codes.begin(), pkg->warning_codes.end(), code);
+    if (it == pkg->warning_codes.end()) {
+        pkg->warning_codes.push_back(code);
+    }
+}
+
+void ApplyRenderReadyContract(AvatarPackage* pkg) {
+    if (pkg == nullptr || !IsContractManagedSource(pkg->source_type)) {
+        return;
+    }
+    const std::string parser_stage = pkg->parser_stage.empty() ? "unknown" : pkg->parser_stage;
+    const std::string primary_error = pkg->primary_error_code.empty() ? "NONE" : pkg->primary_error_code;
+    pkg->warnings.push_back(
+        "W_CONTRACT: AVATAR_RENDER_READY_V1: format=" + std::string(SourceTypeContractName(pkg->source_type)) +
+        ", parser_stage=" + parser_stage +
+        ", primary_error=" + primary_error +
+        ", mesh_payloads=" + std::to_string(pkg->mesh_payloads.size()) +
+        ", material_payloads=" + std::to_string(pkg->material_payloads.size()) +
+        ", texture_payloads=" + std::to_string(pkg->texture_payloads.size()));
+    AppendWarningCodeUnique(pkg, "AVATAR_RENDER_READY_V1_APPLIED");
+
+    if (!pkg->mesh_payloads.empty()) {
+        return;
+    }
+
+    if (pkg->parser_stage.empty()) {
+        pkg->parser_stage = "payload";
+    }
+    if (pkg->primary_error_code.empty() || pkg->primary_error_code == "NONE") {
+        pkg->primary_error_code = "AVATAR_RENDER_READY_MESH_PAYLOAD_MISSING";
+    }
+    pkg->compat_level = AvatarCompatLevel::Failed;
+    pkg->warnings.push_back(
+        "E_CONTRACT: AVATAR_RENDER_READY_MESH_PAYLOAD_MISSING: format=" +
+        std::string(SourceTypeContractName(pkg->source_type)) +
+        ", parser_stage=" + pkg->parser_stage +
+        ", primary_error=" + pkg->primary_error_code);
+    AppendWarningCodeUnique(pkg, "AVATAR_RENDER_READY_MESH_PAYLOAD_MISSING");
+}
+
+core::Result<AvatarPackage> FinalizeLoadResult(core::Result<AvatarPackage> result) {
+    if (!result.ok) {
+        return result;
+    }
+    ApplyRenderReadyContract(&result.value);
+    return result;
+}
+
 }  // namespace
 
 AvatarLoaderFacade::AvatarLoaderFacade() {
@@ -43,9 +112,9 @@ core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path, co
             continue;
         }
         if (auto* miq_loader = dynamic_cast<MiqLoader*>(loader.get()); miq_loader != nullptr) {
-            return miq_loader->Load(path, options.miq_unknown_section_policy);
+            return FinalizeLoadResult(miq_loader->Load(path, options.miq_unknown_section_policy));
         }
-        return loader->Load(path);
+        return FinalizeLoadResult(loader->Load(path));
     }
 
     const auto head = ReadHeadBytes(path, 16U);
@@ -57,9 +126,9 @@ core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path, co
             continue;
         }
         if (auto* miq_loader = dynamic_cast<MiqLoader*>(loader.get()); miq_loader != nullptr) {
-            return miq_loader->Load(path, options.miq_unknown_section_policy);
+            return FinalizeLoadResult(miq_loader->Load(path, options.miq_unknown_section_policy));
         }
-        return loader->Load(path);
+        return FinalizeLoadResult(loader->Load(path));
     }
     return core::Result<AvatarPackage>::Fail("unsupported file extension or signature");
 }

@@ -1,0 +1,26 @@
+﻿Avatar Differential Benchmark Summary
+GeneratedUTC: 2026-03-06T12:38:57.5034394Z
+GateProfile: strict
+ManifestPath: D:\dbslxlvseefacedkfb\AnimiqCore\tools\avatar_benchmark_manifest.example.json
+AvatarToolPath: D:\dbslxlvseefacedkfb\AnimiqCore\build_plan_impl\Release\avatar_tool.exe
+VSeeFaceObservationPath: D:\dbslxlvseefacedkfb\AnimiqCore\tools\vseeface_observations.example.json
+Total: 3
+Priority: P0=1, P1=0, P2=0, PASS=2
+
+ByExtension
+- .vrm total=2, p0=0, p1=0, p2=0, pass=2
+- .vsfavatar total=1, p0=1, p1=0, p2=0, pass=0
+
+Rows
+- [PASS] vrm_normal_01 ext=.vrm class=normal
+  animiq(load=True, ready=True, stage=runtime-ready, primary=NONE, compat=full, critical=0, visible=True, ms=1098)
+  vseeface(load=True, ready=True, visible=True, crash=False, ms=1200)
+  reason=pass
+- [PASS] vrm_boundary_01 ext=.vrm class=boundary
+  animiq(load=True, ready=True, stage=runtime-ready, primary=NONE, compat=full, critical=0, visible=True, ms=1378)
+  vseeface(load=, ready=, visible=, crash=, ms=)
+  reason=pass
+- [P0] vsfavatar_normal_01 ext=.vsfavatar class=normal
+  animiq(load=True, ready=False, stage=complete, primary=NONE, compat=partial, critical=0, visible=False, ms=36217)
+  vseeface(load=True, ready=True, visible=True, crash=False, ms=1300)
+  reason=vseeface_ok_animiq_not_equivalent

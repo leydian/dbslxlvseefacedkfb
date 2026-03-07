@@ -1,0 +1,217 @@
+﻿{
+    "generated_utc":  "2026-03-06T12:38:57.5034394Z",
+    "gate_profile":  "strict",
+    "warning_debt_threshold":  5,
+    "manifest_path":  "D:\\dbslxlvseefacedkfb\\AnimiqCore\\tools\\avatar_benchmark_manifest.example.json",
+    "avatar_tool_path":  "D:\\dbslxlvseefacedkfb\\AnimiqCore\\build_plan_impl\\Release\\avatar_tool.exe",
+    "vseeface_observation_path":  "D:\\dbslxlvseefacedkfb\\AnimiqCore\\tools\\vseeface_observations.example.json",
+    "total":  3,
+    "pass":  2,
+    "priority":  {
+                     "p0":  1,
+                     "p1":  0,
+                     "p2":  0,
+                     "pass":  2
+                 },
+    "by_extension":  {
+                         "vrm":  {
+                                     "total":  2,
+                                     "p0":  0,
+                                     "p1":  0,
+                                     "p2":  0,
+                                     "pass":  2
+                                 },
+                         "vsfavatar":  {
+                                           "total":  1,
+                                           "p0":  1,
+                                           "p1":  0,
+                                           "p2":  0,
+                                           "pass":  0
+                                       }
+                     },
+    "top_reasons":  [
+                        {
+                            "key":  "pass",
+                            "count":  2
+                        },
+                        {
+                            "key":  "vseeface_ok_animiq_not_equivalent",
+                            "count":  1
+                        }
+                    ],
+    "top_primary_errors":  {
+
+                           },
+    "top_warning_codes":  {
+                              "key":  "VRM_NODE_TRANSFORM_APPLIED",
+                              "count":  1
+                          },
+    "parity_rows":  [
+                        {
+                            "id":  "vrm_normal_01",
+                            "sample_class":  "normal",
+                            "engine":  "animiq",
+                            "load_ok":  true,
+                            "runtime_ready":  true,
+                            "visible":  true,
+                            "primary_error":  "NONE",
+                            "parser_stage":  "runtime-ready",
+                            "warning_codes":  [
+                                                  "VRM_NODE_TRANSFORM_APPLIED"
+                                              ],
+                            "critical_warning_count":  0,
+                            "elapsed_ms":  1098,
+                            "crash_or_freeze":  false
+                        },
+                        {
+                            "id":  "vrm_normal_01",
+                            "sample_class":  "normal",
+                            "engine":  "vseeface",
+                            "load_ok":  true,
+                            "runtime_ready":  true,
+                            "visible":  true,
+                            "primary_error":  "NONE",
+                            "parser_stage":  "runtime-ready",
+                            "warning_codes":  [
+
+                                              ],
+                            "critical_warning_count":  0,
+                            "elapsed_ms":  1200,
+                            "crash_or_freeze":  false
+                        },
+                        {
+                            "id":  "vrm_boundary_01",
+                            "sample_class":  "boundary",
+                            "engine":  "animiq",
+                            "load_ok":  true,
+                            "runtime_ready":  true,
+                            "visible":  true,
+                            "primary_error":  "NONE",
+                            "parser_stage":  "runtime-ready",
+                            "warning_codes":  [
+
+                                              ],
+                            "critical_warning_count":  0,
+                            "elapsed_ms":  1378,
+                            "crash_or_freeze":  false
+                        },
+                        {
+                            "id":  "vsfavatar_normal_01",
+                            "sample_class":  "normal",
+                            "engine":  "animiq",
+                            "load_ok":  true,
+                            "runtime_ready":  false,
+                            "visible":  false,
+                            "primary_error":  "NONE",
+                            "parser_stage":  "complete",
+                            "warning_codes":  [
+
+                                              ],
+                            "critical_warning_count":  0,
+                            "elapsed_ms":  36217,
+                            "crash_or_freeze":  false
+                        },
+                        {
+                            "id":  "vsfavatar_normal_01",
+                            "sample_class":  "normal",
+                            "engine":  "vseeface",
+                            "load_ok":  true,
+                            "runtime_ready":  true,
+                            "visible":  true,
+                            "primary_error":  "NONE",
+                            "parser_stage":  "runtime-ready",
+                            "warning_codes":  [
+
+                                              ],
+                            "critical_warning_count":  0,
+                            "elapsed_ms":  1300,
+                            "crash_or_freeze":  false
+                        }
+                    ],
+    "rows":  [
+                 {
+                     "id":  "vrm_normal_01",
+                     "sample_class":  "normal",
+                     "sample_path":  "D:\\dbslxlvseefacedkfb\\sample\\Kikyo_FT Variant.vrm",
+                     "extension":  "vrm",
+                     "must_render_visible":  true,
+                     "animiq_load_ok":  true,
+                     "animiq_runtime_ready":  true,
+                     "animiq_parser_stage":  "runtime-ready",
+                     "animiq_primary_error":  "NONE",
+                     "animiq_compat":  "full",
+                     "animiq_critical_warning_count":  0,
+                     "animiq_warning_code_count":  1,
+                     "animiq_warning_codes":  [
+                                                  "VRM_NODE_TRANSFORM_APPLIED"
+                                              ],
+                     "animiq_render_visible":  true,
+                     "animiq_exit_code":  0,
+                     "animiq_elapsed_ms":  1098,
+                     "vseeface_load_ok":  true,
+                     "vseeface_runtime_ready":  true,
+                     "vseeface_render_visible":  true,
+                     "vseeface_crash_or_freeze":  false,
+                     "vseeface_elapsed_ms":  1200,
+                     "priority":  "PASS",
+                     "reason":  "pass",
+                     "raw_head":  "Load succeeded"
+                 },
+                 {
+                     "id":  "vrm_boundary_01",
+                     "sample_class":  "boundary",
+                     "sample_path":  "D:\\dbslxlvseefacedkfb\\sample\\NewOnYou.vrm",
+                     "extension":  "vrm",
+                     "must_render_visible":  true,
+                     "animiq_load_ok":  true,
+                     "animiq_runtime_ready":  true,
+                     "animiq_parser_stage":  "runtime-ready",
+                     "animiq_primary_error":  "NONE",
+                     "animiq_compat":  "full",
+                     "animiq_critical_warning_count":  0,
+                     "animiq_warning_code_count":  0,
+                     "animiq_warning_codes":  [
+
+                                              ],
+                     "animiq_render_visible":  true,
+                     "animiq_exit_code":  0,
+                     "animiq_elapsed_ms":  1378,
+                     "vseeface_load_ok":  null,
+                     "vseeface_runtime_ready":  null,
+                     "vseeface_render_visible":  null,
+                     "vseeface_crash_or_freeze":  null,
+                     "vseeface_elapsed_ms":  null,
+                     "priority":  "PASS",
+                     "reason":  "pass",
+                     "raw_head":  "Load succeeded"
+                 },
+                 {
+                     "id":  "vsfavatar_normal_01",
+                     "sample_class":  "normal",
+                     "sample_path":  "D:\\dbslxlvseefacedkfb\\sample\\NewOnYou.vsfavatar",
+                     "extension":  "vsfavatar",
+                     "must_render_visible":  true,
+                     "animiq_load_ok":  true,
+                     "animiq_runtime_ready":  false,
+                     "animiq_parser_stage":  "complete",
+                     "animiq_primary_error":  "NONE",
+                     "animiq_compat":  "partial",
+                     "animiq_critical_warning_count":  0,
+                     "animiq_warning_code_count":  0,
+                     "animiq_warning_codes":  [
+
+                                              ],
+                     "animiq_render_visible":  false,
+                     "animiq_exit_code":  0,
+                     "animiq_elapsed_ms":  36217,
+                     "vseeface_load_ok":  true,
+                     "vseeface_runtime_ready":  true,
+                     "vseeface_render_visible":  true,
+                     "vseeface_crash_or_freeze":  false,
+                     "vseeface_elapsed_ms":  1300,
+                     "priority":  "P0",
+                     "reason":  "vseeface_ok_animiq_not_equivalent",
+                     "raw_head":  "Load succeeded"
+                 }
+             ]
+}

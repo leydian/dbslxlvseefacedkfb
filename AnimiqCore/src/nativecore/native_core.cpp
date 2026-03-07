@@ -163,6 +163,10 @@ struct RendererResources {
     ID3D11RasterizerState* raster_cull_back = nullptr;
     ID3D11RasterizerState* raster_cull_front = nullptr;
     ID3D11RasterizerState* raster_cull_none = nullptr;
+    // CCW-front variants for glTF/VRM assets (glTF spec requires CCW winding
+    // for front faces, which is opposite of DirectX's default CW convention).
+    ID3D11RasterizerState* raster_cull_back_ccw = nullptr;
+    ID3D11RasterizerState* raster_cull_front_ccw = nullptr;
     ID3D11DepthStencilState* depth_write = nullptr;
     ID3D11DepthStencilState* depth_read = nullptr;
     ID3D11BlendState* blend_opaque = nullptr;
@@ -316,7 +320,10 @@ NcLightingOptions MakeDefaultLightingOptions() {
     options.shadow_normal_bias = 0.0f;
     options.shadow_near_plane = 8.5f;
     options.shadow_resolution = 8192U;
-    options.ambient_intensity = 1.0f;
+    // Lower ambient so directional lighting produces visible shadow/highlight
+    // contrast. With ambient=1.0 the lerp(ambient,1.0,lit) formula always
+    // returns 1.0, making normals invisible to shading.
+    options.ambient_intensity = 0.35f;
     options.enable_sun_light = 0U;
     options.enable_shadow = 1U;
     return options;
@@ -1434,6 +1441,14 @@ void ResetRendererResources(RendererResources* renderer) {
         renderer->raster_cull_back->Release();
         renderer->raster_cull_back = nullptr;
     }
+    if (renderer->raster_cull_back_ccw != nullptr) {
+        renderer->raster_cull_back_ccw->Release();
+        renderer->raster_cull_back_ccw = nullptr;
+    }
+    if (renderer->raster_cull_front_ccw != nullptr) {
+        renderer->raster_cull_front_ccw->Release();
+        renderer->raster_cull_front_ccw = nullptr;
+    }
     if (renderer->constant_buffer != nullptr) {
         renderer->constant_buffer->Release();
         renderer->constant_buffer = nullptr;
@@ -1586,6 +1601,7 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         renderer->input_layout != nullptr && renderer->constant_buffer != nullptr &&
         renderer->raster_cull_back != nullptr && renderer->raster_cull_front != nullptr &&
         renderer->raster_cull_none != nullptr &&
+        renderer->raster_cull_back_ccw != nullptr && renderer->raster_cull_front_ccw != nullptr &&
         renderer->depth_write != nullptr && renderer->depth_read != nullptr &&
         renderer->blend_opaque != nullptr && renderer->blend_alpha != nullptr &&
         renderer->blend_additive != nullptr && renderer->blend_depth_only != nullptr &&
@@ -1705,9 +1721,11 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
         "  float direct_scale = max(0.0, shadow_params.w);\n"
         "  float ndotl = saturate(dot(normal, light_dir));\n"
         "#if defined(FAMILY_MTOON)\n"
-        "  float lit = ndotl > 0.5 ? 1.0 : 0.62;\n"
+        // Hard binary step matching MToon's toony shading: shadow side drops to
+        // near-zero so that shade_color tinting becomes clearly visible.
+        "  float lit = ndotl > 0.5 ? 1.0 : 0.05;\n"
         "#else\n"
-        "  float lit = lerp(0.55, 1.0, ndotl);\n"
+        "  float lit = lerp(0.35, 1.0, ndotl);\n"
         "#endif\n"
         "  if (has_texture > 0.5) {\n"
         "    float4 texel = tex0.Sample(samp0, sample_uv);\n"
@@ -1974,6 +1992,20 @@ bool EnsurePipelineResources(RendererResources* renderer, ID3D11Device* device) 
     if (FAILED(hr) || renderer->raster_cull_none == nullptr) {
         return false;
     }
+    // CCW-front variants: glTF/VRM spec mandates CCW front faces, which is
+    // opposite of DirectX's default CW convention.
+    raster_desc.FrontCounterClockwise = TRUE;
+    raster_desc.CullMode = D3D11_CULL_BACK;
+    hr = device->CreateRasterizerState(&raster_desc, &renderer->raster_cull_back_ccw);
+    if (FAILED(hr) || renderer->raster_cull_back_ccw == nullptr) {
+        return false;
+    }
+    raster_desc.CullMode = D3D11_CULL_FRONT;
+    hr = device->CreateRasterizerState(&raster_desc, &renderer->raster_cull_front_ccw);
+    if (FAILED(hr) || renderer->raster_cull_front_ccw == nullptr) {
+        return false;
+    }
+    raster_desc.FrontCounterClockwise = FALSE;
 
     D3D11_DEPTH_STENCIL_DESC depth_desc {};
     depth_desc.DepthEnable = TRUE;
@@ -5231,7 +5263,7 @@ bool EnsureAvatarGpuMaterials(RendererResources* renderer, const AvatarPackage& 
             for (float& c : shade_color) {
                 c = std::max(0.0f, std::min(1.0f, c));
             }
-            material.shade_mix = 0.28f;
+            material.shade_mix = 0.80f;
         }
         material.shade_color = shade_color;
         std::array<float, 4U> emission_color = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -7021,6 +7053,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const bool emission_pass = pass_kind == RenderPassKind::Emission;
         const bool is_mask = (alpha_mode == "MASK");
         const bool is_blend = (alpha_mode == "BLEND");
+        // VRM/MIQ avatars use CULL_NONE because winding conventions are not
+        // uniformly CCW across all mesh components in practice: some VRM
+        // exporters emit CW-wound face/head meshes while clothing is CCW.
+        // Per-material double_sided flag is respected on top of this.
         const bool force_no_cull_for_avatar =
             (item.pkg != nullptr &&
                 (item.pkg->source_type == AvatarSourceType::Miq ||

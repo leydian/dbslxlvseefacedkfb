@@ -1,0 +1,27 @@
+﻿{
+    "generated_utc":  "2026-03-06T12:38:57.5034394Z",
+    "total":  3,
+    "priority":  {
+                     "p0":  1,
+                     "p1":  0,
+                     "p2":  0,
+                     "pass":  2
+                 },
+    "by_reason":  [
+                      {
+                          "key":  "pass",
+                          "count":  2
+                      },
+                      {
+                          "key":  "vseeface_ok_animiq_not_equivalent",
+                          "count":  1
+                      }
+                  ],
+    "by_primary_error":  {
+
+                         },
+    "by_warning_code":  {
+                            "key":  "VRM_NODE_TRANSFORM_APPLIED",
+                            "count":  1
+                        }
+}

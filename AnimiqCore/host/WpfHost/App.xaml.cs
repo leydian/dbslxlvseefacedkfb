@@ -16,7 +16,7 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
-        var window = new MainWindow();
-        window.Show();
+        var mainWindow = new MainWindow();
+        mainWindow.Show();
     }
 }

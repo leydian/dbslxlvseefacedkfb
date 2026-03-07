@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     private const string UiModeBeginner = "beginner";
     private const string UiModeAdvanced = "advanced";
     private readonly HostController _controller = new();
+    internal HostController Controller => _controller;
+    private FloatingAvatarWindow? _floatingAvatarWindow;
     private readonly DispatcherTimer _timer = new();
     private readonly DispatcherTimer _uiRefreshTimer = new();
     private readonly DispatcherTimer _resizeTimer = new();
@@ -522,6 +524,17 @@ public partial class MainWindow : Window
     private void NavOutputs_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.Outputs);
     private void NavTracking_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.Tracking);
     private void NavPlatformOps_Click(object sender, RoutedEventArgs e) => ActivateSection(UiSection.PlatformOps);
+
+    private void PopOutRender_Click(object sender, RoutedEventArgs e)
+    {
+        if (_floatingAvatarWindow is { IsLoaded: true })
+        {
+            _floatingAvatarWindow.Activate();
+            return;
+        }
+        _floatingAvatarWindow = new FloatingAvatarWindow(_controller);
+        _floatingAvatarWindow.Show();
+    }
 
     private void ToggleDiagnosticsPanel_Click(object sender, RoutedEventArgs e)
     {
@@ -2289,6 +2302,7 @@ public partial class MainWindow : Window
         RunPreflightButton.IsEnabled = !operation.IsBusy;
         ExportDiagButton.IsEnabled = !operation.IsBusy;
         ExportMetricsButton.IsEnabled = !operation.IsBusy;
+        RunQuickRecoveryButton.IsEnabled = !operation.IsBusy && !string.IsNullOrWhiteSpace(tracking.LastErrorCode);
         ParserModeComboBox.IsEnabled = !operation.IsBusy;
         SidecarPathTextBox.IsEnabled = !operation.IsBusy;
         SidecarTimeoutTextBox.IsEnabled = !operation.IsBusy;
@@ -3779,10 +3793,110 @@ public partial class MainWindow : Window
         RevealDiagnosticsForFailure(string.IsNullOrWhiteSpace(_lastFailureSource) ? "LoadAvatar" : _lastFailureSource);
     }
 
+    private async void RunQuickRecovery_Click(object sender, RoutedEventArgs e)
+    {
+        var errorCode = _controller.TrackingDiagnostics.LastErrorCode;
+        if (string.IsNullOrWhiteSpace(errorCode))
+        {
+            MessageBox.Show(this, "현재 자동 복구 가능한 트래킹 오류 코드가 없습니다.", "복구 안내", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var scriptPath = TryResolveToolScriptPath("tracking_error_recovery.ps1");
+        if (string.IsNullOrWhiteSpace(scriptPath))
+        {
+            MessageBox.Show(this, "tracking_error_recovery.ps1 경로를 찾지 못했습니다. tools 폴더를 확인하세요.", "복구 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        RunQuickRecoveryButton.IsEnabled = false;
+        try
+        {
+            var startInfo = new ProcessStartInfo("powershell")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(scriptPath) ?? Environment.CurrentDirectory,
+            };
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.ArgumentList.Add("-ErrorCode");
+            startInfo.ArgumentList.Add(errorCode);
+            startInfo.ArgumentList.Add("-Execute");
+
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                MessageBox.Show(this, "복구 프로세스를 시작하지 못했습니다.", "복구 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            await Task.Run(() => process.WaitForExit(180000));
+            if (!process.HasExited)
+            {
+                try { process.Kill(true); } catch { }
+                MessageBox.Show(this, "복구 작업이 시간 제한(180초)을 초과했습니다.", "복구 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (process.ExitCode == 0)
+            {
+                MessageBox.Show(this, $"빠른 복구 실행 완료 (ErrorCode={errorCode}).", "복구 완료", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show(this, $"빠른 복구 실행 실패 (exit={process.ExitCode}, ErrorCode={errorCode}).", "복구 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"복구 실행 중 예외가 발생했습니다: {ex.Message}", "복구 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            UpdateUiState();
+        }
+    }
+
     private void DismissFailureHint_Click(object sender, RoutedEventArgs e)
     {
         ClearFailureHint();
         UpdateUiState();
+    }
+
+    private static string? TryResolveToolScriptPath(string scriptName)
+    {
+        var seeds = new List<string>
+        {
+            AppContext.BaseDirectory,
+            Environment.CurrentDirectory,
+            Directory.GetCurrentDirectory(),
+        };
+
+        foreach (var seed in seeds.Where(static p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var current = seed;
+            for (var i = 0; i < 8 && !string.IsNullOrWhiteSpace(current); i++)
+            {
+                var candidate = Path.Combine(current, "tools", scriptName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                var parent = Directory.GetParent(current);
+                if (parent is null)
+                {
+                    break;
+                }
+
+                current = parent.FullName;
+            }
+        }
+
+        return null;
     }
 
     private bool IsBeginnerMode()

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cctype>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -182,6 +183,16 @@ bool IsSupportedShaderFamily(const std::string& raw) {
 bool IsParityShaderFamily(const std::string& raw) {
     const std::string key = NormalizeShaderFamily(raw);
     return key == "liltoon" || key == "poiyomi" || key == "standard" || key == "mtoon";
+}
+
+bool IsStrictMiqContractEnabled() {
+    const char* raw = std::getenv("ANIMIQ_STRICT_MIQ_CONTRACT");
+    if (raw == nullptr || *raw == '\0') {
+        return false;
+    }
+    std::string value(raw);
+    value = ToLower(value);
+    return value == "1" || value == "true" || value == "yes" || value == "on" || value == "strict";
 }
 
 std::string InferShaderFamilyFromShaderName(const std::string& shader_name) {
@@ -1765,6 +1776,8 @@ core::Result<AvatarPackage> MiqLoader::Load(
 
     pkg.parser_stage = "payload";
     bool has_payload_gap = false;
+    bool has_nonfatal_contract_violation = false;
+    const bool strict_miq_contract = IsStrictMiqContractEnabled();
     std::size_t matched_mesh_payloads = 0U;
     std::size_t matched_texture_payloads = 0U;
 
@@ -1837,12 +1850,22 @@ core::Result<AvatarPackage> MiqLoader::Load(
             payload.shader_family = InferShaderFamilyFromShaderName(payload.shader_name);
         }
         if (!IsParityShaderFamily(payload.shader_family)) {
-            pkg.primary_error_code = "MIQ_PARITY_CONTRACT_VIOLATION";
+            if (strict_miq_contract) {
+                pkg.primary_error_code = "MIQ_PARITY_CONTRACT_VIOLATION";
+                PushWarning(
+                    &pkg,
+                    "E_PAYLOAD: MIQ_MATERIAL_SHADER_FAMILY_NOT_ALLOWED: material=" + payload.name +
+                        ", family=" + payload.shader_family);
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            if (pkg.primary_error_code == "NONE") {
+                pkg.primary_error_code = "MIQ_PARITY_CONTRACT_VIOLATION";
+            }
             PushWarning(
                 &pkg,
-                "E_PAYLOAD: MIQ_MATERIAL_SHADER_FAMILY_NOT_ALLOWED: material=" + payload.name +
+                "W_PAYLOAD: MIQ_MATERIAL_SHADER_FAMILY_NOT_ALLOWED: material=" + payload.name +
                     ", family=" + payload.shader_family);
-            return core::Result<AvatarPackage>::Ok(pkg);
+            has_nonfatal_contract_violation = true;
         }
 
         const bool has_typed =
@@ -1965,12 +1988,22 @@ core::Result<AvatarPackage> MiqLoader::Load(
             if (key.empty() || texture_ref_keys.find(key) != texture_ref_keys.end()) {
                 continue;
             }
-            pkg.primary_error_code = "MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
+            if (strict_miq_contract) {
+                pkg.primary_error_code = "MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
+                PushWarning(
+                    &pkg,
+                    "E_PAYLOAD: MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" + material.name +
+                        ", slot=" + typed_texture.slot + ", ref=" + typed_texture.texture_ref);
+                return core::Result<AvatarPackage>::Ok(pkg);
+            }
+            if (pkg.primary_error_code == "NONE") {
+                pkg.primary_error_code = "MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED";
+            }
             PushWarning(
                 &pkg,
-                "E_PAYLOAD: MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" + material.name +
+                "W_PAYLOAD: MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED: material=" + material.name +
                     ", slot=" + typed_texture.slot + ", ref=" + typed_texture.texture_ref);
-            return core::Result<AvatarPackage>::Ok(pkg);
+            has_nonfatal_contract_violation = true;
         }
     }
 
@@ -2075,8 +2108,20 @@ core::Result<AvatarPackage> MiqLoader::Load(
     PushWarning(&pkg, "W_STAGE: runtime-ready");
     const bool fully_matched =
         mesh_refs.size() == matched_mesh_payloads && texture_refs.size() == matched_texture_payloads;
-    pkg.compat_level = fully_matched ? AvatarCompatLevel::Full : AvatarCompatLevel::Partial;
-    pkg.primary_error_code = has_payload_gap ? "MIQ_ASSET_MISSING" : "NONE";
+    pkg.compat_level =
+        (fully_matched && !has_nonfatal_contract_violation) ? AvatarCompatLevel::Full : AvatarCompatLevel::Partial;
+    if (has_nonfatal_contract_violation) {
+        PushWarning(
+            &pkg,
+            "W_CONTRACT: MIQ_STRICT_CONTRACT_RELAXED: strict=off, compatibility=partial");
+    }
+    if (has_payload_gap) {
+        if (pkg.primary_error_code == "NONE") {
+            pkg.primary_error_code = "MIQ_ASSET_MISSING";
+        }
+    } else if (pkg.primary_error_code.empty()) {
+        pkg.primary_error_code = "NONE";
+    }
     return core::Result<AvatarPackage>::Ok(pkg);
 }
 

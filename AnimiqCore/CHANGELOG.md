@@ -2,6 +2,78 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - VRM orientation correction + MIQ contract relaxation controls + WPF operational UX uplift
+
+### Summary
+
+Implemented a combined loader/runtime/host pass focused on three outcomes:
+
+- correct VRM-facing consistency by preventing node-transform double-application and preserving imported normals,
+- make MIQ contract handling tunable (strict vs relaxed) while keeping render-readiness enforcement centralized,
+- improve WPF operator workflow with detached render window, quick recovery action, and denser control layout.
+
+Also added benchmark tooling outputs for VRM->MIQ conversion and parity reporting.
+
+### Changed
+
+- VRM loader orientation and vertex payload handling:
+  - `src/avatar/vrm_loader.cpp`
+  - `ApplyPositionTransformToVertexBlob(...)` now also transforms normals when present (`stride >= 24`) using matrix 3x3 and normalization.
+  - mesh payload extraction now intentionally skips baking node-global transforms into VRM vertex positions to avoid mixed-space double-rotation behavior at preview time.
+  - added aggregate warning emission for skipped mesh-node transform application:
+    - `W_NODE: VRM_NODE_TRANSFORM_SKIPPED`
+  - normal extraction/interleave path reinforced:
+    - supports stride-32 `[pos|nrm|uv]`, stride-24 `[pos|nrm]`, fallback stride-20 `[pos|uv]`.
+
+- MIQ loader contract strictness controls:
+  - `src/avatar/Miq_loader.cpp`
+  - added environment-gated strict policy:
+    - `ANIMIQ_STRICT_MIQ_CONTRACT` (`1/true/yes/on/strict` => strict).
+  - in strict-off mode, parity/material violations that previously hard-failed now downgrade to warnings and partial compatibility:
+    - `MIQ_MATERIAL_SHADER_FAMILY_NOT_ALLOWED`
+    - `MIQ_MATERIAL_TYPED_TEXTURE_UNRESOLVED`
+  - emits relaxed contract trace warning:
+    - `W_CONTRACT: MIQ_STRICT_CONTRACT_RELAXED`
+  - preserves strict failure semantics when strict mode is enabled.
+
+- Avatar loader facade render-ready contract finalization:
+  - `src/avatar/avatar_loader_facade.cpp`
+  - introduced post-load contract finalization for managed formats (`VRM`, `MIQ`):
+    - adds `W_CONTRACT: AVATAR_RENDER_READY_V1` summary warning.
+    - enforces failed compatibility/error code when mesh payloads are missing:
+      - `AVATAR_RENDER_READY_MESH_PAYLOAD_MISSING`
+  - loader selection path now routes successful results through centralized finalization.
+
+- Native renderer defaults and raster-state coverage:
+  - `src/nativecore/native_core.cpp`
+  - added CCW-front rasterizer state variants to align with glTF/VRM winding conventions.
+  - adjusted default lighting balance to restore directional contrast:
+    - lowered ambient default, strengthened toon/lambert shadow contrast.
+  - increased shade mix for MToon-family material path.
+  - documented forced no-cull policy rationale for VRM/MIQ mixed-winding meshes.
+
+- WPF host operational UX updates:
+  - `host/WpfHost/App.xaml.cs`
+  - `host/WpfHost/MainWindow.xaml`
+  - `host/WpfHost/MainWindow.xaml.cs`
+  - `host/WpfHost/FloatingAvatarWindow.xaml` (new)
+  - `host/WpfHost/FloatingAvatarWindow.xaml.cs` (new)
+  - added detached avatar render window flow (`모델 창 분리`) with separate HWND render target lifecycle and optional topmost mode.
+  - added quick recovery button in failure hint panel invoking `tools/tracking_error_recovery.ps1` with current tracking error code.
+  - refreshed several control groups/layouts (session/load/profile/sidecar/telemetry/auto-quality) for denser and clearer operator affordance.
+
+- Benchmark automation and generated reports:
+  - `tools/avatar_vrm_to_miq_benchmark.ps1` (new)
+  - `AnimiqCore/build/reports/avatar_differential_benchmark_summary.json` (new)
+  - `AnimiqCore/build/reports/avatar_differential_benchmark_summary.txt` (new)
+  - `AnimiqCore/build/reports/avatar_differential_error_taxonomy.json` (new)
+  - `AnimiqCore/build/reports/avatar_parity_dashboard.md` (new)
+  - added VRM directory batch conversion/probing script and stored strict-profile parity outputs.
+
+### Verification
+
+- `cmake --build AnimiqCore/build_plan_impl --config RelWithDebInfo --verbose`: PASS
+
 ## 2026-03-06 - NativeCore fallback hardening: dominant-cause warning exclusivity + arm/shadow/expression resilience
 
 ### Summary
