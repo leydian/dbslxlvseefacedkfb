@@ -1739,6 +1739,13 @@ public sealed partial class HostController
         var desiredFlip = storedFlip;
         var detail = $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, mode=stored";
         var format = _sessionService.ActiveAvatarInfo?.DetectedFormat ?? NcAvatarFormatHint.Auto;
+        if (format == NcAvatarFormatHint.VsfAvatar)
+        {
+            desiredFlip = false;
+            detail = $"path={Path.GetFileName(avatarPath)}, stored={storedFlip}, resolved={desiredFlip}, mode=vsfavatar-default-front, format={format}";
+            AddLog(new HostLogEntry(DateTimeOffset.UtcNow, "AvatarPreviewFlipResolve", detail, NcResultCode.Ok), false);
+            return NcResultCode.Ok;
+        }
         var metricsRc = NativeCoreInterop.nc_get_avatar_runtime_metrics_v2(
             activeHandle.Value,
             out var metrics);

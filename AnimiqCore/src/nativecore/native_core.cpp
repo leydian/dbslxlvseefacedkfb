@@ -852,6 +852,9 @@ int PreviewYawDegreesForAvatarSource(AvatarSourceType source_type) {
     if (source_type == AvatarSourceType::Vrm) {
         return 180;
     }
+    if (source_type == AvatarSourceType::VsfAvatar) {
+        return 0;
+    }
     return 180;
 }
 
@@ -6214,8 +6217,15 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float bounds_cluster_distance_threshold = std::max(2.2f, median_extent * 2.8f);
         const float cluster_bounds_extent_cap = std::max(0.75f, median_extent * 1.4f);
         constexpr std::size_t kMinClusterSamplesForBoundsFilter = 6U;
+        const bool is_vsf_avatar = it->second.source_type == AvatarSourceType::VsfAvatar;
+        const bool is_vsf_heuristic_avatar =
+            is_vsf_avatar &&
+            std::find(
+                it->second.warning_codes.begin(),
+                it->second.warning_codes.end(),
+                "VSF_SERIALIZED_HEURISTIC_MESH_PAYLOAD") != it->second.warning_codes.end();
         std::vector<std::uint8_t> preview_bounds_excluded(mesh_it->second.size(), 0U);
-        if (it->second.source_type == AvatarSourceType::Miq) {
+        if (it->second.source_type == AvatarSourceType::Miq || is_vsf_heuristic_avatar) {
             for (const auto& sample : extent_samples) {
                 const auto& m = mesh_it->second[sample.index];
                 if (!std::isfinite(m.center.x) || !std::isfinite(m.center.y) || !std::isfinite(m.center.z)) {
@@ -6262,7 +6272,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float cluster_cy = pick_median(&center_y_samples);
         const float cluster_cz = pick_median(&center_z_samples);
         const bool allow_cluster_bounds_filter =
-            it->second.source_type == AvatarSourceType::Miq &&
+            (it->second.source_type == AvatarSourceType::Miq || is_vsf_heuristic_avatar) &&
             center_x_samples.size() >= kMinClusterSamplesForBoundsFilter;
         if (allow_cluster_bounds_filter) {
             for (const auto& sample : extent_samples) {
@@ -6281,6 +6291,37 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 const float ccz = m.center.z - cluster_cz;
                 const float cluster_dist = std::sqrt((ccx * ccx) + (ccy * ccy) + (ccz * ccz));
                 if (std::isfinite(cluster_dist) && cluster_dist > bounds_cluster_distance_threshold) {
+                    preview_bounds_excluded[sample.index] = 1U;
+                }
+            }
+        }
+        if (is_vsf_heuristic_avatar) {
+            // Heuristic VSF payloads can contain axis-like spike meshes that dominate AutoFit bounds.
+            for (const auto& sample : extent_samples) {
+                if (preview_bounds_excluded[sample.index] != 0U) {
+                    continue;
+                }
+                const auto& m = mesh_it->second[sample.index];
+                const float ex = std::max(m.bounds_max.x - m.bounds_min.x, 0.0f);
+                const float ey = std::max(m.bounds_max.y - m.bounds_min.y, 0.0f);
+                const float ez = std::max(m.bounds_max.z - m.bounds_min.z, 0.0f);
+                const float major = std::max(ex, std::max(ey, ez));
+                const float minor = std::max(1.0e-5f, std::min(ex, std::min(ey, ez)));
+                const float mid = std::max(1.0e-5f, ex + ey + ez - major - minor);
+                const float axis_ratio = major / mid;
+                const float ultra_ratio = major / minor;
+                const float dcx = m.center.x - cluster_cx;
+                const float dcy = m.center.y - cluster_cy;
+                const float dcz = m.center.z - cluster_cz;
+                const float cluster_dist = std::sqrt((dcx * dcx) + (dcy * dcy) + (dcz * dcz));
+                const bool axis_like =
+                    (axis_ratio > 18.0f || ultra_ratio > 55.0f) &&
+                    sample.extent > std::max(0.12f, median_extent * 0.9f);
+                const bool detached_line =
+                    std::isfinite(cluster_dist) &&
+                    cluster_dist > std::max(0.35f, median_extent * 2.2f) &&
+                    sample.extent > std::max(0.20f, median_extent * 1.2f);
+                if (axis_like || detached_line) {
                     preview_bounds_excluded[sample.index] = 1U;
                 }
             }
@@ -6613,6 +6654,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const bool skip_miq_outlier_draws =
             is_miq_avatar &&
             ResolveMiqOutlierDrawPolicy() == MiqOutlierDrawPolicy::SkipDraw;
+        const bool skip_bounds_outlier_draws = skip_miq_outlier_draws || is_vsf_heuristic_avatar;
         bool head_ref_valid = false;
         float head_ref_x = robust_cx;
         float head_ref_y = robust_cy;
@@ -6651,7 +6693,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         }
         for (std::size_t mesh_index = 0U; mesh_index < mesh_it->second.size(); ++mesh_index) {
             auto& mesh = mesh_it->second[mesh_index];
-            if (skip_miq_outlier_draws &&
+            if (skip_bounds_outlier_draws &&
                 mesh_index < preview_bounds_excluded.size() &&
                 preview_bounds_excluded[mesh_index] != 0U) {
                 ++mesh_bounds_outlier_draw_skipped_count;
@@ -6785,7 +6827,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                     }
                 }
             }
-            if (skip_miq_outlier_draws) {
+            if (skip_bounds_outlier_draws) {
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
                     ++mesh_extent_outlier_skipped_count;
                     continue;

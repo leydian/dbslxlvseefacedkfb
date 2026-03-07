@@ -292,6 +292,42 @@ static std::uint64_t GetJsonU64(const std::string& json, const std::string& key,
     return static_cast<std::uint64_t>(std::strtoull(json.substr(i, end - i).c_str(), nullptr, 10));
 }
 
+static double GetJsonF64(const std::string& json, const std::string& key, double fallback = 0.0) {
+    const auto needle = "\"" + key + "\"";
+    const auto key_pos = json.find(needle);
+    if (key_pos == std::string::npos) {
+        return fallback;
+    }
+    const auto colon = json.find(':', key_pos + needle.size());
+    if (colon == std::string::npos) {
+        return fallback;
+    }
+    std::size_t i = colon + 1U;
+    while (i < json.size() && std::isspace(static_cast<unsigned char>(json[i])) != 0) {
+        ++i;
+    }
+    std::size_t end = i;
+    if (end < json.size() && (json[end] == '-' || json[end] == '+')) {
+        ++end;
+    }
+    bool has_digit = false;
+    while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end])) != 0) {
+        has_digit = true;
+        ++end;
+    }
+    if (end < json.size() && json[end] == '.') {
+        ++end;
+        while (end < json.size() && std::isdigit(static_cast<unsigned char>(json[end])) != 0) {
+            has_digit = true;
+            ++end;
+        }
+    }
+    if (!has_digit) {
+        return fallback;
+    }
+    return std::strtod(json.substr(i, end - i).c_str(), nullptr);
+}
+
 static bool HasJsonKey(const std::string& json, const std::string& key) {
     return json.find("\"" + key + "\"") != std::string::npos;
 }
@@ -381,8 +417,8 @@ static std::vector<std::string> GetJsonStringArray(const std::string& json, cons
 
 static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
     const auto schema_version = GetJsonU32(output, "schema_version");
-    if (schema_version != 2U && schema_version != 3U && schema_version != 4U && schema_version != 5U) {
-        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2, 3, 4, or 5");
+    if (schema_version != 2U && schema_version != 3U && schema_version != 4U && schema_version != 5U && schema_version != 6U) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: schema_version must be 2, 3, 4, 5, or 6");
     }
     const auto status = GetJsonString(output, "status");
     if (status.empty()) {
@@ -428,6 +464,20 @@ static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
         }
         if (!HasJsonKey(output, "timing_ms")) {
             return core::Result<bool>::Fail("SCHEMA_INVALID: missing timing_ms");
+        }
+    }
+    if (status == "ok" && schema_version >= 6U) {
+        if (!HasJsonKey(output, "payload_quality_score")) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing payload_quality_score");
+        }
+        if (!HasJsonKey(output, "skin_binding_coverage")) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing skin_binding_coverage");
+        }
+        if (GetJsonString(output, "payload_route_reason_code").empty()) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing payload_route_reason_code");
+        }
+        if (!HasJsonKey(output, "topology_flags")) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing topology_flags");
         }
     }
     return core::Result<bool>::Ok(true);
@@ -1223,10 +1273,19 @@ static bool TryBuildHeuristicMeshPayloadFromBlob(
         return false;
     }
 
+    const float keep_cx = 0.5f * (kmin_x + kmax_x);
+    const float keep_cy = 0.5f * (kmin_y + kmax_y);
+    const float keep_cz = 0.5f * (kmin_z + kmax_z);
+    const float keep_span = std::max(kex, std::max(key, kez));
+    const float target_span = 1.6f;
+    const float span_safe = std::max(1.0e-4f, keep_span);
+    const float normalization_scale = std::clamp(target_span / span_safe, 0.05f, 8.0f);
+
     const std::size_t target_points = 2200U;
     const std::size_t kept_count = kept_points.size();
     const std::size_t step = std::max<std::size_t>(1U, kept_count / target_points);
-    const float point_size = std::max(0.0008f, std::min(span * 0.0022f, 0.018f));
+    const float normalized_span = keep_span * normalization_scale;
+    const float point_size = std::max(0.0010f, std::min(normalized_span * 0.0022f, 0.018f));
     std::vector<std::uint8_t> splat_vertices;
     std::vector<std::uint32_t> splat_indices;
     splat_vertices.reserve((kept_count / step + 1U) * 3U * 12U);
@@ -1235,9 +1294,9 @@ static bool TryBuildHeuristicMeshPayloadFromBlob(
     std::size_t splat_count = 0U;
     for (std::size_t k = 0U; k < kept_count; k += step) {
         const std::size_t i = kept_points[k];
-        const float x = positions[i * 3U + 0U];
-        const float y = positions[i * 3U + 1U];
-        const float z = positions[i * 3U + 2U];
+        const float x = (positions[i * 3U + 0U] - keep_cx) * normalization_scale;
+        const float y = (positions[i * 3U + 1U] - keep_cy) * normalization_scale;
+        const float z = (positions[i * 3U + 2U] - keep_cz) * normalization_scale;
         if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
             continue;
         }
@@ -1376,10 +1435,16 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto sidecar_mesh_payload_count = GetJsonU32(output, "mesh_payload_count");
     const auto sidecar_material_payload_count = GetJsonU32(output, "material_payload_count");
     const auto render_payload_mode = GetJsonString(output, "render_payload_mode");
+    const auto sidecar_payload_quality_score = GetJsonU32(output, "payload_quality_score");
+    const auto sidecar_skin_binding_coverage = static_cast<float>(GetJsonF64(output, "skin_binding_coverage", 0.0));
+    const auto sidecar_payload_route_reason_code = GetJsonString(output, "payload_route_reason_code");
+    const auto sidecar_topology_flags = GetJsonStringArray(output, "topology_flags");
     bool used_heuristic_mesh_payload = false;
     bool used_structured_mesh_payload = false;
-    // Extraction is enabled by default; explicit disable flags are opt-out only.
-    const bool enable_structured_mesh = !EnvFlagEnabled("VSF_DISABLE_STRUCTURED_MESH");
+    // Keep heuristic extraction as default path; structured extraction is opt-in
+    // because false-positive index pairing can produce oversized artifact triangles.
+    const bool enable_structured_mesh =
+        EnvFlagEnabled("VSF_ENABLE_STRUCTURED_MESH") && !EnvFlagEnabled("VSF_DISABLE_STRUCTURED_MESH");
     const bool enable_heuristic_mesh = !EnvFlagEnabled("VSF_DISABLE_HEURISTIC_MESH");
     const bool allow_placeholder_render = EnvFlagEnabled("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
     if (render_payload_mode != "none" && sidecar_mesh_payload_count == 0U) {
@@ -1406,11 +1471,12 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             pkg.warning_codes.push_back("VSF_PLACEHOLDER_OUTPUT_BLOCKED");
             pkg.missing_features.push_back("authored mesh payload extraction");
         }
-    } else if (render_payload_mode == "object_stub_v1" && sidecar_mesh_payload_count > 0U) {
+    } else if ((render_payload_mode == "object_stub_v1" || render_payload_mode == "authored_mesh_v1") && sidecar_mesh_payload_count > 0U) {
         std::uint32_t heuristic_payload_count = 0U;
         std::uint32_t heuristic_index_count_total = 0U;
         std::uint32_t structured_payload_count = 0U;
         std::uint32_t structured_index_count_total = 0U;
+        const bool prefer_authored_route = render_payload_mode == "authored_mesh_v1";
         if (enable_structured_mesh || enable_heuristic_mesh) {
             auto probe = reader_.Probe(path);
             if (probe.ok && !probe.value.serialized_file_bytes.empty()) {
@@ -1459,13 +1525,42 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             heuristic_index_count_total >= 90U;
         const bool structured_quality_ok =
             structured_payload_count >= 1U &&
-            structured_index_count_total >= 120U;
-        if (!structured_quality_ok && !heuristic_quality_ok) {
+            structured_index_count_total >= (prefer_authored_route ? 240U : 120U);
+        const bool authored_quality_ok =
+            prefer_authored_route &&
+            structured_quality_ok &&
+            sidecar_payload_quality_score >= 60U &&
+            sidecar_skin_binding_coverage >= 0.5f;
+        if (authored_quality_ok) {
+            pkg.warnings.push_back("W_RENDER_PAYLOAD: authored mesh payload selected.");
+            pkg.warning_codes.push_back("VSF_AUTHORED_MESH_PAYLOAD");
+            pkg.warnings.push_back(
+                "W_AUTHORED_MESH: payloads=" + std::to_string(structured_payload_count) +
+                ", indices=" + std::to_string(structured_index_count_total) +
+                ", sidecar-quality=" + std::to_string(sidecar_payload_quality_score) +
+                ", skin-coverage=" + std::to_string(sidecar_skin_binding_coverage));
+            used_heuristic_mesh_payload = false;
+        } else if (structured_quality_ok) {
+            pkg.warnings.push_back("W_RENDER_PAYLOAD: structured indexed mesh payload extracted.");
+            pkg.warning_codes.push_back("VSF_SERIALIZED_STRUCTURED_MESH_PAYLOAD");
+            pkg.warnings.push_back(
+                "W_STRUCTURED_MESH: payloads=" + std::to_string(structured_payload_count) +
+                ", indices=" + std::to_string(structured_index_count_total));
+            used_heuristic_mesh_payload = false;
+        } else if (heuristic_quality_ok) {
+            used_heuristic_mesh_payload = true;
+            pkg.warnings.push_back("W_RENDER_PAYLOAD: heuristic mesh payload extracted from serialized mesh objects.");
+            pkg.warning_codes.push_back("VSF_SERIALIZED_HEURISTIC_MESH_PAYLOAD");
+            pkg.warnings.push_back(
+                "W_HEURISTIC_MESH: payloads=" + std::to_string(heuristic_payload_count) +
+                ", indices=" + std::to_string(heuristic_index_count_total));
+        } else {
             pkg.mesh_payloads.clear();
             for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
                 pkg.mesh_payloads.push_back(BuildObjectStubPayload(i));
             }
-            pkg.warnings.push_back("W_RENDER_PAYLOAD: object stub payload applied from sidecar contract.");
+            pkg.warnings.push_back("W_RENDER_PAYLOAD: safe fallback applied (object stub).");
+            pkg.warning_codes.push_back("VSF_SAFE_FALLBACK_APPLIED");
             pkg.warning_codes.push_back("VSF_OBJECT_STUB_RENDER_PAYLOAD");
             pkg.warnings.push_back(
                 "W_HEURISTIC_MESH: quality-low, fallback=object_stub, structured-payloads=" +
@@ -1477,27 +1572,28 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
                 ", structured-enabled=" + std::string(enable_structured_mesh ? "true" : "false") +
                 ", heuristic-enabled=" + std::string(enable_heuristic_mesh ? "true" : "false"));
             used_structured_mesh_payload = false;
-        } else {
-            if (structured_quality_ok) {
-                pkg.warnings.push_back("W_RENDER_PAYLOAD: structured indexed mesh payload extracted.");
-                pkg.warning_codes.push_back("VSF_SERIALIZED_STRUCTURED_MESH_PAYLOAD");
-                pkg.warnings.push_back(
-                    "W_STRUCTURED_MESH: payloads=" + std::to_string(structured_payload_count) +
-                    ", indices=" + std::to_string(structured_index_count_total));
-                used_heuristic_mesh_payload = false;
-            } else {
-                used_heuristic_mesh_payload = true;
-                pkg.warnings.push_back("W_RENDER_PAYLOAD: heuristic mesh payload extracted from serialized mesh objects.");
-                pkg.warning_codes.push_back("VSF_SERIALIZED_HEURISTIC_MESH_PAYLOAD");
-                pkg.warnings.push_back(
-                    "W_HEURISTIC_MESH: payloads=" + std::to_string(heuristic_payload_count) +
-                    ", indices=" + std::to_string(heuristic_index_count_total));
-            }
         }
         pkg.warnings.push_back(
             "W_STRUCTURED_TRY: payloads=" + std::to_string(structured_payload_count) +
             ", indices=" + std::to_string(structured_index_count_total) +
             ", enabled=" + std::string(enable_structured_mesh ? "true" : "false"));
+        if (!sidecar_payload_route_reason_code.empty()) {
+            pkg.warnings.push_back("W_ROUTE: code=" + sidecar_payload_route_reason_code);
+        }
+        if (!sidecar_topology_flags.empty()) {
+            std::ostringstream topo;
+            topo << "W_TOPOLOGY_FLAGS: ";
+            for (std::size_t i = 0; i < sidecar_topology_flags.size(); ++i) {
+                if (i > 0U) {
+                    topo << "|";
+                }
+                topo << sidecar_topology_flags[i];
+            }
+            pkg.warnings.push_back(topo.str());
+        }
+        pkg.warnings.push_back(
+            "W_PAYLOAD_QUALITY: sidecar_score=" + std::to_string(sidecar_payload_quality_score) +
+            ", sidecar_skin_coverage=" + std::to_string(sidecar_skin_binding_coverage));
         if (sidecar_material_payload_count > 0U) {
             MaterialRenderPayload mat {};
             mat.name = "VSF_OBJECT_STUB_MAT";

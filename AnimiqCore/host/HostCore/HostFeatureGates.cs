@@ -52,6 +52,7 @@ public static class HostFeatureGateResolver
         var info = avatarInfo.Value;
         var armSignal = ResolveSignalCode(info, "ARM_POSE_");
         var shadowSignal = ResolveSignalCode(info, "SHADOW_DISABLED_");
+        var isVsfAvatar = info.DetectedFormat == NcAvatarFormatHint.VsfAvatar;
 
         FeatureGateState armGate;
         if (!string.IsNullOrWhiteSpace(armSignal))
@@ -87,9 +88,13 @@ public static class HostFeatureGateResolver
         {
             expressionGate = Disabled(tracking.LastErrorCode);
         }
-        else if (info.ExpressionCount == 0U)
+        else if (info.ExpressionCount == 0U && !isVsfAvatar)
         {
             expressionGate = Disabled("EXPRESSION_COUNT_ZERO");
+        }
+        else if (info.ExpressionCount == 0U && isVsfAvatar)
+        {
+            expressionGate = Disabled("EXPRESSION_OPTIONAL_VSFAVATAR");
         }
         else if (!tracking.IsActive)
         {
@@ -111,7 +116,7 @@ public static class HostFeatureGateResolver
             commonClass = "native_submit_failure";
             commonReason = tracking.LastErrorCode;
         }
-        else if (info.ExpressionCount == 0U)
+        else if (info.ExpressionCount == 0U && !isVsfAvatar)
         {
             commonClass = "payload_policy_gate";
             commonReason = "EXPRESSION_COUNT_ZERO";
@@ -208,6 +213,7 @@ public static class HostFeatureGateResolver
             "SHADOW_DISABLED_SHADOW_DRAW_EMPTY" => "그림자 드로우 큐가 비어 있습니다",
             "SHADOW_PASS_NOT_REPORTED" => "이 아바타 셰이더가 그림자 패스를 지원하지 않습니다",
             "EXPRESSION_COUNT_ZERO" => "아바타에 표정 페이로드가 없습니다",
+            "EXPRESSION_OPTIONAL_VSFAVATAR" => "VSFAvatar는 표정 페이로드가 없어도 렌더링됩니다",
             "TRACKING_INACTIVE" => "트래킹이 시작되지 않았습니다",
             "TRACKING_STALE" => "트래킹 입력이 오래되었습니다 (연결 확인)",
             _ when reasonCode.StartsWith("NC_SET_", StringComparison.Ordinal) => "네이티브 제출에 실패했습니다",
@@ -230,6 +236,8 @@ public static class HostFeatureGateResolver
             {
                 "EXPRESSION_COUNT_ZERO" =>
                     "아바타 표정 페이로드가 비어 있습니다. 표정 카탈로그/블렌드셰이프 바인딩을 포함하여 아바타를 다시 내보내세요.",
+                "EXPRESSION_OPTIONAL_VSFAVATAR" =>
+                    "VSFAvatar는 표정 페이로드가 없어도 렌더링됩니다. 필요 시 트래킹만 별도로 활성화하세요.",
                 "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY" =>
                     "정적 스키닝 정책으로 팔 포즈가 차단되었습니다. 유효한 리그/스키닝 데이터가 포함된 페이로드를 사용하세요.",
                 "ARM_POSE_PAYLOAD_MISSING" =>

@@ -44,8 +44,8 @@ std::string EscapeJson(const std::string& s) {
 void PrintErrorJson(const std::string& error) {
     std::cout << "{"
               << "\"status\":\"error\","
-              << "\"schema_version\":5,"
-              << "\"extractor_version\":\"inhouse-sidecar-v5\","
+              << "\"schema_version\":6,"
+              << "\"extractor_version\":\"inhouse-sidecar-v6\","
               << "\"error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"primary_error_code\":\"SIDECAR_RUNTIME_ERROR\","
               << "\"error_message\":\"" << EscapeJson(error) << "\","
@@ -209,12 +209,32 @@ int main(int argc, char** argv) {
         }
     }
 
+    const bool authored_table_ready =
+        p.probe_stage == "complete" &&
+        p.object_table_parsed &&
+        p.mesh_object_count > 0U;
+    const bool can_emit_authored_payload =
+        authored_table_ready &&
+        p.skinned_mesh_renderer_count > 0U;
     const bool can_emit_object_stub_payload = p.probe_stage == "complete" && p.object_table_parsed;
     const bool can_emit_placeholder_payload = false;
     std::string render_payload_mode = "none";
     std::uint32_t mesh_payload_count = 0U;
     std::uint32_t material_payload_count = 0U;
-    if (can_emit_object_stub_payload) {
+    std::uint32_t payload_quality_score = 0U;
+    std::vector<std::string> topology_flags;
+    float skin_binding_coverage = 0.0f;
+    std::string payload_route_reason_code = "VSF_ROUTE_NONE";
+    if (can_emit_authored_payload) {
+        render_payload_mode = "authored_mesh_v1";
+        mesh_payload_count = std::min<std::uint32_t>(std::max<std::uint32_t>(1U, mesh_count), 128U);
+        material_payload_count = 1U;
+        payload_quality_score = 78U;
+        topology_flags.push_back("mesh_object_table_ready");
+        topology_flags.push_back("skinned_renderer_linked");
+        skin_binding_coverage = 1.0f;
+        payload_route_reason_code = "VSF_ROUTE_AUTHORED_OBJECT_TABLE_READY";
+    } else if (can_emit_object_stub_payload) {
         render_payload_mode = "object_stub_v1";
         std::uint32_t proxy_count = std::max<std::uint32_t>(1U, mesh_count);
         if (proxy_count == 1U && p.mesh_object_count == 0U && p.object_count >= 128U) {
@@ -222,24 +242,38 @@ int main(int argc, char** argv) {
         }
         mesh_payload_count = std::min<std::uint32_t>(proxy_count, 28U);
         material_payload_count = 1U;
+        payload_quality_score = authored_table_ready ? 42U : 22U;
+        topology_flags.push_back(authored_table_ready ? "mesh_objects_present_payload_pending" : "mesh_objects_missing");
+        skin_binding_coverage = (p.skinned_mesh_renderer_count > 0U) ? 0.35f : 0.0f;
+        payload_route_reason_code = authored_table_ready
+            ? "VSF_ROUTE_OBJECT_STUB_AUTHORED_PENDING"
+            : "VSF_ROUTE_OBJECT_STUB_ONLY";
     } else if (can_emit_placeholder_payload) {
         render_payload_mode = "placeholder_quad_v1";
         mesh_payload_count = 1U;
         material_payload_count = 1U;
+        payload_quality_score = 8U;
+        topology_flags.push_back("placeholder_only");
+        skin_binding_coverage = 0.0f;
+        payload_route_reason_code = "VSF_ROUTE_PLACEHOLDER_ONLY";
     }
     const std::string serialized_best_candidate_path =
         p.serialized_best_candidate_path.empty() ? "NONE" : p.serialized_best_candidate_path;
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started_at).count();
-    if (can_emit_object_stub_payload) {
+    if (can_emit_authored_payload) {
+        warnings.push_back("W_RENDER_PAYLOAD: authored mesh contract emitted (loader extraction required).");
+        warnings.push_back("W_ROUTE: code=" + payload_route_reason_code);
+    } else if (can_emit_object_stub_payload) {
         warnings.push_back("W_RENDER_PAYLOAD: object stub payload emitted (authored extraction pending).");
+        warnings.push_back("W_ROUTE: code=" + payload_route_reason_code);
         missing_features.push_back("authored mesh payload extraction");
     }
 
     std::cout << "{"
               << "\"status\":\"ok\","
-              << "\"schema_version\":5,"
-              << "\"extractor_version\":\"inhouse-sidecar-v5\","
+              << "\"schema_version\":6,"
+              << "\"extractor_version\":\"inhouse-sidecar-v6\","
               << "\"display_name\":\"" << EscapeJson(fs::path(path).stem().string()) << "\","
               << "\"compat_level\":\"" << compat_level << "\","
               << "\"probe_stage\":\"" << EscapeJson(p.probe_stage) << "\","
@@ -253,6 +287,10 @@ int main(int argc, char** argv) {
               << "\"render_payload_mode\":\"" << render_payload_mode << "\","
               << "\"mesh_payload_count\":" << mesh_payload_count << ","
               << "\"material_payload_count\":" << material_payload_count << ","
+              << "\"payload_quality_score\":" << payload_quality_score << ","
+              << "\"skin_binding_coverage\":" << skin_binding_coverage << ","
+              << "\"payload_route_reason_code\":\"" << EscapeJson(payload_route_reason_code) << "\","
+              << "\"topology_flags\":" << JoinJsonStringArray(topology_flags) << ","
               << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","
               << "\"selected_block0_hypothesis\":\"" << EscapeJson(p.selected_block0_hypothesis) << "\","
               << "\"block0_attempt_count\":" << p.block0_attempt_count << ","

@@ -3498,8 +3498,33 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                         mesh_node_transforms[mesh_i])) {
                     mesh_node_transform_applied[mesh_i] = true;
 
-                    // Also bake normals.
-                    if (has_vrm_normals) {
+                    // Fix winding order for reflection transforms (det < 0).
+                    // A negative determinant means the transform includes a reflection,
+                    // which flips CCW→CW winding, causing back-face culling to discard
+                    // the visible side (inside-out rendering). Swap index 1 & 2 per
+                    // triangle to restore CCW front-face convention.
+                    {
+                        const auto& mnf = mesh_node_transforms[mesh_i];
+                        const float det3x3 =
+                            mnf[0] * (mnf[5] * mnf[10] - mnf[6] * mnf[9]) -
+                            mnf[1] * (mnf[4] * mnf[10] - mnf[6] * mnf[8]) +
+                            mnf[2] * (mnf[4] * mnf[9]  - mnf[5] * mnf[8]);
+                        if (det3x3 < 0.0f) {
+                            const std::size_t tri_count = mesh_payload.indices.size() / 3U;
+                            for (std::size_t ti = 0U; ti < tri_count; ++ti) {
+                                std::swap(mesh_payload.indices[ti * 3U + 1U],
+                                          mesh_payload.indices[ti * 3U + 2U]);
+                            }
+                            pkg.warnings.push_back(
+                                "W_PAYLOAD: VRM_REFLECTION_WINDING_FIX: mesh=" + mesh_payload.name);
+                            pkg.warning_codes.push_back("VRM_REFLECTION_WINDING_FIX");
+                        }
+                    }
+
+                    // Also bake normals (non-skinned meshes only).
+                    // Skinned meshes have normals handled by GPU skinning via ibm_adjusted;
+                    // baking here would leave them in local space after ibm correction.
+                    if (has_vrm_normals && !is_skinned) {
                         const auto& mnm = mesh_node_transforms[mesh_i];
                         const float s0 = std::sqrt(mnm[0]*mnm[0] + mnm[1]*mnm[1] + mnm[2]*mnm[2]);
                         const float s1 = std::sqrt(mnm[4]*mnm[4] + mnm[5]*mnm[5] + mnm[6]*mnm[6]);
