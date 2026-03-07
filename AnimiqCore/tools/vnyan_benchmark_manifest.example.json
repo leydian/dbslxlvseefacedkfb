@@ -1,0 +1,131 @@
+{
+  "benchmarkName": "vnyan_10axis_4week",
+  "version": "1.0.0",
+  "products": [
+    "animiq",
+    "vnyan"
+  ],
+  "iterationsPerAxisPerProduct": 3,
+  "axes": [
+    {
+      "id": "node_graph_ux",
+      "name": "Node Graph Automation UX",
+      "owner": "platform",
+      "weight": 0.12,
+      "kpis": [
+        { "key": "setup_minutes", "better": "lower" },
+        { "key": "debug_minutes", "better": "lower" },
+        { "key": "scenario_success_rate", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 7, "impact": 8, "confidence": 75, "effort": 5 }
+    },
+    {
+      "id": "external_event_integration",
+      "name": "External Event Integration",
+      "owner": "platform",
+      "weight": 0.11,
+      "kpis": [
+        { "key": "integration_success_rate", "better": "higher" },
+        { "key": "event_latency_ms", "better": "lower" },
+        { "key": "recovery_minutes", "better": "lower" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 9, "confidence": 70, "effort": 8 }
+    },
+    {
+      "id": "expression_mapping_flexibility",
+      "name": "Expression Mapping Flexibility",
+      "owner": "tracking",
+      "weight": 0.11,
+      "kpis": [
+        { "key": "setup_minutes", "better": "lower" },
+        { "key": "tuning_iterations", "better": "lower" },
+        { "key": "mapping_quality_score", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 6, "impact": 8, "confidence": 70, "effort": 5 }
+    },
+    {
+      "id": "input_source_scalability",
+      "name": "Input Source Scalability",
+      "owner": "tracking",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "input_drop_rate", "better": "lower" },
+        { "key": "cpu_percent", "better": "lower" },
+        { "key": "gpu_percent", "better": "lower" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 8, "confidence": 65, "effort": 8 }
+    },
+    {
+      "id": "avatar_swap_workflow",
+      "name": "Avatar Swap Workflow",
+      "owner": "avatar",
+      "weight": 0.09,
+      "kpis": [
+        { "key": "swap_elapsed_ms", "better": "lower" },
+        { "key": "swap_fail_rate", "better": "lower" },
+        { "key": "state_retention_rate", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 7, "impact": 7, "confidence": 75, "effort": 4 }
+    },
+    {
+      "id": "spout2_2d_interop",
+      "name": "Spout2 2D Interop",
+      "owner": "interop",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "first_connect_minutes", "better": "lower" },
+        { "key": "frame_stability_score", "better": "higher" },
+        { "key": "operator_complexity_score", "better": "lower" }
+      ],
+      "riceDefaults": { "reach": 9, "impact": 9, "confidence": 70, "effort": 8 }
+    },
+    {
+      "id": "item_system_modularity",
+      "name": "Item System Modularity",
+      "owner": "runtime",
+      "weight": 0.09,
+      "kpis": [
+        { "key": "new_item_setup_minutes", "better": "lower" },
+        { "key": "reuse_rate", "better": "higher" },
+        { "key": "maintenance_score", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 6, "impact": 7, "confidence": 65, "effort": 5 }
+    },
+    {
+      "id": "world_preset_operations",
+      "name": "World Preset Operations",
+      "owner": "runtime",
+      "weight": 0.09,
+      "kpis": [
+        { "key": "scene_switch_ms", "better": "lower" },
+        { "key": "memory_peak_mb", "better": "lower" },
+        { "key": "scene_stability_rate", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 7, "impact": 7, "confidence": 70, "effort": 6 }
+    },
+    {
+      "id": "ui_theming_customization",
+      "name": "UI Theming Customization",
+      "owner": "ui",
+      "weight": 0.09,
+      "kpis": [
+        { "key": "theme_build_minutes", "better": "lower" },
+        { "key": "readability_score", "better": "higher" },
+        { "key": "sharing_score", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 5, "impact": 6, "confidence": 80, "effort": 3 }
+    },
+    {
+      "id": "runtime_operational_options",
+      "name": "Runtime Operational Options",
+      "owner": "ops",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "issue_recovery_rate", "better": "higher" },
+        { "key": "recovery_minutes", "better": "lower" },
+        { "key": "operator_clarity_score", "better": "higher" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 8, "confidence": 75, "effort": 4 }
+    }
+  ]
+}

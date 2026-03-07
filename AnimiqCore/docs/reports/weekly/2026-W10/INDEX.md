@@ -212,6 +212,7 @@ Report list for this week.
 - [2026-03-07_vrm_clothing_orientation_fix.md](./2026-03-07_vrm_clothing_orientation_fix.md)
 - [2026-03-07_vseeface_parity_global_defaults_and_vrm_origin_armpose_guard.md](./2026-03-07_vseeface_parity_global_defaults_and_vrm_origin_armpose_guard.md)
 - [2026-03-07_vsfavatar_output_readiness_hardening.md](./2026-03-07_vsfavatar_output_readiness_hardening.md)
+- [2026-03-08_vnyan_10axis_benchmark_execution_pack.md](./2026-03-08_vnyan_10axis_benchmark_execution_pack.md)
 - [2026-03-08_vrm_loader_mesh_loop_compile_recovery_and_wpf_redeploy.md](./2026-03-08_vrm_loader_mesh_loop_compile_recovery_and_wpf_redeploy.md)
 - [2026-03-08_vrm_wpf_render_recovery_and_loader_index_contract_fix.md](./2026-03-08_vrm_wpf_render_recovery_and_loader_index_contract_fix.md)
 - [2026-03-08_vsfavatar_authored_route_and_safe_fallback_runtime_stabilization_bundle.md](./2026-03-08_vsfavatar_authored_route_and_safe_fallback_runtime_stabilization_bundle.md)

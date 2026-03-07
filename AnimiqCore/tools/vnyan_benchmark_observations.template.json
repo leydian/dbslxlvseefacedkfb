@@ -1,0 +1,29 @@
+{
+  "benchmarkName": "vnyan_10axis_4week",
+  "captures": [
+    {
+      "axisId": "node_graph_ux",
+      "product": "animiq",
+      "iteration": 1,
+      "capturedAt": "2026-03-08T10:00:00+09:00",
+      "kpis": {
+        "setup_minutes": 20.0,
+        "debug_minutes": 15.0,
+        "scenario_success_rate": 0.8
+      },
+      "notes": "sample row"
+    },
+    {
+      "axisId": "node_graph_ux",
+      "product": "vnyan",
+      "iteration": 1,
+      "capturedAt": "2026-03-08T10:30:00+09:00",
+      "kpis": {
+        "setup_minutes": 12.0,
+        "debug_minutes": 9.0,
+        "scenario_success_rate": 0.9
+      },
+      "notes": "sample row"
+    }
+  ]
+}
