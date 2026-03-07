@@ -93,7 +93,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "pip upgrade failed (exit=$LASTEXITCODE)"
 }
 
-& $venvPython -m pip install mediapipe opencv-python
+& $venvPython -m pip install mediapipe==0.10.11 opencv-python==4.9.0.80
 if ($LASTEXITCODE -ne 0) {
     throw "pip install mediapipe/opencv-python failed (exit=$LASTEXITCODE)"
 }

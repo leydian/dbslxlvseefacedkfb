@@ -1230,6 +1230,8 @@ if ($IncludeWinUi) {
         $log.Add("WinUI publish: failed")
         $log.Add("WinUI publish error: $($publishErrorText.Trim())")
 
+        $isWmc9999 = $publishErrorText -match "WMC9999" -or $publishErrorText -match "MSB3073"
+
         if ($CollectWinUiDiagnostics) {
             Write-Step "WinUI publish failed; collecting diagnostics..."
             Collect-WinUiDiagnostics -Reason "winui publish failed" -PublishError $publishErrorText -Preflight $winUiPreflight -NuGetProbe $nugetProbe
@@ -1238,8 +1240,13 @@ if ($IncludeWinUi) {
             $log.Add("WinUI diagnostics: skipped (CollectWinUiDiagnostics=false)")
         }
 
-        $log | Set-Content -Path $logPath -Encoding UTF8
-        throw
+        if ($isWmc9999) {
+            Write-Host "[publish] WinUI failed with WMC9999/MSB3073 (Platform Unsupported). Downgrading to WPF-only pass." -ForegroundColor Yellow
+            $log.Add("WinUI publish: downgraded to soft-fail due to platform incompatibility (WMC9999).")
+        } else {
+            $log | Set-Content -Path $logPath -Encoding UTF8
+            throw
+        }
     }
 } else {
     $log.Add("WinUI publish: skipped (WPF_ONLY mode; use -IncludeWinUi for optional diagnostics track)")

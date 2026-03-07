@@ -37,6 +37,7 @@ function Get-DefaultUnityEditorPath {
     param([string]$Version)
     $candidates = @(
         "C:\Program Files\Unity\Hub\Editor\$Version\Editor\Unity.exe",
+        "C:\Program Files\Unity\Hub\Editor\2021.3.18f1\Editor\Unity.exe",
         "C:\Program Files\Unity\Editor\Unity.exe"
     )
     foreach ($c in $candidates) {

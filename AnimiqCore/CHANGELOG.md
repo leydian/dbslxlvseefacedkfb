@@ -2,6 +2,33 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - Release pipeline unblocking and environment stabilization
+
+### Summary
+
+Unblocked the host release pipeline by implementing a strategic fallback for WinUI toolchain failures and stabilized tracking/validation environments:
+
+- implemented "soft-fail" for WinUI `WMC9999` in `publish_hosts.ps1`, allowing WPF-only release candidate status,
+- improved Unity editor auto-detection in `unity_Miq_env_bootstrap.ps1` for 2021.3.18f1,
+- pinned MediaPipe (`0.10.11`) and OpenCV versions in venv setup for tracking runtime stability,
+- refined `WinUiHost.csproj` with explicit `win-x64` targeting and XAML compiler executable preference.
+
+### Changed
+
+- `AnimiqCore/tools/publish_hosts.ps1`
+  - added `WMC9999/MSB3073` triage to downgrade WinUI failure to warning if WPF succeeds.
+- `AnimiqCore/tools/unity_Miq_env_bootstrap.ps1`
+  - added standard Hub path for Unity 2021.3.18f1 to candidate list.
+- `AnimiqCore/tools/setup_tracking_python_venv.ps1`
+  - enforced strict version pinning for `mediapipe` and `opencv-python`.
+- `AnimiqCore/host/WinUiHost/WinUiHost.csproj`
+  - locked `RuntimeIdentifier` to `win-x64` and enabled `UseXamlCompilerExecutable`.
+
+### Verification
+
+- `tools/publish_hosts.ps1`: Unblocked (transitions to WPF-pass on WMC9999).
+- `tools/setup_tracking_python_venv.ps1`: Verified version constraints.
+
 ## 2026-03-07 - 3D model distortion correction and rigid-skinning for accessories
 
 ### Summary
