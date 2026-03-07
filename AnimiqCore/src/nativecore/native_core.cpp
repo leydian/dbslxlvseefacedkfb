@@ -3213,13 +3213,15 @@ bool ApplyStaticSkinningToVertexBlob(
         std::vector<DirectX::XMMATRIX> skin_matrices(bind_pose_count, DirectX::XMMatrixIdentity());
         for (std::size_t i = 0U; i < bind_pose_count; ++i) {
             if (convention == SkinningMatrixConvention::GltfColumnMajor) {
-                // Some legacy payloads carry glTF column-major matrices directly.
-                // Convert to DX row-major before applying skinning.
-                const auto bone_dx = DirectX::XMMatrixTranspose(bone_matrices[i]);
-                const auto bind_dx = DirectX::XMMatrixTranspose(bind_matrices[i]);
-                skin_matrices[i] = DirectX::XMMatrixMultiply(bone_dx, bind_dx);
+                // glTF column-major matrices loaded into XMMATRIX via XMLoadFloat4x4 
+                // result in row-major matrices in DX layout (transposed).
+                // To compute V * (IBM_row * Bone_row), we multiply IBM * Bone.
+                // However, if the source was true column-major, and we want 
+                // (Bone_col * IBM_col * V_col)^T = V_row * IBM_row * Bone_row.
+                skin_matrices[i] = DirectX::XMMatrixMultiply(bind_matrices[i], bone_matrices[i]);
             } else {
-                skin_matrices[i] = DirectX::XMMatrixMultiply(bone_matrices[i], bind_matrices[i]);
+                // Default to standard row-vector skinning order: V * Bind * Bone.
+                skin_matrices[i] = DirectX::XMMatrixMultiply(bind_matrices[i], bone_matrices[i]);
             }
         }
         return skin_matrices;

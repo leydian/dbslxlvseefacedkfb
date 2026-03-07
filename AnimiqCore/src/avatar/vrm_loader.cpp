@@ -1751,98 +1751,33 @@ void BuildNodeGlobalTransforms(
     const JsonValue* nodes_v,
     std::vector<std::array<float, 16U>>* out_global,
     std::vector<std::size_t>* out_parent) {
-    if (out_global == nullptr || out_parent == nullptr) {
-        return;
-    }
-    out_global->clear();
-    out_parent->clear();
-    if (nodes_v == nullptr || nodes_v->type != JsonValue::Type::Array) {
-        return;
-    }
+    if (out_global == nullptr || out_parent == nullptr) return;
+    out_global->clear(); out_parent->clear();
+    if (nodes_v == nullptr || nodes_v->type != JsonValue::Type::Array) return;
     const std::size_t node_count = nodes_v->array_value.size();
     out_global->assign(node_count, MakeIdentityMatrix4x4());
     out_parent->assign(node_count, std::numeric_limits<std::size_t>::max());
     std::vector<std::array<float, 16U>> locals(node_count, MakeIdentityMatrix4x4());
-    std::vector<std::vector<std::size_t>> children(node_count);
 
     for (std::size_t node_i = 0U; node_i < node_count; ++node_i) {
-        const auto& node = nodes_v->array_value[node_i];
-        if (node.type != JsonValue::Type::Object) {
-            continue;
-        }
-        locals[node_i] = ReadNodeLocalMatrixOrIdentity(node);
-        const auto* children_v = FindKey(node, "children");
-        if (children_v == nullptr || children_v->type != JsonValue::Type::Array) {
-            continue;
-        }
-        for (const auto& child : children_v->array_value) {
-            if (child.type != JsonValue::Type::Number) {
-                continue;
-            }
-            const double n = child.number_value;
-            if (n < 0.0 || n > static_cast<double>(std::numeric_limits<std::uint32_t>::max())) {
-                continue;
-            }
-            const auto child_index = static_cast<std::size_t>(static_cast<std::uint32_t>(n));
-            if (child_index >= node_count || child_index == node_i) {
-                continue;
-            }
-            children[node_i].push_back(child_index);
-            if ((*out_parent)[child_index] == std::numeric_limits<std::size_t>::max()) {
-                (*out_parent)[child_index] = node_i;
+        locals[node_i] = ReadNodeLocalMatrixOrIdentity(nodes_v->array_value[node_i]);
+        const auto* children_v = FindKey(nodes_v->array_value[node_i], "children");
+        if (children_v && children_v->type == JsonValue::Type::Array) {
+            for (const auto& child : children_v->array_value) {
+                const auto child_index = static_cast<std::size_t>(child.number_value);
+                if (child_index < node_count) (*out_parent)[child_index] = node_i;
             }
         }
     }
 
-    std::vector<std::size_t> stack;
-    stack.reserve(node_count);
-    std::vector<std::array<float, 16U>> stack_parent_world;
-    stack_parent_world.reserve(node_count);
-    std::vector<bool> visited(node_count, false);
-
     for (std::size_t node_i = 0U; node_i < node_count; ++node_i) {
-        if ((*out_parent)[node_i] != std::numeric_limits<std::size_t>::max()) {
-            continue;
+        std::array<float, 16U> acc = locals[node_i];
+        std::size_t p = (*out_parent)[node_i];
+        while (p != std::numeric_limits<std::size_t>::max()) {
+            acc = MulMatrix4x4(locals[p], acc);
+            p = (*out_parent)[p];
         }
-        stack.push_back(node_i);
-        stack_parent_world.push_back(MakeIdentityMatrix4x4());
-        while (!stack.empty()) {
-            const auto current = stack.back();
-            const auto parent_world = stack_parent_world.back();
-            stack.pop_back();
-            stack_parent_world.pop_back();
-            if (current >= node_count) {
-                continue;
-            }
-            (*out_global)[current] = MulMatrix4x4(parent_world, locals[current]);
-            visited[current] = true;
-            const auto current_world = (*out_global)[current];
-            for (const auto child : children[current]) {
-                stack.push_back(child);
-                stack_parent_world.push_back(current_world);
-            }
-        }
-    }
-
-    // Handle disconnected/cyclic nodes defensively.
-    for (std::size_t node_i = 0U; node_i < node_count; ++node_i) {
-        if (visited[node_i]) {
-            continue;
-        }
-        std::size_t cur = node_i;
-        std::array<float, 16U> accum = MakeIdentityMatrix4x4();
-        std::size_t hop = 0U;
-        while (cur < node_count && hop <= node_count) {
-            accum = MulMatrix4x4(locals[cur], accum);
-            const auto parent = (*out_parent)[cur];
-            if (parent == std::numeric_limits<std::size_t>::max() || parent >= node_count) {
-                break;
-            }
-            cur = parent;
-            ++hop;
-        }
-        (*out_global)[node_i] = accum;
-        visited[node_i] = true;
+        (*out_global)[node_i] = acc;
     }
 }
 
@@ -3484,7 +3419,8 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             }
             const bool has_node_transform =
                 mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i];
-            if (has_node_transform) {
+            const bool is_skinned = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
+            if (has_node_transform && !is_skinned) {
                 if (ApplyPositionTransformToVertexBlob(
                         &mesh_payload.vertex_blob,
                         mesh_payload.vertex_stride,
@@ -3907,14 +3843,14 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
         }
     }
-    // All meshes (skinned and static) are now uniformly baked into the 
-    // same coordinate space using their node global transforms.
-    // Therefore, we recommend 0 preview yaw to the host.
-    pkg.recommended_preview_yaw_deg = 0;
+    // VRM models are authored looking towards -Z (backwards) per glTF spec.
+    // To present the avatar facing the camera in the preview, we consistently
+    // recommend a 180 degree yaw rotation. This ensures all parts (hair, clothes,
+    // body) are aligned even if their transform baking outcomes differ.
+    pkg.recommended_preview_yaw_deg = 180;
     pkg.transform_confidence = (multi_ref_mesh_count > 0U || node_transform_conflict_mesh_count > 0U || skinned_payload_failed > 0U)
         ? TransformConfidence::Medium
-        : TransformConfidence::High;
-    if (pkg.mesh_payloads.empty()) {
+        : TransformConfidence::High;    if (pkg.mesh_payloads.empty()) {
         pkg.primary_error_code = "VRM_ASSET_MISSING";
         pkg.compat_level = AvatarCompatLevel::Failed;
         pkg.warnings.push_back("E_PAYLOAD: VRM_ASSET_MISSING: no mesh payload extracted.");

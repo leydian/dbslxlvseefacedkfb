@@ -2,6 +2,29 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - 3D model distortion correction and rigid-skinning for accessories
+
+### Summary
+
+Resolved critical 3D rendering defects identified in model diagnostics:
+
+- fixed vertex distortion by correcting matrix multiplication order in static skinning path,
+- resolved "detached hair/accessory" issue by implementing automatic **Rigid Skinning** for static meshes,
+- ensured all model parts follow bone-tracking movements in real-time.
+
+### Changed
+
+- `AnimiqCore/src/nativecore/native_core.cpp`
+  - corrected `ApplyStaticSkinningToVertexBlob` matrix order to row-vector convention ($V \times IBM \times Bone$).
+- `AnimiqCore/src/avatar/vrm_loader.cpp`
+  - added automatic `SkinRenderPayload` generation for static meshes attached to nodes,
+  - implemented 100%-weight single-joint assignment for rigid parts.
+
+### Verification
+
+- `cmake --build ... --target nativecore`: PASS
+- verified fixed5 parity evidence for accessory-to-head alignment.
+
 ## 2026-03-07 - Release-readiness stabilization, blocker triage, and documentation promotion
 
 ### Summary
