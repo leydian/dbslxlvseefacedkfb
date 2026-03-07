@@ -479,6 +479,12 @@ static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
         if (!HasJsonKey(output, "topology_flags")) {
             return core::Result<bool>::Fail("SCHEMA_INVALID: missing topology_flags");
         }
+        if (!HasJsonKey(output, "authored_extractable_mesh_count")) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing authored_extractable_mesh_count");
+        }
+        if (!HasJsonKey(output, "authored_extractable_vertex_sample_total")) {
+            return core::Result<bool>::Fail("SCHEMA_INVALID: missing authored_extractable_vertex_sample_total");
+        }
     }
     return core::Result<bool>::Ok(true);
 }
@@ -693,16 +699,27 @@ struct IndexCandidate {
 struct VertexCandidate {
     std::size_t segment_index = 0U;
     std::uint32_t stride = 12U;
+    std::uint32_t position_offset = 0U;
     std::size_t vertex_count = 0U;
     float finite_ratio = 0.0f;
     float span = 0.0f;
     float score = 0.0f;
 };
 
+struct StructuredMeshBuildStats {
+    std::uint32_t vertex_stride = 0U;
+    std::uint32_t position_offset = 0U;
+    std::uint32_t raw_index_count = 0U;
+    std::uint32_t selected_index_count = 0U;
+    std::uint32_t selected_window_start_tri = 0U;
+    std::uint32_t selected_window_tri_count = 0U;
+};
+
 static bool TryBuildIndexedMeshPayloadFromBlob(
     const vsf::SerializedMeshObjectBlob& blob,
     std::uint32_t mesh_index,
-    MeshRenderPayload* out_payload) {
+    MeshRenderPayload* out_payload,
+    StructuredMeshBuildStats* out_stats = nullptr) {
     if (out_payload == nullptr) {
         return false;
     }
@@ -825,53 +842,58 @@ static bool TryBuildIndexedMeshPayloadFromBlob(
             if (vertex_count < 32U || vertex_count > 500000U) {
                 continue;
             }
-            const std::size_t sample_count = std::min<std::size_t>(vertex_count, 4000U);
-            std::size_t finite_count = 0U;
-            float min_x = std::numeric_limits<float>::max();
-            float min_y = std::numeric_limits<float>::max();
-            float min_z = std::numeric_limits<float>::max();
-            float max_x = -std::numeric_limits<float>::max();
-            float max_y = -std::numeric_limits<float>::max();
-            float max_z = -std::numeric_limits<float>::max();
-            for (std::size_t i = 0U; i < sample_count; ++i) {
-                const std::size_t at = seg.data_pos + i * stride;
-                const float x = ReadF32LE(blob.bytes, at);
-                const float y = ReadF32LE(blob.bytes, at + 4U);
-                const float z = ReadF32LE(blob.bytes, at + 8U);
-                if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            for (std::uint32_t pos_offset = 0U; pos_offset + 12U <= stride; pos_offset += 4U) {
+                const std::size_t sample_count = std::min<std::size_t>(vertex_count, 4000U);
+                std::size_t finite_count = 0U;
+                float min_x = std::numeric_limits<float>::max();
+                float min_y = std::numeric_limits<float>::max();
+                float min_z = std::numeric_limits<float>::max();
+                float max_x = -std::numeric_limits<float>::max();
+                float max_y = -std::numeric_limits<float>::max();
+                float max_z = -std::numeric_limits<float>::max();
+                for (std::size_t i = 0U; i < sample_count; ++i) {
+                    const std::size_t at = seg.data_pos + i * stride + pos_offset;
+                    const float x = ReadF32LE(blob.bytes, at);
+                    const float y = ReadF32LE(blob.bytes, at + 4U);
+                    const float z = ReadF32LE(blob.bytes, at + 8U);
+                    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+                        continue;
+                    }
+                    if (std::abs(x) > 10000.0f || std::abs(y) > 10000.0f || std::abs(z) > 10000.0f) {
+                        continue;
+                    }
+                    ++finite_count;
+                    min_x = std::min(min_x, x);
+                    min_y = std::min(min_y, y);
+                    min_z = std::min(min_z, z);
+                    max_x = std::max(max_x, x);
+                    max_y = std::max(max_y, y);
+                    max_z = std::max(max_z, z);
+                }
+                const float finite_ratio = sample_count > 0U
+                    ? static_cast<float>(finite_count) / static_cast<float>(sample_count)
+                    : 0.0f;
+                if (finite_ratio < 0.90f || finite_count < 32U) {
                     continue;
                 }
-                if (std::abs(x) > 10000.0f || std::abs(y) > 10000.0f || std::abs(z) > 10000.0f) {
+                const float sx = std::max(0.0f, max_x - min_x);
+                const float sy = std::max(0.0f, max_y - min_y);
+                const float sz = std::max(0.0f, max_z - min_z);
+                const float span = std::max(sx, std::max(sy, sz));
+                if (!std::isfinite(span) || span < 0.005f || span > 3000.0f) {
                     continue;
                 }
-                ++finite_count;
-                min_x = std::min(min_x, x);
-                min_y = std::min(min_y, y);
-                min_z = std::min(min_z, z);
-                max_x = std::max(max_x, x);
-                max_y = std::max(max_y, y);
-                max_z = std::max(max_z, z);
+                float score = finite_ratio * 1000.0f;
+                score += std::min<float>(static_cast<float>(vertex_count), 120000.0f) * 0.01f;
+                score += std::min(span, 4.0f) * 10.0f;
+                if (stride == 12U || stride == 16U || stride == 32U) {
+                    score += 8.0f;
+                }
+                if (pos_offset == 0U) {
+                    score += 3.0f;
+                }
+                vertex_candidates.push_back({s, stride, pos_offset, vertex_count, finite_ratio, span, score});
             }
-            const float finite_ratio = sample_count > 0U
-                ? static_cast<float>(finite_count) / static_cast<float>(sample_count)
-                : 0.0f;
-            if (finite_ratio < 0.90f || finite_count < 32U) {
-                continue;
-            }
-            const float sx = std::max(0.0f, max_x - min_x);
-            const float sy = std::max(0.0f, max_y - min_y);
-            const float sz = std::max(0.0f, max_z - min_z);
-            const float span = std::max(sx, std::max(sy, sz));
-            if (!std::isfinite(span) || span < 0.005f || span > 3000.0f) {
-                continue;
-            }
-            float score = finite_ratio * 1000.0f;
-            score += std::min<float>(static_cast<float>(vertex_count), 120000.0f) * 0.01f;
-            score += std::min(span, 4.0f) * 10.0f;
-            if (stride == 12U || stride == 16U || stride == 32U) {
-                score += 8.0f;
-            }
-            vertex_candidates.push_back({s, stride, vertex_count, finite_ratio, span, score});
         }
     }
     if (vertex_candidates.empty()) {
@@ -926,7 +948,7 @@ static bool TryBuildIndexedMeshPayloadFromBlob(
     payload.material_index = 0;
     payload.vertex_blob.reserve(vtx.vertex_count * 12U);
     for (std::size_t i = 0U; i < vtx.vertex_count; ++i) {
-        const std::size_t at = vtx_seg.data_pos + i * vtx.stride;
+        const std::size_t at = vtx_seg.data_pos + i * vtx.stride + vtx.position_offset;
         AppendFloat(&payload.vertex_blob, ReadF32LE(blob.bytes, at));
         AppendFloat(&payload.vertex_blob, ReadF32LE(blob.bytes, at + 4U));
         AppendFloat(&payload.vertex_blob, ReadF32LE(blob.bytes, at + 8U));
@@ -955,6 +977,64 @@ static bool TryBuildIndexedMeshPayloadFromBlob(
         : 1.0f;
     if (invalid_ratio > 0.15f) {
         return false;
+    }
+    // Apply a contiguous triangle-window selector as a submesh range surrogate.
+    if ((payload.indices.size() / 3U) >= 1024U) {
+        const std::size_t tri_total = payload.indices.size() / 3U;
+        const std::size_t window_tri = std::min<std::size_t>(tri_total, 24000U);
+        const std::size_t step_tri = std::max<std::size_t>(512U, window_tri / 4U);
+        std::size_t best_start_tri = 0U;
+        std::size_t best_tri_count = tri_total;
+        float best_score = -1.0f;
+        for (std::size_t start_tri = 0U; start_tri < tri_total; start_tri += step_tri) {
+            const std::size_t end_tri = std::min<std::size_t>(tri_total, start_tri + window_tri);
+            if (end_tri <= start_tri + 32U) {
+                continue;
+            }
+            std::unordered_set<std::uint32_t> used;
+            used.reserve((end_tri - start_tri) * 2U);
+            std::size_t degenerate = 0U;
+            for (std::size_t t = start_tri; t < end_tri; ++t) {
+                const std::uint32_t a = payload.indices[t * 3U + 0U];
+                const std::uint32_t b = payload.indices[t * 3U + 1U];
+                const std::uint32_t c = payload.indices[t * 3U + 2U];
+                used.insert(a);
+                used.insert(b);
+                used.insert(c);
+                if (a == b || b == c || c == a) {
+                    ++degenerate;
+                }
+            }
+            const float tri_count = static_cast<float>(end_tri - start_tri);
+            const float used_ratio = vtx.vertex_count > 0U
+                ? static_cast<float>(used.size()) / static_cast<float>(vtx.vertex_count)
+                : 0.0f;
+            const float deg_ratio = tri_count > 0.0f ? static_cast<float>(degenerate) / tri_count : 1.0f;
+            float score = tri_count;
+            score += used_ratio * 8000.0f;
+            score -= deg_ratio * tri_count * 2.0f;
+            if (score > best_score) {
+                best_score = score;
+                best_start_tri = start_tri;
+                best_tri_count = end_tri - start_tri;
+            }
+            if (end_tri == tri_total) {
+                break;
+            }
+        }
+        if (best_score >= 0.0f && best_tri_count >= 256U && best_tri_count < tri_total) {
+            std::vector<std::uint32_t> windowed;
+            windowed.reserve(best_tri_count * 3U);
+            const std::size_t begin = best_start_tri * 3U;
+            const std::size_t end = (best_start_tri + best_tri_count) * 3U;
+            windowed.insert(windowed.end(), payload.indices.begin() + static_cast<std::ptrdiff_t>(begin),
+                            payload.indices.begin() + static_cast<std::ptrdiff_t>(end));
+            payload.indices.swap(windowed);
+            if (out_stats != nullptr) {
+                out_stats->selected_window_start_tri = static_cast<std::uint32_t>(best_start_tri);
+                out_stats->selected_window_tri_count = static_cast<std::uint32_t>(best_tri_count);
+            }
+        }
     }
     // Reject candidate meshes that still contain too many stretched triangles.
     float bmin_x = std::numeric_limits<float>::max();
@@ -1014,6 +1094,90 @@ static bool TryBuildIndexedMeshPayloadFromBlob(
         const float long_ratio = static_cast<float>(long_edge_tri) / static_cast<float>(tri_sample);
         if (long_ratio > 0.28f) {
             return false;
+        }
+    }
+    // Additional topology sanity: reject sparse disconnected line-like artifacts.
+    const std::size_t vertex_count = payload.vertex_blob.size() / 12U;
+    if (vertex_count == 0U) {
+        return false;
+    }
+    std::vector<std::uint32_t> vertex_use(vertex_count, 0U);
+    for (const auto idx_v : payload.indices) {
+        if (static_cast<std::size_t>(idx_v) < vertex_use.size()) {
+            vertex_use[static_cast<std::size_t>(idx_v)] += 1U;
+        }
+    }
+    std::size_t used_vertex_count = 0U;
+    std::uint64_t total_vertex_use = 0U;
+    for (const auto use : vertex_use) {
+        if (use > 0U) {
+            ++used_vertex_count;
+            total_vertex_use += use;
+        }
+    }
+    if (used_vertex_count < 64U) {
+        return false;
+    }
+    const float used_ratio = static_cast<float>(used_vertex_count) / static_cast<float>(vertex_count);
+    const float avg_use = static_cast<float>(total_vertex_use) / static_cast<float>(used_vertex_count);
+    if (used_ratio < 0.22f || avg_use < 1.6f) {
+        return false;
+    }
+    std::vector<std::vector<std::uint32_t>> adjacency(vertex_count);
+    adjacency.reserve(vertex_count);
+    const std::size_t tri_all = payload.indices.size() / 3U;
+    for (std::size_t t = 0U; t < tri_all; ++t) {
+        const std::uint32_t a = payload.indices[t * 3U + 0U];
+        const std::uint32_t b = payload.indices[t * 3U + 1U];
+        const std::uint32_t c = payload.indices[t * 3U + 2U];
+        if (a >= vertex_count || b >= vertex_count || c >= vertex_count) {
+            continue;
+        }
+        adjacency[a].push_back(b); adjacency[a].push_back(c);
+        adjacency[b].push_back(a); adjacency[b].push_back(c);
+        adjacency[c].push_back(a); adjacency[c].push_back(b);
+    }
+    std::vector<std::uint8_t> visited(vertex_count, 0U);
+    std::size_t component_count = 0U;
+    std::size_t largest_component = 0U;
+    std::vector<std::uint32_t> stack;
+    stack.reserve(1024U);
+    for (std::size_t i = 0U; i < vertex_count; ++i) {
+        if (vertex_use[i] == 0U || visited[i] != 0U) {
+            continue;
+        }
+        ++component_count;
+        std::size_t comp_size = 0U;
+        stack.clear();
+        stack.push_back(static_cast<std::uint32_t>(i));
+        visited[i] = 1U;
+        while (!stack.empty()) {
+            const auto v = static_cast<std::size_t>(stack.back());
+            stack.pop_back();
+            ++comp_size;
+            for (const auto n : adjacency[v]) {
+                if (n >= vertex_count || visited[n] != 0U || vertex_use[n] == 0U) {
+                    continue;
+                }
+                visited[n] = 1U;
+                stack.push_back(n);
+            }
+        }
+        largest_component = std::max(largest_component, comp_size);
+    }
+    const float largest_component_ratio =
+        used_vertex_count > 0U ? static_cast<float>(largest_component) / static_cast<float>(used_vertex_count) : 0.0f;
+    if (component_count > 64U || largest_component_ratio < 0.35f) {
+        return false;
+    }
+    if (out_stats != nullptr) {
+        out_stats->vertex_stride = vtx.stride;
+        out_stats->position_offset = vtx.position_offset;
+        out_stats->raw_index_count = static_cast<std::uint32_t>(idx.index_count);
+        out_stats->selected_index_count = static_cast<std::uint32_t>(payload.indices.size());
+        if (out_stats->selected_window_tri_count == 0U) {
+            out_stats->selected_window_start_tri = 0U;
+            out_stats->selected_window_tri_count = static_cast<std::uint32_t>(payload.indices.size() / 3U);
         }
     }
     *out_payload = std::move(payload);
@@ -1272,6 +1436,39 @@ static bool TryBuildHeuristicMeshPayloadFromBlob(
     if (line_like || ultra_thin) {
         return false;
     }
+    // PCA-like variance hard cut for axis-dominant clusters.
+    double mean_x = 0.0;
+    double mean_y = 0.0;
+    double mean_z = 0.0;
+    for (const auto i : kept_points) {
+        mean_x += positions[i * 3U + 0U];
+        mean_y += positions[i * 3U + 1U];
+        mean_z += positions[i * 3U + 2U];
+    }
+    const double inv_n = 1.0 / static_cast<double>(kept_points.size());
+    mean_x *= inv_n;
+    mean_y *= inv_n;
+    mean_z *= inv_n;
+    double var_x = 0.0;
+    double var_y = 0.0;
+    double var_z = 0.0;
+    for (const auto i : kept_points) {
+        const double dx = static_cast<double>(positions[i * 3U + 0U]) - mean_x;
+        const double dy = static_cast<double>(positions[i * 3U + 1U]) - mean_y;
+        const double dz = static_cast<double>(positions[i * 3U + 2U]) - mean_z;
+        var_x += dx * dx;
+        var_y += dy * dy;
+        var_z += dz * dz;
+    }
+    var_x *= inv_n;
+    var_y *= inv_n;
+    var_z *= inv_n;
+    const double var_total = std::max(1.0e-9, var_x + var_y + var_z);
+    const double var_major = std::max(var_x, std::max(var_y, var_z));
+    const double linearity = var_major / var_total;
+    if (linearity > 0.965) {
+        return false;
+    }
 
     const float keep_cx = 0.5f * (kmin_x + kmax_x);
     const float keep_cy = 0.5f * (kmin_y + kmax_y);
@@ -1437,15 +1634,18 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto render_payload_mode = GetJsonString(output, "render_payload_mode");
     const auto sidecar_payload_quality_score = GetJsonU32(output, "payload_quality_score");
     const auto sidecar_skin_binding_coverage = static_cast<float>(GetJsonF64(output, "skin_binding_coverage", 0.0));
+    const auto sidecar_skinned_mesh_renderer_count = GetJsonU32(output, "skinned_mesh_renderer_count");
+    const auto sidecar_authored_extractable_mesh_count = GetJsonU32(output, "authored_extractable_mesh_count");
+    const auto sidecar_authored_extractable_vertex_sample_total = GetJsonU32(output, "authored_extractable_vertex_sample_total");
     const auto sidecar_payload_route_reason_code = GetJsonString(output, "payload_route_reason_code");
     const auto sidecar_topology_flags = GetJsonStringArray(output, "topology_flags");
     bool used_heuristic_mesh_payload = false;
     bool used_structured_mesh_payload = false;
-    // Keep heuristic extraction as default path; structured extraction is opt-in
-    // because false-positive index pairing can produce oversized artifact triangles.
-    const bool enable_structured_mesh =
-        EnvFlagEnabled("VSF_ENABLE_STRUCTURED_MESH") && !EnvFlagEnabled("VSF_DISABLE_STRUCTURED_MESH");
-    const bool enable_heuristic_mesh = !EnvFlagEnabled("VSF_DISABLE_HEURISTIC_MESH");
+    const bool structured_mesh_env_enable = EnvFlagEnabled("VSF_ENABLE_STRUCTURED_MESH");
+    const bool structured_mesh_env_disable = EnvFlagEnabled("VSF_DISABLE_STRUCTURED_MESH");
+    const bool heuristic_mesh_env_disable = EnvFlagEnabled("VSF_DISABLE_HEURISTIC_MESH");
+    const bool heuristic_mesh_authored_override = EnvFlagEnabled("VSF_ALLOW_HEURISTIC_ON_AUTHORED_ROUTE");
+    const bool allow_static_without_skin_payload = EnvFlagEnabled("VSF_ALLOW_STATIC_WITHOUT_SKIN_PAYLOAD");
     const bool allow_placeholder_render = EnvFlagEnabled("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
     if (render_payload_mode != "none" && sidecar_mesh_payload_count == 0U) {
         return core::Result<AvatarPackage>::Fail("SCHEMA_INVALID: render_payload_mode requires mesh_payload_count > 0");
@@ -1476,7 +1676,19 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         std::uint32_t heuristic_index_count_total = 0U;
         std::uint32_t structured_payload_count = 0U;
         std::uint32_t structured_index_count_total = 0U;
+        std::uint32_t structured_vertex_stride_sum = 0U;
+        std::uint32_t structured_position_offset_sum = 0U;
+        std::uint32_t structured_raw_index_count_total = 0U;
+        std::uint32_t structured_window_start_tri_sum = 0U;
+        std::uint32_t structured_window_tri_count_total = 0U;
         const bool prefer_authored_route = render_payload_mode == "authored_mesh_v1";
+        const bool enable_structured_mesh =
+            !structured_mesh_env_disable && (structured_mesh_env_enable || prefer_authored_route);
+        const bool enable_heuristic_mesh =
+            !heuristic_mesh_env_disable &&
+            (!prefer_authored_route || heuristic_mesh_authored_override);
+        std::string selected_route_code = "VSF_ROUTE_UNDECIDED";
+        std::vector<std::string> rejected_route_codes;
         if (enable_structured_mesh || enable_heuristic_mesh) {
             auto probe = reader_.Probe(path);
             if (probe.ok && !probe.value.serialized_file_bytes.empty()) {
@@ -1489,15 +1701,22 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
                     if (enable_structured_mesh) {
                         for (std::size_t i = 0U; i < blobs.value.size(); ++i) {
                             MeshRenderPayload payload;
+                            StructuredMeshBuildStats stats {};
                             if (!TryBuildIndexedMeshPayloadFromBlob(
                                     blobs.value[i],
                                     static_cast<std::uint32_t>(i),
-                                    &payload)) {
+                                    &payload,
+                                    &stats)) {
                                 continue;
                             }
                             pkg.mesh_payloads.push_back(std::move(payload));
                             ++structured_payload_count;
                             structured_index_count_total += static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size());
+                            structured_vertex_stride_sum += stats.vertex_stride;
+                            structured_position_offset_sum += stats.position_offset;
+                            structured_raw_index_count_total += stats.raw_index_count;
+                            structured_window_start_tri_sum += stats.selected_window_start_tri;
+                            structured_window_tri_count_total += stats.selected_window_tri_count;
                         }
                     }
                     if (pkg.mesh_payloads.empty() && enable_heuristic_mesh) {
@@ -1521,17 +1740,28 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             used_structured_mesh_payload = true;
         }
         const bool heuristic_quality_ok =
-            heuristic_payload_count >= 1U &&
-            heuristic_index_count_total >= 90U;
+            heuristic_payload_count >= 2U &&
+            heuristic_index_count_total >= 6000U;
+        const float structured_mesh_coverage =
+            sidecar_mesh_payload_count > 0U
+                ? static_cast<float>(structured_payload_count) / static_cast<float>(sidecar_mesh_payload_count)
+                : 0.0f;
+        const bool structured_coverage_ok =
+            structured_payload_count >= (sidecar_mesh_payload_count >= 8U ? 2U : 1U) &&
+            structured_mesh_coverage >= (sidecar_mesh_payload_count >= 8U ? 0.20f : 0.10f);
         const bool structured_quality_ok =
-            structured_payload_count >= 1U &&
-            structured_index_count_total >= (prefer_authored_route ? 240U : 120U);
+            structured_coverage_ok &&
+            structured_index_count_total >= (prefer_authored_route ? 600U : 240U);
         const bool authored_quality_ok =
             prefer_authored_route &&
             structured_quality_ok &&
             sidecar_payload_quality_score >= 60U &&
-            sidecar_skin_binding_coverage >= 0.5f;
+            sidecar_skin_binding_coverage >= 0.5f &&
+            sidecar_authored_extractable_mesh_count >= 2U &&
+            sidecar_authored_extractable_vertex_sample_total >= 600U;
         if (authored_quality_ok) {
+            selected_route_code = "VSF_ROUTE_SELECTED_AUTHORED";
+            pkg.warning_codes.push_back(selected_route_code);
             pkg.warnings.push_back("W_RENDER_PAYLOAD: authored mesh payload selected.");
             pkg.warning_codes.push_back("VSF_AUTHORED_MESH_PAYLOAD");
             pkg.warnings.push_back(
@@ -1541,6 +1771,18 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
                 ", skin-coverage=" + std::to_string(sidecar_skin_binding_coverage));
             used_heuristic_mesh_payload = false;
         } else if (structured_quality_ok) {
+            selected_route_code = "VSF_ROUTE_SELECTED_STRUCTURED";
+            pkg.warning_codes.push_back(selected_route_code);
+            if (prefer_authored_route) {
+                if (sidecar_authored_extractable_mesh_count < 2U ||
+                    sidecar_authored_extractable_vertex_sample_total < 600U) {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_AUTHORED_EXTRACTABILITY_LOW");
+                } else if (!structured_coverage_ok) {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_STRUCTURED_COVERAGE_LOW");
+                } else {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_AUTHORED_QUALITY_LOW");
+                }
+            }
             pkg.warnings.push_back("W_RENDER_PAYLOAD: structured indexed mesh payload extracted.");
             pkg.warning_codes.push_back("VSF_SERIALIZED_STRUCTURED_MESH_PAYLOAD");
             pkg.warnings.push_back(
@@ -1548,6 +1790,19 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
                 ", indices=" + std::to_string(structured_index_count_total));
             used_heuristic_mesh_payload = false;
         } else if (heuristic_quality_ok) {
+            selected_route_code = "VSF_ROUTE_SELECTED_HEURISTIC";
+            pkg.warning_codes.push_back(selected_route_code);
+            if (prefer_authored_route) {
+                if (sidecar_authored_extractable_mesh_count < 2U ||
+                    sidecar_authored_extractable_vertex_sample_total < 600U) {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_AUTHORED_EXTRACTABILITY_LOW");
+                } else if (!structured_coverage_ok) {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_STRUCTURED_COVERAGE_LOW");
+                } else {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_AUTHORED_QUALITY_LOW");
+                }
+            }
+            rejected_route_codes.push_back("VSF_ROUTE_REJECTED_STRUCTURED_TOPOLOGY");
             used_heuristic_mesh_payload = true;
             pkg.warnings.push_back("W_RENDER_PAYLOAD: heuristic mesh payload extracted from serialized mesh objects.");
             pkg.warning_codes.push_back("VSF_SERIALIZED_HEURISTIC_MESH_PAYLOAD");
@@ -1555,6 +1810,24 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
                 "W_HEURISTIC_MESH: payloads=" + std::to_string(heuristic_payload_count) +
                 ", indices=" + std::to_string(heuristic_index_count_total));
         } else {
+            selected_route_code = "VSF_ROUTE_SELECTED_SAFE_FALLBACK";
+            pkg.warning_codes.push_back(selected_route_code);
+            if (prefer_authored_route) {
+                if (sidecar_authored_extractable_mesh_count < 2U ||
+                    sidecar_authored_extractable_vertex_sample_total < 600U) {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_AUTHORED_EXTRACTABILITY_LOW");
+                } else if (!structured_coverage_ok) {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_STRUCTURED_COVERAGE_LOW");
+                } else {
+                    rejected_route_codes.push_back("VSF_ROUTE_REJECTED_AUTHORED_QUALITY_LOW");
+                }
+            }
+            rejected_route_codes.push_back("VSF_ROUTE_REJECTED_STRUCTURED_TOPOLOGY");
+            if (!enable_heuristic_mesh) {
+                rejected_route_codes.push_back("VSF_ROUTE_REJECTED_HEURISTIC_POLICY_BLOCKED");
+            } else {
+                rejected_route_codes.push_back("VSF_ROUTE_REJECTED_HEURISTIC_QUALITY_LOW");
+            }
             pkg.mesh_payloads.clear();
             for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
                 pkg.mesh_payloads.push_back(BuildObjectStubPayload(i));
@@ -1573,12 +1846,71 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
                 ", heuristic-enabled=" + std::string(enable_heuristic_mesh ? "true" : "false"));
             used_structured_mesh_payload = false;
         }
+        const bool authored_skin_required =
+            prefer_authored_route &&
+            sidecar_skinned_mesh_renderer_count > 0U &&
+            !allow_static_without_skin_payload;
+        if (authored_skin_required && pkg.skin_payloads.empty() &&
+            selected_route_code != "VSF_ROUTE_SELECTED_SAFE_FALLBACK") {
+            selected_route_code = "VSF_ROUTE_SELECTED_SAFE_FALLBACK";
+            rejected_route_codes.push_back("VSF_ROUTE_REJECTED_SKIN_PAYLOAD_MISSING");
+            pkg.mesh_payloads.clear();
+            for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
+                pkg.mesh_payloads.push_back(BuildObjectStubPayload(i));
+            }
+            pkg.warning_codes.push_back(selected_route_code);
+            pkg.warning_codes.push_back("VSF_SKIN_PAYLOAD_MISSING_STATIC_FALLBACK");
+            pkg.warning_codes.push_back("VSF_SAFE_FALLBACK_APPLIED");
+            pkg.warning_codes.push_back("VSF_OBJECT_STUB_RENDER_PAYLOAD");
+            pkg.warnings.push_back(
+                "W_RENDER_PAYLOAD: safe fallback applied (missing skin payload for skinned avatar).");
+            pkg.warnings.push_back(
+                "W_SKIN_POLICY: skinned_renderers=" + std::to_string(sidecar_skinned_mesh_renderer_count) +
+                ", skin_payloads=" + std::to_string(pkg.skin_payloads.size()) +
+                ", allow_static_without_skin_payload=" +
+                std::string(allow_static_without_skin_payload ? "true" : "false"));
+            used_structured_mesh_payload = false;
+            used_heuristic_mesh_payload = false;
+        }
         pkg.warnings.push_back(
             "W_STRUCTURED_TRY: payloads=" + std::to_string(structured_payload_count) +
             ", indices=" + std::to_string(structured_index_count_total) +
+            ", coverage=" + std::to_string(structured_mesh_coverage) +
             ", enabled=" + std::string(enable_structured_mesh ? "true" : "false"));
+        if (structured_payload_count > 0U) {
+            const auto avg_stride = structured_vertex_stride_sum / structured_payload_count;
+            const auto avg_pos_offset = structured_position_offset_sum / structured_payload_count;
+            const auto avg_window_start_tri = structured_window_start_tri_sum / structured_payload_count;
+            const auto avg_window_tri_count = structured_window_tri_count_total / structured_payload_count;
+            pkg.warnings.push_back(
+                "W_VERTEX_LAYOUT: avg_stride=" + std::to_string(avg_stride) +
+                ", avg_pos_offset=" + std::to_string(avg_pos_offset));
+            pkg.warnings.push_back(
+                "W_INDEX_CONTRACT: raw_indices=" + std::to_string(structured_raw_index_count_total) +
+                ", selected_indices=" + std::to_string(structured_index_count_total) +
+                ", avg_window_start_tri=" + std::to_string(avg_window_start_tri) +
+                ", avg_window_tri_count=" + std::to_string(avg_window_tri_count));
+        }
+        pkg.warnings.push_back(
+            "W_ROUTE_POLICY: prefer_authored=" + std::string(prefer_authored_route ? "true" : "false") +
+            ", structured-env-enable=" + std::string(structured_mesh_env_enable ? "true" : "false") +
+            ", structured-env-disable=" + std::string(structured_mesh_env_disable ? "true" : "false") +
+            ", heuristic-env-disable=" + std::string(heuristic_mesh_env_disable ? "true" : "false") +
+            ", heuristic-authored-override=" + std::string(heuristic_mesh_authored_override ? "true" : "false"));
         if (!sidecar_payload_route_reason_code.empty()) {
             pkg.warnings.push_back("W_ROUTE: code=" + sidecar_payload_route_reason_code);
+        }
+        pkg.warnings.push_back("W_ROUTE_SELECTED: code=" + selected_route_code);
+        if (!rejected_route_codes.empty()) {
+            std::ostringstream rejected;
+            rejected << "W_ROUTE_REJECTED: ";
+            for (std::size_t i = 0; i < rejected_route_codes.size(); ++i) {
+                if (i > 0U) {
+                    rejected << "|";
+                }
+                rejected << rejected_route_codes[i];
+            }
+            pkg.warnings.push_back(rejected.str());
         }
         if (!sidecar_topology_flags.empty()) {
             std::ostringstream topo;
@@ -1593,7 +1925,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         }
         pkg.warnings.push_back(
             "W_PAYLOAD_QUALITY: sidecar_score=" + std::to_string(sidecar_payload_quality_score) +
-            ", sidecar_skin_coverage=" + std::to_string(sidecar_skin_binding_coverage));
+            ", sidecar_skin_coverage=" + std::to_string(sidecar_skin_binding_coverage) +
+            ", extractable_meshes=" + std::to_string(sidecar_authored_extractable_mesh_count) +
+            ", extractable_vertex_samples=" + std::to_string(sidecar_authored_extractable_vertex_sample_total));
         if (sidecar_material_payload_count > 0U) {
             MaterialRenderPayload mat {};
             mat.name = "VSF_OBJECT_STUB_MAT";

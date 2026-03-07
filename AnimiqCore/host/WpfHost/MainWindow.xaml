@@ -713,6 +713,10 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="수신 포트" VerticalAlignment="Center"/>
                                 <TextBox Grid.Row="0" Grid.Column="1" x:Name="TrackingPortTextBox" Text="49983"/>
@@ -760,6 +764,20 @@
                                 <CheckBox Grid.Row="10" Grid.Column="1" x:Name="TrackingUpperBodyEnabledCheckBox" Content="자동 상반신 트래킹" Margin="0,8,0,0"/>
                                 <TextBlock Grid.Row="11" Grid.Column="0" Text="안정화" VerticalAlignment="Center" Margin="0,8,0,0"/>
                                 <CheckBox Grid.Row="11" Grid.Column="1" x:Name="TrackingAutoStabilityCheckBox" Content="자동 안정화 튜닝" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="12" Grid.Column="0" Text="헤드 폴백" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <CheckBox Grid.Row="12" Grid.Column="1" x:Name="TrackingUpperBodyHeadFallbackCheckBox" Content="상반신 입력 없을 때 헤드 각도 추종" Margin="0,8,0,0" Checked="TrackingUpperBodyHeadFallbackCheckBox_Changed" Unchecked="TrackingUpperBodyHeadFallbackCheckBox_Changed"/>
+                                <TextBlock Grid.Row="13" Grid.Column="0" Text="폴백 강도" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <DockPanel Grid.Row="13" Grid.Column="1" Margin="0,8,0,0">
+                                    <TextBlock x:Name="TrackingUpperBodyHeadFallbackStrengthValueText" Text="0.55" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                    <Slider x:Name="TrackingUpperBodyHeadFallbackStrengthSlider" Minimum="0.0" Maximum="1.0" Value="0.55" TickFrequency="0.05" IsSnapToTickEnabled="False" ValueChanged="TrackingUpperBodyHeadFallbackStrengthSlider_ValueChanged"/>
+                                </DockPanel>
+                                <TextBlock Grid.Row="14" Grid.Column="0" Text="iPhone 스무딩" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <DockPanel Grid.Row="14" Grid.Column="1" Margin="0,8,0,0">
+                                    <TextBlock x:Name="TrackingIfacialSmoothingValueText" Text="0.18" Width="56" HorizontalAlignment="Right" VerticalAlignment="Center" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                                    <Slider x:Name="TrackingIfacialSmoothingSlider" Minimum="0.0" Maximum="1.0" Value="0.18" TickFrequency="0.02" IsSnapToTickEnabled="False" ValueChanged="TrackingIfacialSmoothingSlider_ValueChanged"/>
+                                </DockPanel>
+                                <TextBlock Grid.Row="15" Grid.Column="0" Text="iPhone 표정 우선" VerticalAlignment="Center" Margin="0,8,0,0"/>
+                                <CheckBox Grid.Row="15" Grid.Column="1" x:Name="TrackingIfacialBlinkJawPriorityCheckBox" Content="blink/jaw 우선 처리" Margin="0,8,0,0" Checked="TrackingIfacialBlinkJawPriorityCheckBox_Changed" Unchecked="TrackingIfacialBlinkJawPriorityCheckBox_Changed"/>
                             </Grid>
                         </Expander>
                         <Border x:Name="TrackingIpv4HintPanel" BorderBrush="{DynamicResource Color.CardSoftBorder}" BorderThickness="1" CornerRadius="10" Padding="8" Margin="0,0,0,8">
@@ -1030,5 +1048,3 @@
         </Border>
     </Grid>
 </Window>
-
-

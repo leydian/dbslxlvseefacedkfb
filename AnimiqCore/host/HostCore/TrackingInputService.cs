@@ -125,6 +125,8 @@ public sealed class TrackingInputService : ITrackingInputService
     private DateTimeOffset _trackingStartedUtc = DateTimeOffset.MinValue;
     private bool _webcamRuntimeUnavailable;
     private bool _autoStabilityTuningEnabled = true;
+    private float _ifacialBlendshapeSmoothing = 0.18f;
+    private bool _ifacialBlinkJawPriorityEnabled = true;
     private DateTimeOffset _lastSourceSwitchUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _activeSourceSinceUtc = DateTimeOffset.MinValue;
     private DateTimeOffset _sourceSwitchWindowStartUtc = DateTimeOffset.MinValue;
@@ -163,14 +165,19 @@ public sealed class TrackingInputService : ITrackingInputService
                 UpperBodySmoothing = Enum.IsDefined(typeof(UpperBodySmoothingProfile), options.UpperBodySmoothing)
                     ? options.UpperBodySmoothing
                     : UpperBodySmoothingProfile.Balanced,
+                IfacialBlendshapeSmoothing = Math.Clamp(float.IsFinite(options.IfacialBlendshapeSmoothing) ? options.IfacialBlendshapeSmoothing : 0.18f, 0.0f, 1.0f),
+                IfacialBlinkJawPriorityEnabled = options.IfacialBlinkJawPriorityEnabled,
             };
             ApplyLatencyProfileTuning(_options.LatencyProfile);
             ApplyPoseFilterTuning(_options.PoseFilterProfile, _options.PoseDeadbandDeg);
+            ApplyIfacialLowLatencyFloorIfNeeded();
             ApplyUpperBodySmoothingTuning(_options.UpperBodySmoothing);
             _upperBodyEnabled = _options.UpperBodyEnabled;
             _upperBodyStrength = _options.UpperBodyStrength;
             _upperBodySmoothing = _options.UpperBodySmoothing;
             _autoStabilityTuningEnabled = _options.AutoStabilityTuningEnabled;
+            _ifacialBlendshapeSmoothing = _options.IfacialBlendshapeSmoothing;
+            _ifacialBlinkJawPriorityEnabled = _options.IfacialBlinkJawPriorityEnabled;
             ResetRuntimeState();
             _trackingStartedUtc = DateTimeOffset.UtcNow;
             _webcamRuntimeUnavailable = false;
@@ -1583,8 +1590,6 @@ public sealed class TrackingInputService : ITrackingInputService
             AddCandidate(candidates, envPython, string.Empty, "env:ANIMIQ_MEDIAPIPE_PYTHON");
         }
 
-        AddCandidate(candidates, "py", "-3", "py -3");
-
         var venvCandidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, ".venv", "Scripts", "python.exe"),
@@ -1598,6 +1603,7 @@ public sealed class TrackingInputService : ITrackingInputService
             }
         }
 
+        AddCandidate(candidates, "py", "-3", "py -3");
         AddCandidate(candidates, "python", string.Empty, "python");
         return candidates;
     }
@@ -1618,46 +1624,17 @@ public sealed class TrackingInputService : ITrackingInputService
         failure = string.Empty;
         try
         {
-            var versionArgs = string.IsNullOrWhiteSpace(candidate.ArgumentPrefix)
-                ? "--version"
-                : $"{candidate.ArgumentPrefix} --version";
-            var psi = new ProcessStartInfo(candidate.Executable, versionArgs)
+            if (!TryRunPythonProbe(candidate, "--version", 1800, out var versionFailure))
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-
-            using var process = Process.Start(psi);
-            if (process is null)
-            {
-                failure = "process start returned null";
+                failure = $"version probe failed: {versionFailure}";
                 return false;
             }
 
-            if (!process.WaitForExit(1800))
+            // Prevent code=2 sidecar start failures by requiring mediapipe/cv2 importability
+            // before selecting a Python runtime candidate.
+            if (!TryRunPythonProbe(candidate, "-c \"import mediapipe, cv2; print('ok')\"", 4200, out var importFailure))
             {
-                try
-                {
-                    process.Kill(true);
-                }
-                catch
-                {
-                    // best effort only
-                }
-
-                failure = "version probe timeout";
-                return false;
-            }
-
-            if (process.ExitCode != 0)
-            {
-                var stderr = process.StandardError.ReadToEnd().Trim();
-                var stdout = process.StandardOutput.ReadToEnd().Trim();
-                failure = $"exit={process.ExitCode}; stderr={stderr}; stdout={stdout}";
+                failure = $"dependency probe failed: {importFailure}";
                 return false;
             }
 
@@ -1668,6 +1645,60 @@ public sealed class TrackingInputService : ITrackingInputService
             failure = ex.Message;
             return false;
         }
+    }
+
+    private static bool TryRunPythonProbe(
+        MediapipePythonCandidate candidate,
+        string probeArguments,
+        int timeoutMs,
+        out string failure)
+    {
+        failure = string.Empty;
+        var args = string.IsNullOrWhiteSpace(candidate.ArgumentPrefix)
+            ? probeArguments
+            : $"{candidate.ArgumentPrefix} {probeArguments}";
+
+        var psi = new ProcessStartInfo(candidate.Executable, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            failure = "process start returned null";
+            return false;
+        }
+
+        if (!process.WaitForExit(timeoutMs))
+        {
+            try
+            {
+                process.Kill(true);
+            }
+            catch
+            {
+                // best effort only
+            }
+
+            failure = "probe timeout";
+            return false;
+        }
+
+        if (process.ExitCode == 0)
+        {
+            return true;
+        }
+
+        var stderr = process.StandardError.ReadToEnd().Trim();
+        var stdout = process.StandardOutput.ReadToEnd().Trim();
+        failure = $"exit={process.ExitCode}; stderr={stderr}; stdout={stdout}";
+        return false;
     }
 
     private Process? StartMediapipeSidecar(MediapipeSidecarLaunchConfig launch)
@@ -2621,7 +2652,14 @@ public sealed class TrackingInputService : ITrackingInputService
         {
             "blinkl" or "blinkleft" or "eyecloseleft" => "eyeblinkleft",
             "blinkr" or "blinkright" or "eyecloseright" => "eyeblinkright",
+            "blink" or "eyeclose" => "eyeblink",
             "mouthopen" or "visemeaa" or "aa" => "jawopen",
+            "vrcvaa" => "jawopen",
+            "moutha" => "jawopen",
+            "mouthi" or "vrcvih" => "mouthsmileleft",
+            "mouthu" or "vrcvou" => "mouthpucker",
+            "mouthe" or "vrcve" => "mouthstretchleft",
+            "moutho" or "vrcvoh" => "mouthfunnel",
             "headrotx" or "headrotationx" or "rotationx" => "headyaw",
             "headroty" or "headrotationy" or "rotationy" => "headpitch",
             "headrotz" or "headrotationz" or "rotationz" => "headroll",
@@ -2639,6 +2677,7 @@ public sealed class TrackingInputService : ITrackingInputService
 
         if (Arkit52Channels.NormalizedSet.Contains(normalizedKey) ||
             normalizedKey is "headyaw" or "headpitch" or "headroll" or "headposx" or "headposy" or "headposz" or
+                "eyeblink" or
                 "leftshoulderpitch" or "rightshoulderpitch" or "leftupperarmpitch" or "rightupperarmpitch")
         {
             return true;
@@ -2887,16 +2926,26 @@ public sealed class TrackingInputService : ITrackingInputService
         _expressionCache[normalized] = value;
         switch (normalized)
         {
+            case "eyeblink":
+                {
+                    var blink = ApplyExpressionPostProcess("eyeblink", value);
+                    _rawFrame.BlinkL = blink;
+                    _rawFrame.BlinkR = blink;
+                    _expressionCache["eyeblinkleft"] = blink;
+                    _expressionCache["eyeblinkright"] = blink;
+                    _expressionCache[normalized] = blink;
+                    return true;
+                }
             case "eyeblinkleft":
-                _rawFrame.BlinkL = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _rawFrame.BlinkL = ApplyExpressionPostProcess(normalized, value);
                 _expressionCache[normalized] = _rawFrame.BlinkL;
                 return true;
             case "eyeblinkright":
-                _rawFrame.BlinkR = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _rawFrame.BlinkR = ApplyExpressionPostProcess(normalized, value);
                 _expressionCache[normalized] = _rawFrame.BlinkR;
                 return true;
             case "jawopen":
-                _rawFrame.MouthOpen = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _rawFrame.MouthOpen = ApplyExpressionPostProcess(normalized, value);
                 _expressionCache[normalized] = _rawFrame.MouthOpen;
                 return true;
             case "headyaw":
@@ -2921,9 +2970,53 @@ public sealed class TrackingInputService : ITrackingInputService
                 _rawFrame.HeadPosZ = value;
                 return true;
             default:
-                _expressionCache[normalized] = ApplyAdaptiveCalibration(normalized, Clamp01(value));
+                _expressionCache[normalized] = ApplyExpressionPostProcess(normalized, value);
+                if (_ifacialBlinkJawPriorityEnabled && _options.SourceType == TrackingSourceType.OscIfacial)
+                {
+                    if (normalized is "mouthopen" or "visemeaa" or "aa")
+                    {
+                        var mouth = ApplyExpressionPostProcess("jawopen", value);
+                        _rawFrame.MouthOpen = Math.Max(_rawFrame.MouthOpen, mouth);
+                        _expressionCache["jawopen"] = Math.Max(_expressionCache.GetValueOrDefault("jawopen"), mouth);
+                    }
+                    else if (normalized is "eyewideleft" or "eyewideright")
+                    {
+                        var blink = Math.Clamp(1.0f - Clamp01(value), 0.0f, 1.0f);
+                        if (normalized == "eyewideleft")
+                        {
+                            _rawFrame.BlinkL = Math.Max(_rawFrame.BlinkL, blink);
+                            _expressionCache["eyeblinkleft"] = Math.Max(_expressionCache.GetValueOrDefault("eyeblinkleft"), blink);
+                        }
+                        else
+                        {
+                            _rawFrame.BlinkR = Math.Max(_rawFrame.BlinkR, blink);
+                            _expressionCache["eyeblinkright"] = Math.Max(_expressionCache.GetValueOrDefault("eyeblinkright"), blink);
+                        }
+                    }
+                }
                 return true;
         }
+    }
+
+    private float ApplyExpressionPostProcess(string normalizedKey, float rawValue)
+    {
+        var clamped = Clamp01(rawValue);
+        // iFacial already provides high-frequency blendshape values.
+        // Bypass adaptive baseline normalization there to avoid flattening subtle eye/mouth motion.
+        if (_options.SourceType == TrackingSourceType.OscIfacial)
+        {
+            if (normalizedKey.StartsWith("eyeblink", StringComparison.Ordinal))
+            {
+                return Math.Clamp(MathF.Pow(clamped, 0.72f), 0.0f, 1.0f);
+            }
+            if (normalizedKey == "jawopen" || normalizedKey.StartsWith("mouth", StringComparison.Ordinal))
+            {
+                return Math.Clamp(MathF.Pow(clamped, 0.86f), 0.0f, 1.0f);
+            }
+            return clamped;
+        }
+
+        return ApplyAdaptiveCalibration(normalizedKey, clamped);
     }
 
     private bool ApplyUpperBodyMappedValue(string normalizedKey, float value)
@@ -3636,6 +3729,28 @@ public sealed class TrackingInputService : ITrackingInputService
             UpperBodySmoothingProfile.Stable => 0.24f,
             _ => 0.38f,
         };
+    }
+
+    private void ApplyIfacialLowLatencyFloorIfNeeded()
+    {
+        if (_options.SourceType != TrackingSourceType.OscIfacial)
+        {
+            return;
+        }
+
+        // iFacial OSC is high-rate; keep a minimum responsiveness floor even in Stable profile.
+        _poseAlpha = Math.Max(_poseAlpha, 0.48f);
+        _expressionAlpha = Math.Max(_expressionAlpha, 0.82f);
+        _poseAdaptiveMinAlpha = Math.Max(_poseAdaptiveMinAlpha, 0.34f);
+        _poseAdaptiveMaxAlpha = Math.Max(_poseAdaptiveMaxAlpha, 0.78f);
+        _poseAdaptiveGain = Math.Max(_poseAdaptiveGain, 0.040f);
+        _poseDeadbandDeg = Math.Min(_poseDeadbandDeg, 0.35f);
+
+        // VSeeFace-style iPhone blendshape smoothing:
+        // lower slider => more responsive (higher alpha), higher slider => smoother (lower alpha).
+        var smoothing = Math.Clamp(_ifacialBlendshapeSmoothing, 0.0f, 1.0f);
+        var targetExpressionAlpha = 0.92f - (smoothing * 0.47f);
+        _expressionAlpha = Math.Clamp(targetExpressionAlpha, 0.45f, 0.92f);
     }
 
     private static bool IsUpperBodyChannel(string normalizedKey)

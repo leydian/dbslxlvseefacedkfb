@@ -218,3 +218,4 @@ Report list for this week.
 - [2026-03-08_vsfavatar_sidecar_timeout_and_cmdline_fix.md](./2026-03-08_vsfavatar_sidecar_timeout_and_cmdline_fix.md)
 - [2026-03-08_vsfavatar_structured_mesh_default_enable_and_blob_scan_uplift.md](./2026-03-08_vsfavatar_structured_mesh_default_enable_and_blob_scan_uplift.md)
 - [2026-03-08_workspace_change_rollup_vsfavatar_and_wpf.md](./2026-03-08_workspace_change_rollup_vsfavatar_and_wpf.md)
+- [2026-03-08_workspace_tracking_ifacial_vsf_route_hardening.md](./2026-03-08_workspace_tracking_ifacial_vsf_route_hardening.md)

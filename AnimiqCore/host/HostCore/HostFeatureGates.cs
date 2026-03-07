@@ -59,7 +59,8 @@ public static class HostFeatureGateResolver
         {
             armGate = Disabled(armSignal);
         }
-        else if (info.DetectedFormat != NcAvatarFormatHint.Miq)
+        else if (info.DetectedFormat != NcAvatarFormatHint.Miq &&
+                 info.DetectedFormat != NcAvatarFormatHint.Vrm)
         {
             armGate = Disabled("ARM_POSE_FORMAT_UNSUPPORTED");
         }
@@ -203,7 +204,7 @@ public static class HostFeatureGateResolver
             "HOST_RUNTIME_MISMATCH_DIST_EXPECTED" => "런타임 nativecore 경로가 일치하지 않습니다",
             "HOST_RUNTIME_DIST_OLDER_THAN_BUILD_OUTPUT" => "런타임 nativecore가 빌드 결과물보다 오래되었습니다",
             "NO_AVATAR_LOADED" => "아바타가 로드되지 않았습니다",
-            "ARM_POSE_FORMAT_UNSUPPORTED" => "팔 포즈는 MIQ 형식 아바타에서만 지원됩니다",
+            "ARM_POSE_FORMAT_UNSUPPORTED" => "팔 포즈는 MIQ/VRM 형식 아바타에서 지원됩니다",
             "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY" => "정적 스키닝 정책으로 팔 포즈가 비활성화되었습니다",
             "ARM_POSE_PAYLOAD_MISSING" => "팔 포즈 페이로드가 없습니다",
             "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN" => "VRM 원점 롤백 감지로 팔 포즈가 자동 비활성화되었습니다",

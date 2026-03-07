@@ -3,11 +3,14 @@
 #include <sstream>
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <chrono>
 
 #include "animiq/vsf/unityfs_reader.h"
+#include "animiq/vsf/serialized_file_reader.h"
 
 namespace fs = std::filesystem;
 
@@ -71,6 +74,43 @@ std::string TruncateForSummary(const std::string& text, std::size_t max_chars) {
         return text;
     }
     return text.substr(0, max_chars) + "...";
+}
+
+float ReadF32LE(const std::vector<unsigned char>& bytes, std::size_t at) {
+    const std::uint32_t raw =
+        static_cast<std::uint32_t>(bytes[at]) |
+        (static_cast<std::uint32_t>(bytes[at + 1U]) << 8U) |
+        (static_cast<std::uint32_t>(bytes[at + 2U]) << 16U) |
+        (static_cast<std::uint32_t>(bytes[at + 3U]) << 24U);
+    float out = 0.0f;
+    std::memcpy(&out, &raw, sizeof(float));
+    return out;
+}
+
+std::uint32_t CountFinitePositionTriples(const std::vector<unsigned char>& bytes) {
+    if (bytes.size() < 12U) {
+        return 0U;
+    }
+    std::uint32_t count = 0U;
+    const std::size_t stride = 12U;
+    const std::size_t max_samples = std::min<std::size_t>(bytes.size() / stride, 12000U);
+    for (std::size_t i = 0U; i < max_samples; ++i) {
+        const std::size_t at = i * stride;
+        if (at + 12U > bytes.size()) {
+            break;
+        }
+        const float x = ReadF32LE(bytes, at);
+        const float y = ReadF32LE(bytes, at + 4U);
+        const float z = ReadF32LE(bytes, at + 8U);
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            continue;
+        }
+        if (std::abs(x) > 10000.0f || std::abs(y) > 10000.0f || std::abs(z) > 10000.0f) {
+            continue;
+        }
+        ++count;
+    }
+    return count;
 }
 
 }  // namespace
@@ -209,13 +249,32 @@ int main(int argc, char** argv) {
         }
     }
 
+    std::uint32_t authored_extractable_mesh_count = 0U;
+    std::uint32_t authored_extractable_vertex_sample_total = 0U;
+    if (!p.serialized_file_bytes.empty()) {
+        animiq::vsf::SerializedFileReader serialized_reader;
+        const auto blobs = serialized_reader.ExtractMeshObjectBlobs(
+            p.serialized_file_bytes,
+            std::max<std::size_t>(16U, static_cast<std::size_t>(std::min<std::uint32_t>(96U, p.mesh_object_count + 24U))));
+        if (blobs.ok) {
+            for (const auto& blob : blobs.value) {
+                const auto finite_triples = CountFinitePositionTriples(blob.bytes);
+                if (finite_triples >= 96U) {
+                    ++authored_extractable_mesh_count;
+                    authored_extractable_vertex_sample_total += finite_triples;
+                }
+            }
+        }
+    }
+
     const bool authored_table_ready =
         p.probe_stage == "complete" &&
         p.object_table_parsed &&
         p.mesh_object_count > 0U;
     const bool can_emit_authored_payload =
         authored_table_ready &&
-        p.skinned_mesh_renderer_count > 0U;
+        p.skinned_mesh_renderer_count > 0U &&
+        authored_extractable_mesh_count > 0U;
     const bool can_emit_object_stub_payload = p.probe_stage == "complete" && p.object_table_parsed;
     const bool can_emit_placeholder_payload = false;
     std::string render_payload_mode = "none";
@@ -229,9 +288,12 @@ int main(int argc, char** argv) {
         render_payload_mode = "authored_mesh_v1";
         mesh_payload_count = std::min<std::uint32_t>(std::max<std::uint32_t>(1U, mesh_count), 128U);
         material_payload_count = 1U;
-        payload_quality_score = 78U;
+        payload_quality_score = std::min<std::uint32_t>(
+            95U,
+            65U + std::min<std::uint32_t>(25U, authored_extractable_mesh_count * 2U));
         topology_flags.push_back("mesh_object_table_ready");
         topology_flags.push_back("skinned_renderer_linked");
+        topology_flags.push_back("mesh_blob_extractable");
         skin_binding_coverage = 1.0f;
         payload_route_reason_code = "VSF_ROUTE_AUTHORED_OBJECT_TABLE_READY";
     } else if (can_emit_object_stub_payload) {
@@ -244,6 +306,9 @@ int main(int argc, char** argv) {
         material_payload_count = 1U;
         payload_quality_score = authored_table_ready ? 42U : 22U;
         topology_flags.push_back(authored_table_ready ? "mesh_objects_present_payload_pending" : "mesh_objects_missing");
+        if (authored_table_ready && authored_extractable_mesh_count == 0U) {
+            topology_flags.push_back("mesh_blob_not_extractable");
+        }
         skin_binding_coverage = (p.skinned_mesh_renderer_count > 0U) ? 0.35f : 0.0f;
         payload_route_reason_code = authored_table_ready
             ? "VSF_ROUTE_OBJECT_STUB_AUTHORED_PENDING"
@@ -289,6 +354,8 @@ int main(int argc, char** argv) {
               << "\"material_payload_count\":" << material_payload_count << ","
               << "\"payload_quality_score\":" << payload_quality_score << ","
               << "\"skin_binding_coverage\":" << skin_binding_coverage << ","
+              << "\"authored_extractable_mesh_count\":" << authored_extractable_mesh_count << ","
+              << "\"authored_extractable_vertex_sample_total\":" << authored_extractable_vertex_sample_total << ","
               << "\"payload_route_reason_code\":\"" << EscapeJson(payload_route_reason_code) << "\","
               << "\"topology_flags\":" << JoinJsonStringArray(topology_flags) << ","
               << "\"selected_block_layout\":\"" << EscapeJson(p.selected_block_layout) << "\","

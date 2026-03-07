@@ -93,7 +93,9 @@ public sealed record TrackingStartOptions(
     bool AutoStabilityTuningEnabled = true,
     bool UpperBodyEnabled = true,
     float UpperBodyStrength = 1.0f,
-    UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced);
+    UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced,
+    float IfacialBlendshapeSmoothing = 0.18f,
+    bool IfacialBlinkJawPriorityEnabled = true);
 
 public sealed record WebcamDeviceOption(
     string DeviceKey,

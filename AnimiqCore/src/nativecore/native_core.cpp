@@ -2866,9 +2866,12 @@ bool ShouldApplyArmPoseForAvatar(const AvatarPackage& avatar_pkg) {
     if (mode == StaticSkinningEnvMode::ForceOff) {
         return false;
     }
-    // Auto mode: allow arm pose for MIQ when the runtime has complete pose payloads.
+    // Auto mode: allow arm pose for MIQ/VRM when the runtime has complete pose payloads.
     // Keep mesh static-skinning policy separate to avoid regressions in mesh-space safety rules.
-    return avatar_pkg.source_type == AvatarSourceType::Miq &&
+    const bool supported_format =
+        avatar_pkg.source_type == AvatarSourceType::Miq ||
+        avatar_pkg.source_type == AvatarSourceType::Vrm;
+    return supported_format &&
         !avatar_pkg.skin_payloads.empty() &&
         !avatar_pkg.skeleton_payloads.empty() &&
         !avatar_pkg.skeleton_rig_payloads.empty();
@@ -4216,10 +4219,11 @@ bool ApplyArmPoseToAvatar(
                 !avatar_pkg.skin_payloads.empty() &&
                 !avatar_pkg.skeleton_payloads.empty() &&
                 !avatar_pkg.skeleton_rig_payloads.empty();
-            if (avatar_pkg.source_type != AvatarSourceType::Miq) {
+            if (avatar_pkg.source_type != AvatarSourceType::Miq &&
+                avatar_pkg.source_type != AvatarSourceType::Vrm) {
                 PushAvatarWarningExclusive(
                     &avatar_it->second,
-                    "W_RENDER: ARM_POSE_FORMAT_UNSUPPORTED: arm pose is supported for MIQ payloads.",
+                    "W_RENDER: ARM_POSE_FORMAT_UNSUPPORTED: arm pose is supported for MIQ/VRM payloads.",
                     "ARM_POSE_FORMAT_UNSUPPORTED",
                     {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
             } else if (!payload_complete) {
@@ -4472,7 +4476,13 @@ bool ApplyArmPoseToAvatar(
         const float volume_ratio = post_volume / pre_volume;
         const bool collapsed_volume = volume_ratio < 0.08f;
         const bool exploded_volume = volume_ratio > 25.0f;
-        if (!post_stats.finite || exploded_extent || exploded_abs || exploded_volume) {
+        const bool collapsed_or_tube_artifact =
+            collapsed_extent ||
+            collapsed_axis ||
+            collapsed_volume ||
+            tube_aspect_spike ||
+            tube_axis_ratio;
+        if (!post_stats.finite || exploded_extent || exploded_abs || exploded_volume || collapsed_or_tube_artifact) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
                 PushAvatarWarningUnique(
@@ -6642,6 +6652,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         std::uint32_t mesh_vrm_origin_detached_cluster_recentered_count = 0U;
         std::uint32_t mesh_vrm_origin_hair_head_realigned_count = 0U;
         std::uint32_t mesh_bounds_outlier_draw_skipped_count = 0U;
+        std::uint32_t mesh_vsf_heuristic_axis_spike_skipped_count = 0U;
         std::uint32_t bounds_outlier_excluded_count = static_cast<std::uint32_t>(excluded_bounds_mesh_count);
         std::uint32_t preview_hair_candidate_mesh_count = 0U;
         std::uint32_t preview_hair_aligned_mesh_count = 0U;
@@ -6655,6 +6666,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             is_miq_avatar &&
             ResolveMiqOutlierDrawPolicy() == MiqOutlierDrawPolicy::SkipDraw;
         const bool skip_bounds_outlier_draws = skip_miq_outlier_draws || is_vsf_heuristic_avatar;
+        const bool apply_aggressive_outlier_draw_skips = skip_miq_outlier_draws;
         bool head_ref_valid = false;
         float head_ref_x = robust_cx;
         float head_ref_y = robust_cy;
@@ -6703,6 +6715,19 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
             const float ey = std::max(mesh.bounds_max.y - mesh.bounds_min.y, 0.0f);
             const float ez = std::max(mesh.bounds_max.z - mesh.bounds_min.z, 0.0f);
             const float emax = std::max(ex, std::max(ey, ez));
+            if (is_vsf_heuristic_avatar) {
+                const float emin = std::max(1.0e-5f, std::min(ex, std::min(ey, ez)));
+                const float emid = std::max(1.0e-5f, ex + ey + ez - emax - emin);
+                const float axis_ratio = emax / emid;
+                const float ultra_ratio = emax / emin;
+                const bool axis_spike =
+                    (axis_ratio > 26.0f || ultra_ratio > 80.0f) &&
+                    emax > std::max(0.20f, median_extent * 1.3f);
+                if (axis_spike) {
+                    ++mesh_vsf_heuristic_axis_spike_skipped_count;
+                    continue;
+                }
+            }
             const float dcx = mesh.center.x - robust_cx;
             const float dcy = mesh.center.y - robust_cy;
             const float dcz = mesh.center.z - robust_cz;
@@ -6827,7 +6852,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                     }
                 }
             }
-            if (skip_bounds_outlier_draws) {
+            if (apply_aggressive_outlier_draw_skips) {
                 if (std::isfinite(emax) && emax > draw_extent_threshold) {
                     ++mesh_extent_outlier_skipped_count;
                     continue;
@@ -7084,6 +7109,14 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                 std::ostringstream warning;
                 warning << "W_RENDER: MIQ_BOUNDS_OUTLIER_DRAW_SKIPPED: meshes=" << mesh_bounds_outlier_draw_skipped_count;
                 PushAvatarWarningUnique(&avatar_it->second, warning.str(), "MIQ_BOUNDS_OUTLIER_DRAW_SKIPPED");
+            }
+        }
+        if (mesh_vsf_heuristic_axis_spike_skipped_count > 0U) {
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: VSF_HEURISTIC_AXIS_SPIKE_SKIPPED: meshes=" << mesh_vsf_heuristic_axis_spike_skipped_count;
+                PushAvatarWarningUnique(&avatar_it->second, warning.str(), "VSF_HEURISTIC_AXIS_SPIKE_SKIPPED");
             }
         }
         if (mesh_extreme_detached_cluster_skipped_count > 0U) {

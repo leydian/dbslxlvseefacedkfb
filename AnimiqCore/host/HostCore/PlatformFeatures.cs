@@ -63,7 +63,11 @@ public sealed record TrackingInputSettings(
     bool AutoStabilityTuningEnabled = true,
     bool UpperBodyEnabled = true,
     float UpperBodyStrength = 1.0f,
-    UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced);
+    UpperBodySmoothingProfile UpperBodySmoothing = UpperBodySmoothingProfile.Balanced,
+    float IfacialBlendshapeSmoothing = 0.18f,
+    bool IfacialBlinkJawPriorityEnabled = true,
+    bool UpperBodyFallbackFromHeadEnabled = true,
+    float UpperBodyFallbackFromHeadStrength = 0.55f);
 
 public sealed record RecentAvatarEntry(
     string AvatarPath,
@@ -93,7 +97,7 @@ public sealed record SessionPersistenceModel(
     DateTimeOffset LastUpdatedUtc)
 {
     public static SessionPersistenceModel CreateDefault() => new(
-        Version: 11,
+        Version: 13,
         AvatarPath: string.Empty,
         SpoutChannelName: "Animiq",
         OscBindPort: 39539,
@@ -209,13 +213,13 @@ public sealed class SessionStateStore
             if (legacy is not null)
             {
                 return Normalize(new SessionPersistenceModel(
-                    Version: 11,
+                    Version: 13,
                     AvatarPath: legacy.AvatarPath,
                     SpoutChannelName: legacy.SpoutChannelName,
                     OscBindPort: legacy.OscBindPort,
                     OscPublishAddress: legacy.OscPublishAddress,
                     Sidecar: legacy.Sidecar,
-                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, true, 1.0f, UpperBodySmoothingProfile.Balanced),
+                    Tracking: new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, true, 1.0f, UpperBodySmoothingProfile.Balanced, 0.18f, true, true, 0.55f),
                     RecentAvatars: Array.Empty<RecentAvatarEntry>(),
                     LastProfileName: legacy.LastProfileName,
                     UiMode: "beginner",
@@ -253,7 +257,7 @@ public sealed class SessionStateStore
         var showTrackingIpv4Hint = model.Version < 9 ? true : model.UiShowTrackingIpv4Hint;
         return model with
         {
-            Version = Math.Max(11, model.Version),
+            Version = Math.Max(13, model.Version),
             Tracking = NormalizeTracking(model.Tracking, model.Version),
             RecentAvatars = NormalizeRecentAvatars(model.RecentAvatars),
             UiMode = mode,
@@ -268,7 +272,7 @@ public sealed class SessionStateStore
     {
         if (value is null)
         {
-            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, true, 1.0f, UpperBodySmoothingProfile.Balanced);
+            return new TrackingInputSettings(49983, 500, false, TrackingSourceType.HybridAuto, string.Empty, 30, 10, 10, TrackingSourceLockMode.Auto, TrackingLatencyProfile.Balanced, PoseFilterProfile.Stable, 0.9f, true, true, 1.0f, UpperBodySmoothingProfile.Balanced, 0.18f, true, true, 0.55f);
         }
 
         var port = value.ListenPort == 0 ? (ushort)49983 : value.ListenPort;
@@ -296,6 +300,20 @@ public sealed class SessionStateStore
         var upperBodySmoothing = Enum.IsDefined(typeof(UpperBodySmoothingProfile), value.UpperBodySmoothing)
             ? value.UpperBodySmoothing
             : UpperBodySmoothingProfile.Balanced;
+        var ifacialBlendshapeSmoothing = Math.Clamp(
+            float.IsFinite(value.IfacialBlendshapeSmoothing) ? value.IfacialBlendshapeSmoothing : 0.18f,
+            0.0f,
+            1.0f);
+        var ifacialBlinkJawPriorityEnabled = modelVersion < 13
+            ? true
+            : value.IfacialBlinkJawPriorityEnabled;
+        var upperBodyFallbackFromHeadEnabled = modelVersion < 12
+            ? true
+            : value.UpperBodyFallbackFromHeadEnabled;
+        var upperBodyFallbackFromHeadStrength = Math.Clamp(
+            float.IsFinite(value.UpperBodyFallbackFromHeadStrength) ? value.UpperBodyFallbackFromHeadStrength : 0.55f,
+            0.0f,
+            1.0f);
         return new TrackingInputSettings(
             port,
             stale,
@@ -312,7 +330,11 @@ public sealed class SessionStateStore
             autoStabilityTuningEnabled,
             value.UpperBodyEnabled,
             upperBodyStrength,
-            upperBodySmoothing);
+            upperBodySmoothing,
+            ifacialBlendshapeSmoothing,
+            ifacialBlinkJawPriorityEnabled,
+            upperBodyFallbackFromHeadEnabled,
+            upperBodyFallbackFromHeadStrength);
     }
 
     private static string NormalizeUiMode(string value)

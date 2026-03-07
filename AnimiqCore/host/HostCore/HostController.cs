@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 
 namespace HostCore;
@@ -44,6 +45,11 @@ public sealed partial class HostController
     private List<PoseBoneUiOffset> _poseOffsets = BuildDefaultPoseOffsets();
     private TrackingUpperBodyPose _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
     private NcPoseBoneOffset[] _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
+    private bool _headDrivenTrunkFallbackActive;
+    private float _headDrivenTrunkPitchDeg;
+    private float _headDrivenTrunkYawDeg;
+    private bool _lastHeadDrivenUpperBodyFallbackApplied;
+    private string _lastHeadDrivenUpperBodyFallbackReason = "disabled";
     private string _lastTrackingFormat = "unknown";
     private ulong _lastTrackingParseErrors;
     private bool _lastTrackingActive;
@@ -149,6 +155,8 @@ public sealed partial class HostController
     public IReadOnlyList<PoseBoneUiOffset> PoseOffsets => _poseOffsets;
     public ArmPoseTuningSettings ArmPoseTuning => _armPoseTuning;
     public IReadOnlyList<SuggestedArmPreset> SuggestedArmPresets => _suggestedArmPresets;
+    public bool IsHeadDrivenUpperBodyFallbackApplied => _lastHeadDrivenUpperBodyFallbackApplied;
+    public string HeadDrivenUpperBodyFallbackReason => _lastHeadDrivenUpperBodyFallbackReason;
 
     public NcResultCode Initialize()
     {
@@ -503,7 +511,9 @@ public sealed partial class HostController
                 trackingSettings.AutoStabilityTuningEnabled,
                 trackingSettings.UpperBodyEnabled,
                 trackingSettings.UpperBodyStrength,
-                trackingSettings.UpperBodySmoothing);
+                trackingSettings.UpperBodySmoothing,
+                trackingSettings.IfacialBlendshapeSmoothing,
+                trackingSettings.IfacialBlinkJawPriorityEnabled);
             var rc = _trackingInputService.Start(options);
             _trackingDiagnostics = _trackingInputService.GetDiagnostics();
             _lastArkit52Summary = null;
@@ -528,6 +538,11 @@ public sealed partial class HostController
             {
                 SetTrackingState(_sessionPersistence.Tracking.ListenPort, _sessionPersistence.Tracking.StaleTimeoutMs, false);
                 _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral(status: "stopped");
+                _headDrivenTrunkFallbackActive = false;
+                _headDrivenTrunkPitchDeg = 0.0f;
+                _headDrivenTrunkYawDeg = 0.0f;
+                _lastHeadDrivenUpperBodyFallbackApplied = false;
+                _lastHeadDrivenUpperBodyFallbackReason = "stopped";
                 _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 _ = ApplyPoseOffsetsInternal("StopTrackingResetPoseOffsets");
             }
@@ -900,8 +915,12 @@ public sealed partial class HostController
         }
 
         var nativeSubmitErrorCode = string.Empty;
+        var latestTrackingFrame = BuildNeutralTrackingFrame();
+        var hasLatestTrackingFrame = false;
         if (_trackingInputService.TryGetLatestFrame(out var trackingFrame))
         {
+            latestTrackingFrame = trackingFrame;
+            hasLatestTrackingFrame = true;
             var trackingRc = NativeCoreInterop.nc_set_tracking_frame(ref trackingFrame);
             if (trackingRc != NcResultCode.Ok)
             {
@@ -921,9 +940,11 @@ public sealed partial class HostController
             }
         }
         Arkit52ResolutionSummary? arkit52Summary = null;
+        IReadOnlyDictionary<string, float>? latestExpressionWeights = null;
         if (_trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
             expressionWeights.Count > 0)
         {
+            latestExpressionWeights = expressionWeights;
             var stageWatch = Stopwatch.StartNew();
             var resolved = BuildExpressionPayloadWithArkitFallback(expressionWeights);
             stageWatch.Stop();
@@ -968,6 +989,41 @@ public sealed partial class HostController
         else
         {
             _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral(status: "disabled");
+        }
+
+        _lastHeadDrivenUpperBodyFallbackApplied = false;
+        _headDrivenTrunkFallbackActive = false;
+        _headDrivenTrunkPitchDeg = 0.0f;
+        _headDrivenTrunkYawDeg = 0.0f;
+        _lastHeadDrivenUpperBodyFallbackReason = trackingSettings.UpperBodyEnabled
+            ? (trackingSettings.UpperBodyFallbackFromHeadEnabled ? "not-needed" : "disabled")
+            : "upper-body-disabled";
+        if (trackingSettings.UpperBodyEnabled &&
+            trackingSettings.UpperBodyFallbackFromHeadEnabled &&
+            !_lastAutoUpperBodyPose.IsValid)
+        {
+            if (hasLatestTrackingFrame &&
+                TryBuildHeadDrivenUpperBodyPose(
+                    latestTrackingFrame,
+                    trackingSettings.UpperBodyFallbackFromHeadStrength,
+                    latestExpressionWeights,
+                    out var trunkPitchDeg,
+                    out var trunkYawDeg,
+                    out var headFallbackPose))
+            {
+                _lastAutoUpperBodyPose = headFallbackPose;
+                _headDrivenTrunkFallbackActive = true;
+                _headDrivenTrunkPitchDeg = trunkPitchDeg;
+                _headDrivenTrunkYawDeg = trunkYawDeg;
+                _lastHeadDrivenUpperBodyFallbackApplied = true;
+                _lastHeadDrivenUpperBodyFallbackReason = "applied-no-upper-body-source";
+            }
+            else
+            {
+                _lastHeadDrivenUpperBodyFallbackReason = hasLatestTrackingFrame
+                    ? "head-frame-invalid"
+                    : "no-head-frame";
+            }
         }
 
         var runtimePosePayload = BuildRuntimePosePayload(_lastAutoUpperBodyPose);
@@ -2060,6 +2116,23 @@ public sealed partial class HostController
             missing.Add(channel);
         }
 
+        if (!normalized.ContainsKey("eyeblinkleft") &&
+            normalized.TryGetValue("eyewideleft", out var eyeWideLeft))
+        {
+            normalized["eyeblinkleft"] = Math.Clamp(1.0f - eyeWideLeft, 0.0f, 1.0f);
+            fallbackCount++;
+        }
+        if (!normalized.ContainsKey("eyeblinkright") &&
+            normalized.TryGetValue("eyewideright", out var eyeWideRight))
+        {
+            normalized["eyeblinkright"] = Math.Clamp(1.0f - eyeWideRight, 0.0f, 1.0f);
+            fallbackCount++;
+        }
+
+        // Also emit common VRM preset aliases so avatars bound to preset names
+        // (blink, vowels, emotion presets) animate even when source payload is ARKit-centric.
+        AddVrmPresetAliases(normalized);
+
         var payload = normalized
             .Select(static pair => new NcExpressionWeight
             {
@@ -2080,6 +2153,94 @@ public sealed partial class HostController
             qualityScore,
             0.0);
         return new Arkit52PayloadResolution(payload, summary);
+    }
+
+    private static void AddVrmPresetAliases(Dictionary<string, float> normalized)
+    {
+        if (normalized.Count == 0)
+        {
+            return;
+        }
+
+        var blink = MaxOf(normalized, "eyeblinkleft", "eyeblinkright", "blink");
+        var aa = MaxOf(normalized, "jawopen", "mouthopen", "visemeaa", "aa");
+        var ii = MaxOf(normalized, "mouthsmileleft", "mouthsmileright", "mouthstretchleft", "mouthstretchright", "visemeih", "ih", "i");
+        var uu = MaxOf(normalized, "mouthpucker", "mouthfunnel", "visemeu", "u");
+        var ee = MaxOf(normalized, "mouthsmileleft", "mouthsmileright", "visemee", "e");
+        var oo = MaxOf(normalized, "mouthfunnel", "mouthpucker", "visemeo", "o");
+        var joy = MaxOf(normalized, "mouthsmileleft", "mouthsmileright", "joy");
+        var angry = MaxOf(normalized, "browdownleft", "browdownright", "angry");
+        var sorrow = MaxOf(normalized, "mouthfrownleft", "mouthfrownright", "browinnerup", "sorrow");
+        var lookUp = MaxOf(normalized, "eyelookupleft", "eyelookupright");
+        var lookDown = MaxOf(normalized, "eyelookdownleft", "eyelookdownright");
+        var lookLeft = MaxOf(normalized, "eyelookoutleft", "eyelookinright");
+        var lookRight = MaxOf(normalized, "eyelookinleft", "eyelookoutright");
+
+        SetAliasMax(normalized, blink, "blink", "blinking", "vrmblink");
+        SetAliasMax(normalized, aa, "a", "vrcv_aa", "visemeaa");
+        SetAliasMax(normalized, ii, "i", "vrcv_ih");
+        SetAliasMax(normalized, uu, "u", "vrcv_ou");
+        SetAliasMax(normalized, ee, "e", "vrcv_e");
+        SetAliasMax(normalized, oo, "o", "vrcv_oh");
+        SetAliasMax(normalized, joy, "joy", "happy");
+        SetAliasMax(normalized, angry, "angry");
+        SetAliasMax(normalized, sorrow, "sorrow", "sad");
+        SetAliasMax(normalized, lookUp, "lookup");
+        SetAliasMax(normalized, lookDown, "lookdown");
+        SetAliasMax(normalized, lookLeft, "lookleft");
+        SetAliasMax(normalized, lookRight, "lookright");
+    }
+
+    private static void SetAliasMax(Dictionary<string, float> normalized, float value, params string[] aliases)
+    {
+        if (aliases is null || aliases.Length == 0)
+        {
+            return;
+        }
+
+        var clamped = Math.Clamp(value, 0.0f, 1.0f);
+        for (var i = 0; i < aliases.Length; i++)
+        {
+            var key = Arkit52Channels.NormalizeKey(aliases[i]);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+            if (normalized.TryGetValue(key, out var existing))
+            {
+                normalized[key] = Math.Max(existing, clamped);
+            }
+            else
+            {
+                normalized[key] = clamped;
+            }
+        }
+    }
+
+    private static float MaxOf(IReadOnlyDictionary<string, float> normalized, params string[] keys)
+    {
+        var best = 0.0f;
+        for (var i = 0; i < keys.Length; i++)
+        {
+            var key = Arkit52Channels.NormalizeKey(keys[i]);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+            if (!normalized.TryGetValue(key, out var value))
+            {
+                continue;
+            }
+            if (!float.IsFinite(value))
+            {
+                continue;
+            }
+            if (value > best)
+            {
+                best = value;
+            }
+        }
+        return Math.Clamp(best, 0.0f, 1.0f);
     }
 
     private static bool TryResolveFallbackChannel(
@@ -2141,16 +2302,188 @@ public sealed partial class HostController
                 PoseBoneKind.RightShoulder => autoUpperBodyPose.RightShoulderPitchDeg,
                 PoseBoneKind.LeftUpperArm => autoUpperBodyPose.LeftUpperArmPitchDeg,
                 PoseBoneKind.RightUpperArm => autoUpperBodyPose.RightUpperArmPitchDeg,
+                PoseBoneKind.Spine => GetHeadFallbackTrunkPitch(trunkWeight: 0.16f),
+                PoseBoneKind.Chest => GetHeadFallbackTrunkPitch(trunkWeight: 0.30f),
+                PoseBoneKind.UpperChest => GetHeadFallbackTrunkPitch(trunkWeight: 0.44f),
+                PoseBoneKind.Neck => GetHeadFallbackTrunkPitch(trunkWeight: 0.24f),
+                _ => 0.0f,
+            };
+            var autoYaw = p.Bone switch
+            {
+                PoseBoneKind.Spine => GetHeadFallbackTrunkYaw(trunkWeight: 0.48f),
+                PoseBoneKind.Chest => GetHeadFallbackTrunkYaw(trunkWeight: 0.86f),
+                PoseBoneKind.UpperChest => GetHeadFallbackTrunkYaw(trunkWeight: 1.18f),
+                PoseBoneKind.Neck => GetHeadFallbackTrunkYaw(trunkWeight: 0.74f),
                 _ => 0.0f,
             };
             return new NcPoseBoneOffset
             {
                 BoneId = ToNativePoseBone(p.Bone),
                 PitchDeg = ClampPitchForBone(p.Bone, p.PitchDeg + autoPitch),
-                YawDeg = p.YawDeg,
+                YawDeg = p.YawDeg + autoYaw,
                 RollDeg = p.RollDeg,
             };
         }).ToArray();
+    }
+
+    private float GetHeadFallbackTrunkPitch(float trunkWeight)
+    {
+        if (!_headDrivenTrunkFallbackActive)
+        {
+            return 0.0f;
+        }
+        return Math.Clamp(_headDrivenTrunkPitchDeg * trunkWeight, -30.0f, 30.0f);
+    }
+
+    private float GetHeadFallbackTrunkYaw(float trunkWeight)
+    {
+        if (!_headDrivenTrunkFallbackActive)
+        {
+            return 0.0f;
+        }
+        return Math.Clamp(_headDrivenTrunkYawDeg * trunkWeight, -20.0f, 20.0f);
+    }
+
+    private static bool TryBuildHeadDrivenUpperBodyPose(
+        in NcTrackingFrame frame,
+        float strength,
+        IReadOnlyDictionary<string, float>? expressionWeights,
+        out float trunkPitchDeg,
+        out float trunkYawDeg,
+        out TrackingUpperBodyPose pose)
+    {
+        trunkPitchDeg = 0.0f;
+        trunkYawDeg = 0.0f;
+        pose = TrackingUpperBodyPose.Neutral(status: "head-fallback-unavailable");
+        var hasHeadRot = TryQuaternionToEulerDegrees(frame.HeadRotX, frame.HeadRotY, frame.HeadRotZ, frame.HeadRotW, out var pitchDeg, out var yawDeg, out var rollDeg);
+        if (!hasHeadRot)
+        {
+            pitchDeg = 0.0f;
+            yawDeg = 0.0f;
+            rollDeg = 0.0f;
+        }
+
+        var posPitchDeg = Math.Clamp((-frame.HeadPosY * 120.0f) + (frame.HeadPosZ * 80.0f), -35.0f, 35.0f);
+        var posYawDeg = Math.Clamp(frame.HeadPosX * 100.0f, -28.0f, 28.0f);
+        if (!hasHeadRot || (Math.Abs(pitchDeg) < 0.2f && Math.Abs(yawDeg) < 0.2f && Math.Abs(rollDeg) < 0.2f))
+        {
+            pitchDeg = posPitchDeg;
+            yawDeg = posYawDeg;
+            rollDeg = 0.0f;
+        }
+
+        var gain = Math.Clamp(float.IsFinite(strength) ? strength : 0.55f, 0.0f, 1.0f);
+        var jaw = ResolveExpressionWeight(expressionWeights, "jawOpen", "mouthOpen", "aa", "viseme_aa");
+        var blink = ResolveExpressionWeight(expressionWeights, "blink", "eyeBlinkLeft", "eyeBlinkRight");
+        var browInnerUp = ResolveExpressionWeight(expressionWeights, "browInnerUp");
+        var browDownL = ResolveExpressionWeight(expressionWeights, "browDownLeft", "browDownL");
+        var browDownR = ResolveExpressionWeight(expressionWeights, "browDownRight", "browDownR");
+        var browOuterUpL = ResolveExpressionWeight(expressionWeights, "browOuterUpLeft", "browOuterUpL");
+        var browOuterUpR = ResolveExpressionWeight(expressionWeights, "browOuterUpRight", "browOuterUpR");
+        var exprPitchBoost = (jaw * 10.0f) - (blink * 4.0f) + (browInnerUp * 4.5f) + ((browOuterUpL + browOuterUpR) * 1.5f) - ((browDownL + browDownR) * 2.0f);
+        var exprYawBoost = ((browDownR - browDownL) + (browOuterUpR - browOuterUpL)) * 14.0f;
+        var resolvedPitch = pitchDeg + exprPitchBoost;
+        var resolvedYaw = yawDeg + exprYawBoost;
+        trunkPitchDeg = Math.Clamp(resolvedPitch * gain * 0.55f, -20.0f, 20.0f);
+        trunkYawDeg = Math.Clamp(resolvedYaw * gain * 1.35f, -40.0f, 40.0f);
+        trunkPitchDeg = QuantizeDeg(trunkPitchDeg, 0.35f);
+        trunkYawDeg = QuantizeDeg(trunkYawDeg, 0.35f);
+
+        var shoulderPitch = Math.Clamp((resolvedPitch * 0.20f + rollDeg * 0.08f) * gain, -18.0f, 18.0f);
+        var leftUpperArmPitch = Math.Clamp((resolvedPitch * 0.48f + resolvedYaw * 0.12f) * gain, -40.0f, 40.0f);
+        var rightUpperArmPitch = Math.Clamp((resolvedPitch * 0.48f - resolvedYaw * 0.12f) * gain, -40.0f, 40.0f);
+        var confidence = Math.Clamp(0.35 + (gain * 0.45), 0.0, 1.0);
+        pose = new TrackingUpperBodyPose(
+            IsValid: true,
+            LeftShoulderPitchDeg: shoulderPitch,
+            RightShoulderPitchDeg: shoulderPitch,
+            LeftUpperArmPitchDeg: leftUpperArmPitch,
+            RightUpperArmPitchDeg: rightUpperArmPitch,
+            Confidence: confidence,
+            PacketAgeMs: 0,
+            Status: hasHeadRot ? "head-fallback" : "headpos-expr-fallback");
+        return true;
+    }
+
+    private static float ResolveExpressionWeight(IReadOnlyDictionary<string, float>? source, params string[] candidates)
+    {
+        if (source is null || source.Count == 0 || candidates.Length == 0)
+        {
+            return 0.0f;
+        }
+
+        var best = 0.0f;
+        for (var i = 0; i < candidates.Length; i++)
+        {
+            if (!source.TryGetValue(candidates[i], out var weight))
+            {
+                continue;
+            }
+            if (!float.IsFinite(weight))
+            {
+                continue;
+            }
+            if (weight > best)
+            {
+                best = weight;
+            }
+        }
+        return Math.Clamp(best, 0.0f, 1.0f);
+    }
+
+    private static float QuantizeDeg(float valueDeg, float stepDeg)
+    {
+        if (!float.IsFinite(valueDeg) || !float.IsFinite(stepDeg) || stepDeg <= 0.0f)
+        {
+            return 0.0f;
+        }
+
+        return MathF.Round(valueDeg / stepDeg) * stepDeg;
+    }
+
+    private static bool TryQuaternionToEulerDegrees(
+        float x,
+        float y,
+        float z,
+        float w,
+        out float pitchDeg,
+        out float yawDeg,
+        out float rollDeg)
+    {
+        pitchDeg = 0.0f;
+        yawDeg = 0.0f;
+        rollDeg = 0.0f;
+        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z) || !float.IsFinite(w))
+        {
+            return false;
+        }
+
+        var q = new Quaternion(x, y, z, w);
+        var lenSq = q.LengthSquared();
+        if (!(lenSq > 1e-8f))
+        {
+            return false;
+        }
+
+        q = Quaternion.Normalize(q);
+        var sinrCosp = 2.0f * ((q.W * q.X) + (q.Y * q.Z));
+        var cosrCosp = 1.0f - (2.0f * ((q.X * q.X) + (q.Y * q.Y)));
+        var pitchRad = MathF.Atan2(sinrCosp, cosrCosp);
+
+        var sinp = 2.0f * ((q.W * q.Y) - (q.Z * q.X));
+        var yawRad = MathF.Abs(sinp) >= 1.0f
+            ? MathF.CopySign(MathF.PI / 2.0f, sinp)
+            : MathF.Asin(sinp);
+
+        var sinyCosp = 2.0f * ((q.W * q.Z) + (q.X * q.Y));
+        var cosyCosp = 1.0f - (2.0f * ((q.Y * q.Y) + (q.Z * q.Z)));
+        var rollRad = MathF.Atan2(sinyCosp, cosyCosp);
+
+        const float radToDeg = 180.0f / MathF.PI;
+        pitchDeg = pitchRad * radToDeg;
+        yawDeg = yawRad * radToDeg;
+        rollDeg = rollRad * radToDeg;
+        return float.IsFinite(pitchDeg) && float.IsFinite(yawDeg) && float.IsFinite(rollDeg);
     }
 
     private NcResultCode SubmitPosePayload(NcPoseBoneOffset[] payload)

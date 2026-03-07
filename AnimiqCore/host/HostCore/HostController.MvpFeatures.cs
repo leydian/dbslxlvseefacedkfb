@@ -941,7 +941,11 @@ public sealed partial class HostController
         bool? autoStabilityTuningEnabled = null,
         bool? upperBodyEnabled = null,
         float? upperBodyStrength = null,
-        UpperBodySmoothingProfile? upperBodySmoothing = null)
+        UpperBodySmoothingProfile? upperBodySmoothing = null,
+        float? ifacialBlendshapeSmoothing = null,
+        bool? ifacialBlinkJawPriorityEnabled = null,
+        bool? upperBodyFallbackFromHeadEnabled = null,
+        float? upperBodyFallbackFromHeadStrength = null)
     {
         var current = _sessionPersistence.Tracking;
         var resolvedProfile = latencyProfile ?? current.LatencyProfile;
@@ -954,6 +958,18 @@ public sealed partial class HostController
             float.IsFinite(upperBodyStrength ?? current.UpperBodyStrength) ? (upperBodyStrength ?? current.UpperBodyStrength) : 1.0f,
             0.0f,
             1.5f);
+        var resolvedUpperBodyFallbackFromHeadStrength = Math.Clamp(
+            float.IsFinite(upperBodyFallbackFromHeadStrength ?? current.UpperBodyFallbackFromHeadStrength)
+                ? (upperBodyFallbackFromHeadStrength ?? current.UpperBodyFallbackFromHeadStrength)
+                : 0.55f,
+            0.0f,
+            1.0f);
+        var resolvedIfacialBlendshapeSmoothing = Math.Clamp(
+            float.IsFinite(ifacialBlendshapeSmoothing ?? current.IfacialBlendshapeSmoothing)
+                ? (ifacialBlendshapeSmoothing ?? current.IfacialBlendshapeSmoothing)
+                : 0.18f,
+            0.0f,
+            1.0f);
         var normalized = new TrackingInputSettings(
             listenPort == 0 ? (ushort)49983 : listenPort,
             Math.Clamp(staleTimeoutMs <= 0 ? 500 : staleTimeoutMs, 50, 5000),
@@ -970,7 +986,11 @@ public sealed partial class HostController
             autoStabilityTuningEnabled ?? current.AutoStabilityTuningEnabled,
             upperBodyEnabled ?? current.UpperBodyEnabled,
             resolvedUpperBodyStrength,
-            upperBodySmoothing ?? current.UpperBodySmoothing);
+            upperBodySmoothing ?? current.UpperBodySmoothing,
+            resolvedIfacialBlendshapeSmoothing,
+            ifacialBlinkJawPriorityEnabled ?? current.IfacialBlinkJawPriorityEnabled,
+            upperBodyFallbackFromHeadEnabled ?? current.UpperBodyFallbackFromHeadEnabled,
+            resolvedUpperBodyFallbackFromHeadStrength);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,
@@ -981,7 +1001,7 @@ public sealed partial class HostController
             new HostLogEntry(
                 DateTimeOffset.UtcNow,
                 "TrackingConfig",
-                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, auto_stability={normalized.AutoStabilityTuningEnabled}, upper_body={normalized.UpperBodyEnabled}, upper_strength={normalized.UpperBodyStrength:F2}, upper_smoothing={normalized.UpperBodySmoothing}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
+                $"port={normalized.ListenPort}, stale_ms={normalized.StaleTimeoutMs}, source={normalized.SourceType}, lock={normalized.SourceLockMode}, profile={normalized.LatencyProfile}, pose_filter={normalized.PoseFilterProfile}, deadband_deg={normalized.PoseDeadbandDeg:F2}, auto_stability={normalized.AutoStabilityTuningEnabled}, ifacial_smoothing={normalized.IfacialBlendshapeSmoothing:F2}, ifacial_blinkjaw_priority={normalized.IfacialBlinkJawPriorityEnabled}, upper_body={normalized.UpperBodyEnabled}, upper_strength={normalized.UpperBodyStrength:F2}, upper_smoothing={normalized.UpperBodySmoothing}, upper_fallback={normalized.UpperBodyFallbackFromHeadEnabled}, upper_fallback_strength={normalized.UpperBodyFallbackFromHeadStrength:F2}, fps_cap={normalized.InferenceFpsCap}, parse_warn={normalized.ParseErrorWarnThreshold}, dropped_warn={normalized.DroppedPacketWarnThreshold}",
                 NcResultCode.Ok),
             false);
     }
@@ -1020,7 +1040,11 @@ public sealed partial class HostController
             current.AutoStabilityTuningEnabled,
             current.UpperBodyEnabled,
             current.UpperBodyStrength,
-            current.UpperBodySmoothing);
+            current.UpperBodySmoothing,
+            current.IfacialBlendshapeSmoothing,
+            current.IfacialBlinkJawPriorityEnabled,
+            current.UpperBodyFallbackFromHeadEnabled,
+            current.UpperBodyFallbackFromHeadStrength);
         _sessionPersistence = _sessionPersistence with
         {
             Tracking = normalized,

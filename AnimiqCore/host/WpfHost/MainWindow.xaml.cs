@@ -1288,7 +1288,11 @@ public partial class MainWindow : Window
             poseFilterProfile: poseFilterProfile,
             poseDeadbandDeg: (float)TrackingPoseDeadbandSlider.Value,
             autoStabilityTuningEnabled: TrackingAutoStabilityCheckBox.IsChecked == true,
-            upperBodyEnabled: TrackingUpperBodyEnabledCheckBox.IsChecked == true);
+            upperBodyEnabled: TrackingUpperBodyEnabledCheckBox.IsChecked == true,
+            ifacialBlendshapeSmoothing: (float)TrackingIfacialSmoothingSlider.Value,
+            ifacialBlinkJawPriorityEnabled: TrackingIfacialBlinkJawPriorityCheckBox.IsChecked == true,
+            upperBodyFallbackFromHeadEnabled: TrackingUpperBodyHeadFallbackCheckBox.IsChecked == true,
+            upperBodyFallbackFromHeadStrength: (float)TrackingUpperBodyHeadFallbackStrengthSlider.Value);
 
         var rc = _controller.StartTracking(
             listenPort,
@@ -1432,6 +1436,78 @@ public partial class MainWindow : Window
         _isSyncingTrackingPoseFilterUi = false;
     }
 
+    private void TrackingUpperBodyHeadFallbackCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady || _isSyncingTrackingBasicUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            upperBodyFallbackFromHeadEnabled: TrackingUpperBodyHeadFallbackCheckBox.IsChecked == true);
+        SyncTrackingBasicControlsFromState();
+    }
+
+    private void TrackingUpperBodyHeadFallbackStrengthSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TrackingUpperBodyHeadFallbackStrengthSlider is null || TrackingUpperBodyHeadFallbackStrengthValueText is null)
+        {
+            return;
+        }
+
+        TrackingUpperBodyHeadFallbackStrengthValueText.Text = TrackingUpperBodyHeadFallbackStrengthSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        if (!_uiReady || _isSyncingTrackingBasicUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            upperBodyFallbackFromHeadStrength: (float)TrackingUpperBodyHeadFallbackStrengthSlider.Value);
+        SyncTrackingBasicControlsFromState();
+    }
+
+    private void TrackingIfacialSmoothingSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (TrackingIfacialSmoothingSlider is null || TrackingIfacialSmoothingValueText is null)
+        {
+            return;
+        }
+
+        TrackingIfacialSmoothingValueText.Text = TrackingIfacialSmoothingSlider.Value.ToString("F2", CultureInfo.InvariantCulture);
+        if (!_uiReady || _isSyncingTrackingBasicUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            ifacialBlendshapeSmoothing: (float)TrackingIfacialSmoothingSlider.Value);
+        SyncTrackingBasicControlsFromState();
+    }
+
+    private void TrackingIfacialBlinkJawPriorityCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_uiReady || _isSyncingTrackingBasicUi || _controller.OperationState.IsBusy || _controller.TrackingDiagnostics.IsActive)
+        {
+            return;
+        }
+
+        var current = _controller.GetTrackingInputSettings();
+        _controller.ConfigureTrackingInputSettings(
+            current.ListenPort,
+            current.StaleTimeoutMs,
+            ifacialBlinkJawPriorityEnabled: TrackingIfacialBlinkJawPriorityCheckBox.IsChecked == true);
+        SyncTrackingBasicControlsFromState();
+    }
+
     private void TrackingStaleTimeoutSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (TrackingStaleTimeoutSlider is null || TrackingStaleTimeoutValueText is null)
@@ -1487,6 +1563,12 @@ public partial class MainWindow : Window
         TrackingSourceComboBox.SelectedIndex = 0;
         TrackingUpperBodyEnabledCheckBox.IsChecked = true;
         TrackingAutoStabilityCheckBox.IsChecked = true;
+        TrackingUpperBodyHeadFallbackCheckBox.IsChecked = true;
+        TrackingUpperBodyHeadFallbackStrengthSlider.Value = 0.55;
+        TrackingUpperBodyHeadFallbackStrengthValueText.Text = "0.55";
+        TrackingIfacialSmoothingSlider.Value = 0.18;
+        TrackingIfacialSmoothingValueText.Text = "0.18";
+        TrackingIfacialBlinkJawPriorityCheckBox.IsChecked = true;
 
         _isSyncingTrackingBasicUi = true;
         TrackingStabilitySlider.Value = 70;
@@ -1515,7 +1597,11 @@ public partial class MainWindow : Window
             poseFilterProfile: PoseFilterProfile.Stable,
             poseDeadbandDeg: 0.9f,
             autoStabilityTuningEnabled: true,
-            upperBodyEnabled: true);
+            upperBodyEnabled: true,
+            ifacialBlendshapeSmoothing: 0.18f,
+            ifacialBlinkJawPriorityEnabled: true,
+            upperBodyFallbackFromHeadEnabled: true,
+            upperBodyFallbackFromHeadStrength: 0.55f);
 
         SyncTrackingBasicControlsFromState();
     }
@@ -2566,6 +2652,13 @@ public partial class MainWindow : Window
         TrackingShowPositionCheckBox.IsEnabled = !operation.IsBusy;
         TrackingAutoStabilityCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         TrackingUpperBodyEnabledCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingUpperBodyHeadFallbackCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingUpperBodyHeadFallbackStrengthSlider.IsEnabled =
+            !operation.IsBusy &&
+            !tracking.IsActive &&
+            TrackingUpperBodyHeadFallbackCheckBox.IsChecked == true;
+        TrackingIfacialSmoothingSlider.IsEnabled = !operation.IsBusy && !tracking.IsActive;
+        TrackingIfacialBlinkJawPriorityCheckBox.IsEnabled = !operation.IsBusy && !tracking.IsActive;
         LoadTimeoutTextBox.IsEnabled = !operation.IsBusy && !_isLoadRunning;
         LoadButton.IsEnabled = LoadButton.IsEnabled && !_isLoadRunning;
         var armGateTooltip = uiState.ArmPoseEnabled ? null : $"팔 포즈 비활성 ({uiState.ArmPoseReasonCode})";
@@ -2584,7 +2677,7 @@ public partial class MainWindow : Window
         StartTrackingButton.ToolTip = uiState.ExpressionEnabled ? null : $"얼굴 표정 입력 경고 ({uiState.ExpressionReasonCode})";
         var trackingSettings = _controller.GetTrackingInputSettings();
         var trackingHint = BuildTrackingErrorHint(tracking.LastErrorCode);
-        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} auto_stability={trackingSettings.AutoStabilityTuningEnabled} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} switches={tracking.RecentSourceSwitchCount} switch_reason={tracking.LastSourceSwitchReason} switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} ifm_keys_ok={tracking.IfmAcceptedKeySample} ifm_keys_drop={tracking.IfmDroppedKeySample} err={tracking.LastErrorCode}{trackingHint}";
+        TrackingStatusText.Text = $"tracking={(tracking.IsActive ? "on" : "off")} source={tracking.SourceType} lock={tracking.SourceLockMode} active={tracking.ActiveSource} block={tracking.SwitchBlockedReason} source_status={tracking.SourceStatus} format={tracking.DetectedFormat} pose_filter={tracking.PoseFilterProfile} deadband_deg={tracking.PoseDeadbandDeg:F2} auto_stability={trackingSettings.AutoStabilityTuningEnabled} ifacial_smoothing={trackingSettings.IfacialBlendshapeSmoothing:F2} ifacial_blinkjaw_priority={trackingSettings.IfacialBlinkJawPriorityEnabled} upper_body_enabled={trackingSettings.UpperBodyEnabled} upper_fallback_enabled={trackingSettings.UpperBodyFallbackFromHeadEnabled} upper_fallback_strength={trackingSettings.UpperBodyFallbackFromHeadStrength:F2} upper_fallback_active={_controller.IsHeadDrivenUpperBodyFallbackApplied} upper_fallback_reason={_controller.HeadDrivenUpperBodyFallbackReason} upper_active={tracking.UpperBodyTrackingActive} upper_source={tracking.UpperBodyActiveSource} upper_conf={tracking.UpperBodyConfidence:F2} upper_age={tracking.UpperBodyPacketAgeMs} upper_status={tracking.UpperBodyStatus} fps={tracking.InputFps:F1} capture_fps={tracking.CaptureFps:F1} infer_ms={tracking.InferenceMsAvg:F1} lat_avg={tracking.LatencyAvgMs:F1} lat_p95={tracking.LatencyP95Ms:F1} stage_ms(c/p/s/u)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1} arkit52={tracking.Arkit52SubmittedCount}/52 strict={tracking.Arkit52StrictCount} fb={tracking.Arkit52FallbackCount} missing={tracking.Arkit52MissingCount} q={tracking.Arkit52QualityScore:F2} qms={tracking.Arkit52QualityStageMs:F2} age_ms={tracking.LastPacketAgeMs} ifacial_age={tracking.IfacialPacketAgeMs} webcam_age={tracking.WebcamPacketAgeMs} stale={tracking.IsStale} backend_ready={tracking.ModelSchemaOk} packets={tracking.ReceivedPackets} dropped={tracking.DroppedPackets} parse_err={tracking.ParseErrors} parse_warn={trackingSettings.ParseErrorWarnThreshold} drop_warn={trackingSettings.DroppedPacketWarnThreshold} fallback={tracking.FallbackCount} switches={tracking.RecentSourceSwitchCount} switch_reason={tracking.LastSourceSwitchReason} switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs} calib={tracking.CalibrationState} conf={tracking.ConfidenceSummary} ifm_keys_ok={tracking.IfmAcceptedKeySample} ifm_keys_drop={tracking.IfmDroppedKeySample} err={tracking.LastErrorCode}{trackingHint}";
 
         SessionStatusText.Text = statusText.SessionText switch
         {
@@ -3269,7 +3362,13 @@ public partial class MainWindow : Window
             TrackingStabilityValueText is null ||
             TrackingStaleTimeoutSlider is null ||
             TrackingStaleTimeoutValueText is null ||
-            TrackingShowPositionCheckBox is null)
+            TrackingShowPositionCheckBox is null ||
+            TrackingUpperBodyHeadFallbackCheckBox is null ||
+            TrackingUpperBodyHeadFallbackStrengthSlider is null ||
+            TrackingUpperBodyHeadFallbackStrengthValueText is null ||
+            TrackingIfacialSmoothingSlider is null ||
+            TrackingIfacialSmoothingValueText is null ||
+            TrackingIfacialBlinkJawPriorityCheckBox is null)
         {
             return;
         }
@@ -3288,6 +3387,12 @@ public partial class MainWindow : Window
         TrackingStaleTimeoutSlider.Value = tracking.StaleTimeoutMs;
         TrackingStaleTimeoutValueText.Text = tracking.StaleTimeoutMs.ToString(CultureInfo.InvariantCulture);
         TrackingShowPositionCheckBox.IsChecked = _controller.RenderState.ShowDebugOverlay;
+        TrackingUpperBodyHeadFallbackCheckBox.IsChecked = tracking.UpperBodyFallbackFromHeadEnabled;
+        TrackingUpperBodyHeadFallbackStrengthSlider.Value = tracking.UpperBodyFallbackFromHeadStrength;
+        TrackingUpperBodyHeadFallbackStrengthValueText.Text = tracking.UpperBodyFallbackFromHeadStrength.ToString("F2", CultureInfo.InvariantCulture);
+        TrackingIfacialSmoothingSlider.Value = tracking.IfacialBlendshapeSmoothing;
+        TrackingIfacialSmoothingValueText.Text = tracking.IfacialBlendshapeSmoothing.ToString("F2", CultureInfo.InvariantCulture);
+        TrackingIfacialBlinkJawPriorityCheckBox.IsChecked = tracking.IfacialBlinkJawPriorityEnabled;
         _isSyncingTrackingBasicUi = false;
     }
 
@@ -3564,6 +3669,12 @@ public partial class MainWindow : Window
         TrackingStaleTimeoutValueText.Text = session.Tracking.StaleTimeoutMs.ToString(CultureInfo.InvariantCulture);
         TrackingAutoStabilityCheckBox.IsChecked = session.Tracking.AutoStabilityTuningEnabled;
         TrackingUpperBodyEnabledCheckBox.IsChecked = session.Tracking.UpperBodyEnabled;
+        TrackingIfacialSmoothingSlider.Value = session.Tracking.IfacialBlendshapeSmoothing;
+        TrackingIfacialSmoothingValueText.Text = session.Tracking.IfacialBlendshapeSmoothing.ToString("F2", CultureInfo.InvariantCulture);
+        TrackingIfacialBlinkJawPriorityCheckBox.IsChecked = session.Tracking.IfacialBlinkJawPriorityEnabled;
+        TrackingUpperBodyHeadFallbackCheckBox.IsChecked = session.Tracking.UpperBodyFallbackFromHeadEnabled;
+        TrackingUpperBodyHeadFallbackStrengthSlider.Value = session.Tracking.UpperBodyFallbackFromHeadStrength;
+        TrackingUpperBodyHeadFallbackStrengthValueText.Text = session.Tracking.UpperBodyFallbackFromHeadStrength.ToString("F2", CultureInfo.InvariantCulture);
         _showTrackingIpv4Hint = session.UiShowTrackingIpv4Hint;
         RefreshTrackingIpv4Hint();
         ApplyTrackingIpv4HintVisibility();
