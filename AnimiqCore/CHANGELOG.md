@@ -2,6 +2,56 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-08 - WPF arm pose stabilization: VSeeFace policy alignment + sleeve follow recovery + redeploy
+
+### Summary
+
+Resolved a multi-regression arm pose path where slider-driven arm raise/lower produced spin artifacts, elbow bending, and clothing sleeve desync.
+Final runtime behavior now follows a VSeeFace-like policy:
+
+- upper-arm direct drive
+- relaxed helper-bone follow (twist/sleeve only)
+- no lower-arm/hand/wrist auto-coupling in slider path
+
+WPF distribution was republished with updated `nativecore.dll`.
+
+### Root Cause
+
+- Pose offsets were being applied in a way that mixed global/local intent, which made arm lift map to visible twist for some rigs.
+- Broad bone-name fallback matching over-selected non-arm targets.
+- Clothing helper rigs without stable humanoid IDs did not reliably receive arm pose updates.
+- Arm path collapse/tube guard was over-sensitive for some clothing helper meshes, leaving sleeves in bind pose.
+
+### Changed
+
+- `AnimiqCore/src/nativecore/native_core.cpp`
+  - replaced direct global bone multiplication with local-space pose application + hierarchy recomposition (`child * parent`) before skinning.
+  - added arm-chain axis remap so operator-facing arm pitch maps to arm-lift behavior instead of twist-like spin.
+  - added humanoid lookup fallback by normalized `bone_name` for rigs with incomplete humanoid tagging.
+  - restricted fallback matching to boundary-aware arm-chain tokens to avoid non-arm accidental matches.
+  - applied VSeeFace-like coupling policy:
+    - upper-arm: `1.00`
+    - twist/sleeve helpers: `0.35`
+    - shoulder/lower-arm/hand/wrist: `0.00` in slider-coupled path
+  - arm-pose hard reject now keeps catastrophic guards (`non-finite`, extreme explosion) while avoiding false-positive sleeve lock from mild collapse/tube heuristics.
+
+- benchmark references used for policy alignment:
+  - `VSeeFace-v1.13.38c2/VSeeFace/Release notes.txt` entries around:
+    - upper-arm twist fixes,
+    - twist relaxer fixes,
+    - wrist reception separation from arm/shoulder,
+    - arm-angle slider behavior.
+
+### Verification
+
+- native build:
+  - `cmake --build AnimiqCore/build --config Release --target nativecore`: PASS
+- WPF publish/redeploy:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -SkipNativeBuild -NoRestore`: PASS
+  - `WPF launch smoke: PASS`
+  - native copy integrity confirmed in publish report:
+    - source hash = destination hash (`nativecore.dll`)
+
 ## 2026-03-08 - VRM mesh-loop compile recovery and WPF redeploy
 
 ### Summary

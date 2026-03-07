@@ -4495,6 +4495,14 @@ bool ApplyArmPoseToAvatar(
         };
 
         std::vector<bool> local_pose_applied(bone_count, false);
+        auto scale_pose = [](const NcPoseBoneOffset& pose, float weight) {
+            NcPoseBoneOffset out = pose;
+            const float w = std::max(0.0f, std::min(1.0f, weight));
+            out.pitch_deg *= w;
+            out.yaw_deg *= w;
+            out.roll_deg *= w;
+            return out;
+        };
         auto apply_local_pose_to_bone = [&](std::size_t bone_index, bool is_left_arm_chain, bool is_right_arm_chain, const NcPoseBoneOffset& pose) {
             if (bone_index >= bone_count) {
                 return;
@@ -4572,7 +4580,8 @@ bool ApplyArmPoseToAvatar(
             }
             return false;
         };
-        auto apply_named_arm_chain_fallback = [&](const NcPoseBoneOffset& pose, bool is_left, std::initializer_list<const char*> segment_tokens) {
+        auto apply_named_arm_chain_fallback = [&](const NcPoseBoneOffset& pose, bool is_left, float weight, std::initializer_list<const char*> segment_tokens) {
+            const NcPoseBoneOffset weighted_pose = scale_pose(pose, weight);
             for (std::size_t i = 0U; i < bone_count; ++i) {
                 if (local_pose_applied[i]) {
                     continue;
@@ -4594,7 +4603,7 @@ bool ApplyArmPoseToAvatar(
                 if (!segment_match) {
                     continue;
                 }
-                apply_local_pose_to_bone(i, is_left, !is_left, pose);
+                apply_local_pose_to_bone(i, is_left, !is_left, weighted_pose);
             }
         };
 
@@ -4602,8 +4611,14 @@ bool ApplyArmPoseToAvatar(
         apply_humanoid_local_pose(avatar::HumanoidBoneId::RightUpperArm, right_upper_arm_pose);
         // Keep arm lift/lower stable: only drive upper-arm + upper-arm-adjacent helper bones.
         // Driving shoulder/lower-arm/hand directly caused visible elbow bending artifacts.
-        apply_named_arm_chain_fallback(left_upper_arm_pose, true, {"upperarm", "uparm", "armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
-        apply_named_arm_chain_fallback(right_upper_arm_pose, false, {"upperarm", "uparm", "armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
+        // VSeeFace-like policy:
+        //  - upperarm direct: full weight
+        //  - helper twist/sleeve: relaxed partial weight
+        //  - lowerarm/hand/wrist: no auto coupling in slider path
+        apply_named_arm_chain_fallback(left_upper_arm_pose, true, 1.0f, {"upperarm", "uparm"});
+        apply_named_arm_chain_fallback(right_upper_arm_pose, false, 1.0f, {"upperarm", "uparm"});
+        apply_named_arm_chain_fallback(left_upper_arm_pose, true, 0.35f, {"armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
+        apply_named_arm_chain_fallback(right_upper_arm_pose, false, 0.35f, {"armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
 
         std::vector<DirectX::XMMATRIX> posed_globals(bone_count, DirectX::XMMatrixIdentity());
         std::vector<bool> resolved(bone_count, false);
@@ -4693,7 +4708,11 @@ bool ApplyArmPoseToAvatar(
             collapsed_volume ||
             tube_aspect_spike ||
             tube_axis_ratio;
-        if (!post_stats.finite || exploded_extent || exploded_abs || exploded_volume || collapsed_or_tube_artifact) {
+        (void)collapsed_or_tube_artifact;
+        // Arm-pose path should only hard-reject catastrophic explosions/non-finite output.
+        // Mild collapse/tube heuristics were causing false positives on clothing helper meshes
+        // and leaving sleeves in bind-pose while body moved.
+        if (!post_stats.finite || exploded_extent || exploded_abs || exploded_volume) {
             auto avatar_it = g_state.avatars.find(handle);
             if (avatar_it != g_state.avatars.end()) {
                 PushAvatarWarningUnique(
