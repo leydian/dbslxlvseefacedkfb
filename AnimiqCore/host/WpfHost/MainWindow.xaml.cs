@@ -86,6 +86,8 @@ public partial class MainWindow : Window
     private string _recommendedTrackingIpv4 = string.Empty;
     private const int TrackingDefaultStaleTimeoutMs = 500;
     private const int TrackingDefaultInferenceFps = 30;
+    private sealed record OverlayVisualState(Border Element, DateTimeOffset ExpireAtUtc);
+    private readonly List<OverlayVisualState> _overlayVisuals = new();
 
     private static string ToPersistSectionKey(UiSection section) => section switch
     {
@@ -798,6 +800,9 @@ public partial class MainWindow : Window
                     return true;
                 case Key.P:
                     PopOutRender_Click(this, new RoutedEventArgs());
+                    return true;
+                case Key.X:
+                    PanicStop_Click(this, new RoutedEventArgs());
                     return true;
             }
         }
@@ -2433,6 +2438,8 @@ public partial class MainWindow : Window
         _frameTimer.Restart();
         _ = _controller.Tick((float)elapsed.TotalSeconds);
         _controller.TickAutomation();
+        ProcessOverlayCommands();
+        PruneExpiredOverlayItems();
 
         // Native rendering currently targets the window HWND, so WPF controls
         // need explicit invalidation to keep visual layering stable.
@@ -2513,8 +2520,144 @@ public partial class MainWindow : Window
         AutomationStatusText.Text =
             $"nodes={snapshot.NodeCount}, edges={snapshot.EdgeCount}, pending={snapshot.PendingContinuationCount}, " +
             $"lastEvent={snapshot.LastEvent}, lastError={NormalizeDiagField(snapshot.LastError)}, " +
-            $"receiver(active={receiver.Active}, channel={NormalizeDiagField(receiver.ChannelName)}, err={NormalizeDiagField(receiver.LastErrorCode)})";
+            $"receiver(active={receiver.Active}, channel={NormalizeDiagField(receiver.ChannelName)}, err={NormalizeDiagField(receiver.LastErrorCode)}), " +
+            $"receiverAutoReconnect={_controller.SpoutReceiverAutoReconnectEnabled()}";
         RenderAutomationPreview(json);
+    }
+
+    private void AutomationCommandFire_Click(object sender, RoutedEventArgs e)
+    {
+        var command = AutomationCommandTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+        _controller.TriggerAutomationCommand(command);
+    }
+
+    private void AutomationInsertTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = (AutomationTemplateComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Timer -> SetExpression";
+        var model = ParseAutomationGraphOrDefault(AutomationGraphJsonTextBox.Text);
+        var nextY = model.Nodes.Count == 0 ? 60f : model.Nodes.Max(static n => n.Y) + 100f;
+
+        switch (selected)
+        {
+            case "Command -> SwapAvatar":
+                AddTemplateCommandSwap(model, nextY);
+                break;
+            case "OSC -> SendOsc":
+                AddTemplateOscForward(model, nextY);
+                break;
+            case "Timer -> Overlay Item":
+                AddTemplateOverlayItem(model, nextY);
+                break;
+            default:
+                AddTemplateTimerExpression(model, nextY);
+                break;
+        }
+
+        AutomationGraphJsonTextBox.Text = JsonSerializer.Serialize(model, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true,
+        });
+        RenderAutomationPreview(AutomationGraphJsonTextBox.Text);
+    }
+
+    private void QuickPresetStreaming_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.ApplyRenderProfile("quality");
+        if (!_controller.Outputs.SpoutActive)
+        {
+            StartSpout_Click(this, new RoutedEventArgs());
+        }
+        if (!_controller.Outputs.OscActive)
+        {
+            StartOsc_Click(this, new RoutedEventArgs());
+        }
+    }
+
+    private void QuickPresetTrackingStable_Click(object sender, RoutedEventArgs e)
+    {
+        TrackingSourceComboBox.SelectedIndex = 0;
+        TrackingLatencyProfileComboBox.SelectedIndex = 2;
+        TrackingPoseFilterProfileComboBox.SelectedIndex = 2;
+        if (!_controller.TrackingDiagnostics.IsActive)
+        {
+            StartTracking_Click(this, new RoutedEventArgs());
+        }
+    }
+
+    private void QuickPresetLowLatency_Click(object sender, RoutedEventArgs e)
+    {
+        TrackingSourceComboBox.SelectedIndex = 0;
+        TrackingLatencyProfileComboBox.SelectedIndex = 0;
+        TrackingPoseFilterProfileComboBox.SelectedIndex = 0;
+        if (!_controller.TrackingDiagnostics.IsActive)
+        {
+            StartTracking_Click(this, new RoutedEventArgs());
+        }
+    }
+
+    private void PanicStop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+
+        if (_controller.Outputs.SpoutActive)
+        {
+            _ = _controller.StopSpout();
+        }
+        if (_controller.Outputs.OscActive)
+        {
+            _ = _controller.StopOsc();
+        }
+        if (_controller.TrackingDiagnostics.IsActive)
+        {
+            _ = _controller.StopTracking();
+        }
+    }
+
+    private void RecoveryResetTracking_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _controller.RecenterTracking();
+    }
+
+    private void RecoveryResetExpressions_Click(object sender, RoutedEventArgs e)
+    {
+        var payload = new[]
+        {
+            new NcExpressionWeight { Name = "blink", Weight = 0.0f },
+            new NcExpressionWeight { Name = "jawOpen", Weight = 0.0f },
+            new NcExpressionWeight { Name = "a", Weight = 0.0f },
+            new NcExpressionWeight { Name = "i", Weight = 0.0f },
+            new NcExpressionWeight { Name = "u", Weight = 0.0f },
+            new NcExpressionWeight { Name = "e", Weight = 0.0f },
+            new NcExpressionWeight { Name = "o", Weight = 0.0f },
+            new NcExpressionWeight { Name = "joy", Weight = 0.0f },
+            new NcExpressionWeight { Name = "angry", Weight = 0.0f },
+            new NcExpressionWeight { Name = "sorrow", Weight = 0.0f },
+        };
+        _ = NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
+    }
+
+    private void RecoveryRestartOutputs_Click(object sender, RoutedEventArgs e)
+    {
+        var wasSpout = _controller.Outputs.SpoutActive;
+        var wasOsc = _controller.Outputs.OscActive;
+        if (wasSpout)
+        {
+            _ = _controller.StopSpout();
+            StartSpout_Click(this, new RoutedEventArgs());
+        }
+        if (wasOsc)
+        {
+            _ = _controller.StopOsc();
+            StartOsc_Click(this, new RoutedEventArgs());
+        }
     }
 
     private void RenderAutomationPreview(string json)
@@ -3285,6 +3428,215 @@ public partial class MainWindow : Window
     private static string NormalizeDiagField(string text)
     {
         return string.IsNullOrWhiteSpace(text) ? "none" : text;
+    }
+
+    private void ProcessOverlayCommands()
+    {
+        if (RuntimeOverlayCanvas is null)
+        {
+            return;
+        }
+
+        var commands = _controller.DequeueOverlayItemCommands();
+        foreach (var command in commands)
+        {
+            if (string.Equals(command.Kind, "clear", StringComparison.OrdinalIgnoreCase))
+            {
+                RuntimeOverlayCanvas.Children.Clear();
+                _overlayVisuals.Clear();
+                continue;
+            }
+
+            var color = (Color)ColorConverter.ConvertFromString(string.IsNullOrWhiteSpace(command.ColorHex) ? "#FFFFFFFF" : command.ColorHex);
+            var border = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0)),
+                BorderBrush = new SolidColorBrush(Color.FromArgb(180, color.R, color.G, color.B)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 6, 10, 6),
+                Child = new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(command.Text) ? "Overlay Item" : command.Text,
+                    Foreground = new SolidColorBrush(color),
+                    FontWeight = FontWeights.SemiBold,
+                },
+            };
+
+            var anchor = command.Anchor?.Trim().ToLowerInvariant() ?? "top";
+            var x = (RenderHost.ActualWidth * 0.5) + command.OffsetX;
+            var y = anchor switch
+            {
+                "center" => (RenderHost.ActualHeight * 0.5) + command.OffsetY,
+                "bottom" => Math.Max(12.0, RenderHost.ActualHeight - 60.0 + command.OffsetY),
+                _ => Math.Max(12.0, 24.0 + command.OffsetY),
+            };
+
+            RuntimeOverlayCanvas.Children.Add(border);
+            border.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Canvas.SetLeft(border, x - (border.DesiredSize.Width * 0.5));
+            Canvas.SetTop(border, y);
+            _overlayVisuals.Add(new OverlayVisualState(border, DateTimeOffset.UtcNow.AddMilliseconds(command.DurationMs)));
+        }
+    }
+
+    private void PruneExpiredOverlayItems()
+    {
+        if (_overlayVisuals.Count == 0 || RuntimeOverlayCanvas is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        for (var i = _overlayVisuals.Count - 1; i >= 0; i--)
+        {
+            if (_overlayVisuals[i].ExpireAtUtc > now)
+            {
+                continue;
+            }
+
+            RuntimeOverlayCanvas.Children.Remove(_overlayVisuals[i].Element);
+            _overlayVisuals.RemoveAt(i);
+        }
+    }
+
+    private static WorkflowGraphModel ParseAutomationGraphOrDefault(string json)
+    {
+        try
+        {
+            var model = JsonSerializer.Deserialize<WorkflowGraphModel>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+            return model ?? WorkflowGraphModel.CreateDefault();
+        }
+        catch
+        {
+            return WorkflowGraphModel.CreateDefault();
+        }
+    }
+
+    private static string CreateNodeId(string prefix)
+    {
+        return $"{prefix}_{Guid.NewGuid():N}";
+    }
+
+    private static void AddTemplateTimerExpression(WorkflowGraphModel model, float y)
+    {
+        var timerId = CreateNodeId("trigger_timer");
+        var exprId = CreateNodeId("action_expr");
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = timerId,
+            Kind = WorkflowNodeKind.TimerTrigger,
+            Title = "Timer 2s",
+            X = 80,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["interval_ms"] = "2000" },
+        });
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = exprId,
+            Kind = WorkflowNodeKind.SetExpressionAction,
+            Title = "Blink 1.0",
+            X = 340,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = "blink",
+                ["value"] = "1.0",
+            },
+        });
+        model.Edges.Add(new WorkflowEdgeModel { SourceId = timerId, TargetId = exprId });
+    }
+
+    private static void AddTemplateCommandSwap(WorkflowGraphModel model, float y)
+    {
+        var triggerId = CreateNodeId("trigger_cmd");
+        var swapId = CreateNodeId("action_swap");
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = triggerId,
+            Kind = WorkflowNodeKind.CommandTrigger,
+            Title = "Command swap",
+            X = 80,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["command"] = "swap" },
+        });
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = swapId,
+            Kind = WorkflowNodeKind.SwapAvatarAction,
+            Title = "Swap Avatar",
+            X = 340,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["path"] = "avatar.vrm",
+                ["preserve_outputs"] = "true",
+            },
+        });
+        model.Edges.Add(new WorkflowEdgeModel { SourceId = triggerId, TargetId = swapId });
+    }
+
+    private static void AddTemplateOscForward(WorkflowGraphModel model, float y)
+    {
+        var triggerId = CreateNodeId("trigger_osc");
+        var sendId = CreateNodeId("action_sendosc");
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = triggerId,
+            Kind = WorkflowNodeKind.OscTrigger,
+            Title = "OSC /animiq/input/*",
+            X = 80,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["address"] = "/animiq/input/*" },
+        });
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = sendId,
+            Kind = WorkflowNodeKind.SendOscAction,
+            Title = "Send OSC",
+            X = 340,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["address"] = "/animiq/relay/ping",
+                ["value"] = "1",
+            },
+        });
+        model.Edges.Add(new WorkflowEdgeModel { SourceId = triggerId, TargetId = sendId });
+    }
+
+    private static void AddTemplateOverlayItem(WorkflowGraphModel model, float y)
+    {
+        var timerId = CreateNodeId("trigger_timer");
+        var overlayId = CreateNodeId("action_overlay");
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = timerId,
+            Kind = WorkflowNodeKind.TimerTrigger,
+            Title = "Timer 5s",
+            X = 80,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["interval_ms"] = "5000" },
+        });
+        model.Nodes.Add(new WorkflowNodeModel
+        {
+            Id = overlayId,
+            Kind = WorkflowNodeKind.SpawnOverlayItemAction,
+            Title = "Spawn Overlay",
+            X = 340,
+            Y = y,
+            Params = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["text"] = "Hype!",
+                ["color"] = "#FFB4FF39",
+                ["duration_ms"] = "2000",
+                ["anchor"] = "top",
+            },
+        });
+        model.Edges.Add(new WorkflowEdgeModel { SourceId = timerId, TargetId = overlayId });
     }
 
     private static string ExtractWarningCode(string warningText)

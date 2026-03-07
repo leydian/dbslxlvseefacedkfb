@@ -18,6 +18,12 @@ public enum WorkflowNodeKind
     SetOutputStateAction = 6,
     SetSpout2ReceiverStateAction = 7,
     DelayAction = 8,
+    CommandTrigger = 9,
+    SendOscAction = 10,
+    SetExpressionBatchAction = 11,
+    SpawnOverlayItemAction = 12,
+    ClearOverlayItemsAction = 13,
+    ExtensionAction = 14,
 }
 
 public sealed class WorkflowNodeModel
@@ -128,6 +134,11 @@ public enum WorkflowActionType
     SetRenderProfile = 3,
     SetOutputState = 4,
     SetSpout2ReceiverState = 5,
+    SendOsc = 6,
+    SetExpressionBatch = 7,
+    SpawnOverlayItem = 8,
+    ClearOverlayItems = 9,
+    Extension = 10,
 }
 
 public sealed class WorkflowActionRequest
@@ -422,6 +433,7 @@ internal sealed class WorkflowOscListener : IDisposable
 internal sealed class WorkflowEngine : IDisposable
 {
     private readonly WorkflowOscListener _osc = new();
+    private readonly ConcurrentQueue<string> _commandQueue = new();
     private readonly Dictionary<string, DateTimeOffset> _lastTimerFireUtc = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> _lastStateValue = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(DateTimeOffset ResumeAtUtc, string NodeId)> _continuations = new();
@@ -446,7 +458,9 @@ internal sealed class WorkflowEngine : IDisposable
     public void SetGraphFromJson(string json)
     {
         var model = JsonSerializer.Deserialize<WorkflowGraphModel>(json, _json);
-        SetGraph(model ?? WorkflowGraphModel.CreateDefault());
+        var resolved = model ?? WorkflowGraphModel.CreateDefault();
+        ValidateGraph(resolved);
+        SetGraph(resolved);
     }
 
     public string GetGraphAsJson() => JsonSerializer.Serialize(_graph, _json);
@@ -461,6 +475,15 @@ internal sealed class WorkflowEngine : IDisposable
         LastError = _lastError,
         LastTickUtc = _lastTick,
     };
+
+    public void EnqueueCommand(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+        _commandQueue.Enqueue(command.Trim());
+    }
 
     public void Tick(
         WorkflowTickContext ctx,
@@ -477,6 +500,7 @@ internal sealed class WorkflowEngine : IDisposable
             _osc.EnsureStarted(_graph.OscListenPort);
             _osc.Poll();
             var oscEvents = _osc.Drain();
+            var commands = DrainCommands();
             ExecuteContinuations(ctx, actionCallback);
 
             foreach (var node in _graph.Nodes)
@@ -485,7 +509,7 @@ internal sealed class WorkflowEngine : IDisposable
                 {
                     continue;
                 }
-                if (!ShouldFireTrigger(node, ctx, oscEvents))
+                if (!ShouldFireTrigger(node, ctx, oscEvents, commands))
                 {
                     continue;
                 }
@@ -517,7 +541,11 @@ internal sealed class WorkflowEngine : IDisposable
         }
     }
 
-    private bool ShouldFireTrigger(WorkflowNodeModel node, WorkflowTickContext ctx, IReadOnlyList<WorkflowOscEvent> oscEvents)
+    private bool ShouldFireTrigger(
+        WorkflowNodeModel node,
+        WorkflowTickContext ctx,
+        IReadOnlyList<WorkflowOscEvent> oscEvents,
+        IReadOnlyList<string> commands)
     {
         switch (node.Kind)
         {
@@ -544,9 +572,22 @@ internal sealed class WorkflowEngine : IDisposable
             case WorkflowNodeKind.OscTrigger:
                 var address = GetStringParam(node, "address", "/animiq/event/default");
                 return oscEvents.Any(e => MatchesOscTrigger(node, e, address));
+            case WorkflowNodeKind.CommandTrigger:
+                var command = GetStringParam(node, "command", "default");
+                return commands.Any(c => MatchesCommand(command, c));
             default:
                 return false;
         }
+    }
+
+    private static bool MatchesCommand(string pattern, string command)
+    {
+        var normalizedPattern = string.IsNullOrWhiteSpace(pattern) ? "default" : pattern.Trim();
+        if (normalizedPattern.Contains('*') || normalizedPattern.Contains('?'))
+        {
+            return WildcardMatch(normalizedPattern, command);
+        }
+        return string.Equals(normalizedPattern, command, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool MatchesOscTrigger(WorkflowNodeModel node, WorkflowOscEvent evt, string addressPattern)
@@ -737,12 +778,20 @@ internal sealed class WorkflowEngine : IDisposable
             WorkflowNodeKind.SetRenderProfileAction => WorkflowActionType.SetRenderProfile,
             WorkflowNodeKind.SetOutputStateAction => WorkflowActionType.SetOutputState,
             WorkflowNodeKind.SetSpout2ReceiverStateAction => WorkflowActionType.SetSpout2ReceiverState,
+            WorkflowNodeKind.SendOscAction => WorkflowActionType.SendOsc,
+            WorkflowNodeKind.SetExpressionBatchAction => WorkflowActionType.SetExpressionBatch,
+            WorkflowNodeKind.SpawnOverlayItemAction => WorkflowActionType.SpawnOverlayItem,
+            WorkflowNodeKind.ClearOverlayItemsAction => WorkflowActionType.ClearOverlayItems,
+            WorkflowNodeKind.ExtensionAction => WorkflowActionType.Extension,
             _ => WorkflowActionType.None,
         };
     }
 
     private static bool IsTriggerNode(WorkflowNodeKind kind) =>
-        kind is WorkflowNodeKind.TimerTrigger or WorkflowNodeKind.StateTrigger or WorkflowNodeKind.OscTrigger;
+        kind is WorkflowNodeKind.TimerTrigger
+            or WorkflowNodeKind.StateTrigger
+            or WorkflowNodeKind.OscTrigger
+            or WorkflowNodeKind.CommandTrigger;
 
     private static bool IsActionNode(WorkflowNodeKind kind) =>
         kind is WorkflowNodeKind.SetExpressionAction
@@ -750,7 +799,12 @@ internal sealed class WorkflowEngine : IDisposable
             or WorkflowNodeKind.SetRenderProfileAction
             or WorkflowNodeKind.SetOutputStateAction
             or WorkflowNodeKind.SetSpout2ReceiverStateAction
-            or WorkflowNodeKind.DelayAction;
+            or WorkflowNodeKind.DelayAction
+            or WorkflowNodeKind.SendOscAction
+            or WorkflowNodeKind.SetExpressionBatchAction
+            or WorkflowNodeKind.SpawnOverlayItemAction
+            or WorkflowNodeKind.ClearOverlayItemsAction
+            or WorkflowNodeKind.ExtensionAction;
 
     private static int GetIntParam(WorkflowNodeModel node, string key, int fallback)
     {
@@ -782,5 +836,48 @@ internal sealed class WorkflowEngine : IDisposable
     public void Dispose()
     {
         _osc.Dispose();
+    }
+
+    private List<string> DrainCommands()
+    {
+        var outList = new List<string>();
+        while (_commandQueue.TryDequeue(out var command))
+        {
+            outList.Add(command);
+        }
+        return outList;
+    }
+
+    private static void ValidateGraph(WorkflowGraphModel graph)
+    {
+        if (graph.Nodes is null || graph.Edges is null)
+        {
+            throw new InvalidDataException("workflow graph nodes/edges are required");
+        }
+
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in graph.Nodes)
+        {
+            if (node is null || string.IsNullOrWhiteSpace(node.Id))
+            {
+                throw new InvalidDataException("workflow node id is required");
+            }
+            if (!ids.Add(node.Id))
+            {
+                throw new InvalidDataException($"duplicate workflow node id: {node.Id}");
+            }
+        }
+
+        foreach (var edge in graph.Edges)
+        {
+            if (edge is null || string.IsNullOrWhiteSpace(edge.SourceId) || string.IsNullOrWhiteSpace(edge.TargetId))
+            {
+                throw new InvalidDataException("workflow edge source/target is required");
+            }
+            if (!ids.Contains(edge.SourceId) || !ids.Contains(edge.TargetId))
+            {
+                throw new InvalidDataException($"workflow edge references missing node: {edge.SourceId}->{edge.TargetId}");
+            }
+        }
     }
 }

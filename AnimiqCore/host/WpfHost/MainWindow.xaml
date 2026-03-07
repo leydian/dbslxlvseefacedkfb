@@ -861,6 +861,19 @@
                             <Button x:Name="AutomationApplyButton" Content="그래프 적용/저장" Click="AutomationApply_Click" Margin="0,0,8,0" MinWidth="126"/>
                             <CheckBox x:Name="AutomationEnabledCheckBox" Content="자동 실행 사용" Checked="AutomationEnabled_Changed" Unchecked="AutomationEnabled_Changed" VerticalAlignment="Center"/>
                         </WrapPanel>
+                        <WrapPanel Margin="0,0,0,6">
+                            <TextBlock Text="커맨드" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBox x:Name="AutomationCommandTextBox" Width="180" Text="default" Margin="0,0,8,0"/>
+                            <Button x:Name="AutomationCommandFireButton" Content="커맨드 실행" Click="AutomationCommandFire_Click" Margin="0,0,8,0" MinWidth="96"/>
+                            <TextBlock Text="템플릿" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="AutomationTemplateComboBox" Width="200" SelectedIndex="0" Margin="0,0,8,0">
+                                <ComboBoxItem Content="Timer -> SetExpression"/>
+                                <ComboBoxItem Content="Command -> SwapAvatar"/>
+                                <ComboBoxItem Content="OSC -> SendOsc"/>
+                                <ComboBoxItem Content="Timer -> Overlay Item"/>
+                            </ComboBox>
+                            <Button x:Name="AutomationInsertTemplateButton" Content="템플릿 삽입" Click="AutomationInsertTemplate_Click" MinWidth="96"/>
+                        </WrapPanel>
                         <Grid Margin="0,0,0,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="1.2*"/>
@@ -872,6 +885,19 @@
                             </Border>
                         </Grid>
                         <TextBlock x:Name="AutomationStatusText" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <UniformGrid Columns="2" Margin="0,0,0,8">
+                            <Button Content="Quick Preset: Streaming" Click="QuickPresetStreaming_Click" Margin="0,0,4,0"/>
+                            <Button Content="Quick Preset: TrackingStable" Click="QuickPresetTrackingStable_Click" Margin="4,0,0,0"/>
+                        </UniformGrid>
+                        <UniformGrid Columns="2" Margin="0,0,0,8">
+                            <Button Content="Quick Preset: LowLatency" Click="QuickPresetLowLatency_Click" Margin="0,0,4,0"/>
+                            <Button Content="Panic Stop" Click="PanicStop_Click" Margin="4,0,0,0"/>
+                        </UniformGrid>
+                        <UniformGrid Columns="3" Margin="0,0,0,8">
+                            <Button Content="Reset Tracking" Click="RecoveryResetTracking_Click" Margin="0,0,4,0"/>
+                            <Button Content="Reset Expressions" Click="RecoveryResetExpressions_Click" Margin="4,0,4,0"/>
+                            <Button Content="Restart Outputs" Click="RecoveryRestartOutputs_Click" Margin="4,0,0,0"/>
+                        </UniformGrid>
 
                         <TextBlock Text="텔레메트리" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,4,0,4">
@@ -928,6 +954,7 @@
                 <Border Background="{DynamicResource Color.RenderShellBg}" BorderBrush="{DynamicResource Color.RenderShellBorder}" BorderThickness="1.5" CornerRadius="14">
                     <local:RenderHwndHost x:Name="RenderHost"/>
                 </Border>
+                <Canvas x:Name="RuntimeOverlayCanvas" IsHitTestVisible="False" Panel.ZIndex="15"/>
                 <Border x:Name="RenderOnlyHintOverlay"
                         Visibility="Collapsed"
                         HorizontalAlignment="Center"
@@ -1058,6 +1085,17 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="QuickSpoutIndicator" Text="○" FontSize="14" Margin="0,0,4,0" VerticalAlignment="Center"/>
                         <TextBlock Text="Spout" FontSize="12" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="QuickPanicStopButton"
+                        DockPanel.Dock="Left"
+                        Click="PanicStop_Click"
+                        Padding="10,4"
+                        Margin="8,0,4,0"
+                        ToolTip="Ctrl+Shift+X: 전체 출력/트래킹 중지">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="■" FontSize="14" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Panic" FontSize="12" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
 
