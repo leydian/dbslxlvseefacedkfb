@@ -3482,8 +3482,22 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
-            // Intentionally skip baking node-global transforms for VRM meshes.
-            // Runtime preview yaw remains the single alignment mechanism.
+            const bool has_node_transform =
+                mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i];
+            const bool has_transform_conflict =
+                mesh_i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[mesh_i];
+            if (has_node_transform && !has_transform_conflict) {
+                if (ApplyPositionTransformToVertexBlob(
+                        &mesh_payload.vertex_blob,
+                        mesh_payload.vertex_stride,
+                        mesh_node_transforms[mesh_i])) {
+                    mesh_node_transform_applied[mesh_i] = true;
+                } else {
+                    pkg.warnings.push_back(
+                        "W_NODE: VRM_NODE_TRANSFORM_INVALID: mesh=" + mesh_payload.name + ", action=skipped");
+                    pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_INVALID");
+                }
+            }
 
             // Extract NORMAL attribute (VEC3 FLOAT) from glTF primitive.
             // VRM files carry per-vertex normals that are correct for the mesh's
@@ -3787,7 +3801,11 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     pkg.parser_stage = "payload";
     std::uint32_t transformed_mesh_count = 0U;
     std::uint32_t skipped_mesh_transform_count = 0U;
+    std::uint32_t skipped_conflict_mesh_count = 0U;
+    std::uint32_t displaced_mesh_count = 0U;
     std::string sample_skipped_mesh = "unknown";
+    std::string sample_displaced_mesh = "unknown";
+    std::array<float, 3U> sample_displaced_translation = {0.0f, 0.0f, 0.0f};
     for (std::size_t i = 0U; i < mesh_node_transform_applied.size(); ++i) {
         if (mesh_node_transform_applied[i]) {
             ++transformed_mesh_count;
@@ -3796,8 +3814,29 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             mesh_has_node_transform[i] &&
             !mesh_node_transform_applied[i]) {
             ++skipped_mesh_transform_count;
+            const bool is_conflict =
+                i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[i];
+            if (is_conflict) {
+                ++skipped_conflict_mesh_count;
+            }
             if (sample_skipped_mesh == "unknown" && i < mesh_names_by_index.size()) {
                 sample_skipped_mesh = mesh_names_by_index[i];
+            }
+        }
+        if (i < mesh_has_node_transform.size() &&
+            mesh_has_node_transform[i] &&
+            i < mesh_node_transforms.size()) {
+            const auto& m = mesh_node_transforms[i];
+            const float tx = m[12];
+            const float ty = m[13];
+            const float tz = m[14];
+            const float len = std::sqrt((tx * tx) + (ty * ty) + (tz * tz));
+            if (std::isfinite(len) && len > 1e-4f) {
+                ++displaced_mesh_count;
+                if (sample_displaced_mesh == "unknown" && i < mesh_names_by_index.size()) {
+                    sample_displaced_mesh = mesh_names_by_index[i];
+                    sample_displaced_translation = {tx, ty, tz};
+                }
             }
         }
     }
@@ -3818,8 +3857,19 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
     if (skipped_mesh_transform_count > 0U) {
         pkg.warnings.push_back(
             "W_NODE: VRM_NODE_TRANSFORM_SKIPPED: meshes=" + std::to_string(skipped_mesh_transform_count) +
+            ", conflictMeshes=" + std::to_string(skipped_conflict_mesh_count) +
             ", sampleMesh=" + sample_skipped_mesh);
         pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_SKIPPED");
+    }
+    if (displaced_mesh_count > 0U) {
+        std::ostringstream displaced_diag;
+        displaced_diag << "W_NODE: VRM_NODE_TRANSLATION_OFFSET_DETECTED: meshes=" << displaced_mesh_count
+                       << ", sampleMesh=" << sample_displaced_mesh
+                       << ", sampleT=(" << sample_displaced_translation[0]
+                       << "," << sample_displaced_translation[1]
+                       << "," << sample_displaced_translation[2] << ")";
+        pkg.warnings.push_back(displaced_diag.str());
+        pkg.warning_codes.push_back("VRM_NODE_TRANSLATION_OFFSET_DETECTED");
     }
     pkg.warnings.push_back("W_NODE: VRM_NODE_TRANSFORM_BASIS: global");
     if (skinned_primitive_count > 0U) {
@@ -3864,10 +3914,14 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             multi_ref_mesh_count > 0U ||
             node_transform_conflict_mesh_count > 0U ||
             skinned_payload_failed > 0U;
-        const bool has_skinned_transform_activity =
-            skinned_primitive_count > 0U &&
-            transformed_mesh_count > 0U;
-        if (has_transform_uncertainty || has_skinned_transform_activity) {
+        const bool transform_bake_dominant =
+            transformed_mesh_count >= skipped_mesh_transform_count;
+        if (transformed_mesh_count > 0U && transform_bake_dominant) {
+            pkg.recommended_preview_yaw_deg = 0;
+            pkg.transform_confidence = has_transform_uncertainty
+                ? TransformConfidence::Medium
+                : TransformConfidence::High;
+        } else if (has_transform_uncertainty || skipped_mesh_transform_count > 0U) {
             pkg.recommended_preview_yaw_deg = 180;
             pkg.transform_confidence = has_transform_uncertainty
                 ? TransformConfidence::Low

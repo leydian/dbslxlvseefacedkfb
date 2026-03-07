@@ -2,6 +2,51 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - VRM node-transform bake restoration and displacement diagnostics hardening
+
+### Summary
+
+Applied a focused VRM loader correction based on model-orientation diagnostic findings:
+
+- restored node-global transform baking for mesh vertices (instead of globally skipping),
+- kept conflict-safe skip behavior for ambiguous mesh-node mappings,
+- updated preview yaw recommendation logic to follow actual bake outcomes,
+- added translation-offset diagnostics to improve displacement root-cause triage.
+
+### Changed
+
+- VRM mesh transform application policy:
+  - `src/avatar/vrm_loader.cpp`
+  - re-enabled `ApplyPositionTransformToVertexBlob(...)` when:
+    - mesh has a non-identity node transform, and
+    - mesh does not have node-transform conflict.
+  - invalid matrix/apply failure now explicitly emits:
+    - `W_NODE: VRM_NODE_TRANSFORM_INVALID`
+
+- Skip/conflict observability expansion:
+  - `src/avatar/vrm_loader.cpp`
+  - `VRM_NODE_TRANSFORM_SKIPPED` warning payload now includes:
+    - total skipped mesh count
+    - conflict-skipped mesh count (`conflictMeshes`)
+    - sample mesh name
+
+- Displacement-oriented diagnostics:
+  - `src/avatar/vrm_loader.cpp`
+  - added translation offset summary warning for meshes with non-trivial node translation:
+    - `W_NODE: VRM_NODE_TRANSLATION_OFFSET_DETECTED`
+    - includes sample mesh and sample translation tuple `(tx, ty, tz)`
+
+- Contract yaw heuristic alignment:
+  - `src/avatar/vrm_loader.cpp`
+  - `recommended_preview_yaw_deg` now prioritizes baked-mesh dominant outcomes:
+    - `0` when transform baking is applied and dominant
+    - `180` when uncertainty/skipped transforms dominate
+  - `transform_confidence` remains tied to transform uncertainty level.
+
+### Verification
+
+- `cmake --build AnimiqCore/build_plan_impl --config RelWithDebInfo --verbose`: PASS
+
 ## 2026-03-07 - VRM orientation correction + MIQ contract relaxation controls + WPF operational UX uplift
 
 ### Summary
