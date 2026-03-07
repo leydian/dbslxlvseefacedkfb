@@ -89,7 +89,15 @@ static core::Result<std::string> RunSidecar(
     PROCESS_INFORMATION pi {};
     std::string cmd = EscapeCmdArg(sidecar_path) + " " + EscapeCmdArg(avatar_path);
     std::vector<char> cmd_mutable(cmd.begin(), cmd.end());
-    cmd_mutable.push_back('\0');
+    ZeroMemory(&pi, sizeof(pi));
+
+    // Create a Job Object to ensure the sidecar process is terminated if the host process exits unexpectedly.
+    HANDLE hJob = CreateJobObject(nullptr, nullptr);
+    if (hJob) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {0};
+        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+    }
 
     const BOOL created = CreateProcessA(
         nullptr,
@@ -97,7 +105,7 @@ static core::Result<std::string> RunSidecar(
         nullptr,
         nullptr,
         TRUE,
-        CREATE_NO_WINDOW,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED, // Create suspended to assign to job object
         nullptr,
         nullptr,
         &si,
@@ -105,14 +113,21 @@ static core::Result<std::string> RunSidecar(
 
     CloseHandle(write_pipe);
     if (!created) {
+        if (hJob) CloseHandle(hJob);
         CloseHandle(read_pipe);
         return core::Result<std::string>::Fail("CreateProcess failed");
     }
+
+    if (hJob) {
+        AssignProcessToJobObject(hJob, pi.hProcess);
+    }
+    ResumeThread(pi.hThread);
 
     std::string output;
     char buffer[1024];
     const DWORD start_tick = GetTickCount();
     bool process_exited = false;
+
 
     for (;;) {
         DWORD available = 0;

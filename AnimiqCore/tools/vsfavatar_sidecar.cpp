@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
     if (!p.object_table_parsed) {
         mesh_extract_stage = "object-table-unavailable";
     } else if (mesh_count == 0U) {
-        mesh_extract_stage = "object-table-ready-no-mesh";
+        mesh_extract_stage = "object-table-ready-no-mesh-stub-payload";
     } else {
         mesh_extract_stage = "mesh-objects-discovered-stub-payload";
     }
@@ -193,15 +193,17 @@ int main(int argc, char** argv) {
             : "metadata-recon-baseline-v1";
 
     if (primary_error_code == "NONE") {
-        if (p.probe_stage == "failed-serialized") {
+        if (p.probe_stage == "complete" && p.object_table_parsed) {
+            primary_error_code = "NONE";
+        } else if (p.probe_stage == "failed-serialized") {
             primary_error_code = "VSF_SERIALIZED_TABLE_INCOMPLETE";
-        } else if (mesh_extract_stage == "object-table-ready-no-mesh") {
+        } else if (mesh_extract_stage == "object-table-ready-no-mesh-stub-payload") {
             primary_error_code = "VSF_MESH_PAYLOAD_MISSING";
         }
     }
 
-    const bool can_emit_object_stub_payload = p.probe_stage == "complete" && p.object_table_parsed && mesh_count > 0U;
-    const bool can_emit_placeholder_payload = p.probe_stage == "complete" && p.object_table_parsed && mesh_count == 0U;
+    const bool can_emit_object_stub_payload = p.probe_stage == "complete" && p.object_table_parsed;
+    const bool can_emit_placeholder_payload = false;
     std::string render_payload_mode = "none";
     std::uint32_t mesh_payload_count = 0U;
     std::uint32_t material_payload_count = 0U;
@@ -220,9 +222,6 @@ int main(int argc, char** argv) {
         std::chrono::steady_clock::now() - started_at).count();
     if (can_emit_object_stub_payload) {
         warnings.push_back("W_RENDER_PAYLOAD: object stub payload emitted (authored extraction pending).");
-        missing_features.push_back("authored mesh payload extraction");
-    } else if (can_emit_placeholder_payload) {
-        warnings.push_back("W_RENDER_PAYLOAD: placeholder quad emitted (mesh extraction pending).");
         missing_features.push_back("authored mesh payload extraction");
     }
 

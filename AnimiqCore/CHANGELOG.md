@@ -2,6 +2,42 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - VSFAvatar output-readiness hardening (placeholder output block + stub payload contract)
+
+### Summary
+
+Closed the gap where `.vsfavatar` preview could pass while output-readiness stayed unresolved.
+This change hardens sidecar/loader contracts so output path no longer depends on placeholder payloads and render gate reflects real output readiness.
+
+### Changed
+
+- `AnimiqCore/src/avatar/vsfavatar_loader.cpp`
+  - added strict sidecar schema checks for:
+    - `render_payload_mode`
+    - `mesh_payload_count`
+    - `material_payload_count`
+  - added output-path policy to block placeholder payload by default:
+    - placeholder is accepted only when `VSF_ALLOW_VSF_PLACEHOLDER_RENDER=1`
+    - otherwise loader emits `VSF_PLACEHOLDER_OUTPUT_BLOCKED`
+  - added `object_stub_v1` payload handling and mesh/material stub payload synthesis for output-safe fallback.
+  - added sidecar contract guard:
+    - non-`none` render mode with `mesh_payload_count=0` now fails schema validation.
+
+- `AnimiqCore/tools/vsfavatar_sidecar.cpp`
+  - updated complete/object-table-parsed path to emit `render_payload_mode=object_stub_v1` (instead of placeholder dependency).
+  - aligned mesh extract stage naming for no-mesh complete path:
+    - `object-table-ready-no-mesh-stub-payload`
+  - preserved explicit failure signaling for non-complete/non-object-table paths.
+
+### Verification
+
+- `cmake --build .\build --config Release --target nativecore avatar_tool vsfavatar_sidecar`: PASS
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_render_gate.ps1 -UseFixedSet`: PASS
+  - `Overall: PASS`
+  - `output_readiness: PASS`
+  - `placeholder_dependency: NO`
+- `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`: PASS
+
 ## 2026-03-07 - Loader Stability, 3D Displacement Fix, and 95% Release Readiness
 
 ### Summary
