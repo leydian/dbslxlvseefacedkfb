@@ -65,6 +65,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         _hwnd = WindowNative.GetWindowHandle(this);
         _appWindow = ConfigureWindowBounds();
+        TrySetWindowIcon();
         _timer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(16.0);
         _timer.Tick += Timer_Tick;
@@ -1932,6 +1933,20 @@ public sealed partial class MainWindow : Window
         var targetHeight = Math.Max(MinWindowHeight, appWindow.Size.Height);
         appWindow.Resize(new SizeInt32(targetWidth, targetHeight));
         return appWindow;
+    }
+
+    private void TrySetWindowIcon()
+    {
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+        if (File.Exists(iconPath))
+        {
+            _appWindow.SetIcon(iconPath);
+        }
     }
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)

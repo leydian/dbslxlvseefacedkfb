@@ -70,6 +70,7 @@
 - Newly added: review `2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md` for single-active rail navigation, diagnostics default-collapse policy, dual-theme runtime switch, and lightweight section transition optimization.
 - Newly added: review `2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md` for HostCore-backed workspace restore, core keyboard shortcuts, nav keyboard traversal, and section-focused primary control routing.
 - Newly added: review `2026-03-06_wpf_ui_v4_operation_hub_and_flow_timing.md` for Getting Started operation hub quick actions, block-reason consolidation, and first-broadcast timing telemetry (latest/median).
+- Newly added: review `2026-03-07_animiq_brand_logo_icon_application.md` for WPF/WinUI brand asset 적용 범위, icon/logo wiring details, and current HostCore build blocker (`CS0535`) verification context.
 - Newly added: review `2026-03-06_wpf_dark_theme_coverage_and_contrast_fix.md` for semantic token expansion, hardcoded color island removal, dark-theme coverage completion, and readability/contrast uplift in WPF host.
 - Newly added: review `2026-03-06_arkit52_strict_full_support_pipeline.md` for strict ARKit52 channel binding policy, host/native coverage diagnostics, and non-fatal missing-channel warning behavior.
 - Newly added: review `2026-03-06_arkit52_quality_refinement_hybrid_fallback.md` for strict-first hybrid fallback routing, ARKit quality scoring, per-group calibration tuning, and fallback warning telemetry.

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WpfHost"
-        Title="Animiq Host (WPF)" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
+        Title="Animiq Host (WPF)" Icon="Assets/app.ico" Height="840" Width="1420" MinHeight="760" MinWidth="1240">
     <Window.Resources>
         <LinearGradientBrush x:Key="Brush.AppBackdrop" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#E8E2FF" Offset="0.0"/>
@@ -84,21 +84,16 @@
                             Background="#251450">
                         <StackPanel>
                             <Border Width="40" Height="40" CornerRadius="12"
-                                    HorizontalAlignment="Left" Margin="0,0,0,12">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                        <GradientStop Color="#7C3AED" Offset="0"/>
-                                        <GradientStop Color="#5B21B6" Offset="1"/>
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                                <TextBlock Text="V" Foreground="White" FontWeight="Black"
-                                           FontSize="22" HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           FontFamily="{StaticResource Font.Display}"/>
+                                    HorizontalAlignment="Left" Margin="0,0,0,10"
+                                    Background="#140934">
+                                <Image Width="32" Height="32"
+                                       Source="pack://application:,,,/Assets/brand-icon.png"
+                                       Stretch="Uniform"/>
                             </Border>
-                            <TextBlock Text="Animiq" Foreground="#F3F0FF"
-                                       FontWeight="Bold" FontSize="15"
-                                       FontFamily="{StaticResource Font.Display}"/>
+                            <Image Height="26"
+                                   HorizontalAlignment="Left"
+                                   Stretch="Uniform"
+                                   Source="pack://application:,,,/Assets/brand-logo.png"/>
                             <TextBlock Text="Studio" Foreground="#C4B5FD"
                                        FontSize="11" Margin="0,2,0,0"/>
                         </StackPanel>
@@ -941,6 +936,5 @@
         </Grid>
     </Grid>
 </Window>
-
 
 

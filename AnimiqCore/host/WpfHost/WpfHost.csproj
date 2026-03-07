@@ -9,7 +9,14 @@
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\brand-icon.png" />
+    <Resource Include="Assets\brand-logo.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\HostCore\HostCore.csproj" />

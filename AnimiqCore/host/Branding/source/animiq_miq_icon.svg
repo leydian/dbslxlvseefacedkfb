@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AnimIQ miq Icon — V2 Layered Overlap -->
+<!-- Adobe Illustrator compatible SVG -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     version="1.1"
+     id="AnimIQ_miq"
+     viewBox="0 0 256 256"
+     width="256px" height="256px"
+     xml:space="preserve">
+
+  <defs>
+    <!-- Background gradient -->
+    <radialGradient id="bg_grad" cx="55%" cy="35%" r="75%" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#1E0D5C"/>
+      <stop offset="100%" stop-color="#050214"/>
+    </radialGradient>
+    <!-- M letter gradient -->
+    <linearGradient id="m_grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#EDE8FF"/>
+      <stop offset="100%" stop-color="#B89EFF"/>
+    </linearGradient>
+    <!-- I letter gradient -->
+    <linearGradient id="i_grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#D4BFFF"/>
+    </linearGradient>
+    <!-- Q letter gradient -->
+    <linearGradient id="q_grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#C4ACFF"/>
+      <stop offset="100%" stop-color="#8055E0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ================================ -->
+  <!-- LAYER 1: Background              -->
+  <!-- ================================ -->
+  <g id="Background">
+    <rect id="bg_rect" x="0" y="0" width="256" height="256" rx="57" ry="57"
+          fill="url(#bg_grad)"/>
+  </g>
+
+  <!-- ================================ -->
+  <!-- LAYER 2: Ghost Q (depth layer)   -->
+  <!-- ================================ -->
+  <g id="Ghost_Q" opacity="1">
+    <!-- Ghost ring -->
+    <circle id="ghost_ring" cx="175" cy="148" r="95"
+            fill="none"
+            stroke="#9B77F5" stroke-width="38"
+            opacity="0.12"/>
+    <!-- Ghost tail -->
+    <rect id="ghost_tail" x="222" y="153" width="15" height="50" rx="5" ry="5"
+          fill="#9B77F5"
+          opacity="0.12"/>
+  </g>
+
+  <!-- ================================ -->
+  <!-- LAYER 3: Foreground Letters      -->
+  <!-- ================================ -->
+  <g id="Letters">
+
+    <!-- M -->
+    <g id="Letter_M" fill="url(#m_grad)">
+      <rect id="m_leg_left"  x="10" y="76" width="15" height="112" rx="5" ry="5"/>
+      <rect id="m_arch_left" x="10" y="76" width="55" height="15"  rx="5" ry="5"/>
+      <rect id="m_leg_mid"   x="50" y="76" width="15" height="112" rx="5" ry="5"/>
+      <rect id="m_arch_right" x="50" y="76" width="55" height="15" rx="5" ry="5"/>
+      <rect id="m_leg_right" x="90" y="76" width="15" height="112" rx="5" ry="5"/>
+    </g>
+
+    <!-- I -->
+    <g id="Letter_I">
+      <rect id="i_stem" x="115" y="76" width="14" height="112" rx="6" ry="6"
+            fill="url(#i_grad)" opacity="0.92"/>
+      <rect id="i_dot"  x="113" y="55" width="18" height="14"  rx="7" ry="7"
+            fill="url(#i_grad)" opacity="0.92"/>
+    </g>
+
+    <!-- Q -->
+    <g id="Letter_Q">
+      <circle id="q_ring" cx="196" cy="130" r="44"
+              fill="none"
+              stroke="url(#q_grad)" stroke-width="17"/>
+      <rect id="q_tail" x="222" y="153" width="15" height="50" rx="5" ry="5"
+            fill="url(#q_grad)"/>
+    </g>
+
+  </g>
+
+  <!-- ================================ -->
+  <!-- LAYER 4: Shimmer highlights      -->
+  <!-- ================================ -->
+  <g id="Shimmer" fill="white" opacity="0.4">
+    <rect x="10"  y="76" width="15" height="4" rx="2" ry="2"/>
+    <rect x="50"  y="76" width="15" height="4" rx="2" ry="2"/>
+    <rect x="90"  y="76" width="15" height="4" rx="2" ry="2"/>
+    <rect x="115" y="76" width="14" height="4" rx="2" ry="2"/>
+  </g>
+
+</svg>

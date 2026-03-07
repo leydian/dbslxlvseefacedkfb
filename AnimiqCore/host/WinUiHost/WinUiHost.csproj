@@ -14,7 +14,14 @@
     <PlatformTarget>x64</PlatformTarget>
     <PublishTrimmed>false</PublishTrimmed>
     <UseXamlCompilerExecutable>true</UseXamlCompilerExecutable>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\brand-icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Assets\brand-logo.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\HostCore\HostCore.csproj" />
