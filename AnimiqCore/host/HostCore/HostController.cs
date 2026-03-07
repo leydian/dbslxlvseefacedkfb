@@ -55,6 +55,8 @@ public sealed partial class HostController
     private string _firstBroadcastOutputKind = string.Empty;
     private readonly Queue<double> _firstBroadcastStartSamplesMs = new();
     private long _uiFlowTimingVersion;
+    private long _lastRenderReattachAttemptMs = 0;
+    private const int RenderReattachCooldownMs = 1000;
     private ArmPoseTuningSettings _armPoseTuning = new(
         EnableSmoothing: true,
         SmoothingTauMs: 80.0f,
@@ -1000,6 +1002,19 @@ public sealed partial class HostController
         {
             if (_sessionService.ActiveAvatarHandle.HasValue)
             {
+                if (!_windowAttached && _windowHandle != IntPtr.Zero)
+                {
+                    var w = (uint)Math.Max(SessionState.RenderWidthPx, 1u);
+                    var h = (uint)Math.Max(SessionState.RenderHeightPx, 1u);
+                    var attachRc = _renderLoopService.AttachWindow(_windowHandle, w, h);
+                    _windowAttached = attachRc == NcResultCode.Ok;
+                    TrackResult("RenderAttachOnTick", attachRc);
+                    if (attachRc == NcResultCode.Ok)
+                    {
+                        ApplyRenderOptionsInternal("RenderAttachOnTickOpts");
+                    }
+                }
+
                 rc = _renderLoopService.Tick(deltaTimeSeconds);
                 if (rc == NcResultCode.Unsupported)
                 {
@@ -1014,6 +1029,36 @@ public sealed partial class HostController
                             if (rc == NcResultCode.Ok)
                             {
                                 TrackResult("RenderTickRecovered", NcResultCode.Ok);
+                            }
+                        }
+                    }
+                }
+                // Internal = window render target incomplete (e.g. resize failure left rtv null)
+                if (rc == NcResultCode.Internal && _windowAttached && _windowHandle != IntPtr.Zero)
+                {
+                    var nowMs = Environment.TickCount64;
+                    if (nowMs - _lastRenderReattachAttemptMs >= RenderReattachCooldownMs)
+                    {
+                        _lastRenderReattachAttemptMs = nowMs;
+                        var w = (uint)Math.Max(SessionState.RenderWidthPx, 1u);
+                        var h = (uint)Math.Max(SessionState.RenderHeightPx, 1u);
+                        var resizeRc = _renderLoopService.Resize(w, h);
+                        if (resizeRc == NcResultCode.Ok)
+                        {
+                            rc = _renderLoopService.Tick(deltaTimeSeconds);
+                            TrackResult("RenderRecoverResize", rc);
+                        }
+                        if (rc != NcResultCode.Ok)
+                        {
+                            _renderLoopService.DetachWindow();
+                            var attachRc = _renderLoopService.AttachWindow(_windowHandle, w, h);
+                            _windowAttached = attachRc == NcResultCode.Ok;
+                            TrackResult("RenderRecoverReattach", attachRc);
+                            if (attachRc == NcResultCode.Ok)
+                            {
+                                ApplyRenderOptionsInternal("RenderRecoverOpts");
+                                rc = _renderLoopService.Tick(deltaTimeSeconds);
+                                TrackResult("RenderRecoverRender", rc);
                             }
                         }
                     }

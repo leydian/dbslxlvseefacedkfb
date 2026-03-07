@@ -12,6 +12,24 @@ public static class AvatarThumbnailWorker
 
     public static int Run(string[] args)
     {
+        var reportLines = new List<string>();
+        void AddReport(string line)
+        {
+            reportLines.Add($"{DateTimeOffset.UtcNow:O} {line}");
+        }
+        void FlushReport(string outputPath)
+        {
+            try
+            {
+                var reportPath = outputPath + ".worker.log";
+                File.WriteAllLines(reportPath, reportLines);
+            }
+            catch
+            {
+                // Best effort diagnostics only.
+            }
+        }
+
         if (!TryGetArg(args, "--avatar", out var avatarPath) ||
             !TryGetArg(args, "--output", out var outputPath))
         {
@@ -50,6 +68,8 @@ public static class AvatarThumbnailWorker
         var initRc = NativeCoreInterop.nc_initialize(ref init);
         if (initRc != NcResultCode.Ok)
         {
+            AddReport($"init failed: rc={initRc}, detail={NativeCoreInterop.FormatLastError()}");
+            FlushReport(outputPath);
             return 10;
         }
 
@@ -66,12 +86,16 @@ public static class AvatarThumbnailWorker
             var loadRc = NativeCoreInterop.nc_load_avatar(ref loadRequest, out handle, out _);
             if (loadRc != NcResultCode.Ok)
             {
+                AddReport($"load failed: rc={loadRc}, detail={NativeCoreInterop.FormatLastError()}");
+                FlushReport(outputPath);
                 return 11;
             }
 
             var createRc = NativeCoreInterop.nc_create_render_resources(handle);
             if (createRc != NcResultCode.Ok)
             {
+                AddReport($"create_render_resources failed: rc={createRc}, detail={NativeCoreInterop.FormatLastError()}");
+                FlushReport(outputPath);
                 return 12;
             }
 
@@ -86,9 +110,13 @@ public static class AvatarThumbnailWorker
             var thumbnailRc = NativeCoreInterop.nc_render_avatar_thumbnail_png(ref thumbnailRequest);
             if (thumbnailRc != NcResultCode.Ok)
             {
+                AddReport($"render_thumbnail failed: rc={thumbnailRc}, detail={NativeCoreInterop.FormatLastError()}");
+                FlushReport(outputPath);
                 return 13;
             }
 
+            AddReport("thumbnail worker completed successfully");
+            FlushReport(outputPath);
             return 0;
         }
         finally

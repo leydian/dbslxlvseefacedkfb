@@ -3499,7 +3499,14 @@ bool BuildGpuMeshForPayload(
     bool* out_normals_generation_failed,
     ID3D11Device* device,
     GpuMeshResource* out_mesh) {
-    if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty() || payload.indices.empty()) {
+    if (device == nullptr || out_mesh == nullptr || payload.vertex_blob.empty()) {
+        std::ostringstream message;
+        message << "gpu mesh build invalid input: mesh=" << payload.name
+                << ", device=" << (device != nullptr ? "ok" : "null")
+                << ", out_mesh=" << (out_mesh != nullptr ? "ok" : "null")
+                << ", vertex_blob_bytes=" << payload.vertex_blob.size()
+                << ", index_count=" << payload.indices.size();
+        SetError(NC_ERROR_INTERNAL, "render", message.str(), true);
         return false;
     }
     if (out_normals_generated != nullptr) {
@@ -3510,10 +3517,44 @@ bool BuildGpuMeshForPayload(
     }
     const std::uint32_t src_stride = payload.vertex_stride >= 12U ? payload.vertex_stride : 12U;
     if ((payload.vertex_blob.size() % src_stride) != 0U) {
+        std::ostringstream message;
+        message << "gpu mesh stride mismatch: mesh=" << payload.name
+                << ", vertex_blob_bytes=" << payload.vertex_blob.size()
+                << ", src_stride=" << src_stride;
+        SetError(NC_ERROR_INTERNAL, "render", message.str(), true);
         return false;
     }
     const std::uint32_t vertex_count = static_cast<std::uint32_t>(payload.vertex_blob.size() / src_stride);
-    const std::uint32_t index_count = static_cast<std::uint32_t>(payload.indices.size());
+    std::vector<std::uint32_t> generated_indices;
+    const std::vector<std::uint32_t>* index_source = &payload.indices;
+    if (payload.indices.size() < 3U) {
+        std::string mesh_name_lower = payload.name;
+        std::transform(mesh_name_lower.begin(), mesh_name_lower.end(), mesh_name_lower.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        const bool likely_non_render_proxy = mesh_name_lower.find("baked") != std::string::npos;
+        if (likely_non_render_proxy) {
+            std::ostringstream message;
+            message << "gpu mesh skipped (insufficient indices): mesh=" << payload.name
+                    << ", index_count=" << payload.indices.size();
+            SetError(NC_ERROR_INTERNAL, "render", message.str(), true);
+            return false;
+        }
+        const std::uint32_t tri_vertex_count = (vertex_count / 3U) * 3U;
+        if (tri_vertex_count < 3U) {
+            std::ostringstream message;
+            message << "gpu mesh index fallback unavailable: mesh=" << payload.name
+                    << ", vertex_count=" << vertex_count;
+            SetError(NC_ERROR_INTERNAL, "render", message.str(), true);
+            return false;
+        }
+        generated_indices.reserve(tri_vertex_count);
+        for (std::uint32_t i = 0U; i < tri_vertex_count; ++i) {
+            generated_indices.push_back(i);
+        }
+        index_source = &generated_indices;
+    }
+    const std::uint32_t index_count = static_cast<std::uint32_t>(index_source->size());
 
     std::vector<std::uint8_t> gpu_vertex_blob;
     gpu_vertex_blob.reserve(static_cast<std::size_t>(vertex_count) * 32U);
@@ -3745,18 +3786,33 @@ bool BuildGpuMeshForPayload(
     vb_data.pSysMem = gpu_vertex_blob.data();
 
     D3D11_BUFFER_DESC ib_desc {};
-    ib_desc.ByteWidth = static_cast<UINT>(payload.indices.size() * sizeof(std::uint32_t));
+    ib_desc.ByteWidth = static_cast<UINT>(index_source->size() * sizeof(std::uint32_t));
     ib_desc.Usage = D3D11_USAGE_DEFAULT;
     ib_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
     D3D11_SUBRESOURCE_DATA ib_data {};
-    ib_data.pSysMem = payload.indices.data();
+    ib_data.pSysMem = index_source->data();
 
     ID3D11Buffer* vb = nullptr;
     ID3D11Buffer* ib = nullptr;
-    if (FAILED(device->CreateBuffer(&vb_desc, &vb_data, &vb)) || vb == nullptr) {
+    const HRESULT vb_hr = device->CreateBuffer(&vb_desc, &vb_data, &vb);
+    if (FAILED(vb_hr) || vb == nullptr) {
+        std::ostringstream message;
+        message << "vertex buffer create failed: mesh=" << payload.name
+                << ", vertex_count=" << vertex_count
+                << ", vertex_stride=32"
+                << ", vb_bytes=" << gpu_vertex_blob.size()
+                << ", hr=0x" << std::hex << static_cast<std::uint32_t>(vb_hr);
+        SetError(NC_ERROR_INTERNAL, "render", message.str(), true);
         return false;
     }
-    if (FAILED(device->CreateBuffer(&ib_desc, &ib_data, &ib)) || ib == nullptr) {
+    const HRESULT ib_hr = device->CreateBuffer(&ib_desc, &ib_data, &ib);
+    if (FAILED(ib_hr) || ib == nullptr) {
+        std::ostringstream message;
+        message << "index buffer create failed: mesh=" << payload.name
+                << ", index_count=" << index_count
+                << ", ib_bytes=" << (payload.indices.size() * sizeof(std::uint32_t))
+                << ", hr=0x" << std::hex << static_cast<std::uint32_t>(ib_hr);
+        SetError(NC_ERROR_INTERNAL, "render", message.str(), true);
         vb->Release();
         return false;
     }
@@ -4031,10 +4087,15 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
                 &normals_generation_failed,
                 device,
                 &mesh)) {
-            for (auto& created : meshes) {
-                ReleaseGpuMeshResource(&created);
+            auto avatar_it = g_state.avatars.find(handle);
+            if (avatar_it != g_state.avatars.end()) {
+                std::ostringstream warning;
+                warning << "W_RENDER: GPU_MESH_UPLOAD_FAILED: mesh=" << payload.name << ", skip=true";
+                avatar_it->second.warnings.push_back(warning.str());
+                avatar_it->second.warning_codes.push_back("GPU_MESH_UPLOAD_FAILED");
             }
-            return false;
+            ReleaseGpuMeshResource(&mesh);
+            continue;
         }
         if (!avatar_skinning_convention_locked &&
             selected_skinning_convention != SkinningMatrixConvention::Unknown) {
@@ -4093,6 +4154,16 @@ bool EnsureAvatarGpuMeshes(RendererResources* renderer, const AvatarPackage& ava
             }
         }
         meshes.push_back(mesh);
+    }
+    if (meshes.empty()) {
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            PushAvatarWarningUnique(
+                &avatar_it->second,
+                "W_RENDER: GPU_MESH_UPLOAD_ALL_FAILED: no mesh could be uploaded for this avatar.",
+                "GPU_MESH_UPLOAD_ALL_FAILED");
+        }
+        return false;
     }
     if (allow_miq_autodetect && avatar_skinning_convention_ambiguous) {
         auto avatar_it = g_state.avatars.find(handle);
@@ -6080,7 +6151,9 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         }
         const auto material_resolve_begin = std::chrono::steady_clock::now();
         if (!EnsureAvatarGpuMeshes(&renderer, it->second, handle, device)) {
-            SetError(NC_ERROR_INTERNAL, "render", "failed to upload mesh payloads to GPU", true);
+            if (g_state.last_error_code == NC_OK || g_state.last_error_message.empty()) {
+                SetError(NC_ERROR_INTERNAL, "render", "failed to upload mesh payloads to GPU", true);
+            }
             return NC_ERROR_INTERNAL;
         }
         if (!EnsureAvatarGpuMaterials(&renderer, it->second, handle, device)) {
@@ -8073,11 +8146,11 @@ NcResultCode nc_create_window_render_target(const NcWindowRenderTarget* target) 
     swap_desc.Windowed = TRUE;
     swap_desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
-    D3D_FEATURE_LEVEL feature_levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1};
+    D3D_FEATURE_LEVEL feature_levels[] = {D3D_FEATURE_LEVEL_11_0};
     D3D_FEATURE_LEVEL selected_level = D3D_FEATURE_LEVEL_11_0;
 
     const UINT device_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-    const HRESULT hr = D3D11CreateDeviceAndSwapChain(
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
@@ -8090,6 +8163,21 @@ NcResultCode nc_create_window_render_target(const NcWindowRenderTarget* target) 
         &state.device,
         &selected_level,
         &state.device_context);
+    if (FAILED(hr)) {
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr,
+            D3D_DRIVER_TYPE_WARP,
+            nullptr,
+            device_flags,
+            feature_levels,
+            static_cast<UINT>(std::size(feature_levels)),
+            D3D11_SDK_VERSION,
+            &swap_desc,
+            &state.swap_chain,
+            &state.device,
+            &selected_level,
+            &state.device_context);
+    }
     if (FAILED(hr)) {
         animiq::nativecore::g_state.window_targets.erase(target->hwnd);
         animiq::nativecore::SetError(NC_ERROR_INTERNAL, "render", "failed to create d3d11 device/swapchain", true);
@@ -8145,6 +8233,14 @@ NcResultCode nc_resize_window_render_target(const NcWindowRenderTarget* target) 
     if (state.swap_chain == nullptr || state.device == nullptr) {
         animiq::nativecore::SetError(NC_ERROR_INTERNAL, "render", "window render target is not initialized", true);
         return NC_ERROR_INTERNAL;
+    }
+
+    if (state.device_context != nullptr) {
+        // Ensure no backbuffer-dependent bindings remain before ResizeBuffers.
+        ID3D11RenderTargetView* null_rtvs[1] = {nullptr};
+        state.device_context->OMSetRenderTargets(1U, null_rtvs, nullptr);
+        state.device_context->ClearState();
+        state.device_context->Flush();
     }
 
     if (state.rtv != nullptr) {
@@ -8288,11 +8384,11 @@ NcResultCode nc_render_avatar_thumbnail_png(const NcThumbnailRequest* request) {
         return NC_ERROR_INVALID_ARGUMENT;
     }
 
-    D3D_FEATURE_LEVEL feature_levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1};
+    D3D_FEATURE_LEVEL feature_levels[] = {D3D_FEATURE_LEVEL_11_0};
     D3D_FEATURE_LEVEL selected_level = D3D_FEATURE_LEVEL_11_0;
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* device_ctx = nullptr;
-    const HRESULT device_hr = D3D11CreateDevice(
+    HRESULT device_hr = D3D11CreateDevice(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
@@ -8303,6 +8399,27 @@ NcResultCode nc_render_avatar_thumbnail_png(const NcThumbnailRequest* request) {
         &device,
         &selected_level,
         &device_ctx);
+    if (FAILED(device_hr) || device == nullptr || device_ctx == nullptr) {
+        if (device_ctx != nullptr) {
+            device_ctx->Release();
+            device_ctx = nullptr;
+        }
+        if (device != nullptr) {
+            device->Release();
+            device = nullptr;
+        }
+        device_hr = D3D11CreateDevice(
+            nullptr,
+            D3D_DRIVER_TYPE_WARP,
+            nullptr,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            feature_levels,
+            static_cast<UINT>(std::size(feature_levels)),
+            D3D11_SDK_VERSION,
+            &device,
+            &selected_level,
+            &device_ctx);
+    }
     if (FAILED(device_hr) || device == nullptr || device_ctx == nullptr) {
         if (device_ctx != nullptr) {
             device_ctx->Release();

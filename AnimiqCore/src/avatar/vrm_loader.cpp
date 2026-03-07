@@ -3413,6 +3413,65 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
+            std::uint32_t primitive_mode = 4U; // glTF TRIANGLES default
+            const auto* mode_v = FindKey(prim, "mode");
+            if (mode_v != nullptr && mode_v->type == JsonValue::Type::Number && mode_v->number_value >= 0.0) {
+                primitive_mode = static_cast<std::uint32_t>(mode_v->number_value);
+            }
+            if (primitive_mode != 4U) {
+                pkg.warnings.push_back(
+                    "W_PAYLOAD: VRM_PRIMITIVE_MODE_UNSUPPORTED: mesh=" + mesh_payload.name +
+                    ", mode=" + std::to_string(primitive_mode));
+                pkg.warning_codes.push_back("VRM_PRIMITIVE_MODE_UNSUPPORTED");
+                continue;
+            }
+            const auto* indices_v = FindKey(prim, "indices");
+            if (indices_v != nullptr && indices_v->type == JsonValue::Type::Number && indices_v->number_value >= 0.0) {
+                const std::size_t index_accessor = static_cast<std::size_t>(static_cast<std::uint32_t>(indices_v->number_value));
+                if (!ExtractIndices(bin_chunk.bytes, accessors, views, index_accessor, &mesh_payload.indices, &read_error)) {
+                    pkg.warnings.push_back(
+                        "W_PAYLOAD: VRM_INDEX_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
+                    pkg.warning_codes.push_back("VRM_INDEX_READ_FAILED");
+                    continue;
+                }
+            } else {
+                // glTF allows non-indexed primitives; build triangle-list indices directly.
+                const std::uint32_t tri_vertex_count = (vtx_count / 3U) * 3U;
+                if (tri_vertex_count < 3U) {
+                    pkg.warnings.push_back(
+                        "W_PAYLOAD: VRM_NONINDEXED_TRIANGLES_TOO_SMALL: mesh=" + mesh_payload.name +
+                        ", vertexCount=" + std::to_string(vtx_count));
+                    pkg.warning_codes.push_back("VRM_NONINDEXED_TRIANGLES_TOO_SMALL");
+                    continue;
+                }
+                pkg.warnings.push_back(
+                    "W_PAYLOAD: VRM_NONINDEXED_TRIANGLES_FALLBACK: mesh=" + mesh_payload.name +
+                    ", vertexCount=" + std::to_string(vtx_count));
+                pkg.warning_codes.push_back("VRM_NONINDEXED_TRIANGLES_FALLBACK");
+                mesh_payload.indices.reserve(tri_vertex_count);
+                for (std::uint32_t vi = 0U; vi < tri_vertex_count; ++vi) {
+                    mesh_payload.indices.push_back(vi);
+                }
+            }
+            mesh_payload.material_index = -1;
+            const auto* material_v = FindKey(prim, "material");
+            if (material_v != nullptr && material_v->type == JsonValue::Type::Number && material_v->number_value >= 0.0) {
+                mesh_payload.material_index = static_cast<std::int32_t>(static_cast<std::uint32_t>(material_v->number_value));
+            }
+            bool index_oob = false;
+            for (const auto idx : mesh_payload.indices) {
+                if (idx >= vtx_count) {
+                    index_oob = true;
+                    break;
+                }
+            }
+            if (index_oob) {
+                pkg.warnings.push_back(
+                    "W_PAYLOAD: VRM_INDEX_OUT_OF_RANGE: mesh=" + mesh_payload.name +
+                    ", vertexCount=" + std::to_string(vtx_count));
+                pkg.warning_codes.push_back("VRM_INDEX_OUT_OF_RANGE");
+                continue;
+            }
             std::vector<std::array<float, 3U>> vrm_normals;
             const auto* normal_v = FindKey(*attrs_v, "NORMAL");
             const bool has_vrm_normals =

@@ -174,6 +174,7 @@ public partial class MainWindow : Window
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
         UpdateRenderMetricsFromHost();
+        TryAttachRenderWindow();
     }
 
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -187,6 +188,7 @@ public partial class MainWindow : Window
         if (!state.IsInitialized || !state.IsWindowAttached)
         {
             UpdateRenderMetricsFromHost();
+            TryAttachRenderWindow();
             return;
         }
 
@@ -231,17 +233,10 @@ public partial class MainWindow : Window
         }
 
         var initRc = _controller.Initialize();
-        var renderHwnd = RenderHost.Hwnd;
-        if (initRc == NcResultCode.Ok && renderHwnd != IntPtr.Zero)
+        if (initRc == NcResultCode.Ok)
         {
-            var metrics = GetRenderMetrics();
-            _controller.UpdateRenderMetrics(metrics.logicalWidth, metrics.logicalHeight, metrics.dpiScaleX, metrics.dpiScaleY, metrics.pixelWidth, metrics.pixelHeight);
-            _ = PushRenderUiState();
-            var attachRc = _controller.AttachWindow(renderHwnd, metrics.pixelWidth, metrics.pixelHeight);
-            if (attachRc == NcResultCode.Ok)
-            {
-                _timer.Start();
-            }
+            TryAttachRenderWindow();
+            _timer.Start();
         }
 
         MarkAllDirty(includeLogs: true);
@@ -263,6 +258,31 @@ public partial class MainWindow : Window
         _timer.Stop();
         _ = _controller.Shutdown();
         MarkAllDirty(includeLogs: true);
+    }
+
+    private void TryAttachRenderWindow()
+    {
+        if (!_controller.SessionState.IsInitialized || _controller.SessionState.IsWindowAttached)
+        {
+            return;
+        }
+
+        var renderHwnd = RenderHost.Hwnd;
+        if (renderHwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var metrics = GetRenderMetrics();
+        _controller.UpdateRenderMetrics(
+            metrics.logicalWidth,
+            metrics.logicalHeight,
+            metrics.dpiScaleX,
+            metrics.dpiScaleY,
+            metrics.pixelWidth,
+            metrics.pixelHeight);
+        _ = PushRenderUiState();
+        _ = _controller.AttachWindow(renderHwnd, metrics.pixelWidth, metrics.pixelHeight);
     }
 
     private void BrowseAvatar_Click(object sender, RoutedEventArgs e)
