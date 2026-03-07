@@ -5943,11 +5943,13 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         }
         g_state.tracking_weights_dirty = false;
     }
+    const bool spout_active = g_state.spout.IsActive();
+    const float clear_alpha = spout_active ? 0.0f : quality.background_rgba[3];
     const float clear_color[4] = {
         quality.background_rgba[0],
         quality.background_rgba[1],
         quality.background_rgba[2],
-        quality.background_rgba[3]};
+        clear_alpha};
     device_ctx->OMSetRenderTargets(1, &rtv, renderer.depth_dsv);
     device_ctx->ClearRenderTargetView(rtv, clear_color);
     device_ctx->ClearDepthStencilView(renderer.depth_dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0U);
