@@ -320,10 +320,9 @@ NcLightingOptions MakeDefaultLightingOptions() {
     options.shadow_normal_bias = 0.0f;
     options.shadow_near_plane = 8.5f;
     options.shadow_resolution = 8192U;
-    // Lower ambient so directional lighting produces visible shadow/highlight
-    // contrast. With ambient=1.0 the lerp(ambient,1.0,lit) formula always
-    // returns 1.0, making normals invisible to shading.
-    options.ambient_intensity = 0.35f;
+    // Higher ambient so dark materials (hair, black clothing) retain detail
+    // and don't "black out" or "crush" into a single flat shape.
+    options.ambient_intensity = 0.55f;
     options.enable_sun_light = 0U;
     options.enable_shadow = 1U;
     return options;
@@ -7092,15 +7091,29 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         if (outline_pass) {
             device_ctx->OMSetBlendState(renderer.blend_opaque, blend_factor, 0xFFFFFFFFU);
             device_ctx->OMSetDepthStencilState(renderer.depth_read, 0U);
-            if (double_sided || force_no_cull_for_avatar) {
+            if (double_sided) {
                 device_ctx->RSSetState(renderer.raster_cull_none);
+            } else if (force_no_cull_for_avatar) {
+                device_ctx->RSSetState(renderer.raster_cull_front_ccw);
             } else {
                 device_ctx->RSSetState(renderer.raster_cull_front);
             }
         } else if (shadow_pass) {
-            device_ctx->RSSetState((double_sided || force_no_cull_for_avatar) ? renderer.raster_cull_none : renderer.raster_cull_back);
+            if (double_sided) {
+                device_ctx->RSSetState(renderer.raster_cull_none);
+            } else if (force_no_cull_for_avatar) {
+                device_ctx->RSSetState(renderer.raster_cull_back_ccw);
+            } else {
+                device_ctx->RSSetState(renderer.raster_cull_back);
+            }
         } else {
-            device_ctx->RSSetState((double_sided || force_no_cull_for_avatar) ? renderer.raster_cull_none : renderer.raster_cull_back);
+            if (double_sided) {
+                device_ctx->RSSetState(renderer.raster_cull_none);
+            } else if (force_no_cull_for_avatar) {
+                device_ctx->RSSetState(renderer.raster_cull_back_ccw);
+            } else {
+                device_ctx->RSSetState(renderer.raster_cull_back);
+            }
         }
 
         const UINT stride = item.mesh->vertex_stride;

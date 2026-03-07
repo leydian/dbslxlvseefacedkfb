@@ -3484,9 +3484,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             }
             const bool has_node_transform =
                 mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i];
-            const bool has_transform_conflict =
-                mesh_i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[mesh_i];
-            if (has_node_transform && !has_transform_conflict) {
+            if (has_node_transform) {
                 if (ApplyPositionTransformToVertexBlob(
                         &mesh_payload.vertex_blob,
                         mesh_payload.vertex_stride,
@@ -3909,28 +3907,13 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             pkg.warning_codes.push_back("VRM_SKIN_PAYLOAD_PARTIAL");
         }
     }
-    {
-        const bool has_transform_uncertainty =
-            multi_ref_mesh_count > 0U ||
-            node_transform_conflict_mesh_count > 0U ||
-            skinned_payload_failed > 0U;
-        const bool transform_bake_dominant =
-            transformed_mesh_count >= skipped_mesh_transform_count;
-        if (transformed_mesh_count > 0U && transform_bake_dominant) {
-            pkg.recommended_preview_yaw_deg = 0;
-            pkg.transform_confidence = has_transform_uncertainty
-                ? TransformConfidence::Medium
-                : TransformConfidence::High;
-        } else if (has_transform_uncertainty || skipped_mesh_transform_count > 0U) {
-            pkg.recommended_preview_yaw_deg = 180;
-            pkg.transform_confidence = has_transform_uncertainty
-                ? TransformConfidence::Low
-                : TransformConfidence::Medium;
-        } else {
-            pkg.recommended_preview_yaw_deg = 0;
-            pkg.transform_confidence = TransformConfidence::High;
-        }
-    }
+    // All meshes (skinned and static) are now uniformly baked into the 
+    // same coordinate space using their node global transforms.
+    // Therefore, we recommend 0 preview yaw to the host.
+    pkg.recommended_preview_yaw_deg = 0;
+    pkg.transform_confidence = (multi_ref_mesh_count > 0U || node_transform_conflict_mesh_count > 0U || skinned_payload_failed > 0U)
+        ? TransformConfidence::Medium
+        : TransformConfidence::High;
     if (pkg.mesh_payloads.empty()) {
         pkg.primary_error_code = "VRM_ASSET_MISSING";
         pkg.compat_level = AvatarCompatLevel::Failed;
