@@ -2,4 +2,4 @@
 
 Weekly report navigation hub.
 
-- [2026-W10](./2026-W10/INDEX.md) (204 reports)
+- [2026-W10](./2026-W10/INDEX.md) (214 reports)

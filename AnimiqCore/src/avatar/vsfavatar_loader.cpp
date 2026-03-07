@@ -1378,8 +1378,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto render_payload_mode = GetJsonString(output, "render_payload_mode");
     bool used_heuristic_mesh_payload = false;
     bool used_structured_mesh_payload = false;
-    const bool enable_structured_mesh = EnvFlagEnabled("VSF_ENABLE_STRUCTURED_MESH");
-    const bool enable_heuristic_mesh = EnvFlagEnabled("VSF_ENABLE_HEURISTIC_MESH");
+    // Extraction is enabled by default; explicit disable flags are opt-out only.
+    const bool enable_structured_mesh = !EnvFlagEnabled("VSF_DISABLE_STRUCTURED_MESH");
+    const bool enable_heuristic_mesh = !EnvFlagEnabled("VSF_DISABLE_HEURISTIC_MESH");
     const bool allow_placeholder_render = EnvFlagEnabled("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
     if (render_payload_mode != "none" && sidecar_mesh_payload_count == 0U) {
         return core::Result<AvatarPackage>::Fail("SCHEMA_INVALID: render_payload_mode requires mesh_payload_count > 0");
@@ -1414,7 +1415,10 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             auto probe = reader_.Probe(path);
             if (probe.ok && !probe.value.serialized_file_bytes.empty()) {
                 vsf::SerializedFileReader serialized_reader;
-                auto blobs = serialized_reader.ExtractMeshObjectBlobs(probe.value.serialized_file_bytes, 6U);
+                const std::uint32_t blob_scan_limit = std::max<std::uint32_t>(
+                    6U,
+                    std::min<std::uint32_t>(96U, sidecar_mesh_payload_count > 0U ? sidecar_mesh_payload_count * 2U : 24U));
+                auto blobs = serialized_reader.ExtractMeshObjectBlobs(probe.value.serialized_file_bytes, blob_scan_limit);
                 if (blobs.ok) {
                     if (enable_structured_mesh) {
                         for (std::size_t i = 0U; i < blobs.value.size(); ++i) {
@@ -1452,10 +1456,10 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         }
         const bool heuristic_quality_ok =
             heuristic_payload_count >= 1U &&
-            heuristic_index_count_total >= 100U;
+            heuristic_index_count_total >= 90U;
         const bool structured_quality_ok =
             structured_payload_count >= 1U &&
-            structured_index_count_total >= 240U;
+            structured_index_count_total >= 120U;
         if (!structured_quality_ok && !heuristic_quality_ok) {
             pkg.mesh_payloads.clear();
             for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
