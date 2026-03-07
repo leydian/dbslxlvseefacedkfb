@@ -114,7 +114,7 @@ public sealed partial class HostController
         Outputs = new OutputState(false, false, "Animiq", 0U, 0U, 60U, 39539, "127.0.0.1:39540");
         _desiredSpoutActive = false;
         _desiredOscActive = false;
-        RenderState = BuildRenderUiState(_renderOptions, _lightingOptions, true, BackgroundPreset.DarkBlue, false);
+        RenderState = BuildRenderUiState(_renderOptions, _lightingOptions, true, BackgroundPreset.NeutralGray, false);
         if (TryGetSelectedPreset(out var selectedPreset))
         {
             RenderState = ToRenderUiState(selectedPreset);
@@ -213,7 +213,7 @@ public sealed partial class HostController
             }
             ResetFirstBroadcastFlow();
             _renderOptions = NativeCoreInterop.BuildBroadcastPreset();
-            RenderState = BuildRenderUiState(_renderOptions, _lightingOptions, true, BackgroundPreset.DarkBlue, false);
+            RenderState = BuildRenderUiState(_renderOptions, _lightingOptions, true, BackgroundPreset.NeutralGray, false);
             _poseOffsets = BuildDefaultPoseOffsets();
             _lastAutoUpperBodyPose = TrackingUpperBodyPose.Neutral();
             _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
@@ -292,6 +292,11 @@ public sealed partial class HostController
                 _ = ResolveAndApplyAvatarPreviewFlipOnLoad(normalizedPath);
                 _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
+                var neutralExprRc = TryApplyNeutralExpressionWeightsForActiveAvatar();
+                if (neutralExprRc != NcResultCode.Ok)
+                {
+                    TrackResult("SetExpressionWeightsNeutralLoadAvatar", neutralExprRc);
+                }
                 ScheduleCommonCauseTriage();
                 _lastLoadFailureGuidance = string.Empty;
                 _lastLoadFailureTechnical = string.Empty;
@@ -887,6 +892,15 @@ public sealed partial class HostController
                 }
             }
         }
+        else
+        {
+            var neutralExprRc = TryApplyNeutralExpressionWeightsForActiveAvatar();
+            if (neutralExprRc != NcResultCode.Ok)
+            {
+                nativeSubmitErrorCode = $"NC_SET_EXPRESSION_WEIGHTS_{neutralExprRc}";
+                TrackResult("SetExpressionWeightsNeutral", neutralExprRc);
+            }
+        }
         _lastArkit52Summary = arkit52Summary;
 
         var trackingSettings = _sessionPersistence.Tracking;
@@ -1364,8 +1378,42 @@ public sealed partial class HostController
             "quality" => (uint)NcRenderQualityProfile.Balanced,
             "stability" => (uint)NcRenderQualityProfile.FastFallback,
             "performance" => (uint)NcRenderQualityProfile.FastFallback,
-            _ => (uint)NcRenderQualityProfile.Default,
+            _ => (uint)NcRenderQualityProfile.Balanced,
         };
+    }
+
+    private NcResultCode TryApplyNeutralExpressionWeightsForActiveAvatar()
+    {
+        var handle = _sessionService.ActiveAvatarHandle;
+        if (!handle.HasValue)
+        {
+            return NcResultCode.Ok;
+        }
+
+        var countRc = NativeCoreInterop.nc_get_expression_count(handle.Value, out var expressionCount);
+        if (countRc != NcResultCode.Ok || expressionCount == 0U)
+        {
+            return countRc;
+        }
+
+        var infos = new NcExpressionInfo[expressionCount];
+        var infosRc = NativeCoreInterop.nc_get_expression_infos(handle.Value, infos, (uint)infos.Length, out var written);
+        if (infosRc != NcResultCode.Ok || written == 0U)
+        {
+            return infosRc;
+        }
+
+        var payload = new NcExpressionWeight[written];
+        for (var i = 0; i < written; i++)
+        {
+            payload[i] = new NcExpressionWeight
+            {
+                Name = infos[i].Name,
+                Weight = 0.0f,
+            };
+        }
+
+        return NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
     }
 
     private static NcCameraMode ToNativeCameraMode(RenderCameraMode mode)

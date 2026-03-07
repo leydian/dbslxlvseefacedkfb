@@ -201,6 +201,7 @@ public static class HostFeatureGateResolver
             "ARM_POSE_FORMAT_UNSUPPORTED" => "arm pose is supported for MIQ payloads",
             "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY" => "arm pose blocked by static skinning policy",
             "ARM_POSE_PAYLOAD_MISSING" => "arm pose payload is missing",
+            "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN" => "arm pose auto-disabled after vrm-origin rollback guard trigger",
             "SHADOW_DISABLED_TOGGLE_OFF" => "realtime shadow toggle is off",
             "SHADOW_DISABLED_FAST_FALLBACK" => "realtime shadow is disabled in fast fallback profile",
             "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL" => "no material advertises shadow pass",
@@ -233,6 +234,8 @@ public static class HostFeatureGateResolver
                     "Arm pose is blocked by static skinning policy. Use payloads that include valid rig/skinning data.",
                 "ARM_POSE_PAYLOAD_MISSING" =>
                     "Arm pose payload is missing. Re-export avatar with skeleton/skin/rig payloads.",
+                "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN" =>
+                    "VRM-origin rollback guard disabled arm pose for safety. Keep current session or adjust pose policy after validating mesh-space stability.",
                 "SHADOW_DISABLED_TOGGLE_OFF" =>
                     "Realtime shadow is disabled by toggle. Turn on shadow and retest.",
                 "SHADOW_DISABLED_FAST_FALLBACK" =>

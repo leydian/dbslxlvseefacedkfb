@@ -249,6 +249,7 @@ struct CoreState {
     std::unordered_map<std::uint64_t, AvatarPreviewOrientationMetrics> avatar_preview_orientation_metrics;
     std::unordered_map<std::uint64_t, AvatarSecondaryMotionState> secondary_motion_states;
     std::unordered_map<std::uint64_t, AvatarArmPoseState> arm_pose_states;
+    std::unordered_set<std::uint64_t> arm_pose_auto_rollback_handles;
     std::unordered_set<std::uint64_t> render_ready_avatars;
     avatar::AvatarLoaderFacade loader;
     stream::SpoutSender spout;
@@ -285,15 +286,15 @@ struct CoreState {
 NcRenderQualityOptions MakeDefaultRenderQualityOptions() {
     NcRenderQualityOptions options {};
     options.camera_mode = NC_CAMERA_MODE_AUTO_FIT_BUST;
-    options.framing_target = 0.72f;
-    options.headroom = 0.12f;
+    options.framing_target = 0.80f;
+    options.headroom = 0.10f;
     options.yaw_deg = 0.0f;
-    options.fov_deg = 45.0f;
-    options.background_rgba[0] = 0.08f;
-    options.background_rgba[1] = 0.12f;
-    options.background_rgba[2] = 0.18f;
+    options.fov_deg = 40.0f;
+    options.background_rgba[0] = 0.55f;
+    options.background_rgba[1] = 0.55f;
+    options.background_rgba[2] = 0.55f;
     options.background_rgba[3] = 1.0f;
-    options.quality_profile = NC_RENDER_QUALITY_DEFAULT;
+    options.quality_profile = NC_RENDER_QUALITY_BALANCED;
     options.show_debug_overlay = 0U;
     return options;
 }
@@ -2831,11 +2832,6 @@ bool ShouldApplyArmPoseForAvatar(const AvatarPackage& avatar_pkg) {
     if (mode == StaticSkinningEnvMode::ForceOff) {
         return false;
     }
-    if (avatar_pkg.source_type == AvatarSourceType::Miq && avatar_pkg.source_ext == ".vrm") {
-        // Keep VRM-origin MIQ out of auto arm-pose re-skinning to avoid
-        // face/hair/body mesh-space desync regressions.
-        return false;
-    }
     // Auto mode: allow arm pose for MIQ when the runtime has complete pose payloads.
     // Keep mesh static-skinning policy separate to avoid regressions in mesh-space safety rules.
     return avatar_pkg.source_type == AvatarSourceType::Miq &&
@@ -3431,6 +3427,29 @@ bool UploadMeshVertexBlob(GpuMeshResource* mesh, ID3D11DeviceContext* device_ctx
     std::memcpy(mapped.pData, mesh->base_vertex_blob.data(), mesh->base_vertex_blob.size());
     device_ctx->Unmap(mesh->vertex_buffer, 0U);
     return true;
+}
+
+void ResetAvatarMeshesToBindPose(
+    RendererResources* renderer,
+    std::uint64_t handle,
+    ID3D11DeviceContext* device_ctx) {
+    if (renderer == nullptr || device_ctx == nullptr) {
+        return;
+    }
+    auto mesh_it = renderer->avatar_meshes.find(handle);
+    if (mesh_it == renderer->avatar_meshes.end()) {
+        return;
+    }
+    for (auto& mesh : mesh_it->second) {
+        if (mesh.bind_pose_vertex_blob.empty()) {
+            continue;
+        }
+        mesh.base_vertex_blob = mesh.bind_pose_vertex_blob;
+        mesh.deformed_vertex_blob = mesh.base_vertex_blob;
+        RecomputeMeshBoundsFromVertexBlob(&mesh);
+        (void)UploadMeshVertexBlob(&mesh, device_ctx);
+    }
+    g_state.arm_pose_states.erase(handle);
 }
 
 bool BuildGpuMeshForPayload(
@@ -4067,6 +4086,21 @@ bool ApplyArmPoseToAvatar(
     if (renderer == nullptr || device_ctx == nullptr) {
         return false;
     }
+    const bool is_vrm_origin_miq =
+        avatar_pkg.source_type == AvatarSourceType::Miq &&
+        avatar_pkg.source_ext == ".vrm";
+    if (is_vrm_origin_miq &&
+        g_state.arm_pose_auto_rollback_handles.find(handle) != g_state.arm_pose_auto_rollback_handles.end()) {
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            PushAvatarWarningExclusive(
+                &avatar_it->second,
+                "W_RENDER: ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN: arm pose auto-disabled due to vrm-origin rollback guard.",
+                "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN",
+                {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+        }
+        return true;
+    }
     const bool arm_pose_enabled = ShouldApplyArmPoseForAvatar(avatar_pkg);
     if (!arm_pose_enabled) {
         auto avatar_it = g_state.avatars.find(handle);
@@ -4080,19 +4114,19 @@ bool ApplyArmPoseToAvatar(
                     &avatar_it->second,
                     "W_RENDER: ARM_POSE_FORMAT_UNSUPPORTED: arm pose is supported for MIQ payloads.",
                     "ARM_POSE_FORMAT_UNSUPPORTED",
-                    {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+                    {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
             } else if (!payload_complete) {
                 PushAvatarWarningExclusive(
                     &avatar_it->second,
                     "W_RENDER: ARM_POSE_PAYLOAD_MISSING: arm pose skipped due to missing skin/skeleton/rig payload.",
                     "ARM_POSE_PAYLOAD_MISSING",
-                    {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+                    {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
             } else {
                 PushAvatarWarningExclusive(
                     &avatar_it->second,
                     "W_RENDER: ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY: arm pose skipped due to static skinning policy.",
                     "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY",
-                    {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+                    {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
             }
         }
         return true;
@@ -4108,7 +4142,7 @@ bool ApplyArmPoseToAvatar(
                 &avatar_it->second,
                 "W_RENDER: ARM_POSE_PAYLOAD_MISSING: arm pose skipped due to missing skin/skeleton/rig payload.",
                 "ARM_POSE_PAYLOAD_MISSING",
-                {"ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+                {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
         }
         return true;
     }
@@ -4171,6 +4205,18 @@ bool ApplyArmPoseToAvatar(
         return true;
     }
     bool any_mesh_updated = false;
+    bool rollback_guard_triggered = false;
+    std::string rollback_guard_reason;
+    if (is_vrm_origin_miq) {
+        const auto metrics_it = g_state.avatar_preview_orientation_metrics.find(handle);
+        if (metrics_it != g_state.avatar_preview_orientation_metrics.end()) {
+            const float hair_align_score = metrics_it->second.preview_hair_head_alignment_score;
+            if (std::isfinite(hair_align_score) && hair_align_score >= 0.0f && hair_align_score < 0.35f) {
+                rollback_guard_triggered = true;
+                rollback_guard_reason = "hair_head_alignment_score_low";
+            }
+        }
+    }
     auto& meshes = mesh_it->second;
     auto compute_position_stats = [](const std::vector<std::uint8_t>& blob, std::uint32_t stride) {
         struct Stats {
@@ -4327,6 +4373,10 @@ bool ApplyArmPoseToAvatar(
                     "W_RENDER: MIQ_SKINNING_EXTENT_GUARD: posed mesh rejected; keep bind pose.",
                     "MIQ_SKINNING_EXTENT_GUARD");
             }
+            if (is_vrm_origin_miq) {
+                rollback_guard_triggered = true;
+                rollback_guard_reason = "miq_skinning_extent_guard";
+            }
             posed_vertices = mesh.bind_pose_vertex_blob;
         }
         mesh.base_vertex_blob = std::move(posed_vertices);
@@ -4334,6 +4384,22 @@ bool ApplyArmPoseToAvatar(
         RecomputeMeshBoundsFromVertexBlob(&mesh);
         (void)UploadMeshVertexBlob(&mesh, device_ctx);
         any_mesh_updated = true;
+    }
+    if (is_vrm_origin_miq && rollback_guard_triggered) {
+        g_state.arm_pose_auto_rollback_handles.insert(handle);
+        ResetAvatarMeshesToBindPose(renderer, handle, device_ctx);
+        auto avatar_it = g_state.avatars.find(handle);
+        if (avatar_it != g_state.avatars.end()) {
+            const std::string reason = rollback_guard_reason.empty()
+                ? "unknown"
+                : rollback_guard_reason;
+            PushAvatarWarningExclusive(
+                &avatar_it->second,
+                std::string("W_RENDER: ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN: arm pose auto-disabled due to guard reason=") + reason,
+                "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN",
+                {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
+        }
+        return true;
     }
     if (any_mesh_updated) {
         pose_state.initialized = true;
@@ -7316,6 +7382,7 @@ NcResultCode nc_initialize(const NcInitOptions* options) {
     animiq::nativecore::g_state.avatars.clear();
     animiq::nativecore::g_state.secondary_motion_states.clear();
     animiq::nativecore::g_state.arm_pose_states.clear();
+    animiq::nativecore::g_state.arm_pose_auto_rollback_handles.clear();
     animiq::nativecore::g_state.render_ready_avatars.clear();
     animiq::nativecore::g_state.render_quality = animiq::nativecore::MakeDefaultRenderQualityOptions();
     animiq::nativecore::g_state.lighting_options = animiq::nativecore::MakeDefaultLightingOptions();
@@ -7353,7 +7420,9 @@ NcResultCode nc_shutdown(void) {
     animiq::nativecore::ResetRendererResources(&animiq::nativecore::g_state.renderer);
 #endif
     animiq::nativecore::g_state.avatars.clear();
+    animiq::nativecore::g_state.secondary_motion_states.clear();
     animiq::nativecore::g_state.arm_pose_states.clear();
+    animiq::nativecore::g_state.arm_pose_auto_rollback_handles.clear();
     animiq::nativecore::g_state.render_ready_avatars.clear();
     animiq::nativecore::g_state.render_quality = animiq::nativecore::MakeDefaultRenderQualityOptions();
     animiq::nativecore::g_state.lighting_options = animiq::nativecore::MakeDefaultLightingOptions();
@@ -7408,6 +7477,7 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
     animiq::nativecore::g_state.avatar_preview_orientation_metrics.erase(handle);
     animiq::nativecore::g_state.secondary_motion_states.erase(handle);
     animiq::nativecore::g_state.arm_pose_states.erase(handle);
+    animiq::nativecore::g_state.arm_pose_auto_rollback_handles.erase(handle);
     *out_handle = handle;
     animiq::nativecore::FillAvatarInfo(loaded.value, handle, out_info);
     animiq::nativecore::ClearError();
@@ -7430,6 +7500,7 @@ NcResultCode nc_unload_avatar(NcAvatarHandle handle) {
     animiq::nativecore::g_state.avatar_preview_orientation_metrics.erase(handle);
     animiq::nativecore::g_state.secondary_motion_states.erase(handle);
     animiq::nativecore::g_state.arm_pose_states.erase(handle);
+    animiq::nativecore::g_state.arm_pose_auto_rollback_handles.erase(handle);
 #if defined(_WIN32)
     auto mesh_it = animiq::nativecore::g_state.renderer.avatar_meshes.find(handle);
     if (mesh_it != animiq::nativecore::g_state.renderer.avatar_meshes.end()) {
@@ -7795,35 +7866,22 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
         return NC_ERROR_UNSUPPORTED;
     }
     if (it->second.mesh_payloads.empty()) {
-        const char* format_name = "unknown";
-        switch (it->second.source_type) {
-            case animiq::avatar::AvatarSourceType::Vrm:
-                format_name = "vrm";
-                break;
-            case animiq::avatar::AvatarSourceType::VxAvatar:
-                format_name = "vxavatar";
-                break;
-            case animiq::avatar::AvatarSourceType::Vxa2:
-                format_name = "vxa2";
-                break;
-            case animiq::avatar::AvatarSourceType::Miq:
-                format_name = "miq";
-                break;
-            case animiq::avatar::AvatarSourceType::VsfAvatar:
-                format_name = "vsfavatar";
-                break;
-            default:
-                break;
-        }
+        const char* format_name = animiq::nativecore::AvatarSourceTypeName(it->second.source_type);
+        const bool contract_managed_format =
+            it->second.source_type == animiq::avatar::AvatarSourceType::Vrm ||
+            it->second.source_type == animiq::avatar::AvatarSourceType::Miq;
         std::ostringstream detail;
-        detail << "avatar has no renderable mesh payloads"
-               << " (format=" << format_name
+        detail << "render-ready contract failed: no renderable mesh payloads"
+               << " (contract=" << (contract_managed_format ? "avatar_render_ready_v1" : "legacy")
+               << ", format=" << format_name
                << ", parser_mode=" << parser_mode
                << ", parser_stage=" << (it->second.parser_stage.empty() ? "unknown" : it->second.parser_stage)
                << ", primary_error=" << (it->second.primary_error_code.empty() ? "NONE" : it->second.primary_error_code)
                << ", mesh_extract_stage=" << (mesh_extract_stage.empty() ? "unknown" : mesh_extract_stage)
                << ", mesh_count=" << it->second.meshes.size()
+               << ", mesh_payload_count=" << it->second.mesh_payloads.size()
                << ", material_count=" << it->second.materials.size()
+               << ", material_payload_count=" << it->second.material_payloads.size()
                << ")";
         animiq::nativecore::SetError(
             NC_ERROR_UNSUPPORTED,
@@ -7854,6 +7912,7 @@ NcResultCode nc_create_render_resources(NcAvatarHandle handle) {
 #endif
     animiq::nativecore::g_state.secondary_motion_states.erase(handle);
     animiq::nativecore::g_state.arm_pose_states.erase(handle);
+    animiq::nativecore::g_state.arm_pose_auto_rollback_handles.erase(handle);
     it->second.last_render_draw_calls = 0U;
     animiq::nativecore::ClearError();
     return NC_OK;
@@ -7892,6 +7951,7 @@ NcResultCode nc_destroy_render_resources(NcAvatarHandle handle) {
 #endif
     animiq::nativecore::g_state.secondary_motion_states.erase(handle);
     animiq::nativecore::g_state.arm_pose_states.erase(handle);
+    animiq::nativecore::g_state.arm_pose_auto_rollback_handles.erase(handle);
     it->second.last_render_draw_calls = 0U;
     animiq::nativecore::ClearError();
     return NC_OK;

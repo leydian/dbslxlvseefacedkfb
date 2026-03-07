@@ -207,3 +207,4 @@ Report list for this week.
 - [2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md](./2026-03-06_wpf_ui_v2_navigation_theme_diagnostics.md)
 - [2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md](./2026-03-06_wpf_ui_v3_shortcuts_focus_persistence.md)
 - [2026-03-06_wpf_ui_v4_operation_hub_and_flow_timing.md](./2026-03-06_wpf_ui_v4_operation_hub_and_flow_timing.md)
+- [2026-03-07_vseeface_parity_global_defaults_and_vrm_origin_armpose_guard.md](./2026-03-07_vseeface_parity_global_defaults_and_vrm_origin_armpose_guard.md)

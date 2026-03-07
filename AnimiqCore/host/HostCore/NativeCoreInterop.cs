@@ -485,15 +485,15 @@ public static class NativeCoreInterop
         return new NcRenderQualityOptions
         {
             CameraMode = NcCameraMode.AutoFitBust,
-            FramingTarget = 0.72f,
-            Headroom = 0.12f,
+            FramingTarget = 0.80f,
+            Headroom = 0.10f,
             YawDeg = 0.0f,
-            FovDeg = 45.0f,
-            BackgroundR = 0.08f,
-            BackgroundG = 0.12f,
-            BackgroundB = 0.18f,
+            FovDeg = 40.0f,
+            BackgroundR = 0.55f,
+            BackgroundG = 0.55f,
+            BackgroundB = 0.55f,
             BackgroundA = 1.0f,
-            QualityProfile = (uint)NcRenderQualityProfile.Default,
+            QualityProfile = (uint)NcRenderQualityProfile.Balanced,
             ShowDebugOverlay = 0U,
         };
     }
