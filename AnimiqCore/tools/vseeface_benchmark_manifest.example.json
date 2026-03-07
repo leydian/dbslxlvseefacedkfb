@@ -1,0 +1,125 @@
+{
+  "benchmarkName": "vseeface_v11338c2_10axis",
+  "version": "1.0.0",
+  "baselineProduct": "vseeface",
+  "baselineVersion": "1.13.38c2",
+  "focusProduct": "animiq",
+  "iterationsPerAxisPerProduct": 3,
+  "axes": [
+    {
+      "id": "e2e_latency",
+      "name": "End-to-End Latency",
+      "owner": "tracking",
+      "weight": 0.12,
+      "kpis": [
+        { "key": "latency_ms", "better": "lower", "unit": "ms" },
+        { "key": "latency_p95_ms", "better": "lower", "unit": "ms" }
+      ],
+      "riceDefaults": { "reach": 9, "impact": 9, "confidence": 80, "effort": 7 }
+    },
+    {
+      "id": "tracking_retention",
+      "name": "Tracking Retention Under Disturbance",
+      "owner": "tracking",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "tracking_drop_count", "better": "lower", "unit": "count" },
+        { "key": "reacquire_ms", "better": "lower", "unit": "ms" },
+        { "key": "retention_rate", "better": "higher", "unit": "ratio" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 8, "confidence": 75, "effort": 6 }
+    },
+    {
+      "id": "wink_blink_accuracy",
+      "name": "Wink and Blink Accuracy",
+      "owner": "tracking",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "wink_accuracy_rate", "better": "higher", "unit": "ratio" },
+        { "key": "blink_false_positive_rate", "better": "lower", "unit": "ratio" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 7, "confidence": 75, "effort": 5 }
+    },
+    {
+      "id": "lipsync_quality",
+      "name": "Lip Sync and Mouth Shape Quality",
+      "owner": "tracking",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "phoneme_match_score", "better": "higher", "unit": "score_0_to_100" },
+        { "key": "mouth_jitter_events", "better": "lower", "unit": "count" }
+      ],
+      "riceDefaults": { "reach": 7, "impact": 8, "confidence": 70, "effort": 6 }
+    },
+    {
+      "id": "gaze_tracking",
+      "name": "Gaze Tracking Responsiveness",
+      "owner": "tracking",
+      "weight": 0.08,
+      "kpis": [
+        { "key": "gaze_latency_ms", "better": "lower", "unit": "ms" },
+        { "key": "gaze_stability_score", "better": "higher", "unit": "score_0_to_100" }
+      ],
+      "riceDefaults": { "reach": 7, "impact": 7, "confidence": 70, "effort": 5 }
+    },
+    {
+      "id": "resource_efficiency",
+      "name": "Resource Efficiency",
+      "owner": "runtime",
+      "weight": 0.12,
+      "kpis": [
+        { "key": "cpu_percent", "better": "lower", "unit": "percent" },
+        { "key": "gpu_percent", "better": "lower", "unit": "percent" },
+        { "key": "fps_1pct_low", "better": "higher", "unit": "fps" }
+      ],
+      "riceDefaults": { "reach": 9, "impact": 8, "confidence": 80, "effort": 7 }
+    },
+    {
+      "id": "multi_instance_camera_sharing",
+      "name": "Multi-instance Camera Sharing",
+      "owner": "runtime",
+      "weight": 0.08,
+      "kpis": [
+        { "key": "secondary_instance_start_ms", "better": "lower", "unit": "ms" },
+        { "key": "camera_conflict_rate", "better": "lower", "unit": "ratio" }
+      ],
+      "riceDefaults": { "reach": 6, "impact": 7, "confidence": 70, "effort": 4 }
+    },
+    {
+      "id": "vmc_reliability",
+      "name": "VMC Send and Receive Reliability",
+      "owner": "interop",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "vmc_packet_drop_rate", "better": "lower", "unit": "ratio" },
+        { "key": "vmc_blendshape_missing_rate", "better": "lower", "unit": "ratio" },
+        { "key": "vmc_end_to_end_ms", "better": "lower", "unit": "ms" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 8, "confidence": 75, "effort": 6 }
+    },
+    {
+      "id": "camera_spout_compatibility",
+      "name": "Virtual Camera and Spout Compatibility",
+      "owner": "interop",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "startup_freeze_rate", "better": "lower", "unit": "ratio" },
+        { "key": "source_detection_rate", "better": "higher", "unit": "ratio" },
+        { "key": "first_frame_ms", "better": "lower", "unit": "ms" }
+      ],
+      "riceDefaults": { "reach": 8, "impact": 8, "confidence": 70, "effort": 6 }
+    },
+    {
+      "id": "long_run_stability",
+      "name": "Long-run Stability",
+      "owner": "runtime",
+      "weight": 0.1,
+      "kpis": [
+        { "key": "crash_count", "better": "lower", "unit": "count" },
+        { "key": "memory_growth_mb_per_hour", "better": "lower", "unit": "mb_per_hour" },
+        { "key": "tracking_drift_score", "better": "lower", "unit": "score_0_to_100" }
+      ],
+      "riceDefaults": { "reach": 9, "impact": 9, "confidence": 80, "effort": 8 }
+    }
+  ]
+}

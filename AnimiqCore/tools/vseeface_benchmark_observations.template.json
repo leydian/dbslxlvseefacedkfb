@@ -1,0 +1,41 @@
+{
+  "benchmarkName": "vseeface_v11338c2_10axis",
+  "records": [
+    {
+      "test_id": "e2e_latency_cam60_run01",
+      "scenario": "studio_light_static_cam",
+      "tool_name": "vseeface",
+      "tool_version": "1.13.38c2",
+      "hardware_profile": "i7_13700k_rtx4070_32gb",
+      "quality_preset": "high_quality_wink_support",
+      "axis_id": "e2e_latency",
+      "metric_name": "latency_ms",
+      "value": 42.0,
+      "unit": "ms",
+      "sample_count": 300,
+      "avg": 42.0,
+      "p95": 58.0,
+      "worst": 77.0,
+      "notes": "sample row",
+      "pass_fail": "pass"
+    },
+    {
+      "test_id": "e2e_latency_cam60_run01",
+      "scenario": "studio_light_static_cam",
+      "tool_name": "animiq",
+      "tool_version": "dev-main",
+      "hardware_profile": "i7_13700k_rtx4070_32gb",
+      "quality_preset": "tracking_high",
+      "axis_id": "e2e_latency",
+      "metric_name": "latency_ms",
+      "value": 39.0,
+      "unit": "ms",
+      "sample_count": 300,
+      "avg": 39.0,
+      "p95": 53.0,
+      "worst": 73.0,
+      "notes": "sample row",
+      "pass_fail": "pass"
+    }
+  ]
+}
