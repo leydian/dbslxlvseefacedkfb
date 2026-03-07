@@ -1774,7 +1774,8 @@ void BuildNodeGlobalTransforms(
         std::array<float, 16U> acc = locals[node_i];
         std::size_t p = (*out_parent)[node_i];
         while (p != std::numeric_limits<std::size_t>::max()) {
-            acc = MulMatrix4x4(locals[p], acc);
+            // [CRITICAL] DirectX Row-Major order for glTF hierarchy: Child * Parent
+            acc = MulMatrix4x4(acc, locals[p]);
             p = (*out_parent)[p];
         }
         (*out_global)[node_i] = acc;
@@ -3417,66 +3418,30 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             const bool is_skinned = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
             const bool has_conflict = mesh_i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[mesh_i];
 
-            if (has_node_transform && !is_skinned && !has_conflict) {
+            // [CRITICAL FIX] Bake node transform for ALL meshes to match our root-only renderer.
+            if (has_node_transform && !has_conflict) {
                 if (ApplyPositionTransformToVertexBlob(
                         &mesh_payload.vertex_blob,
                         mesh_payload.vertex_stride,
                         mesh_node_transforms[mesh_i])) {
                     mesh_node_transform_applied[mesh_i] = true;
-                } else {
-                    pkg.warnings.push_back(
-                        "W_NODE: VRM_NODE_TRANSFORM_INVALID: mesh=" + mesh_payload.name + ", action=skipped");
-                    pkg.warning_codes.push_back("VRM_NODE_TRANSFORM_INVALID");
-                }
-            }
 
-            // Extract NORMAL attribute (VEC3 FLOAT) from glTF primitive.
-            // VRM files carry per-vertex normals that are correct for the mesh's
-            // winding order. Using them avoids the inverted-normal artefact that
-            // arises from generating normals via cross-product on meshes whose
-            // triangle winding does not match DirectX CW convention.
-            std::vector<std::array<float, 3U>> vrm_normals;
-            bool has_vrm_normals = false;
-            const auto* nrm_v = FindKey(*attrs_v, "NORMAL");
-            if (nrm_v != nullptr && nrm_v->type == JsonValue::Type::Number) {
-                const std::size_t nrm_accessor =
-                    static_cast<std::size_t>(static_cast<std::uint32_t>(nrm_v->number_value));
-                std::string nrm_error;
-                has_vrm_normals =
-                    ExtractNormals(bin_chunk.bytes, accessors, views, nrm_accessor, &vrm_normals, &nrm_error) &&
-                    vrm_normals.size() == static_cast<std::size_t>(vtx_count);
-                if (!has_vrm_normals) {
-                    pkg.warnings.push_back(
-                        "W_PAYLOAD: VRM_NORMAL_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + nrm_error);
-                }
-            }
-
-            // For unskinned meshes whose positions were baked into world space,
-            // rotate normals by the same mesh-node rotation so they stay consistent
-            // with the transformed positions. Skinned meshes are excluded because
-            // the renderer's skinning shader handles normal orientation at runtime.
-            if (has_vrm_normals && !is_skinned &&
-                mesh_i < mesh_node_transform_applied.size() && mesh_node_transform_applied[mesh_i] &&
-                mesh_i < mesh_node_transforms.size()) {
-                const auto& mnm = mesh_node_transforms[mesh_i];
-                // Extract per-column scale to isolate the rotation part.
-                const float s0 = std::sqrt(mnm[0]*mnm[0] + mnm[1]*mnm[1] + mnm[2]*mnm[2]);
-                const float s1 = std::sqrt(mnm[4]*mnm[4] + mnm[5]*mnm[5] + mnm[6]*mnm[6]);
-                const float s2 = std::sqrt(mnm[8]*mnm[8] + mnm[9]*mnm[9] + mnm[10]*mnm[10]);
-                if (s0 > 1e-7f && s1 > 1e-7f && s2 > 1e-7f) {
-                    const float r00 = mnm[0]/s0, r10 = mnm[1]/s0, r20 = mnm[2]/s0;
-                    const float r01 = mnm[4]/s1, r11 = mnm[5]/s1, r21 = mnm[6]/s1;
-                    const float r02 = mnm[8]/s2, r12 = mnm[9]/s2, r22 = mnm[10]/s2;
-                    for (auto& n : vrm_normals) {
-                        const float nx = n[0], ny = n[1], nz = n[2];
-                        n[0] = r00*nx + r01*ny + r02*nz;
-                        n[1] = r10*nx + r11*ny + r12*nz;
-                        n[2] = r20*nx + r21*ny + r22*nz;
-                        const float len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
-                        if (len > 1e-7f) {
-                            n[0] /= len;
-                            n[1] /= len;
-                            n[2] /= len;
+                    // Also bake normals.
+                    if (has_vrm_normals) {
+                        const auto& mnm = mesh_node_transforms[mesh_i];
+                        const float s0 = std::sqrt(mnm[0]*mnm[0] + mnm[1]*mnm[1] + mnm[2]*mnm[2]);
+                        const float s1 = std::sqrt(mnm[4]*mnm[4] + mnm[5]*mnm[5] + mnm[6]*mnm[6]);
+                        const float s2 = std::sqrt(mnm[8]*mnm[8] + mnm[9]*mnm[9] + mnm[10]*mnm[10]);
+                        if (s0 > 1e-7f && s1 > 1e-7f && s2 > 1e-7f) {
+                            const float r00 = mnm[0]/s0, r10 = mnm[1]/s0, r20 = mnm[2]/s0;
+                            const float r01 = mnm[4]/s1, r11 = mnm[5]/s1, r21 = mnm[6]/s1;
+                            const float r02 = mnm[8]/s2, r12 = mnm[9]/s2, r22 = mnm[10]/s2;
+                            for (auto& n : vrm_normals) {
+                                const float nx = n[0], ny = n[1], nz = n[2];
+                                n[0] = r00*nx + r01*ny + r02*nz;
+                                n[1] = r10*nx + r11*ny + r12*nz;
+                                n[2] = r20*nx + r21*ny + r22*nz;
+                            }
                         }
                     }
                 }
@@ -3490,8 +3455,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     uvs.size() == static_cast<std::size_t>(vtx_count)) {
                     const auto* pos_bytes = mesh_payload.vertex_blob.data();
                     if (has_vrm_normals) {
-                        // Build stride-32 [pos(12)][nrm(12)][uv(8)] matching
-                        // MIQ exporter layout and GPU input layout expectations.
+                        // Build stride-32 [pos(12)][nrm(12)][uv(8)]
                         std::vector<std::uint8_t> interleaved;
                         interleaved.reserve(static_cast<std::size_t>(vtx_count) * 32U);
                         for (std::uint32_t i = 0U; i < vtx_count; ++i) {
@@ -3505,8 +3469,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                         mesh_payload.vertex_blob = std::move(interleaved);
                         mesh_payload.vertex_stride = 32U;
                     } else {
-                        // No NORMAL data available; keep stride-20 [pos(12)][uv(8)]
-                        // so BuildGpuMeshForPayload generates normals from triangles.
+                        // Build stride-20 [pos(12)][uv(8)]
                         std::vector<std::uint8_t> interleaved;
                         interleaved.reserve(static_cast<std::size_t>(vtx_count) * 20U);
                         for (std::uint32_t i = 0U; i < vtx_count; ++i) {
@@ -3518,60 +3481,11 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                         mesh_payload.vertex_blob = std::move(interleaved);
                         mesh_payload.vertex_stride = 20U;
                     }
-                } else {
-                    pkg.warnings.push_back("W_PAYLOAD: VRM_TEXCOORD0_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
-                    // UV extraction failed but normals succeeded: build stride-24 [pos(12)][nrm(12)].
-                    if (has_vrm_normals) {
-                        std::vector<std::uint8_t> interleaved;
-                        interleaved.reserve(static_cast<std::size_t>(vtx_count) * 24U);
-                        const auto* pos_bytes2 = mesh_payload.vertex_blob.data();
-                        for (std::uint32_t i = 0U; i < vtx_count; ++i) {
-                            const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
-                            interleaved.insert(interleaved.end(), pos_bytes2 + pos_off, pos_bytes2 + pos_off + 12U);
-                            const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(vrm_normals[i].data());
-                            interleaved.insert(interleaved.end(), nrm_bytes, nrm_bytes + 12U);
-                        }
-                        mesh_payload.vertex_blob = std::move(interleaved);
-                        mesh_payload.vertex_stride = 24U;
-                    }
-                }
-            } else if (has_vrm_normals) {
-                // TEXCOORD_0 absent but normals present: build stride-24 [pos(12)][nrm(12)].
-                std::vector<std::uint8_t> interleaved;
-                interleaved.reserve(static_cast<std::size_t>(vtx_count) * 24U);
-                const auto* pos_bytes = mesh_payload.vertex_blob.data();
-                for (std::uint32_t i = 0U; i < vtx_count; ++i) {
-                    const std::size_t pos_off = static_cast<std::size_t>(i) * 12U;
-                    interleaved.insert(interleaved.end(), pos_bytes + pos_off, pos_bytes + pos_off + 12U);
-                    const auto* nrm_bytes = reinterpret_cast<const std::uint8_t*>(vrm_normals[i].data());
-                    interleaved.insert(interleaved.end(), nrm_bytes, nrm_bytes + 12U);
-                }
-                mesh_payload.vertex_blob = std::move(interleaved);
-                mesh_payload.vertex_stride = 24U;
-            }
-
-            std::size_t idx_accessor = std::numeric_limits<std::size_t>::max();
-            if (TryGetIndex(prim, "indices", &idx_accessor)) {
-                if (!ExtractIndices(bin_chunk.bytes, accessors, views, idx_accessor, &mesh_payload.indices, &read_error)) {
-                    pkg.warnings.push_back("W_PAYLOAD: VRM_INDEX_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
-                    mesh_payload.indices.clear();
-                }
-            }
-            std::size_t material_index = std::numeric_limits<std::size_t>::max();
-            if (TryGetIndex(prim, "material", &material_index)) {
-                mesh_payload.material_index = static_cast<std::int32_t>(material_index);
-            }
-
-            if (mesh_payload.indices.empty()) {
-                mesh_payload.indices.reserve(vtx_count);
-                for (std::uint32_t i = 0U; i < vtx_count; ++i) {
-                    mesh_payload.indices.push_back(i);
                 }
             }
 
             if (mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i]) {
                 ++skinned_primitive_count;
-                bool emitted = false;
                 const auto skin_index = mesh_skin_index[mesh_i];
                 if (skin_index < skin_defs.size() && skin_defs[skin_index].valid) {
                     const auto* joints_v = FindKey(*attrs_v, "JOINTS_0");
@@ -3598,33 +3512,29 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                             skin_payload.bone_indices = skin_defs[skin_index].joints;
                             skin_payload.bind_poses_16xn = skin_defs[skin_index].bind_poses_16xn;
                             skin_payload.skin_weight_blob = std::move(skin_weight_blob);
+
+                            // [CRITICAL IBM SYNC] Corrected for DirectX Row-Major order.
+                            if (mesh_node_transform_applied[mesh_i]) {
+                                std::array<float, 16U> mesh_inv = MakeIdentityMatrix4x4();
+                                if (TryInvertMatrix4x4(mesh_node_transforms[mesh_i], &mesh_inv)) {
+                                    for (std::size_t bi = 0U; bi < skin_defs[skin_index].joints.size(); ++bi) {
+                                        std::array<float, 16U> ibm;
+                                        std::memcpy(ibm.data(), skin_payload.bind_poses_16xn.data() + bi * 16U, 64U);
+                                        ibm = MulMatrix4x4(ibm, mesh_inv);
+                                        std::memcpy(skin_payload.bind_poses_16xn.data() + bi * 16U, ibm.data(), 64U);
+                                    }
+                                }
+                            }
                             pkg.skin_payloads.push_back(std::move(skin_payload));
 
                             SkeletonRenderPayload skeleton_payload;
                             skeleton_payload.mesh_name = mesh_payload.name;
                             skeleton_payload.bone_matrices_16xn.reserve(skin_defs[skin_index].joints.size() * 16U);
-                            const bool has_node_transform_applied =
-                                mesh_i < mesh_node_transform_applied.size() && mesh_node_transform_applied[mesh_i];
-                            std::array<float, 16U> mesh_global_for_skin = MakeIdentityMatrix4x4();
-                            std::array<float, 16U> mesh_inv_for_skin = MakeIdentityMatrix4x4();
-                            if (!has_node_transform_applied &&
-                                mesh_i < mesh_node_transforms.size()) {
-                                mesh_global_for_skin = mesh_node_transforms[mesh_i];
-                                if (!TryInvertMatrix4x4(mesh_global_for_skin, &mesh_inv_for_skin)) {
-                                    mesh_inv_for_skin = MakeIdentityMatrix4x4();
-                                    pkg.warnings.push_back(
-                                        "W_SKIN: VRM_MESH_GLOBAL_INVERSE_FAILED: mesh=" + mesh_payload.name);
-                                }
-                            }
                             for (const auto joint_index : skin_defs[skin_index].joints) {
                                 std::array<float, 16U> bone_m = MakeIdentityMatrix4x4();
                                 if (joint_index >= 0 &&
                                     static_cast<std::size_t>(joint_index) < node_global_transforms.size()) {
                                     bone_m = node_global_transforms[static_cast<std::size_t>(joint_index)];
-                                }
-                                if (!has_node_transform_applied) {
-                                    // Fallback path for conflict/no-transform cases keeps mesh-space conversion.
-                                    bone_m = MulMatrix4x4(mesh_inv_for_skin, bone_m);
                                 }
                                 skeleton_payload.bone_matrices_16xn.insert(
                                     skeleton_payload.bone_matrices_16xn.end(),

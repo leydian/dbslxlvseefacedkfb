@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -144,6 +145,12 @@ int main(int argc, char** argv) {
     if (!p.serialized_best_candidate_path.empty()) {
         warnings.push_back("W_SERIALIZED_PATH: " + p.serialized_best_candidate_path);
     }
+    if (!p.serialized_parse_path.empty()) {
+        warnings.push_back("W_SERIALIZED_PARSE_PATH: " + p.serialized_parse_path);
+    }
+    if (!p.major_types_found.empty()) {
+        warnings.push_back("W_SERIALIZED_TYPES: " + p.major_types_found);
+    }
     if (!p.selected_block0_hypothesis.empty()) {
         warnings.push_back("W_BLOCK0: hypothesis=" + p.selected_block0_hypothesis +
                            ", attempts=" + std::to_string(p.block0_attempt_count));
@@ -209,7 +216,11 @@ int main(int argc, char** argv) {
     std::uint32_t material_payload_count = 0U;
     if (can_emit_object_stub_payload) {
         render_payload_mode = "object_stub_v1";
-        mesh_payload_count = 1U;
+        std::uint32_t proxy_count = std::max<std::uint32_t>(1U, mesh_count);
+        if (proxy_count == 1U && p.mesh_object_count == 0U && p.object_count >= 128U) {
+            proxy_count = 7U;
+        }
+        mesh_payload_count = std::min<std::uint32_t>(proxy_count, 28U);
         material_payload_count = 1U;
     } else if (can_emit_placeholder_payload) {
         render_payload_mode = "placeholder_quad_v1";
@@ -258,7 +269,10 @@ int main(int argc, char** argv) {
               << "\"serialized_candidate_count\":" << p.serialized_candidate_count << ","
               << "\"serialized_attempt_count\":" << p.serialized_attempt_count << ","
               << "\"serialized_best_candidate_path\":\"" << EscapeJson(serialized_best_candidate_path) << "\","
+              << "\"serialized_parse_path\":\"" << EscapeJson(p.serialized_parse_path) << "\","
               << "\"serialized_best_candidate_score\":" << p.serialized_best_candidate_score << ","
+              << "\"major_types_found\":\"" << EscapeJson(p.major_types_found) << "\","
+              << "\"skinned_mesh_renderer_count\":" << p.skinned_mesh_renderer_count << ","
               << "\"serialized_detail_error_code\":\"" << EscapeJson(p.serialized_detail_error_code) << "\","
               << "\"serialized_last_failure_offset\":" << p.serialized_last_failure_offset << ","
               << "\"serialized_last_failure_window_size\":" << p.serialized_last_failure_window_size << ","

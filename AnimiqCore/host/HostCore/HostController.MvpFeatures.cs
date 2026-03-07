@@ -271,13 +271,51 @@ public sealed partial class HostController
         PersistSessionSnapshot();
     }
 
+    public void ToggleFavoriteAvatar(string path)
+    {
+        var normalizedPath = path?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return;
+        }
+
+        var existing = _sessionPersistence.RecentAvatars.FirstOrDefault(item =>
+            string.Equals(item.AvatarPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
+        if (existing is null)
+        {
+            return;
+        }
+
+        var recent = UpsertRecentAvatar(
+            _sessionPersistence.RecentAvatars,
+            normalizedPath,
+            thumbnailStatus: null,
+            thumbnailPath: null,
+            lastError: null,
+            previewFlip180: null,
+            isFavorite: !existing.IsFavorite);
+
+        var ordered = recent
+            .OrderByDescending(e => e.IsFavorite)
+            .ThenByDescending(e => e.LastUsedUtc)
+            .ToList();
+
+        _sessionPersistence = _sessionPersistence with
+        {
+            RecentAvatars = ordered,
+            LastUpdatedUtc = DateTimeOffset.UtcNow,
+        };
+        PersistSessionSnapshot();
+    }
+
     private static IReadOnlyList<RecentAvatarEntry> UpsertRecentAvatar(
         IReadOnlyList<RecentAvatarEntry> current,
         string avatarPath,
         string? thumbnailStatus,
         string? thumbnailPath,
         string? lastError,
-        bool? previewFlip180)
+        bool? previewFlip180,
+        bool? isFavorite = null)
     {
         var existing = current.FirstOrDefault(item =>
             string.Equals(item.AvatarPath, avatarPath, StringComparison.OrdinalIgnoreCase));
@@ -290,7 +328,8 @@ public sealed partial class HostController
             ThumbnailStatus: thumbnailStatus ?? existing?.ThumbnailStatus ?? "none",
             LastUsedUtc: DateTimeOffset.UtcNow,
             LastError: lastError ?? existing?.LastError ?? string.Empty,
-            PreviewFlip180: previewFlip180 ?? existing?.PreviewFlip180 ?? false);
+            PreviewFlip180: previewFlip180 ?? existing?.PreviewFlip180 ?? false,
+            IsFavorite: isFavorite ?? existing?.IsFavorite ?? false);
 
         var ordered = new List<RecentAvatarEntry>(MaxRecentAvatarEntries) { entry };
         foreach (var item in current)

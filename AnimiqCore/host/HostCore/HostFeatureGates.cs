@@ -190,28 +190,28 @@ public static class HostFeatureGateResolver
         return string.IsNullOrWhiteSpace(code) ? fallback : code.Trim();
     }
 
-    private static string ResolveReasonText(string reasonCode)
+    public static string ResolveReasonText(string reasonCode)
     {
         return reasonCode switch
         {
-            "HOST_RUNTIME_PATH_UNKNOWN" => "runtime path is unknown",
-            "HOST_RUNTIME_MISMATCH_DIST_EXPECTED" => "runtime nativecore path mismatch",
-            "HOST_RUNTIME_DIST_OLDER_THAN_BUILD_OUTPUT" => "runtime nativecore is older than build output",
-            "NO_AVATAR_LOADED" => "no avatar loaded",
-            "ARM_POSE_FORMAT_UNSUPPORTED" => "arm pose is supported for MIQ payloads",
-            "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY" => "arm pose blocked by static skinning policy",
-            "ARM_POSE_PAYLOAD_MISSING" => "arm pose payload is missing",
-            "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN" => "arm pose auto-disabled after vrm-origin rollback guard trigger",
-            "SHADOW_DISABLED_TOGGLE_OFF" => "realtime shadow toggle is off",
-            "SHADOW_DISABLED_FAST_FALLBACK" => "realtime shadow is disabled in fast fallback profile",
-            "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL" => "no material advertises shadow pass",
-            "SHADOW_DISABLED_SHADOW_DRAW_EMPTY" => "shadow draw queue is empty",
-            "SHADOW_PASS_NOT_REPORTED" => "active passes do not report shadow",
-            "EXPRESSION_COUNT_ZERO" => "avatar has no expression payload",
-            "TRACKING_INACTIVE" => "tracking is not active",
-            "TRACKING_STALE" => "tracking input is stale",
-            _ when reasonCode.StartsWith("NC_SET_", StringComparison.Ordinal) => "native submit failed",
-            _ => "feature gated by runtime policy",
+            "HOST_RUNTIME_PATH_UNKNOWN" => "런타임 경로를 알 수 없습니다",
+            "HOST_RUNTIME_MISMATCH_DIST_EXPECTED" => "런타임 nativecore 경로가 일치하지 않습니다",
+            "HOST_RUNTIME_DIST_OLDER_THAN_BUILD_OUTPUT" => "런타임 nativecore가 빌드 결과물보다 오래되었습니다",
+            "NO_AVATAR_LOADED" => "아바타가 로드되지 않았습니다",
+            "ARM_POSE_FORMAT_UNSUPPORTED" => "팔 포즈는 MIQ 형식 아바타에서만 지원됩니다",
+            "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY" => "정적 스키닝 정책으로 팔 포즈가 비활성화되었습니다",
+            "ARM_POSE_PAYLOAD_MISSING" => "팔 포즈 페이로드가 없습니다",
+            "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN" => "VRM 원점 롤백 감지로 팔 포즈가 자동 비활성화되었습니다",
+            "SHADOW_DISABLED_TOGGLE_OFF" => "실시간 그림자 토글이 꺼져 있습니다",
+            "SHADOW_DISABLED_FAST_FALLBACK" => "빠른 폴백 프로파일에서 실시간 그림자가 비활성화됩니다",
+            "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL" => "그림자 패스를 지원하는 머티리얼이 없습니다",
+            "SHADOW_DISABLED_SHADOW_DRAW_EMPTY" => "그림자 드로우 큐가 비어 있습니다",
+            "SHADOW_PASS_NOT_REPORTED" => "이 아바타 셰이더가 그림자 패스를 지원하지 않습니다",
+            "EXPRESSION_COUNT_ZERO" => "아바타에 표정 페이로드가 없습니다",
+            "TRACKING_INACTIVE" => "트래킹이 시작되지 않았습니다",
+            "TRACKING_STALE" => "트래킹 입력이 오래되었습니다 (연결 확인)",
+            _ when reasonCode.StartsWith("NC_SET_", StringComparison.Ordinal) => "네이티브 제출에 실패했습니다",
+            _ => "런타임 정책에 의해 기능이 제한되었습니다",
         };
     }
 
@@ -223,40 +223,40 @@ public static class HostFeatureGateResolver
         return normalizedClass switch
         {
             "runtime_binary_mismatch" =>
-                "Runtime/build mismatch detected. Republish dist/wpf and relaunch WpfHost.exe.",
+                "런타임/빌드 불일치가 감지되었습니다. dist/wpf를 다시 배포하고 WpfHost.exe를 재시작하세요.",
             "native_submit_failure" =>
-                "Native submit failed. Check tracking diagnostics and last NC_SET_* error code.",
+                "네이티브 제출에 실패했습니다. 트래킹 진단 및 마지막 NC_SET_* 오류 코드를 확인하세요.",
             "payload_policy_gate" => normalizedReason switch
             {
                 "EXPRESSION_COUNT_ZERO" =>
-                    "Avatar expression payload is empty. Re-export avatar with expression catalog/blendshape bindings.",
+                    "아바타 표정 페이로드가 비어 있습니다. 표정 카탈로그/블렌드셰이프 바인딩을 포함하여 아바타를 다시 내보내세요.",
                 "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY" =>
-                    "Arm pose is blocked by static skinning policy. Use payloads that include valid rig/skinning data.",
+                    "정적 스키닝 정책으로 팔 포즈가 차단되었습니다. 유효한 리그/스키닝 데이터가 포함된 페이로드를 사용하세요.",
                 "ARM_POSE_PAYLOAD_MISSING" =>
-                    "Arm pose payload is missing. Re-export avatar with skeleton/skin/rig payloads.",
+                    "팔 포즈 페이로드가 없습니다. 스켈레톤/스킨/리그 페이로드를 포함하여 아바타를 다시 내보내세요.",
                 "ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN" =>
-                    "VRM-origin rollback guard disabled arm pose for safety. Keep current session or adjust pose policy after validating mesh-space stability.",
+                    "VRM 원점 롤백 가드가 안전을 위해 팔 포즈를 비활성화했습니다. 현재 세션을 유지하거나 메시 공간 안정성 검증 후 포즈 정책을 조정하세요.",
                 "SHADOW_DISABLED_TOGGLE_OFF" =>
-                    "Realtime shadow is disabled by toggle. Turn on shadow and retest.",
+                    "그림자 토글이 꺼져 있습니다. 그림자를 켜고 다시 테스트하세요.",
                 "SHADOW_DISABLED_FAST_FALLBACK" =>
-                    "Realtime shadow is disabled in fast fallback profile. Increase quality profile and retest.",
+                    "빠른 폴백 프로파일에서 실시간 그림자가 비활성화됩니다. 품질 프로파일을 높이고 다시 테스트하세요.",
                 "SHADOW_DISABLED_NO_SHADOW_PASS_MATERIAL" =>
-                    "Avatar materials do not advertise a shadow pass. Compare with another avatar or re-export materials with shadow-pass support.",
+                    "아바타 머티리얼이 그림자 패스를 지원하지 않습니다. 다른 아바타와 비교하거나 그림자 패스 지원 머티리얼로 다시 내보내세요.",
                 "SHADOW_DISABLED_SHADOW_DRAW_EMPTY" =>
-                    "Shadow queue is empty. Validate material pass setup and render pass authoring.",
+                    "그림자 큐가 비어 있습니다. 머티리얼 패스 설정과 렌더 패스 작성을 확인하세요.",
                 _ =>
-                    "Payload/policy gate detected. Check FeatureGate reason codes in Runtime and Avatar diagnostics.",
+                    "페이로드/정책 게이트가 감지되었습니다. 런타임 및 아바타 진단에서 FeatureGate 이유 코드를 확인하세요.",
             },
             "tracking_input_inactive" => normalizedReason switch
             {
                 "TRACKING_INACTIVE" =>
-                    "Tracking is inactive. Start tracking and verify source input health.",
+                    "트래킹이 비활성 상태입니다. 트래킹을 시작하고 입력 소스 상태를 확인하세요.",
                 "TRACKING_STALE" =>
-                    "Tracking input is stale. Check camera/source connectivity and stale timeout settings.",
+                    "트래킹 입력이 오래되었습니다. 카메라/소스 연결 상태와 지연 시간 설정을 확인하세요.",
                 _ =>
-                    "Tracking input is not healthy. Verify source status and diagnostics.",
+                    "트래킹 입력이 정상적이지 않습니다. 소스 상태와 진단 정보를 확인하세요.",
             },
-            _ => "No blocking common cause detected.",
+            _ => "차단 공통 원인이 감지되지 않았습니다.",
         };
     }
 }

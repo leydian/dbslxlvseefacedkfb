@@ -1678,6 +1678,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     bool found_candidate = false;
     bool attempted_candidate = false;
     SerializedFileSummary best {};
+    std::vector<unsigned char> best_file_bytes;
     struct CandidateRef {
         std::uint64_t offset = 0U;
         std::uint64_t window_size = 0U;
@@ -1855,6 +1856,7 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     probe.serialized_candidate_count = static_cast<std::uint32_t>(candidates.size());
     probe.serialized_attempt_count = 0U;
     probe.serialized_best_candidate_path.clear();
+    probe.serialized_parse_path.clear();
     probe.serialized_best_candidate_score = std::numeric_limits<std::int32_t>::min();
     probe.serialized_detail_error_code.clear();
     probe.serialized_last_failure_offset = 0U;
@@ -1884,10 +1886,16 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
         }
         return groups;
     };
+    auto CountRenderableSignals = [](const SerializedFileSummary& summary) -> std::int32_t {
+        return static_cast<std::int32_t>(summary.mesh_object_count) +
+               static_cast<std::int32_t>(summary.skinned_mesh_renderer_count * 2U) +
+               static_cast<std::int32_t>(summary.material_object_count);
+    };
     auto ScoreParsedSummary = [&](const SerializedFileSummary& summary, std::int64_t candidate_score) -> std::int32_t {
         std::int32_t score = static_cast<std::int32_t>(candidate_score);
         score += static_cast<std::int32_t>(summary.object_count * 4U);
         score += CountMajorTypeGroups(summary) * 15;
+        score += CountRenderableSignals(summary) * 40;
         if (!summary.major_types_found.empty()) {
             score += 5;
         }
@@ -1951,11 +1959,15 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
             if (!probe.object_table_parsed ||
                 parsed_score > probe.serialized_best_candidate_score ||
                 (parsed_score == probe.serialized_best_candidate_score &&
-                 CountMajorTypeGroups(parsed.value) > CountMajorTypeGroups(best))) {
+                 (CountRenderableSignals(parsed.value) > CountRenderableSignals(best) ||
+                  (CountRenderableSignals(parsed.value) == CountRenderableSignals(best) &&
+                   CountMajorTypeGroups(parsed.value) > CountMajorTypeGroups(best))))) {
                 best = parsed.value;
                 probe.object_table_parsed = true;
                 probe.serialized_best_candidate_score = parsed_score;
                 probe.serialized_best_candidate_path = candidate.label + "@offset=" + std::to_string(adjusted_offset);
+                probe.serialized_parse_path = parsed.value.parse_path;
+                best_file_bytes = std::move(file_bytes);
             }
         }
     }
@@ -2002,6 +2014,8 @@ bool ParseSerializedFromNodes(const ParsedMetadata& metadata,
     probe.game_object_count = best.game_object_count;
     probe.skinned_mesh_renderer_count = best.skinned_mesh_renderer_count;
     probe.major_types_found = best.major_types_found;
+    probe.serialized_parse_path = best.parse_path;
+    probe.serialized_file_bytes = std::move(best_file_bytes);
     probe.probe_primary_error.clear();
     return true;
 }
@@ -2095,6 +2109,11 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
         }
         return groups;
     };
+    auto CountRenderableSignals = [](const SerializedFileSummary& summary) -> std::int32_t {
+        return static_cast<std::int32_t>(summary.mesh_object_count) +
+               static_cast<std::int32_t>(summary.skinned_mesh_renderer_count * 2U) +
+               static_cast<std::int32_t>(summary.material_object_count);
+    };
 
     SerializedFileReader serialized;
     bool success = false;
@@ -2107,6 +2126,7 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
     std::size_t best_error_offset = 0U;
     std::size_t best_error_window = 0U;
     SerializedFileSummary best {};
+    std::vector<unsigned char> best_candidate_bytes;
     std::size_t best_offset = 0U;
     const std::size_t scan_limit = raw_bytes.size();
     for (std::size_t at = 0U; at + 64U <= scan_limit && candidates < 20000U; at += 4U) {
@@ -2135,13 +2155,16 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
         }
         const auto groups = CountMajorTypeGroups(parsed.value);
         if (!success ||
-            parsed.value.object_count > best_objects ||
-            (parsed.value.object_count == best_objects && groups > best_groups)) {
+            CountRenderableSignals(parsed.value) > CountRenderableSignals(best) ||
+            (CountRenderableSignals(parsed.value) == CountRenderableSignals(best) &&
+             (parsed.value.object_count > best_objects ||
+              (parsed.value.object_count == best_objects && groups > best_groups)))) {
             success = true;
             best = parsed.value;
             best_objects = parsed.value.object_count;
             best_groups = groups;
             best_offset = at;
+            best_candidate_bytes = std::move(candidate_bytes);
         }
     }
 
@@ -2177,6 +2200,8 @@ bool TryParseSerializedFromRawBundle(std::ifstream& in, UnityFsProbe& probe, std
     probe.game_object_count = best.game_object_count;
     probe.skinned_mesh_renderer_count = best.skinned_mesh_renderer_count;
     probe.major_types_found = best.major_types_found;
+    probe.serialized_parse_path = best.parse_path;
+    probe.serialized_file_bytes = std::move(best_candidate_bytes);
     probe.serialized_best_candidate_score =
         std::max(probe.serialized_best_candidate_score, static_cast<std::int32_t>(best.object_count * 4U + best_groups * 15));
     probe.serialized_best_candidate_path = "raw-scan@offset=" + std::to_string(best_offset);

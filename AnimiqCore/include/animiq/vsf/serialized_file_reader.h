@@ -20,9 +20,19 @@ struct SerializedFileSummary {
     std::string error_code;
 };
 
+struct SerializedMeshObjectBlob {
+    std::uint64_t path_id = 0;
+    std::uint32_t byte_start = 0;
+    std::uint32_t byte_size = 0;
+    std::vector<unsigned char> bytes;
+};
+
 class SerializedFileReader {
   public:
     core::Result<SerializedFileSummary> ParseObjectSummary(const std::vector<unsigned char>& bytes) const;
+    core::Result<std::vector<SerializedMeshObjectBlob>> ExtractMeshObjectBlobs(
+        const std::vector<unsigned char>& bytes,
+        std::size_t max_mesh_objects = 8U) const;
 };
 
 }  // namespace animiq::vsf

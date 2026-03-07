@@ -72,7 +72,8 @@ public sealed record RecentAvatarEntry(
     string ThumbnailStatus,
     DateTimeOffset LastUsedUtc,
     string LastError,
-    bool PreviewFlip180 = false);
+    bool PreviewFlip180 = false,
+    bool IsFavorite = false);
 
 public sealed record SessionPersistenceModel(
     int Version,
@@ -354,7 +355,8 @@ public sealed class SessionStateStore
         var normalized = new List<RecentAvatarEntry>(Math.Min(12, values.Count));
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var value in values
-                     .OrderByDescending(v => v.LastUsedUtc == default ? DateTimeOffset.MinValue : v.LastUsedUtc))
+                     .OrderByDescending(v => v.IsFavorite)
+                     .ThenByDescending(v => v.LastUsedUtc == default ? DateTimeOffset.MinValue : v.LastUsedUtc))
         {
             var path = value.AvatarPath?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(path))
@@ -373,7 +375,8 @@ public sealed class SessionStateStore
                 NormalizeThumbnailStatus(value.ThumbnailStatus),
                 value.LastUsedUtc == default ? now : value.LastUsedUtc,
                 value.LastError?.Trim() ?? string.Empty,
-                value.PreviewFlip180));
+                value.PreviewFlip180,
+                value.IsFavorite));
             if (normalized.Count >= 12)
             {
                 break;

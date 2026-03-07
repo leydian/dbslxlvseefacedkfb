@@ -362,18 +362,82 @@ public partial class MainWindow : Window
         RecentAvatarListBox.Items.Clear();
         foreach (var entry in _controller.GetRecentAvatars())
         {
-            var status = entry.ThumbnailStatus switch
+            var thumbnailImage = new Image
             {
-                "ready" => "ready",
-                "pending" => "pending",
-                "failed" => "failed",
-                _ => "none",
+                Width = 56,
+                Height = 56,
+                Stretch = System.Windows.Media.Stretch.UniformToFill,
+                VerticalAlignment = VerticalAlignment.Center,
             };
+            if (!string.IsNullOrWhiteSpace(entry.ThumbnailPath) && File.Exists(entry.ThumbnailPath))
+            {
+                try
+                {
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.UriSource = new Uri(entry.ThumbnailPath, UriKind.Absolute);
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.EndInit();
+                    thumbnailImage.Source = bmp;
+                }
+                catch { /* ignore thumbnail load errors */ }
+            }
+
+            var thumbBorder = new Border
+            {
+                Width = 58,
+                Height = 58,
+                CornerRadius = new CornerRadius(6),
+                Background = (System.Windows.Media.Brush)FindResource("Color.CardSoftBg"),
+                BorderBrush = (System.Windows.Media.Brush)FindResource("Color.CardSoftBorderStrong"),
+                BorderThickness = new Thickness(1),
+                Child = thumbnailImage,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+
+            var nameText = new TextBlock
+            {
+                Text = entry.DisplayName,
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                ToolTip = entry.AvatarPath,
+            };
+
+            var favSymbol = entry.IsFavorite ? "★" : "☆";
+            var favButton = new Button
+            {
+                Content = favSymbol,
+                Tag = entry.AvatarPath,
+                FontSize = 16,
+                Padding = new Thickness(4, 0, 4, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = entry.IsFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가",
+            };
+            favButton.Click += FavoriteToggle_Click;
+
+            var infoStack = new StackPanel { Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            infoStack.Children.Add(nameText);
+
+            var itemGrid = new Grid();
+            itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            itemGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(thumbBorder, 0);
+            Grid.SetColumn(infoStack, 1);
+            Grid.SetColumn(favButton, 2);
+            itemGrid.Children.Add(thumbBorder);
+            itemGrid.Children.Add(infoStack);
+            itemGrid.Children.Add(favButton);
+
             var item = new ListBoxItem
             {
+                Content = itemGrid,
                 Tag = entry.AvatarPath,
-                Content = $"{entry.DisplayName} [{status}]",
                 ToolTip = entry.AvatarPath,
+                Padding = new Thickness(2, 3, 2, 3),
             };
             RecentAvatarListBox.Items.Add(item);
             if (string.Equals(entry.AvatarPath, selectedPath, StringComparison.OrdinalIgnoreCase))
@@ -536,6 +600,121 @@ public partial class MainWindow : Window
         _floatingAvatarWindow.Show();
     }
 
+    private void Window_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            var files = e.Data.GetData(DataFormats.FileDrop) as string[];
+            var hasValid = files?.Any(f =>
+            {
+                var ext = Path.GetExtension(f).ToLowerInvariant();
+                return ext is ".vrm" or ".vsfavatar" or ".vxavatar" or ".vxa2";
+            }) ?? false;
+            e.Effects = hasValid ? DragDropEffects.Copy : DragDropEffects.None;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+        e.Handled = true;
+    }
+
+    private void Window_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            return;
+        }
+        var files = e.Data.GetData(DataFormats.FileDrop) as string[];
+        var avatarFile = files?.FirstOrDefault(f =>
+        {
+            var ext = Path.GetExtension(f).ToLowerInvariant();
+            return ext is ".vrm" or ".vsfavatar" or ".vxavatar" or ".vxa2";
+        });
+        if (string.IsNullOrWhiteSpace(avatarFile))
+        {
+            return;
+        }
+        AvatarPathTextBox.Text = avatarFile;
+        _controller.RecordAvatarSelection(avatarFile);
+        EnqueueThumbnailGeneration(avatarFile, force: false);
+        RefreshRecentAvatarList();
+    }
+
+    private void QuickSpoutToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+        if (_controller.Outputs.SpoutActive)
+        {
+            StopSpout_Click(sender, e);
+        }
+        else if (StartSpoutButton.IsEnabled)
+        {
+            StartSpout_Click(sender, e);
+        }
+    }
+
+    private void QuickOscToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.OperationState.IsBusy)
+        {
+            return;
+        }
+        if (_controller.Outputs.OscActive)
+        {
+            StopOsc_Click(sender, e);
+        }
+        else if (StartOscButton.IsEnabled)
+        {
+            StartOsc_Click(sender, e);
+        }
+    }
+
+    private void FavoriteToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement el && el.Tag is string path)
+        {
+            _controller.ToggleFavoriteAvatar(path);
+            RefreshRecentAvatarList();
+        }
+    }
+
+    private void OpenCommandPalette_Click(object sender, RoutedEventArgs e)
+    {
+        var palette = new CommandPalette(this);
+        palette.Owner = this;
+        palette.ShowDialog();
+    }
+
+    // Public command invokers for CommandPalette
+    internal void InvokeInitialize() => Initialize_Click(this, new RoutedEventArgs());
+    internal void InvokeBrowseAvatar() => BrowseAvatar_Click(this, new RoutedEventArgs());
+    internal void InvokeLoadAvatar() => Load_Click(this, new RoutedEventArgs());
+    internal void InvokeStartSpout() => StartSpout_Click(this, new RoutedEventArgs());
+    internal void InvokeStopSpout() => StopSpout_Click(this, new RoutedEventArgs());
+    internal void InvokeStartOsc() => StartOsc_Click(this, new RoutedEventArgs());
+    internal void InvokeStopOsc() => StopOsc_Click(this, new RoutedEventArgs());
+    internal void InvokePopOut() => PopOutRender_Click(this, new RoutedEventArgs());
+    internal void InvokeDiagnosticsToggle() => ToggleDiagnosticsPanel_Click(this, new RoutedEventArgs());
+    internal void InvokeThemeToggle() => ThemeToggle_Click(this, new RoutedEventArgs());
+    internal void InvokeShutdown() => Shutdown_Click(this, new RoutedEventArgs());
+    internal void InvokeNavSection(int sectionNumber)
+    {
+        var section = sectionNumber switch
+        {
+            2 => UiSection.SessionAvatar,
+            3 => UiSection.Render,
+            4 => UiSection.Outputs,
+            5 => UiSection.Tracking,
+            6 => UiSection.PlatformOps,
+            _ => UiSection.GettingStarted,
+        };
+        ActivateSection(section);
+    }
+
     private void ToggleDiagnosticsPanel_Click(object sender, RoutedEventArgs e)
     {
         if (!string.Equals(_uiMode, UiModeAdvanced, StringComparison.Ordinal))
@@ -570,11 +749,37 @@ public partial class MainWindow : Window
             SetRenderOnlyMode(!_isRenderOnlyMode);
             e.Handled = true;
         }
+        else if (e.Key == Key.F5 && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            if (LoadButton.IsEnabled)
+            {
+                Load_Click(this, new RoutedEventArgs());
+            }
+            e.Handled = true;
+        }
     }
 
     private bool TryHandleGlobalShortcut(KeyEventArgs e)
     {
         var modifiers = Keyboard.Modifiers;
+
+        // Ctrl+Shift shortcuts
+        if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            switch (e.Key)
+            {
+                case Key.S:
+                    QuickSpoutToggle_Click(this, new RoutedEventArgs());
+                    return true;
+                case Key.O:
+                    QuickOscToggle_Click(this, new RoutedEventArgs());
+                    return true;
+                case Key.P:
+                    PopOutRender_Click(this, new RoutedEventArgs());
+                    return true;
+            }
+        }
+
         if (modifiers != ModifierKeys.Control)
         {
             return false;
@@ -611,6 +816,18 @@ public partial class MainWindow : Window
                 return true;
             case Key.T:
                 ThemeToggle_Click(this, new RoutedEventArgs());
+                return true;
+            case Key.O:
+                BrowseAvatar_Click(this, new RoutedEventArgs());
+                return true;
+            case Key.Enter:
+                if (PrimaryActionButton.IsEnabled)
+                {
+                    PrimaryAction_Click(this, new RoutedEventArgs());
+                }
+                return true;
+            case Key.K:
+                OpenCommandPalette_Click(this, new RoutedEventArgs());
                 return true;
             default:
                 return false;
@@ -2462,7 +2679,103 @@ public partial class MainWindow : Window
             SyncTrackingPoseFilterControlsFromState();
         }
 
+        UpdateQuickStatusBar(outputs, operation, session);
+        UpdateFeatureGateHints(uiState);
+        UpdateAvatarInfoBadge(snapshot.AvatarInfo);
+
         ApplyModeVisibility();
+    }
+
+    private void UpdateQuickStatusBar(OutputState outputs, HostOperationState operation, HostSessionState session)
+    {
+        if (QuickSpoutIndicator is null)
+        {
+            return;
+        }
+
+        QuickSpoutIndicator.Text = outputs.SpoutActive ? "●" : "○";
+        QuickSpoutIndicator.Foreground = outputs.SpoutActive
+            ? (System.Windows.Media.Brush)FindResource("Color.PanelSuccessTitle")
+            : (System.Windows.Media.Brush)FindResource("Color.TextMuted");
+
+        QuickOscIndicator.Text = outputs.OscActive ? "●" : "○";
+        QuickOscIndicator.Foreground = outputs.OscActive
+            ? (System.Windows.Media.Brush)FindResource("Color.PanelSuccessTitle")
+            : (System.Windows.Media.Brush)FindResource("Color.TextMuted");
+
+        var avatarName = session.ActiveAvatarHandle.HasValue
+            ? Path.GetFileNameWithoutExtension(AvatarPathTextBox.Text.Trim())
+            : null;
+        QuickAvatarNameText.Text = string.IsNullOrWhiteSpace(avatarName) ? "아바타 없음" : avatarName;
+
+        QuickBusyText.Text = operation.IsBusy ? operation.CurrentOperation : "대기";
+
+        QuickSpoutToggleButton.IsEnabled = !operation.IsBusy;
+        QuickOscToggleButton.IsEnabled = !operation.IsBusy;
+    }
+
+    private void UpdateFeatureGateHints(HostUiAvailability uiState)
+    {
+        if (ArmPoseGateHintText is null)
+        {
+            return;
+        }
+
+        if (!uiState.ArmPoseEnabled && !string.Equals(uiState.ArmPoseReasonCode, "none", StringComparison.Ordinal))
+        {
+            ArmPoseGateHintText.Text = $"⚠ {HostFeatureGateResolver.ResolveReasonText(uiState.ArmPoseReasonCode)}";
+            ArmPoseGateHintText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ArmPoseGateHintText.Visibility = Visibility.Collapsed;
+        }
+
+        if (!uiState.RealtimeShadowEnabled && !string.Equals(uiState.RealtimeShadowReasonCode, "none", StringComparison.Ordinal))
+        {
+            ShadowGateHintText.Text = $"⚠ {HostFeatureGateResolver.ResolveReasonText(uiState.RealtimeShadowReasonCode)}";
+            ShadowGateHintText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ShadowGateHintText.Visibility = Visibility.Collapsed;
+        }
+
+        if (!uiState.ExpressionEnabled && !string.Equals(uiState.ExpressionReasonCode, "none", StringComparison.Ordinal))
+        {
+            ExpressionGateHintText.Text = $"⚠ 표정: {HostFeatureGateResolver.ResolveReasonText(uiState.ExpressionReasonCode)}";
+            ExpressionGateHintText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ExpressionGateHintText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateAvatarInfoBadge(NcAvatarInfo? avatarInfo)
+    {
+        if (AvatarInfoBadgePanel is null)
+        {
+            return;
+        }
+
+        if (!avatarInfo.HasValue)
+        {
+            AvatarInfoBadgePanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var info = avatarInfo.Value;
+        AvatarInfoExpressionText.Text = info.ExpressionCount.ToString();
+        AvatarInfoMeshText.Text = info.MeshCount.ToString();
+        AvatarInfoFormatText.Text = info.DetectedFormat switch
+        {
+            NcAvatarFormatHint.Vrm => "VRM",
+            NcAvatarFormatHint.VsfAvatar => "VSF",
+            NcAvatarFormatHint.VxAvatar => "VXA",
+            _ => "자동",
+        };
+        AvatarInfoBadgePanel.Visibility = Visibility.Visible;
     }
 
     private bool ShouldSkipRenderInteraction()

@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace animiq::vsf {
@@ -209,7 +210,211 @@ std::string ClassifySerializedParseError(const std::string& error) {
     return "SF_PARSE_INVALID";
 }
 
-core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<unsigned char>& bytes, Endian metadata_endian) {
+struct SerializedObjectEntry {
+    std::uint64_t path_id = 0;
+    std::uint32_t byte_start = 0;
+    std::uint32_t byte_size = 0;
+    std::int32_t class_id = -1;
+};
+
+core::Result<std::vector<SerializedMeshObjectBlob>> ParseMeshObjectBlobsWithMetadataEndian(
+    const std::vector<unsigned char>& bytes,
+    Endian metadata_endian,
+    bool assume_type_dependencies_after_types,
+    std::size_t max_mesh_objects) {
+    if (bytes.size() < 20U) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("serialized file too small");
+    }
+    const std::uint32_t metadata_size_be = ReadU32(bytes, 0U, Endian::Big);
+    const std::uint32_t version_be = ReadU32(bytes, 8U, Endian::Big);
+    const std::uint32_t data_offset_be = ReadU32(bytes, 12U, Endian::Big);
+    if (metadata_size_be == 0U || metadata_size_be > bytes.size()) {
+        if (metadata_size_be == 0U) {
+            return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("invalid metadata size");
+        }
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("metadata size exceeds current window");
+    }
+    if (version_be > 40U) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("unsupported serialized file version");
+    }
+    std::size_t header_size = 20U;
+    if (version_be >= 22U) {
+        header_size = 48U;
+    }
+    if (header_size + metadata_size_be > bytes.size()) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("metadata window truncated");
+    }
+    if (data_offset_be >= bytes.size()) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("data offset out of range");
+    }
+
+    std::vector<unsigned char> metadata(bytes.begin() + static_cast<std::ptrdiff_t>(header_size),
+                                        bytes.begin() + static_cast<std::ptrdiff_t>(header_size + metadata_size_be));
+    Cursor c {metadata, 0U, metadata_endian};
+
+    std::string unity_version;
+    if (!c.CString(unity_version, 256U)) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read unity version string");
+    }
+    std::int32_t target_platform = 0;
+    if (!c.I32(target_platform)) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read target platform");
+    }
+    (void)target_platform;
+    std::uint8_t enable_type_tree = 0;
+    if (!c.U8(enable_type_tree)) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read type tree flag");
+    }
+
+    std::int32_t type_count = 0;
+    if (!c.I32(type_count) || type_count < 0 || type_count > 200000) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("invalid type count");
+    }
+    std::vector<std::int32_t> class_ids;
+    class_ids.reserve(static_cast<std::size_t>(type_count));
+    for (std::int32_t i = 0; i < type_count; ++i) {
+        std::int32_t class_id = 0;
+        if (!c.I32(class_id)) {
+            return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read class id");
+        }
+        class_ids.push_back(class_id);
+        if (version_be >= 16U) {
+            std::uint8_t is_stripped = 0;
+            if (!c.U8(is_stripped)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read stripped flag");
+            }
+            (void)is_stripped;
+        }
+        if (version_be >= 17U) {
+            std::uint16_t script_type_index = 0;
+            if (!c.U16(script_type_index)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read script type index");
+            }
+        }
+        if (version_be >= 13U) {
+            const bool has_script_id = (version_be < 16U && class_id < 0) || (version_be >= 16U && class_id == 114);
+            if (has_script_id && !c.Skip(16U)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read script id");
+            }
+            if (!c.Skip(16U)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read old type hash");
+            }
+        }
+        if (enable_type_tree != 0U) {
+            if (!ParseTypeTree(c, static_cast<std::int32_t>(version_be))) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to parse type tree");
+            }
+        }
+        if (assume_type_dependencies_after_types && version_be >= 19U) {
+            std::int32_t dep_count = 0;
+            if (!c.I32(dep_count)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read type dependency count");
+            }
+            if (dep_count < 0 || dep_count > 500000) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("invalid type dependency count");
+            }
+            if (!c.Skip(static_cast<std::size_t>(dep_count) * 4U)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read type dependency entries");
+            }
+        }
+    }
+    if (version_be >= 7U && version_be < 14U) {
+        if (!c.Align(4U)) {
+            return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to align metadata cursor");
+        }
+    }
+
+    std::int32_t object_count = 0;
+    if (!c.I32(object_count) || object_count < 0 || object_count > 20000000) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("invalid object count");
+    }
+    std::vector<SerializedObjectEntry> entries;
+    entries.reserve(static_cast<std::size_t>(object_count));
+    for (std::int32_t i = 0; i < object_count; ++i) {
+        if (version_be >= 14U && !c.Align(4U)) {
+            return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to align object table");
+        }
+        std::uint64_t path_id = 0;
+        if (version_be < 14U) {
+            std::uint32_t path_id32 = 0;
+            if (!c.U32(path_id32)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read object path id");
+            }
+            path_id = path_id32;
+        } else if (!c.U64(path_id)) {
+            return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read object path id");
+        }
+        std::uint32_t byte_start = 0;
+        std::uint32_t byte_size = 0;
+        std::int32_t type_id = -1;
+        if (!c.U32(byte_start) || !c.U32(byte_size) || !c.I32(type_id)) {
+            return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read object entry core");
+        }
+        std::int32_t class_id = type_id;
+        if (type_id >= 0 && static_cast<std::size_t>(type_id) < class_ids.size()) {
+            class_id = class_ids[static_cast<std::size_t>(type_id)];
+        }
+        if (version_be < 16U) {
+            std::uint16_t class_id_legacy = 0;
+            if (!c.U16(class_id_legacy)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read legacy class id");
+            }
+            class_id = static_cast<std::int32_t>(class_id_legacy);
+        }
+        if (version_be < 11U) {
+            std::uint16_t is_destroyed = 0;
+            if (!c.U16(is_destroyed)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read legacy destroyed flag");
+            }
+        }
+        if (version_be >= 11U && version_be < 17U) {
+            std::uint16_t script_type_index = 0;
+            if (!c.U16(script_type_index)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read object script type index");
+            }
+        }
+        if (version_be == 15U || version_be == 16U) {
+            std::uint8_t stripped = 0;
+            if (!c.U8(stripped)) {
+                return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("failed to read stripped byte");
+            }
+        }
+        entries.push_back({path_id, byte_start, byte_size, class_id});
+    }
+
+    std::vector<SerializedMeshObjectBlob> out;
+    out.reserve(std::min<std::size_t>(max_mesh_objects, 16U));
+    for (const auto& entry : entries) {
+        if (entry.class_id != 43) {
+            continue;
+        }
+        const std::uint64_t begin = static_cast<std::uint64_t>(data_offset_be) + static_cast<std::uint64_t>(entry.byte_start);
+        const std::uint64_t end = begin + static_cast<std::uint64_t>(entry.byte_size);
+        if (entry.byte_size == 0U || begin >= bytes.size() || end > bytes.size() || end <= begin) {
+            continue;
+        }
+        SerializedMeshObjectBlob blob;
+        blob.path_id = entry.path_id;
+        blob.byte_start = entry.byte_start;
+        blob.byte_size = entry.byte_size;
+        blob.bytes.assign(
+            bytes.begin() + static_cast<std::ptrdiff_t>(begin),
+            bytes.begin() + static_cast<std::ptrdiff_t>(end));
+        out.push_back(std::move(blob));
+        if (out.size() >= max_mesh_objects) {
+            break;
+        }
+    }
+    if (out.empty()) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("no mesh object blobs");
+    }
+    return core::Result<std::vector<SerializedMeshObjectBlob>>::Ok(out);
+}
+
+core::Result<SerializedFileSummary> ParseWithMetadataEndian(
+    const std::vector<unsigned char>& bytes,
+    Endian metadata_endian,
+    bool assume_type_dependencies_after_types) {
     if (bytes.size() < 20U) {
         return core::Result<SerializedFileSummary>::Fail("serialized file too small");
     }
@@ -297,6 +502,21 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
         if (enable_type_tree != 0U) {
             if (!ParseTypeTree(c, static_cast<std::int32_t>(version_be))) {
                 return core::Result<SerializedFileSummary>::Fail("failed to parse type tree");
+            }
+        }
+
+        // Some Unity 2019+ serialized layouts may include per-type dependency lists.
+        // Try an alternative parse mode that consumes dependency arrays after type headers.
+        if (assume_type_dependencies_after_types && version_be >= 19U) {
+            std::int32_t dep_count = 0;
+            if (!c.I32(dep_count)) {
+                return core::Result<SerializedFileSummary>::Fail("failed to read type dependency count");
+            }
+            if (dep_count < 0 || dep_count > 500000) {
+                return core::Result<SerializedFileSummary>::Fail("invalid type dependency count");
+            }
+            if (!c.Skip(static_cast<std::size_t>(dep_count) * 4U)) {
+                return core::Result<SerializedFileSummary>::Fail("failed to read type dependency entries");
             }
         }
     }
@@ -405,23 +625,64 @@ core::Result<SerializedFileSummary> ParseWithMetadataEndian(const std::vector<un
 }  // namespace
 
 core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(const std::vector<unsigned char>& bytes) const {
-    // Unity serialized metadata is almost always little-endian in modern bundles.
-    auto little = ParseWithMetadataEndian(bytes, Endian::Little);
-    if (little.ok && little.value.object_count > 0U) {
-        return little;
+    auto CountRenderableSignals = [](const SerializedFileSummary& s) -> std::int32_t {
+        return static_cast<std::int32_t>(s.mesh_object_count) +
+               static_cast<std::int32_t>(s.skinned_mesh_renderer_count * 2U) +
+               static_cast<std::int32_t>(s.material_object_count);
+    };
+    auto IsBetterSummary = [&](const SerializedFileSummary& lhs, const SerializedFileSummary& rhs) -> bool {
+        const auto lhs_render = CountRenderableSignals(lhs);
+        const auto rhs_render = CountRenderableSignals(rhs);
+        if (lhs_render != rhs_render) {
+            return lhs_render > rhs_render;
+        }
+        if (lhs.object_count != rhs.object_count) {
+            return lhs.object_count > rhs.object_count;
+        }
+        const auto lhs_types = static_cast<std::int32_t>(!lhs.major_types_found.empty());
+        const auto rhs_types = static_cast<std::int32_t>(!rhs.major_types_found.empty());
+        return lhs_types > rhs_types;
+    };
+
+    const std::array<std::tuple<Endian, bool>, 4U> strategies = {
+        std::tuple<Endian, bool> {Endian::Little, false},
+        std::tuple<Endian, bool> {Endian::Little, true},
+        std::tuple<Endian, bool> {Endian::Big, false},
+        std::tuple<Endian, bool> {Endian::Big, true}
+    };
+
+    core::Result<SerializedFileSummary> best_ok = core::Result<SerializedFileSummary>::Fail("");
+    core::Result<SerializedFileSummary> first_error = core::Result<SerializedFileSummary>::Fail("");
+    bool has_error = false;
+    for (const auto& strategy : strategies) {
+        const auto endian = std::get<0>(strategy);
+        const auto assume_deps = std::get<1>(strategy);
+        auto parsed = ParseWithMetadataEndian(bytes, endian, assume_deps);
+        if (parsed.ok) {
+            parsed.value.parse_path += assume_deps ? "+deps" : "+nodeps";
+            if (!best_ok.ok || IsBetterSummary(parsed.value, best_ok.value)) {
+                best_ok = parsed;
+            }
+            continue;
+        }
+        if (!has_error) {
+            first_error = parsed;
+            has_error = true;
+        }
     }
 
-    auto big = ParseWithMetadataEndian(bytes, Endian::Big);
-    if (big.ok && big.value.object_count > 0U) {
-        return big;
+    if (best_ok.ok && best_ok.value.object_count > 0U) {
+        return best_ok;
+    }
+    if (best_ok.ok) {
+        return best_ok;
+    }
+    if (has_error) {
+        return first_error;
     }
 
-    if (little.ok) {
-        return little;
-    }
-    if (big.ok) {
-        return big;
-    }
+    auto little = ParseWithMetadataEndian(bytes, Endian::Little, false);
+    auto big = ParseWithMetadataEndian(bytes, Endian::Big, false);
 
     auto LooksLikeHeaderAt = [&](std::size_t at, std::uint32_t* out_metadata_size, std::uint32_t* out_version) -> bool {
         if (at + 20U > bytes.size() || out_metadata_size == nullptr || out_version == nullptr) {
@@ -467,7 +728,10 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
             std::vector<unsigned char> sliced(
                 bytes.begin() + static_cast<std::ptrdiff_t>(at),
                 bytes.begin() + static_cast<std::ptrdiff_t>(at + sample_window));
-            auto parsed = ParseWithMetadataEndian(sliced, metadata_endian);
+            auto parsed = ParseWithMetadataEndian(sliced, metadata_endian, false);
+            if (!parsed.ok) {
+                parsed = ParseWithMetadataEndian(sliced, metadata_endian, true);
+            }
             if (!parsed.ok) {
                 continue;
             }
@@ -510,6 +774,47 @@ core::Result<SerializedFileSummary> SerializedFileReader::ParseObjectSummary(con
     return core::Result<SerializedFileSummary>::Fail(
         "SF_PARSE_BOTH_ENDIAN_FAILED[" + little_code + "|" + big_code + "]: little={" + little.error + "}, big={" +
         big.error + "}");
+}
+
+core::Result<std::vector<SerializedMeshObjectBlob>> SerializedFileReader::ExtractMeshObjectBlobs(
+    const std::vector<unsigned char>& bytes,
+    std::size_t max_mesh_objects) const {
+    if (max_mesh_objects == 0U) {
+        return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("max mesh objects must be > 0");
+    }
+    const std::array<std::tuple<Endian, bool>, 4U> strategies = {
+        std::tuple<Endian, bool> {Endian::Little, false},
+        std::tuple<Endian, bool> {Endian::Little, true},
+        std::tuple<Endian, bool> {Endian::Big, false},
+        std::tuple<Endian, bool> {Endian::Big, true}
+    };
+    core::Result<std::vector<SerializedMeshObjectBlob>> best =
+        core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("");
+    core::Result<std::vector<SerializedMeshObjectBlob>> first_error =
+        core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("");
+    bool has_error = false;
+    for (const auto& strategy : strategies) {
+        const auto endian = std::get<0>(strategy);
+        const auto assume_deps = std::get<1>(strategy);
+        auto parsed = ParseMeshObjectBlobsWithMetadataEndian(bytes, endian, assume_deps, max_mesh_objects);
+        if (parsed.ok) {
+            if (!best.ok || parsed.value.size() > best.value.size()) {
+                best = std::move(parsed);
+            }
+            continue;
+        }
+        if (!has_error) {
+            first_error = std::move(parsed);
+            has_error = true;
+        }
+    }
+    if (best.ok) {
+        return best;
+    }
+    if (has_error) {
+        return first_error;
+    }
+    return core::Result<std::vector<SerializedMeshObjectBlob>>::Fail("mesh blob extraction failed");
 }
 
 }  // namespace animiq::vsf

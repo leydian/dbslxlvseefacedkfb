@@ -6355,14 +6355,29 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         const float safe_extent_x = std::max(avatar_bmax.x - avatar_bmin.x, 0.0001f);
         const float safe_extent_y = std::max(avatar_bmax.y - avatar_bmin.y, 0.0001f);
         const float safe_extent_z = std::max(avatar_bmax.z - avatar_bmin.z, 0.0001f);
+        bool has_vsf_placeholder_payload = false;
+        if (it->second.source_type == AvatarSourceType::VsfAvatar) {
+            for (const auto& warning_code : it->second.warning_codes) {
+                if (warning_code == "VSF_OBJECT_STUB_RENDER_PAYLOAD" ||
+                    warning_code == "VSF_PLACEHOLDER_RENDER_PAYLOAD") {
+                    has_vsf_placeholder_payload = true;
+                    break;
+                }
+            }
+        }
+        const bool use_vsf_proxy_full_fit =
+            has_vsf_placeholder_payload &&
+            quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST;
         const float max_extent = std::max(safe_extent_x, std::max(safe_extent_y, safe_extent_z));
         float fit_scale = 1.4f / max_extent;
         if (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_FULL || quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST) {
             const float fit_basis_height =
-                (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST)
+                (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST && !use_vsf_proxy_full_fit)
                     ? std::max(safe_extent_y * 0.58f, 0.0001f)
                     : safe_extent_y;
-            const float desired = quality.framing_target;
+            const float desired = use_vsf_proxy_full_fit
+                ? std::min(quality.framing_target, 0.68f)
+                : quality.framing_target;
             fit_scale = (desired * 2.0f * camera_distance * std::max(0.01f, tan_half_fov)) / fit_basis_height;
         }
         // Some imported assets can carry very large coordinate ranges.
@@ -6415,6 +6430,10 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         float focus_y = cy;
         if (quality.camera_mode == NC_CAMERA_MODE_AUTO_FIT_BUST) {
             const float focus_from_bounds = avatar_bmin.y + safe_extent_y * bust_anchor;
+            if (use_vsf_proxy_full_fit) {
+                // Proxy payloads are coarse full-body stubs; center focus prevents over-zoom framing.
+                focus_y = avatar_bmin.y + safe_extent_y * 0.50f;
+            } else {
             // Robust center keeps framing stable when outlier meshes are excluded.
             const float focus_from_cluster = robust_cy - safe_extent_y * 0.03f;
             if (it->second.source_type == AvatarSourceType::Miq) {
@@ -6436,6 +6455,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
         } else {
                 focus_y = focus_from_bounds;
             }
+            }
         }
         // Keep preview centered even if multiple handles are present.
         // Host UI currently operates in single-avatar mode, and slot offsets
@@ -6454,6 +6474,7 @@ NcResultCode RenderFrameLocked(const NcRenderContext* ctx) {
                           << ", bounds_cluster_extent_cap=" << cluster_bounds_extent_cap
                           << ", autofit_degenerate=" << (autofit_degenerate ? "1" : "0")
                           << ", near_origin=" << (near_origin_bounds_used ? "1" : "0")
+                          << ", vsf_proxy_full_fit=" << (use_vsf_proxy_full_fit ? "1" : "0")
                           << ", preview_yaw_deg=" << PreviewYawDegreesForAvatarPackage(it->second, nullptr);
             if (!excluded_mesh_names.empty()) {
                 preview_debug << ", excluded_names=";

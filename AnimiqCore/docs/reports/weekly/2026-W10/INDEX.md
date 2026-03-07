@@ -212,3 +212,4 @@ Report list for this week.
 - [2026-03-07_vsfavatar_output_readiness_hardening.md](./2026-03-07_vsfavatar_output_readiness_hardening.md)
 - [2026-03-07_vseeface_parity_global_defaults_and_vrm_origin_armpose_guard.md](./2026-03-07_vseeface_parity_global_defaults_and_vrm_origin_armpose_guard.md)
 - [2026-03-08_vsfavatar_sidecar_timeout_and_cmdline_fix.md](./2026-03-08_vsfavatar_sidecar_timeout_and_cmdline_fix.md)
+- [2026-03-08_workspace_change_rollup_vsfavatar_and_wpf.md](./2026-03-08_workspace_change_rollup_vsfavatar_and_wpf.md)

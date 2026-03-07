@@ -1,14 +1,26 @@
 #include "vsfavatar_loader.h"
+#include "animiq/vsf/serialized_file_reader.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
+#include <unordered_map>
+#include <unordered_set>
+#include <limits>
 #include <sstream>
 #include <vector>
 #if defined(_WIN32)
 #include <windows.h>
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
 #endif
 
 namespace fs = std::filesystem;
@@ -475,22 +487,784 @@ static MeshRenderPayload BuildObjectStubPayload(std::uint32_t index) {
     payload.name = "VSF_OBJECT_STUB_" + std::to_string(index);
     payload.vertex_stride = 12U;
     payload.material_index = 0;
-    payload.indices = {0U, 1U, 2U};
-    payload.vertex_blob.reserve(3U * 12U);
-    const float x_offset = static_cast<float>(index) * 0.08f;
+    payload.indices = {
+        // front
+        0U, 1U, 2U, 0U, 2U, 3U,
+        // back
+        4U, 6U, 5U, 4U, 7U, 6U,
+        // left
+        0U, 3U, 7U, 0U, 7U, 4U,
+        // right
+        1U, 5U, 6U, 1U, 6U, 2U,
+        // top
+        3U, 2U, 6U, 3U, 6U, 7U,
+        // bottom
+        0U, 4U, 5U, 0U, 5U, 1U
+    };
+    payload.vertex_blob.reserve(8U * 12U);
 
-    AppendFloat(&payload.vertex_blob, -0.2f + x_offset);
-    AppendFloat(&payload.vertex_blob, -0.2f);
-    AppendFloat(&payload.vertex_blob, 0.0f);
+    float center_x = 0.0f;
+    float center_y = 0.0f;
+    float half_w = 0.18f;
+    float half_h = 0.35f;
+    float half_d = 0.10f;
 
-    AppendFloat(&payload.vertex_blob, 0.2f + x_offset);
-    AppendFloat(&payload.vertex_blob, -0.2f);
-    AppendFloat(&payload.vertex_blob, 0.0f);
+    // Build a simple humanoid proxy from multiple cuboids.
+    switch (index % 7U) {
+        case 0U: // torso
+            center_x = 0.0f;
+            center_y = 0.05f;
+            half_w = 0.18f;
+            half_h = 0.32f;
+            half_d = 0.10f;
+            break;
+        case 1U: // head
+            center_x = 0.0f;
+            center_y = 0.52f;
+            half_w = 0.12f;
+            half_h = 0.12f;
+            half_d = 0.11f;
+            break;
+        case 2U: // left arm
+            center_x = -0.28f;
+            center_y = 0.08f;
+            half_w = 0.06f;
+            half_h = 0.26f;
+            half_d = 0.07f;
+            break;
+        case 3U: // right arm
+            center_x = 0.28f;
+            center_y = 0.08f;
+            half_w = 0.06f;
+            half_h = 0.26f;
+            half_d = 0.07f;
+            break;
+        case 4U: // left leg
+            center_x = -0.10f;
+            center_y = -0.52f;
+            half_w = 0.07f;
+            half_h = 0.30f;
+            half_d = 0.08f;
+            break;
+        case 5U: // right leg
+            center_x = 0.10f;
+            center_y = -0.52f;
+            half_w = 0.07f;
+            half_h = 0.30f;
+            half_d = 0.08f;
+            break;
+        default: // hip connector
+            center_x = 0.0f;
+            center_y = -0.20f;
+            half_w = 0.16f;
+            half_h = 0.10f;
+            half_d = 0.09f;
+            break;
+    }
 
-    AppendFloat(&payload.vertex_blob, 0.0f + x_offset);
-    AppendFloat(&payload.vertex_blob, 0.25f);
-    AppendFloat(&payload.vertex_blob, 0.0f);
+    const std::uint32_t cluster = index / 7U;
+    if (cluster > 0U) {
+        center_x += static_cast<float>(cluster) * 0.30f;
+    }
+
+    // Keep proxy compact so default framing does not over-zoom.
+    constexpr float kProxyScale = 0.32f;
+    center_x *= kProxyScale;
+    center_y *= kProxyScale;
+    half_w *= kProxyScale;
+    half_h *= kProxyScale;
+    half_d *= kProxyScale;
+    center_y -= 0.12f;
+
+    const float x_min = center_x - half_w;
+    const float x_max = center_x + half_w;
+    const float y_min = center_y - half_h;
+    const float y_max = center_y + half_h;
+    const float z_min = -half_d;
+    const float z_max = half_d;
+
+    // front quad
+    AppendFloat(&payload.vertex_blob, x_min); AppendFloat(&payload.vertex_blob, y_min); AppendFloat(&payload.vertex_blob, z_max); // 0
+    AppendFloat(&payload.vertex_blob, x_max); AppendFloat(&payload.vertex_blob, y_min); AppendFloat(&payload.vertex_blob, z_max); // 1
+    AppendFloat(&payload.vertex_blob, x_max); AppendFloat(&payload.vertex_blob, y_max); AppendFloat(&payload.vertex_blob, z_max); // 2
+    AppendFloat(&payload.vertex_blob, x_min); AppendFloat(&payload.vertex_blob, y_max); AppendFloat(&payload.vertex_blob, z_max); // 3
+    // back quad
+    AppendFloat(&payload.vertex_blob, x_min); AppendFloat(&payload.vertex_blob, y_min); AppendFloat(&payload.vertex_blob, z_min); // 4
+    AppendFloat(&payload.vertex_blob, x_max); AppendFloat(&payload.vertex_blob, y_min); AppendFloat(&payload.vertex_blob, z_min); // 5
+    AppendFloat(&payload.vertex_blob, x_max); AppendFloat(&payload.vertex_blob, y_max); AppendFloat(&payload.vertex_blob, z_min); // 6
+    AppendFloat(&payload.vertex_blob, x_min); AppendFloat(&payload.vertex_blob, y_max); AppendFloat(&payload.vertex_blob, z_min); // 7
     return payload;
+}
+
+static float ReadF32LE(const std::vector<unsigned char>& bytes, std::size_t at) {
+    std::uint32_t raw = static_cast<std::uint32_t>(bytes[at]) |
+                        (static_cast<std::uint32_t>(bytes[at + 1U]) << 8U) |
+                        (static_cast<std::uint32_t>(bytes[at + 2U]) << 16U) |
+                        (static_cast<std::uint32_t>(bytes[at + 3U]) << 24U);
+    float out = 0.0f;
+    std::memcpy(&out, &raw, sizeof(float));
+    return out;
+}
+
+static std::uint16_t ReadU16LE(const std::vector<unsigned char>& bytes, std::size_t at) {
+    return static_cast<std::uint16_t>(bytes[at]) |
+           static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[at + 1U]) << 8U);
+}
+
+static std::uint32_t ReadU32LE(const std::vector<unsigned char>& bytes, std::size_t at) {
+    return static_cast<std::uint32_t>(bytes[at]) |
+           (static_cast<std::uint32_t>(bytes[at + 1U]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[at + 2U]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[at + 3U]) << 24U);
+}
+
+static std::uint32_t ReadU32BE(const std::vector<unsigned char>& bytes, std::size_t at) {
+    return (static_cast<std::uint32_t>(bytes[at]) << 24U) |
+           (static_cast<std::uint32_t>(bytes[at + 1U]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[at + 2U]) << 8U) |
+           static_cast<std::uint32_t>(bytes[at + 3U]);
+}
+
+struct ByteArraySegment {
+    std::size_t length_pos = 0U;
+    std::size_t data_pos = 0U;
+    std::size_t length = 0U;
+};
+
+struct IndexCandidate {
+    std::size_t segment_index = 0U;
+    std::uint32_t index_format_bytes = 2U;
+    std::size_t index_count = 0U;
+    std::uint32_t max_index = 0U;
+    float degenerate_ratio = 1.0f;
+    float score = 0.0f;
+};
+
+struct VertexCandidate {
+    std::size_t segment_index = 0U;
+    std::uint32_t stride = 12U;
+    std::size_t vertex_count = 0U;
+    float finite_ratio = 0.0f;
+    float span = 0.0f;
+    float score = 0.0f;
+};
+
+static bool TryBuildIndexedMeshPayloadFromBlob(
+    const vsf::SerializedMeshObjectBlob& blob,
+    std::uint32_t mesh_index,
+    MeshRenderPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    if (blob.bytes.size() < 1024U) {
+        return false;
+    }
+
+    std::vector<ByteArraySegment> segments;
+    segments.reserve(64U);
+    const std::size_t blob_size = blob.bytes.size();
+    const std::size_t max_seg_len = std::min<std::size_t>(blob_size, 8U * 1024U * 1024U);
+    std::unordered_set<std::uint64_t> seen_segments;
+    seen_segments.reserve(512U);
+    for (std::size_t p = 0U; p + 8U <= blob_size; ++p) {
+        const std::array<std::uint32_t, 2U> lens = {ReadU32LE(blob.bytes, p), ReadU32BE(blob.bytes, p)};
+        for (const auto len : lens) {
+            if (len < 96U || len > max_seg_len) {
+                continue;
+            }
+            const std::size_t data_pos = p + 4U;
+            if (data_pos + static_cast<std::size_t>(len) > blob_size) {
+                continue;
+            }
+            const std::uint64_t key =
+                (static_cast<std::uint64_t>(data_pos) << 32U) ^ static_cast<std::uint64_t>(len);
+            if (!seen_segments.insert(key).second) {
+                continue;
+            }
+            segments.push_back({p, data_pos, static_cast<std::size_t>(len)});
+            if (segments.size() >= 512U) {
+                break;
+            }
+        }
+        if (segments.size() >= 512U) {
+            break;
+        }
+    }
+    if (segments.empty()) {
+        return false;
+    }
+
+    std::vector<IndexCandidate> index_candidates;
+    index_candidates.reserve(64U);
+    for (std::size_t s = 0U; s < segments.size(); ++s) {
+        const auto& seg = segments[s];
+        const std::array<std::uint32_t, 2U> fmts = {2U, 4U};
+        for (const auto fmt : fmts) {
+            if ((seg.length % fmt) != 0U) {
+                continue;
+            }
+            const std::size_t index_count = seg.length / fmt;
+            if (index_count < 96U || index_count > 1800000U) {
+                continue;
+            }
+            const std::size_t sample_count = std::min<std::size_t>(index_count, 24000U);
+            std::uint32_t max_index = 0U;
+            std::size_t tri_count = 0U;
+            std::size_t degenerate = 0U;
+            for (std::size_t i = 0U; i < sample_count; ++i) {
+                const std::size_t at = seg.data_pos + i * fmt;
+                const std::uint32_t v = (fmt == 2U)
+                    ? static_cast<std::uint32_t>(ReadU16LE(blob.bytes, at))
+                    : ReadU32LE(blob.bytes, at);
+                max_index = std::max(max_index, v);
+            }
+            for (std::size_t i = 0U; i + 2U < sample_count; i += 3U) {
+                const std::size_t at0 = seg.data_pos + i * fmt;
+                const std::size_t at1 = seg.data_pos + (i + 1U) * fmt;
+                const std::size_t at2 = seg.data_pos + (i + 2U) * fmt;
+                const std::uint32_t a = (fmt == 2U)
+                    ? static_cast<std::uint32_t>(ReadU16LE(blob.bytes, at0))
+                    : ReadU32LE(blob.bytes, at0);
+                const std::uint32_t b = (fmt == 2U)
+                    ? static_cast<std::uint32_t>(ReadU16LE(blob.bytes, at1))
+                    : ReadU32LE(blob.bytes, at1);
+                const std::uint32_t c = (fmt == 2U)
+                    ? static_cast<std::uint32_t>(ReadU16LE(blob.bytes, at2))
+                    : ReadU32LE(blob.bytes, at2);
+                ++tri_count;
+                if (a == b || b == c || c == a) {
+                    ++degenerate;
+                }
+            }
+            if (tri_count < 24U || max_index < 16U) {
+                continue;
+            }
+            const float deg_ratio = static_cast<float>(degenerate) / static_cast<float>(tri_count);
+            if (deg_ratio > 0.85f) {
+                continue;
+            }
+            float score = static_cast<float>(tri_count);
+            score -= deg_ratio * static_cast<float>(tri_count) * 1.4f;
+            score -= static_cast<float>(max_index) * 0.0015f;
+            if (fmt == 2U) {
+                score += 24.0f;
+            }
+            index_candidates.push_back({s, fmt, index_count, max_index, deg_ratio, score});
+        }
+    }
+    if (index_candidates.empty()) {
+        return false;
+    }
+    std::sort(index_candidates.begin(), index_candidates.end(), [](const IndexCandidate& a, const IndexCandidate& b) {
+        return a.score > b.score;
+    });
+    if (index_candidates.size() > 16U) {
+        index_candidates.resize(16U);
+    }
+
+    std::vector<VertexCandidate> vertex_candidates;
+    vertex_candidates.reserve(96U);
+    const std::array<std::uint32_t, 14U> strides = {12U, 16U, 20U, 24U, 28U, 32U, 36U, 40U, 44U, 48U, 52U, 56U, 60U, 64U};
+    for (std::size_t s = 0U; s < segments.size(); ++s) {
+        const auto& seg = segments[s];
+        for (const auto stride : strides) {
+            if ((seg.length % stride) != 0U) {
+                continue;
+            }
+            const std::size_t vertex_count = seg.length / stride;
+            if (vertex_count < 32U || vertex_count > 500000U) {
+                continue;
+            }
+            const std::size_t sample_count = std::min<std::size_t>(vertex_count, 4000U);
+            std::size_t finite_count = 0U;
+            float min_x = std::numeric_limits<float>::max();
+            float min_y = std::numeric_limits<float>::max();
+            float min_z = std::numeric_limits<float>::max();
+            float max_x = -std::numeric_limits<float>::max();
+            float max_y = -std::numeric_limits<float>::max();
+            float max_z = -std::numeric_limits<float>::max();
+            for (std::size_t i = 0U; i < sample_count; ++i) {
+                const std::size_t at = seg.data_pos + i * stride;
+                const float x = ReadF32LE(blob.bytes, at);
+                const float y = ReadF32LE(blob.bytes, at + 4U);
+                const float z = ReadF32LE(blob.bytes, at + 8U);
+                if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+                    continue;
+                }
+                if (std::abs(x) > 10000.0f || std::abs(y) > 10000.0f || std::abs(z) > 10000.0f) {
+                    continue;
+                }
+                ++finite_count;
+                min_x = std::min(min_x, x);
+                min_y = std::min(min_y, y);
+                min_z = std::min(min_z, z);
+                max_x = std::max(max_x, x);
+                max_y = std::max(max_y, y);
+                max_z = std::max(max_z, z);
+            }
+            const float finite_ratio = sample_count > 0U
+                ? static_cast<float>(finite_count) / static_cast<float>(sample_count)
+                : 0.0f;
+            if (finite_ratio < 0.90f || finite_count < 32U) {
+                continue;
+            }
+            const float sx = std::max(0.0f, max_x - min_x);
+            const float sy = std::max(0.0f, max_y - min_y);
+            const float sz = std::max(0.0f, max_z - min_z);
+            const float span = std::max(sx, std::max(sy, sz));
+            if (!std::isfinite(span) || span < 0.005f || span > 3000.0f) {
+                continue;
+            }
+            float score = finite_ratio * 1000.0f;
+            score += std::min<float>(static_cast<float>(vertex_count), 120000.0f) * 0.01f;
+            score += std::min(span, 4.0f) * 10.0f;
+            if (stride == 12U || stride == 16U || stride == 32U) {
+                score += 8.0f;
+            }
+            vertex_candidates.push_back({s, stride, vertex_count, finite_ratio, span, score});
+        }
+    }
+    if (vertex_candidates.empty()) {
+        return false;
+    }
+    std::sort(vertex_candidates.begin(), vertex_candidates.end(), [](const VertexCandidate& a, const VertexCandidate& b) {
+        return a.score > b.score;
+    });
+    if (vertex_candidates.size() > 24U) {
+        vertex_candidates.resize(24U);
+    }
+
+    struct PairChoice {
+        std::size_t idx_i = 0U;
+        std::size_t vtx_i = 0U;
+        float score = -1.0f;
+    };
+    PairChoice best_pair {};
+    for (std::size_t i = 0U; i < index_candidates.size(); ++i) {
+        const auto& idx = index_candidates[i];
+        for (std::size_t j = 0U; j < vertex_candidates.size(); ++j) {
+            const auto& vtx = vertex_candidates[j];
+            if (vtx.vertex_count <= static_cast<std::size_t>(idx.max_index)) {
+                continue;
+            }
+            float score = idx.score + vtx.score;
+            if (idx.segment_index == vtx.segment_index) {
+                score -= 120.0f;
+            }
+            const auto& idx_seg = segments[idx.segment_index];
+            const auto& vtx_seg = segments[vtx.segment_index];
+            if (vtx_seg.data_pos > idx_seg.data_pos) {
+                score += 24.0f;
+            }
+            if (score > best_pair.score) {
+                best_pair = {i, j, score};
+            }
+        }
+    }
+    if (best_pair.score < 0.0f) {
+        return false;
+    }
+
+    const auto& idx = index_candidates[best_pair.idx_i];
+    const auto& vtx = vertex_candidates[best_pair.vtx_i];
+    const auto& idx_seg = segments[idx.segment_index];
+    const auto& vtx_seg = segments[vtx.segment_index];
+
+    MeshRenderPayload payload;
+    payload.name = "VSF_STRUCT_MESH_" + std::to_string(mesh_index);
+    payload.vertex_stride = 12U;
+    payload.material_index = 0;
+    payload.vertex_blob.reserve(vtx.vertex_count * 12U);
+    for (std::size_t i = 0U; i < vtx.vertex_count; ++i) {
+        const std::size_t at = vtx_seg.data_pos + i * vtx.stride;
+        AppendFloat(&payload.vertex_blob, ReadF32LE(blob.bytes, at));
+        AppendFloat(&payload.vertex_blob, ReadF32LE(blob.bytes, at + 4U));
+        AppendFloat(&payload.vertex_blob, ReadF32LE(blob.bytes, at + 8U));
+    }
+
+    payload.indices.reserve(idx.index_count);
+    std::size_t invalid_index = 0U;
+    const std::size_t usable_indices = idx.index_count - (idx.index_count % 3U);
+    for (std::size_t i = 0U; i < usable_indices; ++i) {
+        const std::size_t at = idx_seg.data_pos + i * idx.index_format_bytes;
+        const std::uint32_t v = (idx.index_format_bytes == 2U)
+            ? static_cast<std::uint32_t>(ReadU16LE(blob.bytes, at))
+            : ReadU32LE(blob.bytes, at);
+        if (v >= vtx.vertex_count) {
+            ++invalid_index;
+            continue;
+        }
+        payload.indices.push_back(v);
+    }
+
+    if (payload.indices.size() < 600U) {
+        return false;
+    }
+    const float invalid_ratio = usable_indices > 0U
+        ? static_cast<float>(invalid_index) / static_cast<float>(usable_indices)
+        : 1.0f;
+    if (invalid_ratio > 0.15f) {
+        return false;
+    }
+    // Reject candidate meshes that still contain too many stretched triangles.
+    float bmin_x = std::numeric_limits<float>::max();
+    float bmin_y = std::numeric_limits<float>::max();
+    float bmin_z = std::numeric_limits<float>::max();
+    float bmax_x = -std::numeric_limits<float>::max();
+    float bmax_y = -std::numeric_limits<float>::max();
+    float bmax_z = -std::numeric_limits<float>::max();
+    for (std::size_t i = 0U; i < vtx.vertex_count; ++i) {
+        const std::size_t at = i * 12U;
+        const float x = ReadF32LE(payload.vertex_blob, at);
+        const float y = ReadF32LE(payload.vertex_blob, at + 4U);
+        const float z = ReadF32LE(payload.vertex_blob, at + 8U);
+        bmin_x = std::min(bmin_x, x);
+        bmin_y = std::min(bmin_y, y);
+        bmin_z = std::min(bmin_z, z);
+        bmax_x = std::max(bmax_x, x);
+        bmax_y = std::max(bmax_y, y);
+        bmax_z = std::max(bmax_z, z);
+    }
+    const float span_x = std::max(1.0e-5f, bmax_x - bmin_x);
+    const float span_y = std::max(1.0e-5f, bmax_y - bmin_y);
+    const float span_z = std::max(1.0e-5f, bmax_z - bmin_z);
+    const float span = std::max(span_x, std::max(span_y, span_z));
+    const float max_edge = std::max(0.01f, std::min(span * 0.18f, 0.80f));
+    const float max_edge_sq = max_edge * max_edge;
+    auto sq_dist = [&](std::uint32_t ia, std::uint32_t ib) -> float {
+        const std::size_t a = static_cast<std::size_t>(ia) * 12U;
+        const std::size_t b = static_cast<std::size_t>(ib) * 12U;
+        const float ax = ReadF32LE(payload.vertex_blob, a);
+        const float ay = ReadF32LE(payload.vertex_blob, a + 4U);
+        const float az = ReadF32LE(payload.vertex_blob, a + 8U);
+        const float bx = ReadF32LE(payload.vertex_blob, b);
+        const float by = ReadF32LE(payload.vertex_blob, b + 4U);
+        const float bz = ReadF32LE(payload.vertex_blob, b + 8U);
+        const float dx = ax - bx;
+        const float dy = ay - by;
+        const float dz = az - bz;
+        return dx * dx + dy * dy + dz * dz;
+    };
+    const std::size_t tri_total = payload.indices.size() / 3U;
+    const std::size_t tri_sample = std::min<std::size_t>(tri_total, 20000U);
+    std::size_t long_edge_tri = 0U;
+    for (std::size_t t = 0U; t < tri_sample; ++t) {
+        const std::uint32_t i0 = payload.indices[t * 3U + 0U];
+        const std::uint32_t i1 = payload.indices[t * 3U + 1U];
+        const std::uint32_t i2 = payload.indices[t * 3U + 2U];
+        const float e01 = sq_dist(i0, i1);
+        const float e12 = sq_dist(i1, i2);
+        const float e20 = sq_dist(i2, i0);
+        if (!std::isfinite(e01) || !std::isfinite(e12) || !std::isfinite(e20) ||
+            e01 > max_edge_sq || e12 > max_edge_sq || e20 > max_edge_sq) {
+            ++long_edge_tri;
+        }
+    }
+    if (tri_sample >= 64U) {
+        const float long_ratio = static_cast<float>(long_edge_tri) / static_cast<float>(tri_sample);
+        if (long_ratio > 0.28f) {
+            return false;
+        }
+    }
+    *out_payload = std::move(payload);
+    return true;
+}
+
+static bool TryBuildHeuristicMeshPayloadFromBlob(
+    const vsf::SerializedMeshObjectBlob& blob,
+    std::uint32_t mesh_index,
+    MeshRenderPayload* out_payload) {
+    if (out_payload == nullptr) {
+        return false;
+    }
+    if (blob.bytes.size() < 256U) {
+        return false;
+    }
+
+    struct Candidate {
+        std::size_t start = 0U;
+        std::size_t stride = 12U;
+        std::size_t count = 0U;
+        float span = 0.0f;
+    };
+    Candidate best {};
+    const std::array<std::size_t, 10U> strides = {12U, 16U, 20U, 24U, 28U, 32U, 36U, 40U, 44U, 48U};
+    const std::size_t scan_limit = std::min<std::size_t>(blob.bytes.size(), 8192U);
+    constexpr std::size_t kMaxVertexCount = 6000U;
+    for (std::size_t start = 0U; start + 12U <= scan_limit; start += 4U) {
+        for (const auto stride : strides) {
+            if (start + stride > blob.bytes.size() || stride < 12U || (stride % 4U) != 0U) {
+                continue;
+            }
+            float min_x = std::numeric_limits<float>::max();
+            float min_y = std::numeric_limits<float>::max();
+            float min_z = std::numeric_limits<float>::max();
+            float max_x = -std::numeric_limits<float>::max();
+            float max_y = -std::numeric_limits<float>::max();
+            float max_z = -std::numeric_limits<float>::max();
+            std::size_t count = 0U;
+            for (std::size_t at = start; at + 12U <= blob.bytes.size() && count < kMaxVertexCount; at += stride) {
+                const float x = ReadF32LE(blob.bytes, at);
+                const float y = ReadF32LE(blob.bytes, at + 4U);
+                const float z = ReadF32LE(blob.bytes, at + 8U);
+                if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+                    break;
+                }
+                if (std::abs(x) > 10000.0f || std::abs(y) > 10000.0f || std::abs(z) > 10000.0f) {
+                    break;
+                }
+                min_x = std::min(min_x, x);
+                min_y = std::min(min_y, y);
+                min_z = std::min(min_z, z);
+                max_x = std::max(max_x, x);
+                max_y = std::max(max_y, y);
+                max_z = std::max(max_z, z);
+                ++count;
+            }
+            if (count < 48U) {
+                continue;
+            }
+            const float span_x = std::max(0.0f, max_x - min_x);
+            const float span_y = std::max(0.0f, max_y - min_y);
+            const float span_z = std::max(0.0f, max_z - min_z);
+            const float span = std::max(span_x, std::max(span_y, span_z));
+            if (!std::isfinite(span) || span < 0.01f || span > 1000.0f) {
+                continue;
+            }
+            if (count > best.count || (count == best.count && span > best.span)) {
+                best = {start, stride, count, span};
+            }
+        }
+    }
+    if (best.count < 48U) {
+        return false;
+    }
+
+    MeshRenderPayload payload;
+    payload.name = "VSF_HEURISTIC_MESH_" + std::to_string(mesh_index);
+    payload.vertex_stride = 12U;
+    payload.material_index = 0;
+    std::vector<float> positions;
+    positions.reserve(best.count * 3U);
+    payload.vertex_blob.reserve(best.count * 12U);
+    float min_x = std::numeric_limits<float>::max();
+    float min_y = std::numeric_limits<float>::max();
+    float min_z = std::numeric_limits<float>::max();
+    float max_x = -std::numeric_limits<float>::max();
+    float max_y = -std::numeric_limits<float>::max();
+    float max_z = -std::numeric_limits<float>::max();
+    for (std::size_t i = 0U; i < best.count; ++i) {
+        const std::size_t at = best.start + i * best.stride;
+        if (at + 12U > blob.bytes.size()) {
+            break;
+        }
+        const float x = ReadF32LE(blob.bytes, at);
+        const float y = ReadF32LE(blob.bytes, at + 4U);
+        const float z = ReadF32LE(blob.bytes, at + 8U);
+        AppendFloat(&payload.vertex_blob, x);
+        AppendFloat(&payload.vertex_blob, y);
+        AppendFloat(&payload.vertex_blob, z);
+        positions.push_back(x);
+        positions.push_back(y);
+        positions.push_back(z);
+        min_x = std::min(min_x, x);
+        min_y = std::min(min_y, y);
+        min_z = std::min(min_z, z);
+        max_x = std::max(max_x, x);
+        max_y = std::max(max_y, y);
+        max_z = std::max(max_z, z);
+    }
+    const std::size_t vertex_count = payload.vertex_blob.size() / 12U;
+    if (vertex_count < 48U) {
+        return false;
+    }
+
+    const float span_x = std::max(0.0f, max_x - min_x);
+    const float span_y = std::max(0.0f, max_y - min_y);
+    const float span_z = std::max(0.0f, max_z - min_z);
+    const float span = std::max(span_x, std::max(span_y, span_z));
+    if (!std::isfinite(span) || span < 0.01f || span > 1000.0f) {
+        return false;
+    }
+
+    auto median_of = [](std::vector<float> values) -> float {
+        if (values.empty()) {
+            return 0.0f;
+        }
+        const std::size_t mid = values.size() / 2U;
+        std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(mid), values.end());
+        return values[mid];
+    };
+    const float cell_size = std::max(0.01f, std::min(span * 0.03f, 0.25f));
+    struct CellAccum {
+        std::uint32_t count = 0U;
+        float sx = 0.0f;
+        float sy = 0.0f;
+        float sz = 0.0f;
+    };
+    std::unordered_map<std::uint64_t, CellAccum> cells;
+    cells.reserve(vertex_count / 4U + 32U);
+    auto pack_key = [](int gx, int gy, int gz) -> std::uint64_t {
+        const std::uint64_t ux = static_cast<std::uint64_t>(static_cast<std::uint32_t>(gx + 32768));
+        const std::uint64_t uy = static_cast<std::uint64_t>(static_cast<std::uint32_t>(gy + 32768));
+        const std::uint64_t uz = static_cast<std::uint64_t>(static_cast<std::uint32_t>(gz + 32768));
+        return (ux << 32U) ^ (uy << 16U) ^ uz;
+    };
+    for (std::size_t i = 0U; i < vertex_count; ++i) {
+        const float x = positions[i * 3U + 0U];
+        const float y = positions[i * 3U + 1U];
+        const float z = positions[i * 3U + 2U];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            continue;
+        }
+        const int gx = static_cast<int>(std::floor(x / cell_size));
+        const int gy = static_cast<int>(std::floor(y / cell_size));
+        const int gz = static_cast<int>(std::floor(z / cell_size));
+        auto& cell = cells[pack_key(gx, gy, gz)];
+        cell.count += 1U;
+        cell.sx += x;
+        cell.sy += y;
+        cell.sz += z;
+    }
+    if (cells.empty()) {
+        return false;
+    }
+    std::uint64_t best_key = 0U;
+    std::uint32_t best_count = 0U;
+    for (const auto& kv : cells) {
+        if (kv.second.count > best_count) {
+            best_count = kv.second.count;
+            best_key = kv.first;
+        }
+    }
+    const auto best_it = cells.find(best_key);
+    if (best_it == cells.end() || best_it->second.count < 8U) {
+        return false;
+    }
+    const float cluster_cx = best_it->second.sx / static_cast<float>(best_it->second.count);
+    const float cluster_cy = best_it->second.sy / static_cast<float>(best_it->second.count);
+    const float cluster_cz = best_it->second.sz / static_cast<float>(best_it->second.count);
+    const float keep_radius = std::max(cell_size * 3.5f, std::min(span * 0.22f, 0.9f));
+
+    std::vector<std::size_t> kept_points;
+    kept_points.reserve(vertex_count / 2U + 32U);
+    for (std::size_t i = 0U; i < vertex_count; ++i) {
+        const float dx = positions[i * 3U + 0U] - cluster_cx;
+        const float dy = positions[i * 3U + 1U] - cluster_cy;
+        const float dz = positions[i * 3U + 2U] - cluster_cz;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (!std::isfinite(dist) || dist > keep_radius) {
+            continue;
+        }
+        kept_points.push_back(i);
+    }
+    if (kept_points.size() < 120U) {
+        return false;
+    }
+
+    // Second-pass local density filter: remove sparse axis-like outliers.
+    const float local_cell = std::max(0.004f, std::min(keep_radius * 0.08f, 0.06f));
+    std::unordered_map<std::uint64_t, std::uint32_t> local_counts;
+    local_counts.reserve(kept_points.size() / 2U + 32U);
+    for (const auto i : kept_points) {
+        const float x = positions[i * 3U + 0U];
+        const float y = positions[i * 3U + 1U];
+        const float z = positions[i * 3U + 2U];
+        const int gx = static_cast<int>(std::floor((x - cluster_cx) / local_cell));
+        const int gy = static_cast<int>(std::floor((y - cluster_cy) / local_cell));
+        const int gz = static_cast<int>(std::floor((z - cluster_cz) / local_cell));
+        local_counts[pack_key(gx, gy, gz)] += 1U;
+    }
+    std::vector<std::size_t> dense_points;
+    dense_points.reserve(kept_points.size());
+    for (const auto i : kept_points) {
+        const float x = positions[i * 3U + 0U];
+        const float y = positions[i * 3U + 1U];
+        const float z = positions[i * 3U + 2U];
+        const int gx = static_cast<int>(std::floor((x - cluster_cx) / local_cell));
+        const int gy = static_cast<int>(std::floor((y - cluster_cy) / local_cell));
+        const int gz = static_cast<int>(std::floor((z - cluster_cz) / local_cell));
+        const auto it = local_counts.find(pack_key(gx, gy, gz));
+        if (it == local_counts.end() || it->second < 3U) {
+            continue;
+        }
+        dense_points.push_back(i);
+    }
+    if (dense_points.size() >= 120U) {
+        kept_points.swap(dense_points);
+    }
+    // Reject line-like or plane-like clusters; they come from mis-parsed float runs.
+    float kmin_x = std::numeric_limits<float>::max();
+    float kmin_y = std::numeric_limits<float>::max();
+    float kmin_z = std::numeric_limits<float>::max();
+    float kmax_x = -std::numeric_limits<float>::max();
+    float kmax_y = -std::numeric_limits<float>::max();
+    float kmax_z = -std::numeric_limits<float>::max();
+    for (const auto i : kept_points) {
+        const float x = positions[i * 3U + 0U];
+        const float y = positions[i * 3U + 1U];
+        const float z = positions[i * 3U + 2U];
+        kmin_x = std::min(kmin_x, x);
+        kmin_y = std::min(kmin_y, y);
+        kmin_z = std::min(kmin_z, z);
+        kmax_x = std::max(kmax_x, x);
+        kmax_y = std::max(kmax_y, y);
+        kmax_z = std::max(kmax_z, z);
+    }
+    const float kex = std::max(1.0e-5f, kmax_x - kmin_x);
+    const float key = std::max(1.0e-5f, kmax_y - kmin_y);
+    const float kez = std::max(1.0e-5f, kmax_z - kmin_z);
+    const float kmajor = std::max(kex, std::max(key, kez));
+    const float kmid = std::max(std::min(std::max(kex, key), std::max(std::min(kex, key), kez)), 1.0e-5f);
+    const float kminor = std::max(std::min(kex, std::min(key, kez)), 1.0e-5f);
+    const bool line_like = (kmajor / kmid) > 45.0f;
+    const bool ultra_thin = (kmajor / kminor) > 180.0f;
+    if (line_like || ultra_thin) {
+        return false;
+    }
+
+    const std::size_t target_points = 2200U;
+    const std::size_t kept_count = kept_points.size();
+    const std::size_t step = std::max<std::size_t>(1U, kept_count / target_points);
+    const float point_size = std::max(0.0008f, std::min(span * 0.0022f, 0.018f));
+    std::vector<std::uint8_t> splat_vertices;
+    std::vector<std::uint32_t> splat_indices;
+    splat_vertices.reserve((kept_count / step + 1U) * 3U * 12U);
+    splat_indices.reserve((kept_count / step + 1U) * 3U);
+    std::uint32_t base_vertex = 0U;
+    std::size_t splat_count = 0U;
+    for (std::size_t k = 0U; k < kept_count; k += step) {
+        const std::size_t i = kept_points[k];
+        const float x = positions[i * 3U + 0U];
+        const float y = positions[i * 3U + 1U];
+        const float z = positions[i * 3U + 2U];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+            continue;
+        }
+        // Tiny local triangle per sampled point. This avoids giant stretched polygons
+        // while preserving the extracted vertex-space silhouette.
+        AppendFloat(&splat_vertices, x - point_size);
+        AppendFloat(&splat_vertices, y);
+        AppendFloat(&splat_vertices, z);
+        AppendFloat(&splat_vertices, x + point_size);
+        AppendFloat(&splat_vertices, y);
+        AppendFloat(&splat_vertices, z);
+        AppendFloat(&splat_vertices, x);
+        AppendFloat(&splat_vertices, y + point_size);
+        AppendFloat(&splat_vertices, z);
+        splat_indices.push_back(base_vertex + 0U);
+        splat_indices.push_back(base_vertex + 1U);
+        splat_indices.push_back(base_vertex + 2U);
+        base_vertex += 3U;
+        ++splat_count;
+    }
+    if (splat_count < 100U || splat_indices.size() < 300U) {
+        return false;
+    }
+    payload.vertex_blob = std::move(splat_vertices);
+    payload.indices = std::move(splat_indices);
+    *out_payload = std::move(payload);
+    return true;
 }
 
 bool VsfAvatarLoader::CanLoadPath(const std::string& path) const {
@@ -547,7 +1321,7 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         sidecar_path = env;
     }
     const auto env_timeout = GetEnvU32("VSF_SIDECAR_TIMEOUT_MS", 0U);
-    std::uint32_t timeout_ms = 60000U;
+    std::uint32_t timeout_ms = 120000U;
     if (env_timeout > 0U) {
         timeout_ms = env_timeout;
     }
@@ -602,6 +1376,10 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto sidecar_mesh_payload_count = GetJsonU32(output, "mesh_payload_count");
     const auto sidecar_material_payload_count = GetJsonU32(output, "material_payload_count");
     const auto render_payload_mode = GetJsonString(output, "render_payload_mode");
+    bool used_heuristic_mesh_payload = false;
+    bool used_structured_mesh_payload = false;
+    const bool enable_structured_mesh = EnvFlagEnabled("VSF_ENABLE_STRUCTURED_MESH");
+    const bool enable_heuristic_mesh = EnvFlagEnabled("VSF_ENABLE_HEURISTIC_MESH");
     const bool allow_placeholder_render = EnvFlagEnabled("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
     if (render_payload_mode != "none" && sidecar_mesh_payload_count == 0U) {
         return core::Result<AvatarPackage>::Fail("SCHEMA_INVALID: render_payload_mode requires mesh_payload_count > 0");
@@ -628,9 +1406,94 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             pkg.missing_features.push_back("authored mesh payload extraction");
         }
     } else if (render_payload_mode == "object_stub_v1" && sidecar_mesh_payload_count > 0U) {
-        for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
-            pkg.mesh_payloads.push_back(BuildObjectStubPayload(i));
+        std::uint32_t heuristic_payload_count = 0U;
+        std::uint32_t heuristic_index_count_total = 0U;
+        std::uint32_t structured_payload_count = 0U;
+        std::uint32_t structured_index_count_total = 0U;
+        if (enable_structured_mesh || enable_heuristic_mesh) {
+            auto probe = reader_.Probe(path);
+            if (probe.ok && !probe.value.serialized_file_bytes.empty()) {
+                vsf::SerializedFileReader serialized_reader;
+                auto blobs = serialized_reader.ExtractMeshObjectBlobs(probe.value.serialized_file_bytes, 6U);
+                if (blobs.ok) {
+                    if (enable_structured_mesh) {
+                        for (std::size_t i = 0U; i < blobs.value.size(); ++i) {
+                            MeshRenderPayload payload;
+                            if (!TryBuildIndexedMeshPayloadFromBlob(
+                                    blobs.value[i],
+                                    static_cast<std::uint32_t>(i),
+                                    &payload)) {
+                                continue;
+                            }
+                            pkg.mesh_payloads.push_back(std::move(payload));
+                            ++structured_payload_count;
+                            structured_index_count_total += static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size());
+                        }
+                    }
+                    if (pkg.mesh_payloads.empty() && enable_heuristic_mesh) {
+                        for (std::size_t i = 0U; i < blobs.value.size(); ++i) {
+                            MeshRenderPayload payload;
+                            if (!TryBuildHeuristicMeshPayloadFromBlob(
+                                    blobs.value[i],
+                                    static_cast<std::uint32_t>(i),
+                                    &payload)) {
+                                continue;
+                            }
+                            pkg.mesh_payloads.push_back(std::move(payload));
+                            ++heuristic_payload_count;
+                            heuristic_index_count_total += static_cast<std::uint32_t>(pkg.mesh_payloads.back().indices.size());
+                        }
+                    }
+                }
+            }
         }
+        if (structured_payload_count > 0U) {
+            used_structured_mesh_payload = true;
+        }
+        const bool heuristic_quality_ok =
+            heuristic_payload_count >= 1U &&
+            heuristic_index_count_total >= 100U;
+        const bool structured_quality_ok =
+            structured_payload_count >= 1U &&
+            structured_index_count_total >= 240U;
+        if (!structured_quality_ok && !heuristic_quality_ok) {
+            pkg.mesh_payloads.clear();
+            for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
+                pkg.mesh_payloads.push_back(BuildObjectStubPayload(i));
+            }
+            pkg.warnings.push_back("W_RENDER_PAYLOAD: object stub payload applied from sidecar contract.");
+            pkg.warning_codes.push_back("VSF_OBJECT_STUB_RENDER_PAYLOAD");
+            pkg.warnings.push_back(
+                "W_HEURISTIC_MESH: quality-low, fallback=object_stub, structured-payloads=" +
+                std::to_string(structured_payload_count) +
+                ", structured-indices=" + std::to_string(structured_index_count_total) +
+                ", heuristic-payloads=" +
+                std::to_string(heuristic_payload_count) +
+                ", heuristic-indices=" + std::to_string(heuristic_index_count_total) +
+                ", structured-enabled=" + std::string(enable_structured_mesh ? "true" : "false") +
+                ", heuristic-enabled=" + std::string(enable_heuristic_mesh ? "true" : "false"));
+            used_structured_mesh_payload = false;
+        } else {
+            if (structured_quality_ok) {
+                pkg.warnings.push_back("W_RENDER_PAYLOAD: structured indexed mesh payload extracted.");
+                pkg.warning_codes.push_back("VSF_SERIALIZED_STRUCTURED_MESH_PAYLOAD");
+                pkg.warnings.push_back(
+                    "W_STRUCTURED_MESH: payloads=" + std::to_string(structured_payload_count) +
+                    ", indices=" + std::to_string(structured_index_count_total));
+                used_heuristic_mesh_payload = false;
+            } else {
+                used_heuristic_mesh_payload = true;
+                pkg.warnings.push_back("W_RENDER_PAYLOAD: heuristic mesh payload extracted from serialized mesh objects.");
+                pkg.warning_codes.push_back("VSF_SERIALIZED_HEURISTIC_MESH_PAYLOAD");
+                pkg.warnings.push_back(
+                    "W_HEURISTIC_MESH: payloads=" + std::to_string(heuristic_payload_count) +
+                    ", indices=" + std::to_string(heuristic_index_count_total));
+            }
+        }
+        pkg.warnings.push_back(
+            "W_STRUCTURED_TRY: payloads=" + std::to_string(structured_payload_count) +
+            ", indices=" + std::to_string(structured_index_count_total) +
+            ", enabled=" + std::string(enable_structured_mesh ? "true" : "false"));
         if (sidecar_material_payload_count > 0U) {
             MaterialRenderPayload mat {};
             mat.name = "VSF_OBJECT_STUB_MAT";
@@ -640,8 +1503,6 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
             mat.double_sided = true;
             pkg.material_payloads.push_back(mat);
         }
-        pkg.warnings.push_back("W_RENDER_PAYLOAD: object stub payload applied from sidecar contract.");
-        pkg.warning_codes.push_back("VSF_OBJECT_STUB_RENDER_PAYLOAD");
     }
 
     pkg.warnings.push_back("W_MODE: parser mode=sidecar");
@@ -686,6 +1547,18 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto serialized_best_candidate_path = GetJsonString(output, "serialized_best_candidate_path");
     if (!serialized_best_candidate_path.empty()) {
         pkg.warnings.push_back("W_SERIALIZED_PATH: " + serialized_best_candidate_path);
+    }
+    const auto serialized_parse_path = GetJsonString(output, "serialized_parse_path");
+    if (!serialized_parse_path.empty()) {
+        pkg.warnings.push_back("W_SERIALIZED_PARSE_PATH: " + serialized_parse_path);
+    }
+    const auto major_types_found = GetJsonString(output, "major_types_found");
+    if (!major_types_found.empty()) {
+        pkg.warnings.push_back("W_SERIALIZED_TYPES: " + major_types_found);
+    }
+    const auto skinned_mesh_renderer_count = GetJsonU32(output, "skinned_mesh_renderer_count");
+    if (HasJsonKey(output, "skinned_mesh_renderer_count")) {
+        pkg.warnings.push_back("W_SKINNED_RENDERER_COUNT: " + std::to_string(skinned_mesh_renderer_count));
     }
     const auto recovery_attempt_profile = GetJsonString(output, "recovery_attempt_profile");
     if (!recovery_attempt_profile.empty()) {
@@ -752,6 +1625,26 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto missing_items = GetJsonStringArray(output, "missing_features");
     for (const auto& m : missing_items) {
         pkg.missing_features.push_back(m);
+    }
+    if (used_heuristic_mesh_payload) {
+        pkg.missing_features.erase(
+            std::remove_if(
+                pkg.missing_features.begin(),
+                pkg.missing_features.end(),
+                [](const std::string& value) {
+                    return value.find("mesh payload extraction") != std::string::npos;
+                }),
+            pkg.missing_features.end());
+    }
+    if (used_structured_mesh_payload) {
+        pkg.missing_features.erase(
+            std::remove_if(
+                pkg.missing_features.begin(),
+                pkg.missing_features.end(),
+                [](const std::string& value) {
+                    return value.find("mesh payload extraction") != std::string::npos;
+                }),
+            pkg.missing_features.end());
     }
     if (pkg.missing_features.empty() && mesh_count == 0U && material_count == 0U) {
         pkg.missing_features.push_back("mesh/material object discovery");
