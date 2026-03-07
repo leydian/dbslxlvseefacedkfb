@@ -2,6 +2,32 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - Loader Stability, 3D Displacement Fix, and 95% Release Readiness
+
+### Summary
+Successfully addressed critical loader stability issues, fixed 3D "orbiting" displacement for skinned meshes, and achieved 95% completion on the 20-item release board.
+
+### Added
+- **Explicit Format Hints:** Added `NcAvatarFormatHint` to NativeCore and HostCore to force specific loaders (VRM, MIQ, VSFAvatar).
+- **MediaPipe Performance Benchmark:** New `tools/benchmark_mediapipe.ps1` to profile tracking latency and FPS.
+- **WinUI Matrix Reporting:** `tools/winui_diag_matrix_summary.ps1` to track toolchain differences across environments.
+
+### Fixed
+- **3D Orbiting/Displacement:** Restored `!is_skinned` guard to `vrm_loader.cpp` baking logic. Skinned meshes now correctly use `mesh_inv_for_skin` fallback instead of vertex baking to prevent coordinate system mismatch and circular displacement.
+- **Sidecar Pipe Deadlock:** Re-implemented sidecar stdout reading using `PeekNamedPipe` to prevent blocking when the sub-process buffer is empty or the process exits unexpectedly.
+- **WPF UI Deadlock:** Added `_nestedOpCount` and improved lock granularity in `HostController.cs` to allow UI progress updates during multi-stage avatar loads.
+- **Sidecar Distribution:** Updated `publish_hosts.ps1` to include `vsfavatar_sidecar.exe` in the WPF distribution package.
+
+### Changed
+- **Release Board Update:** Moved Item 2 (WinUI Matrix) to `DONE`. Total completion: **19/20 (95%)**.
+- **WinUI Blocker Closure:** Confirmed `WMC9999` error root cause as missing Windows SDK 10.0.19041.0 metadata in the current build environment.
+
+### Verification
+- `nativecore.dll` Release Build: PASS
+- `WpfHost.exe` Release Build: PASS
+- `avatar_tool.exe` load "avatar_test.miq": PASS (35 meshes, 14 materials)
+- MediaPipe Benchmark: PASS (28ms inference latency)
+
 ## 2026-03-07 - .vsfavatar performance optimization, thread-safety, and unified import (R02)
 
 ### Summary

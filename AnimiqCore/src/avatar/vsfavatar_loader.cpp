@@ -49,6 +49,15 @@ static std::uint32_t GetEnvU32(const char* name, std::uint32_t fallback) {
     return static_cast<std::uint32_t>(parsed);
 }
 
+static bool EnvFlagEnabled(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return false;
+    }
+    const std::string lowered = ToLower(value);
+    return lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on";
+}
+
 static core::Result<std::string> RunSidecar(
     const std::string& sidecar_path,
     const std::string& avatar_path,
@@ -373,6 +382,15 @@ static core::Result<bool> ValidateSidecarSchema(const std::string& output) {
     if (status == "ok" && !HasJsonKey(output, "missing_features")) {
         return core::Result<bool>::Fail("SCHEMA_INVALID: missing missing_features");
     }
+    if (status == "ok" && GetJsonString(output, "render_payload_mode").empty()) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing render_payload_mode");
+    }
+    if (status == "ok" && !HasJsonKey(output, "mesh_payload_count")) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing mesh_payload_count");
+    }
+    if (status == "ok" && !HasJsonKey(output, "material_payload_count")) {
+        return core::Result<bool>::Fail("SCHEMA_INVALID: missing material_payload_count");
+    }
     if (status == "ok" && schema_version >= 5U) {
         if (GetJsonString(output, "recovery_attempt_profile").empty()) {
             return core::Result<bool>::Fail("SCHEMA_INVALID: missing recovery_attempt_profile");
@@ -432,6 +450,29 @@ static MeshRenderPayload BuildPlaceholderQuadPayload() {
 
     AppendFloat(&payload.vertex_blob, -0.5f);
     AppendFloat(&payload.vertex_blob, 0.8f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+    return payload;
+}
+
+static MeshRenderPayload BuildObjectStubPayload(std::uint32_t index) {
+    MeshRenderPayload payload;
+    payload.name = "VSF_OBJECT_STUB_" + std::to_string(index);
+    payload.vertex_stride = 12U;
+    payload.material_index = 0;
+    payload.indices = {0U, 1U, 2U};
+    payload.vertex_blob.reserve(3U * 12U);
+    const float x_offset = static_cast<float>(index) * 0.08f;
+
+    AppendFloat(&payload.vertex_blob, -0.2f + x_offset);
+    AppendFloat(&payload.vertex_blob, -0.2f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+
+    AppendFloat(&payload.vertex_blob, 0.2f + x_offset);
+    AppendFloat(&payload.vertex_blob, -0.2f);
+    AppendFloat(&payload.vertex_blob, 0.0f);
+
+    AppendFloat(&payload.vertex_blob, 0.0f + x_offset);
+    AppendFloat(&payload.vertex_blob, 0.25f);
     AppendFloat(&payload.vertex_blob, 0.0f);
     return payload;
 }
@@ -541,19 +582,46 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     const auto sidecar_mesh_payload_count = GetJsonU32(output, "mesh_payload_count");
     const auto sidecar_material_payload_count = GetJsonU32(output, "material_payload_count");
     const auto render_payload_mode = GetJsonString(output, "render_payload_mode");
+    const bool allow_placeholder_render = EnvFlagEnabled("VSF_ALLOW_VSF_PLACEHOLDER_RENDER");
+    if (render_payload_mode != "none" && sidecar_mesh_payload_count == 0U) {
+        return core::Result<AvatarPackage>::Fail("SCHEMA_INVALID: render_payload_mode requires mesh_payload_count > 0");
+    }
     if (render_payload_mode == "placeholder_quad_v1" && sidecar_mesh_payload_count > 0U) {
-        pkg.mesh_payloads.push_back(BuildPlaceholderQuadPayload());
-        MaterialRenderPayload mat {};
-        mat.name = "VSF_PLACEHOLDER_MAT";
-        mat.shader_name = "Unlit/Color";
-        mat.shader_variant = "placeholder";
-        mat.alpha_mode = "OPAQUE";
-        mat.double_sided = true;
+        if (allow_placeholder_render) {
+            pkg.mesh_payloads.push_back(BuildPlaceholderQuadPayload());
+            MaterialRenderPayload mat {};
+            mat.name = "VSF_PLACEHOLDER_MAT";
+            mat.shader_name = "Unlit/Color";
+            mat.shader_variant = "placeholder";
+            mat.alpha_mode = "OPAQUE";
+            mat.double_sided = true;
+            if (sidecar_material_payload_count > 0U) {
+                pkg.material_payloads.push_back(mat);
+            }
+            pkg.warnings.push_back("W_RENDER_PAYLOAD: placeholder quad payload applied from sidecar contract.");
+            pkg.warning_codes.push_back("VSF_PLACEHOLDER_RENDER_PAYLOAD");
+        } else {
+            pkg.compat_level = AvatarCompatLevel::Failed;
+            pkg.primary_error_code = "VSF_PLACEHOLDER_OUTPUT_BLOCKED";
+            pkg.warnings.push_back("E_RENDER_PAYLOAD: placeholder payload blocked for output path.");
+            pkg.warning_codes.push_back("VSF_PLACEHOLDER_OUTPUT_BLOCKED");
+            pkg.missing_features.push_back("authored mesh payload extraction");
+        }
+    } else if (render_payload_mode == "object_stub_v1" && sidecar_mesh_payload_count > 0U) {
+        for (std::uint32_t i = 0; i < sidecar_mesh_payload_count; ++i) {
+            pkg.mesh_payloads.push_back(BuildObjectStubPayload(i));
+        }
         if (sidecar_material_payload_count > 0U) {
+            MaterialRenderPayload mat {};
+            mat.name = "VSF_OBJECT_STUB_MAT";
+            mat.shader_name = "Unlit/Color";
+            mat.shader_variant = "stub";
+            mat.alpha_mode = "OPAQUE";
+            mat.double_sided = true;
             pkg.material_payloads.push_back(mat);
         }
-        pkg.warnings.push_back("W_RENDER_PAYLOAD: placeholder quad payload applied from sidecar contract.");
-        pkg.warning_codes.push_back("VSF_PLACEHOLDER_RENDER_PAYLOAD");
+        pkg.warnings.push_back("W_RENDER_PAYLOAD: object stub payload applied from sidecar contract.");
+        pkg.warning_codes.push_back("VSF_OBJECT_STUB_RENDER_PAYLOAD");
     }
 
     pkg.warnings.push_back("W_MODE: parser mode=sidecar");
@@ -563,7 +631,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         pkg.warnings.push_back("W_STAGE: " + probe_stage);
     }
     const auto primary_error_code = GetJsonString(output, "primary_error_code");
-    pkg.primary_error_code = primary_error_code.empty() ? "NONE" : primary_error_code;
+    if (pkg.primary_error_code.empty() || pkg.primary_error_code == "NONE") {
+        pkg.primary_error_code = primary_error_code.empty() ? "NONE" : primary_error_code;
+    }
     if (!primary_error_code.empty() && primary_error_code != "NONE") {
         pkg.warnings.push_back("W_PRIMARY: " + primary_error_code);
     }

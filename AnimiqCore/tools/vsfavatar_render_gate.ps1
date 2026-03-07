@@ -122,7 +122,9 @@ $placeholderDependentRows = @(
 )
 $outputReadiness = if ($outputPassRows.Count -gt 0) { "PASS" } else { "FAIL" }
 $placeholderDependencyStatus = if ($placeholderDependentRows.Count -gt 0) { "YES" } else { "NO" }
-$overall = $atLeastOneRenderable -and $noEmptyPrimaryOnComplete -and $targetSamplePresent -and $targetHasContractFields
+$outputReadyPass = $outputReadiness -eq "PASS"
+$placeholderFreePass = $placeholderDependencyStatus -eq "NO"
+$overall = $atLeastOneRenderable -and $noEmptyPrimaryOnComplete -and $targetSamplePresent -and $targetHasContractFields -and $outputReadyPass -and $placeholderFreePass
 
 $summary = @()
 $summary += "VSFAvatar Render Gate Summary"
@@ -136,6 +138,8 @@ $summary += "- GateR1 (at least one sample has mesh payloads): $(if($atLeastOneR
 $summary += "- GateR2 (complete-stage rows have primary error code): $(if($noEmptyPrimaryOnComplete){'PASS'}else{'FAIL'})"
 $summary += "- GateR3 (target sample row present): $(if($targetSamplePresent){'PASS'}else{'FAIL'})"
 $summary += "- GateR4 (target row has sidecar contract fields): $(if($targetHasContractFields){'PASS'}else{'FAIL'})"
+$summary += "- GateR5 (output_readiness is PASS): $(if($outputReadyPass){'PASS'}else{'FAIL'})"
+$summary += "- GateR6 (placeholder_dependency is NO): $(if($placeholderFreePass){'PASS'}else{'FAIL'})"
 $summary += "- Overall: $(if($overall){'PASS'}else{'FAIL'})"
 $summary += ""
 $summary += "Metrics"

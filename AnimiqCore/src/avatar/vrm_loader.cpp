@@ -3415,7 +3415,9 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             const bool has_node_transform =
                 mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i];
             const bool is_skinned = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
-            if (has_node_transform) {
+            const bool has_conflict = mesh_i < mesh_node_transform_conflict.size() && mesh_node_transform_conflict[mesh_i];
+
+            if (has_node_transform && !is_skinned && !has_conflict) {
                 if (ApplyPositionTransformToVertexBlob(
                         &mesh_payload.vertex_blob,
                         mesh_payload.vertex_stride,
