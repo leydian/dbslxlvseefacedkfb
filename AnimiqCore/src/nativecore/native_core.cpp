@@ -2869,11 +2869,10 @@ bool ShouldApplyArmPoseForAvatar(const AvatarPackage& avatar_pkg) {
     if (mode == StaticSkinningEnvMode::ForceOff) {
         return false;
     }
-    // Auto mode: allow arm pose for MIQ/VRM when the runtime has complete pose payloads.
+    // Auto mode: allow arm pose for MIQ only when the runtime has complete pose payloads.
     // Keep mesh static-skinning policy separate to avoid regressions in mesh-space safety rules.
     const bool supported_format =
-        avatar_pkg.source_type == AvatarSourceType::Miq ||
-        avatar_pkg.source_type == AvatarSourceType::Vrm;
+        avatar_pkg.source_type == AvatarSourceType::Miq;
     return supported_format &&
         !avatar_pkg.skin_payloads.empty() &&
         !avatar_pkg.skeleton_payloads.empty() &&
@@ -4222,11 +4221,10 @@ bool ApplyArmPoseToAvatar(
                 !avatar_pkg.skin_payloads.empty() &&
                 !avatar_pkg.skeleton_payloads.empty() &&
                 !avatar_pkg.skeleton_rig_payloads.empty();
-            if (avatar_pkg.source_type != AvatarSourceType::Miq &&
-                avatar_pkg.source_type != AvatarSourceType::Vrm) {
+            if (avatar_pkg.source_type != AvatarSourceType::Miq) {
                 PushAvatarWarningExclusive(
                     &avatar_it->second,
-                    "W_RENDER: ARM_POSE_FORMAT_UNSUPPORTED: arm pose is supported for MIQ/VRM payloads.",
+                    "W_RENDER: ARM_POSE_FORMAT_UNSUPPORTED: arm pose is supported for MIQ payloads.",
                     "ARM_POSE_FORMAT_UNSUPPORTED",
                     {"ARM_POSE_AUTO_ROLLBACK_VRM_ORIGIN", "ARM_POSE_FORMAT_UNSUPPORTED", "ARM_POSE_PAYLOAD_MISSING", "ARM_POSE_DISABLED_BY_STATIC_SKINNING_POLICY"});
             } else if (!payload_complete) {
@@ -4606,6 +4604,40 @@ bool ApplyArmPoseToAvatar(
                 apply_local_pose_to_bone(i, is_left, !is_left, weighted_pose);
             }
         };
+        auto apply_named_arm_chain_fallback_anyside = [&](const NcPoseBoneOffset& pose, float weight, std::initializer_list<const char*> segment_tokens) {
+            const NcPoseBoneOffset weighted_pose = scale_pose(pose, weight);
+            for (std::size_t i = 0U; i < bone_count; ++i) {
+                if (local_pose_applied[i]) {
+                    continue;
+                }
+                const std::string bone_key = NormalizeRefKey(rig_payload->bones[i].bone_name);
+                const bool has_left_hint =
+                    contains_token_with_boundary(bone_key, "left") ||
+                    bone_key.find("_l") != std::string::npos ||
+                    bone_key.find(".l") != std::string::npos ||
+                    bone_key.find("l_") != std::string::npos;
+                const bool has_right_hint =
+                    contains_token_with_boundary(bone_key, "right") ||
+                    bone_key.find("_r") != std::string::npos ||
+                    bone_key.find(".r") != std::string::npos ||
+                    bone_key.find("r_") != std::string::npos;
+                if (has_left_hint || has_right_hint) {
+                    continue;
+                }
+                bool segment_match = false;
+                for (const char* token : segment_tokens) {
+                    if (contains_token_with_boundary(bone_key, token)) {
+                        segment_match = true;
+                        break;
+                    }
+                }
+                if (!segment_match) {
+                    continue;
+                }
+                // Unknown side: apply as left-chain convention using averaged bilateral pose.
+                apply_local_pose_to_bone(i, true, false, weighted_pose);
+            }
+        };
 
         apply_humanoid_local_pose(avatar::HumanoidBoneId::LeftUpperArm, left_upper_arm_pose);
         apply_humanoid_local_pose(avatar::HumanoidBoneId::RightUpperArm, right_upper_arm_pose);
@@ -4619,6 +4651,12 @@ bool ApplyArmPoseToAvatar(
         apply_named_arm_chain_fallback(right_upper_arm_pose, false, 1.0f, {"upperarm", "uparm"});
         apply_named_arm_chain_fallback(left_upper_arm_pose, true, 0.35f, {"armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
         apply_named_arm_chain_fallback(right_upper_arm_pose, false, 0.35f, {"armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
+        NcPoseBoneOffset upper_arm_avg_pose = left_upper_arm_pose;
+        upper_arm_avg_pose.pitch_deg = (left_upper_arm_pose.pitch_deg + right_upper_arm_pose.pitch_deg) * 0.5f;
+        upper_arm_avg_pose.yaw_deg = (left_upper_arm_pose.yaw_deg + right_upper_arm_pose.yaw_deg) * 0.5f;
+        upper_arm_avg_pose.roll_deg = (left_upper_arm_pose.roll_deg + right_upper_arm_pose.roll_deg) * 0.5f;
+        apply_named_arm_chain_fallback_anyside(upper_arm_avg_pose, 1.0f, {"upperarm", "uparm"});
+        apply_named_arm_chain_fallback_anyside(upper_arm_avg_pose, 0.35f, {"armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
 
         std::vector<DirectX::XMMATRIX> posed_globals(bone_count, DirectX::XMMatrixIdentity());
         std::vector<bool> resolved(bone_count, false);

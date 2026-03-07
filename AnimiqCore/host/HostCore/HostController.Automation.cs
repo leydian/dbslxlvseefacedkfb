@@ -3,6 +3,12 @@ using System.Text.Json;
 
 namespace HostCore;
 
+public sealed record SpoutReceiverDiagnosticsSnapshot(
+    NcResultCode ResultCode,
+    bool Active,
+    string ChannelName,
+    string LastErrorCode);
+
 public sealed partial class HostController
 {
     private readonly WorkflowStore _workflowStore = new();
@@ -98,6 +104,27 @@ public sealed partial class HostController
         _spoutReceiverActive = false;
         _spoutReceiverChannel = string.Empty;
         return rc;
+    }
+
+    public SpoutReceiverDiagnosticsSnapshot GetSpoutReceiverDiagnostics()
+    {
+        var rc = NativeCoreInterop.nc_get_spout_receiver_diagnostics(out var diag);
+        if (rc != NcResultCode.Ok)
+        {
+            return new SpoutReceiverDiagnosticsSnapshot(
+                ResultCode: rc,
+                Active: _spoutReceiverActive,
+                ChannelName: _spoutReceiverChannel,
+                LastErrorCode: string.Empty);
+        }
+
+        _spoutReceiverActive = diag.Active != 0U;
+        _spoutReceiverChannel = diag.ChannelName ?? string.Empty;
+        return new SpoutReceiverDiagnosticsSnapshot(
+            ResultCode: rc,
+            Active: _spoutReceiverActive,
+            ChannelName: _spoutReceiverChannel,
+            LastErrorCode: diag.LastErrorCode ?? string.Empty);
     }
 
     private void EnsureAutomationLoaded()

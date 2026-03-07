@@ -2650,10 +2650,10 @@ public sealed class TrackingInputService : ITrackingInputService
 
         normalizedKey = normalized switch
         {
-            "blinkl" or "blinkleft" or "eyecloseleft" => "eyeblinkleft",
-            "blinkr" or "blinkright" or "eyecloseright" => "eyeblinkright",
-            "blink" or "eyeclose" => "eyeblink",
-            "mouthopen" or "visemeaa" or "aa" => "jawopen",
+            "blinkl" or "blinkleft" or "eyecloseleft" or "eyeblinkl" or "eyeblinkleft" => "eyeblinkleft",
+            "blinkr" or "blinkright" or "eyecloseright" or "eyeblinkr" or "eyeblinkright" => "eyeblinkright",
+            "blink" or "eyeclose" or "eyeblink" => "eyeblink",
+            "mouthopen" or "visemeaa" or "aa" or "jaw" or "jawopenness" => "jawopen",
             "vrcvaa" => "jawopen",
             "moutha" => "jawopen",
             "mouthi" or "vrcvih" => "mouthsmileleft",
@@ -2921,6 +2921,13 @@ public sealed class TrackingInputService : ITrackingInputService
         if (IsUpperBodyChannel(normalized))
         {
             return ApplyUpperBodyMappedValue(normalized, value);
+        }
+
+        // Some trackers publish blendshape weights as percentages (0..100).
+        // Normalize those to 0..1 before expression post-processing.
+        if (value > 1.5f)
+        {
+            value *= 0.01f;
         }
 
         _expressionCache[normalized] = value;

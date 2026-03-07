@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -542,10 +543,130 @@ internal sealed class WorkflowEngine : IDisposable
                 return !previousKnown || (previous != current && current == desired);
             case WorkflowNodeKind.OscTrigger:
                 var address = GetStringParam(node, "address", "/animiq/event/default");
-                return oscEvents.Any(e => string.Equals(e.Address, address, StringComparison.OrdinalIgnoreCase));
+                return oscEvents.Any(e => MatchesOscTrigger(node, e, address));
             default:
                 return false;
         }
+    }
+
+    private static bool MatchesOscTrigger(WorkflowNodeModel node, WorkflowOscEvent evt, string addressPattern)
+    {
+        if (!MatchesOscAddress(addressPattern, evt.Address))
+        {
+            return false;
+        }
+
+        if (node.Params.TryGetValue("float_min", out var floatMinRaw) &&
+            TryParseInvariantFloat(floatMinRaw, out var floatMin))
+        {
+            if (!evt.FloatValue.HasValue || evt.FloatValue.Value < floatMin)
+            {
+                return false;
+            }
+        }
+
+        if (node.Params.TryGetValue("float_max", out var floatMaxRaw) &&
+            TryParseInvariantFloat(floatMaxRaw, out var floatMax))
+        {
+            if (!evt.FloatValue.HasValue || evt.FloatValue.Value > floatMax)
+            {
+                return false;
+            }
+        }
+
+        if (node.Params.TryGetValue("float_equals", out var floatEqualsRaw) &&
+            TryParseInvariantFloat(floatEqualsRaw, out var floatEquals))
+        {
+            if (!evt.FloatValue.HasValue || Math.Abs(evt.FloatValue.Value - floatEquals) > 0.0001f)
+            {
+                return false;
+            }
+        }
+
+        var ignoreCase = GetBoolParam(node, "string_ignore_case", true);
+        var cmp = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (node.Params.TryGetValue("string_equals", out var stringEqualsRaw) &&
+            !string.IsNullOrWhiteSpace(stringEqualsRaw))
+        {
+            if (!string.Equals(evt.StringValue, stringEqualsRaw.Trim(), cmp))
+            {
+                return false;
+            }
+        }
+
+        if (node.Params.TryGetValue("string_contains", out var stringContainsRaw) &&
+            !string.IsNullOrWhiteSpace(stringContainsRaw))
+        {
+            var needle = stringContainsRaw.Trim();
+            if (string.IsNullOrWhiteSpace(evt.StringValue) || evt.StringValue.IndexOf(needle, cmp) < 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool MatchesOscAddress(string pattern, string address)
+    {
+        var normalizedPattern = string.IsNullOrWhiteSpace(pattern) ? "/animiq/event/default" : pattern.Trim();
+        if (normalizedPattern.Contains('*') || normalizedPattern.Contains('?'))
+        {
+            return WildcardMatch(normalizedPattern, address);
+        }
+        return string.Equals(address, normalizedPattern, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool WildcardMatch(string pattern, string input)
+    {
+        if (string.IsNullOrEmpty(pattern))
+        {
+            return string.IsNullOrEmpty(input);
+        }
+
+        var p = 0;
+        var s = 0;
+        var star = -1;
+        var match = 0;
+
+        while (s < input.Length)
+        {
+            if (p < pattern.Length &&
+                (pattern[p] == '?' || char.ToLowerInvariant(pattern[p]) == char.ToLowerInvariant(input[s])))
+            {
+                p++;
+                s++;
+                continue;
+            }
+
+            if (p < pattern.Length && pattern[p] == '*')
+            {
+                star = p++;
+                match = s;
+                continue;
+            }
+
+            if (star >= 0)
+            {
+                p = star + 1;
+                s = ++match;
+                continue;
+            }
+
+            return false;
+        }
+
+        while (p < pattern.Length && pattern[p] == '*')
+        {
+            p++;
+        }
+
+        return p == pattern.Length;
+    }
+
+    private static bool TryParseInvariantFloat(string? raw, out float value)
+    {
+        return float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
     private static bool GetStateValue(WorkflowTickContext ctx, string key)

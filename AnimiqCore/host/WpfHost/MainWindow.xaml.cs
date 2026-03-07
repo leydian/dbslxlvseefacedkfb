@@ -2509,7 +2509,11 @@ public partial class MainWindow : Window
         AutomationGraphJsonTextBox.Text = json;
         var snapshot = _controller.GetAutomationSnapshot();
         AutomationEnabledCheckBox.IsChecked = snapshot.Enabled;
-        AutomationStatusText.Text = $"nodes={snapshot.NodeCount}, edges={snapshot.EdgeCount}, pending={snapshot.PendingContinuationCount}, lastEvent={snapshot.LastEvent}";
+        var receiver = _controller.GetSpoutReceiverDiagnostics();
+        AutomationStatusText.Text =
+            $"nodes={snapshot.NodeCount}, edges={snapshot.EdgeCount}, pending={snapshot.PendingContinuationCount}, " +
+            $"lastEvent={snapshot.LastEvent}, lastError={NormalizeDiagField(snapshot.LastError)}, " +
+            $"receiver(active={receiver.Active}, channel={NormalizeDiagField(receiver.ChannelName)}, err={NormalizeDiagField(receiver.LastErrorCode)})";
         RenderAutomationPreview(json);
     }
 
@@ -3128,6 +3132,9 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, switches={tracking.RecentSourceSwitchCount}, switch_reason={tracking.LastSourceSwitchReason}, switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, ifm_keys_ok={tracking.IfmAcceptedKeySample}, ifm_keys_drop={tracking.IfmDroppedKeySample}, err={tracking.LastErrorCode}");
         var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, tracking);
         runtimeSb.AppendLine($"FeatureGate: class={gates.CommonClass}, reason={NormalizeDiagField(gates.CommonReasonCode)}, arm={gates.ArmPose.Enabled}/{NormalizeDiagField(gates.ArmPose.ReasonCode)}, shadow={gates.RealtimeShadow.Enabled}/{NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, expression={gates.Expression.Enabled}/{NormalizeDiagField(gates.Expression.ReasonCode)}");
+        var receiverDiag = _controller.GetSpoutReceiverDiagnostics();
+        runtimeSb.AppendLine(
+            $"SpoutReceiver: rc={receiverDiag.ResultCode}, active={receiverDiag.Active}, channel={NormalizeDiagField(receiverDiag.ChannelName)}, err={NormalizeDiagField(receiverDiag.LastErrorCode)}");
         runtimeSb.AppendLine(BuildCommonCauseTriageLine(snapshot, tracking));
         runtimeSb.AppendLine(BuildCommonCauseActionLine(snapshot, tracking));
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");

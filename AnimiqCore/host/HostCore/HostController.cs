@@ -12,6 +12,7 @@ public sealed partial class HostController
 {
     private const int MaxLogEntries = 200;
     private const int UiFlowTimingSampleCapacity = 20;
+    private const bool AvatarRenderIsolationMode = false;
     private static readonly TimeSpan TickDiagnosticsPublishInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan RuntimeCaptureRefreshInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan CommonCauseTriageDelay = TimeSpan.FromMilliseconds(1200);
@@ -350,10 +351,13 @@ public sealed partial class HostController
                 _ = ResolveAndApplyAvatarPreviewFlipOnLoad(normalizedPath);
                 _lastSubmittedPosePayload = Array.Empty<NcPoseBoneOffset>();
                 ApplyPoseOffsetsInternal("ApplyPoseOffsetsLoadAvatar");
-                var neutralExprRc = TryApplyNeutralExpressionWeightsForActiveAvatar();
-                if (neutralExprRc != NcResultCode.Ok)
+                if (!AvatarRenderIsolationMode)
                 {
-                    TrackResult("SetExpressionWeightsNeutralLoadAvatar", neutralExprRc);
+                    var neutralExprRc = TryApplyNeutralExpressionWeightsForActiveAvatar();
+                    if (neutralExprRc != NcResultCode.Ok)
+                    {
+                        TrackResult("SetExpressionWeightsNeutralLoadAvatar", neutralExprRc);
+                    }
                 }
                 ScheduleCommonCauseTriage();
                 _lastLoadFailureGuidance = string.Empty;
@@ -941,8 +945,9 @@ public sealed partial class HostController
         }
         Arkit52ResolutionSummary? arkit52Summary = null;
         IReadOnlyDictionary<string, float>? latestExpressionWeights = null;
-        if (_trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
-            expressionWeights.Count > 0)
+        if (!AvatarRenderIsolationMode &&
+            _trackingInputService.TryGetLatestExpressionWeights(out var expressionWeights) &&
+                 expressionWeights.Count > 0)
         {
             latestExpressionWeights = expressionWeights;
             var stageWatch = Stopwatch.StartNew();
@@ -963,7 +968,7 @@ public sealed partial class HostController
                 }
             }
         }
-        else
+        else if (!AvatarRenderIsolationMode)
         {
             var neutralExprRc = TryApplyNeutralExpressionWeightsForActiveAvatar();
             if (neutralExprRc != NcResultCode.Ok)
@@ -1026,7 +1031,9 @@ public sealed partial class HostController
             }
         }
 
-        var runtimePosePayload = BuildRuntimePosePayload(_lastAutoUpperBodyPose);
+        var runtimePosePayload = AvatarRenderIsolationMode
+            ? BuildRuntimePosePayload(TrackingUpperBodyPose.Neutral(status: "isolation"))
+            : BuildRuntimePosePayload(_lastAutoUpperBodyPose);
         var poseRc = SubmitPosePayload(runtimePosePayload);
         if (poseRc != NcResultCode.Ok)
         {
@@ -1552,15 +1559,48 @@ public sealed partial class HostController
             return infosRc;
         }
 
-        var payload = new NcExpressionWeight[written];
+        var zeroKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < written; i++)
         {
-            payload[i] = new NcExpressionWeight
+            if (!string.IsNullOrWhiteSpace(infos[i].Name))
             {
-                Name = infos[i].Name,
-                Weight = 0.0f,
-            };
+                zeroKeys.Add(infos[i].Name);
+            }
         }
+
+        foreach (var key in Arkit52Channels.NormalizedOrder)
+        {
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                zeroKeys.Add(key);
+            }
+        }
+
+        var globalResetAliases = new[]
+        {
+            "blink", "blinking", "vrmblink",
+            "a", "i", "u", "e", "o",
+            "vrcv_aa", "vrcv_ih", "vrcv_ou", "vrcv_e", "vrcv_oh",
+            "visemeaa", "visemeih", "visemeu", "visemee", "visemeo",
+            "joy", "happy", "angry", "sorrow", "sad",
+            "lookup", "lookdown", "lookleft", "lookright",
+        };
+        for (var i = 0; i < globalResetAliases.Length; i++)
+        {
+            var normalized = Arkit52Channels.NormalizeKey(globalResetAliases[i]);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                zeroKeys.Add(normalized);
+            }
+        }
+
+        var payload = zeroKeys
+            .Select(static name => new NcExpressionWeight
+            {
+                Name = name,
+                Weight = 0.0f,
+            })
+            .ToArray();
 
         return NativeCoreInterop.nc_set_expression_weights(payload, (uint)payload.Length);
     }
@@ -2129,9 +2169,9 @@ public sealed partial class HostController
             fallbackCount++;
         }
 
-        // Also emit common VRM preset aliases so avatars bound to preset names
-        // (blink, vowels, emotion presets) animate even when source payload is ARKit-centric.
-        AddVrmPresetAliases(normalized);
+        // Keep blink preset live for avatars that only bind blink on presets,
+        // but hard-clear vowel/emotion presets that may drive outfit visibility clips.
+        SyncVrmPresetChannelsSafe(normalized);
 
         var payload = normalized
             .Select(static pair => new NcExpressionWeight
@@ -2164,9 +2204,9 @@ public sealed partial class HostController
 
         var blink = MaxOf(normalized, "eyeblinkleft", "eyeblinkright", "blink");
         var aa = MaxOf(normalized, "jawopen", "mouthopen", "visemeaa", "aa");
-        var ii = MaxOf(normalized, "mouthsmileleft", "mouthsmileright", "mouthstretchleft", "mouthstretchright", "visemeih", "ih", "i");
+        var ii = MaxOf(normalized, "mouthstretchleft", "mouthstretchright", "visemeih", "ih", "i");
         var uu = MaxOf(normalized, "mouthpucker", "mouthfunnel", "visemeu", "u");
-        var ee = MaxOf(normalized, "mouthsmileleft", "mouthsmileright", "visemee", "e");
+        var ee = MaxOf(normalized, "visemee", "e");
         var oo = MaxOf(normalized, "mouthfunnel", "mouthpucker", "visemeo", "o");
         var joy = MaxOf(normalized, "mouthsmileleft", "mouthsmileright", "joy");
         var angry = MaxOf(normalized, "browdownleft", "browdownright", "angry");
@@ -2241,6 +2281,40 @@ public sealed partial class HostController
             }
         }
         return Math.Clamp(best, 0.0f, 1.0f);
+    }
+
+    private static void SyncVrmPresetChannelsSafe(Dictionary<string, float> normalized)
+    {
+        var blink = MaxOf(normalized, "eyeblinkleft", "eyeblinkright", "blink");
+        SetAliasOverwrite(normalized, blink, "blink", "blinking", "vrmblink");
+        SetAliasOverwrite(normalized, 0.0f, "a", "vrcv_aa", "visemeaa");
+        SetAliasOverwrite(normalized, 0.0f, "i", "vrcv_ih");
+        SetAliasOverwrite(normalized, 0.0f, "u", "vrcv_ou");
+        SetAliasOverwrite(normalized, 0.0f, "e", "vrcv_e");
+        SetAliasOverwrite(normalized, 0.0f, "o", "vrcv_oh");
+        SetAliasOverwrite(normalized, 0.0f, "joy", "happy");
+        SetAliasOverwrite(normalized, 0.0f, "angry");
+        SetAliasOverwrite(normalized, 0.0f, "sorrow", "sad");
+        SetAliasOverwrite(normalized, 0.0f, "lookup", "lookdown", "lookleft", "lookright");
+    }
+
+    private static void SetAliasOverwrite(Dictionary<string, float> normalized, float value, params string[] aliases)
+    {
+        if (aliases is null || aliases.Length == 0)
+        {
+            return;
+        }
+
+        var clamped = Math.Clamp(value, 0.0f, 1.0f);
+        for (var i = 0; i < aliases.Length; i++)
+        {
+            var key = Arkit52Channels.NormalizeKey(aliases[i]);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                continue;
+            }
+            normalized[key] = clamped;
+        }
     }
 
     private static bool TryResolveFallbackChannel(
@@ -2363,8 +2437,8 @@ public sealed partial class HostController
             rollDeg = 0.0f;
         }
 
-        var posPitchDeg = Math.Clamp((-frame.HeadPosY * 120.0f) + (frame.HeadPosZ * 80.0f), -35.0f, 35.0f);
-        var posYawDeg = Math.Clamp(frame.HeadPosX * 100.0f, -28.0f, 28.0f);
+        var posPitchDeg = Math.Clamp((-frame.HeadPosY * 92.0f) + (frame.HeadPosZ * 42.0f), -28.0f, 28.0f);
+        var posYawDeg = Math.Clamp(frame.HeadPosX * 125.0f, -34.0f, 34.0f);
         if (!hasHeadRot || (Math.Abs(pitchDeg) < 0.2f && Math.Abs(yawDeg) < 0.2f && Math.Abs(rollDeg) < 0.2f))
         {
             pitchDeg = posPitchDeg;
@@ -2384,14 +2458,14 @@ public sealed partial class HostController
         var exprYawBoost = ((browDownR - browDownL) + (browOuterUpR - browOuterUpL)) * 14.0f;
         var resolvedPitch = pitchDeg + exprPitchBoost;
         var resolvedYaw = yawDeg + exprYawBoost;
-        trunkPitchDeg = Math.Clamp(resolvedPitch * gain * 0.55f, -20.0f, 20.0f);
-        trunkYawDeg = Math.Clamp(resolvedYaw * gain * 1.35f, -40.0f, 40.0f);
+        trunkPitchDeg = Math.Clamp(resolvedPitch * gain * 0.35f, -16.0f, 16.0f);
+        trunkYawDeg = Math.Clamp(resolvedYaw * gain * 1.65f, -44.0f, 44.0f);
         trunkPitchDeg = QuantizeDeg(trunkPitchDeg, 0.35f);
         trunkYawDeg = QuantizeDeg(trunkYawDeg, 0.35f);
 
-        var shoulderPitch = Math.Clamp((resolvedPitch * 0.20f + rollDeg * 0.08f) * gain, -18.0f, 18.0f);
-        var leftUpperArmPitch = Math.Clamp((resolvedPitch * 0.48f + resolvedYaw * 0.12f) * gain, -40.0f, 40.0f);
-        var rightUpperArmPitch = Math.Clamp((resolvedPitch * 0.48f - resolvedYaw * 0.12f) * gain, -40.0f, 40.0f);
+        var shoulderPitch = Math.Clamp((resolvedPitch * 0.12f + rollDeg * 0.12f) * gain, -12.0f, 12.0f);
+        var leftUpperArmPitch = Math.Clamp((resolvedPitch * 0.28f + resolvedYaw * 0.22f) * gain, -36.0f, 36.0f);
+        var rightUpperArmPitch = Math.Clamp((resolvedPitch * 0.28f - resolvedYaw * 0.22f) * gain, -36.0f, 36.0f);
         var confidence = Math.Clamp(0.35 + (gain * 0.45), 0.0, 1.0);
         pose = new TrackingUpperBodyPose(
             IsValid: true,
