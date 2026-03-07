@@ -2,6 +2,38 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - Release-readiness stabilization, blocker triage, and documentation promotion
+
+### Summary
+
+Executed a high-priority stabilization pass to unblock the host release pipeline and formalize key documentation:
+
+- resolved NuGet restore blockers via local mirror bootstrapping,
+- triaged WinUI `WMC9999` SDK mismatch with detailed matrix reporting,
+- cleared stale Unity project locks to unblock MIQ validation,
+- achieved `ReleaseCandidateWpfOnly: PASS` and verified onboarding KPI sessions,
+- promoted 10-persona plan, KPI policy, and rebrand docs to reference storage,
+- published dedicated MediaPipe user setup and troubleshooting guide.
+
+### Added
+
+- `AnimiqCore/docs/public/webcam-mediapipe-setup.md` (New user guide)
+- `AnimiqCore/docs/reference/persona_action_plan.md` (Promoted)
+- `AnimiqCore/docs/reference/release_kpi_policy.md` (Promoted)
+- `AnimiqCore/docs/reference/rebrand_and_migration.md` (Promoted)
+
+### Changed
+
+- `AnimiqCore/README.md`
+  - updated validation snapshot date and status (WPF PASS).
+  - added link to MediaPipe setup guide.
+
+### Verification
+
+- `tools/release_gate_dashboard.ps1`: `ReleaseCandidateWpfOnly: PASS`
+- `tools/publish_hosts.ps1` (WPF): PASS
+- `tools/docs_quality_gate.ps1`: PASS
+
 ## 2026-03-07 - VRM node-transform bake restoration and displacement diagnostics hardening
 
 ### Summary

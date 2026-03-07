@@ -43,11 +43,14 @@ Optional WinUI diagnostics track:
 powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1 -IncludeWinUi
 ```
 
-## Current Validation Snapshot (2026-03-06)
+## Current Validation Snapshot (2026-03-07)
 
 - `tools/vsfavatar_quality_gate.ps1 -UseFixedSet`: PASS
 - `tools/vrm_quality_gate.ps1 -Profile fixed5`: PASS
-- `tools/publish_hosts.ps1`: WPF PASS, WinUI optional diagnostics track (environment-dependent XAML compile failures still possible)
+- `tools/publish_hosts.ps1`: WPF PASS (`ReleaseCandidateWpfOnly: PASS`), WinUI `WMC9999` triaged.
+- `Onboarding KPI Gate`: PASS (5 sessions verified)
+
+For webcam setup details, see: [docs/public/webcam-mediapipe-setup.md](./docs/public/webcam-mediapipe-setup.md)
 
 ## Core Runtime Surface
 
