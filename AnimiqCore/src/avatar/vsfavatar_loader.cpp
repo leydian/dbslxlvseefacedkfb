@@ -545,7 +545,21 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
     if (const char* env = std::getenv("VSF_SIDECAR_PATH")) {
         sidecar_path = env;
     }
-    const auto timeout_ms = GetEnvU32("VSF_SIDECAR_TIMEOUT_MS", 15000U);
+    const auto env_timeout = GetEnvU32("VSF_SIDECAR_TIMEOUT_MS", 0U);
+    std::uint32_t timeout_ms = 15000U;
+    if (env_timeout > 0U) {
+        timeout_ms = env_timeout;
+    } else {
+        // Dynamic timeout based on file size: 15s base + 500ms per MB, capped at 60s.
+        try {
+            const auto size = fs::file_size(path);
+            const auto extra_ms = static_cast<std::uint32_t>((size / (1024ULL * 1024ULL)) * 500ULL);
+            const std::uint32_t candidate_timeout = 15000U + extra_ms;
+            timeout_ms = (candidate_timeout > 60000U) ? 60000U : candidate_timeout;
+        } catch (...) {
+            // Fallback to default 15s if file_size fails
+        }
+    }
 
     const auto ran = RunSidecar(sidecar_path, path, timeout_ms);
     if (!ran.ok) {

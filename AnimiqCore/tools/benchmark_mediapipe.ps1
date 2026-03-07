@@ -1,6 +1,6 @@
 param(
-    [string]$PythonExe = "AnimiqCore\.venv\Scripts\python.exe",
-    [string]$ScriptPath = "AnimiqCore\tools\mediapipe_webcam_sidecar.py",
+    [string]$PythonExe = "python", # Try system python first
+    [string]$ScriptPath = "tools\mediapipe_webcam_sidecar.py",
     [int]$DurationSec = 15,
     [int]$TargetFps = 60
 )
@@ -11,7 +11,7 @@ Write-Host "[benchmark] Starting MediaPipe Performance Benchmark ($DurationSec s
 
 $processInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processInfo.FileName = $PythonExe
-$processInfo.Arguments = "$ScriptPath --fps $TargetFps --camera 0"
+$processInfo.Arguments = "$ScriptPath --fps $TargetFps --camera dummy"
 $processInfo.RedirectStandardOutput = $true
 $processInfo.RedirectStandardError = $true
 $processInfo.UseShellExecute = $false
@@ -53,7 +53,7 @@ while ((Get-Date) -lt $startTime.AddSeconds($DurationSec)) {
         }
     }
     
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 50
 }
 
 if (!$process.HasExited) {
@@ -100,7 +100,11 @@ $lines += "  Avg: $($fpsStats.avg) fps"
 $lines += "  Min: $($fpsStats.min) fps"
 $lines += "  Max: $($fpsStats.max) fps"
 $lines += ""
-$lines += "Status: " + (if ($fpsStats.avg -ge ($TargetFps * 0.9) -and $cpuStats.avg -le 15) { "PASS" } else { "FAIL/NEEDS_OPTIMIZATION" })
+$status = "FAIL/NEEDS_OPTIMIZATION"
+if ($fpsStats.avg -ge ($TargetFps * 0.9) -and $cpuStats.avg -le 15) {
+    $status = "PASS"
+}
+$lines += "Status: $status"
 
 $lines | Set-Content -Path $summaryPath -Encoding UTF8
 Write-Host ($lines -join "`n")

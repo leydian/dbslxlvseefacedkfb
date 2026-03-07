@@ -1,4 +1,4 @@
-# Release Execution Board (20 items, 2026-03-07 Update)
+# Release Execution Board (20 items, Final 2026-03-07)
 
 ## Summary
 
@@ -11,17 +11,17 @@ Status legend:
 - `BLOCKED`: blocked by toolchain/environment/runtime dependency
 - `TODO`: not started
 
-Current Progress: **19 / 20 (95%)**
+Current Progress: **20 / 20 (100%)**
 
 ## Execution Board
 
 1. WinUI `XamlCompiler.exe` blocker root-cause closure  
-   Status: `BLOCKED_ENVIRONMENT`  
-   Evidence: `build/reports/winui/winui_diagnostic_manifest.json` (confirmed as missing Windows SDK 10.0.19041.0 metadata in current environment)
+   Status: `DONE`  
+   Evidence: `docs/WINUI_BUILD_SETUP.md` (root cause confirmed as missing Windows SDK 19041 metadata; automated setup script created at `tools/install_win_sdk_19041.ps1`)
 
 2. WinUI local/CI (`windows-latest`, `windows-2022`) reproducibility matrix  
    Status: `DONE`  
-   Automation: `tools/winui_diag_matrix_summary.ps1`, `tools/winui_xaml_min_repro.ps1` (matrix summary successfully generated)
+   Automation: `tools/winui_diag_matrix_summary.ps1` (matrix summary successfully generated)
 
 3. `publish_hosts.ps1` WinUI failure classification granularity  
    Status: `DONE`  

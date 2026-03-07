@@ -26,9 +26,9 @@ const char* SourceTypeName(animiq::avatar::AvatarSourceType t) {
 
 void PrintUsage() {
     std::cout << "Usage:\n"
-              << "  animiq_cli <path_to_avatar_file>\n"
+              << "  animiq_cli <path_to_avatar_file> [--format=vrm|miq|vsfavatar]\n"
               << "Examples:\n"
-              << "  animiq_cli D:\\\\avatars\\\\sample.vsfavatar\n";
+              << "  animiq_cli sample.txt --format=vrm\n";
 }
 
 }  // namespace
@@ -39,9 +39,28 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const std::string path = argv[1];
+    std::string path;
+    animiq::avatar::AvatarLoadOptions options;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.find("--format=") == 0) {
+            std::string fmt = arg.substr(9);
+            if (fmt == "vrm") options.forced_source_type = animiq::avatar::AvatarSourceType::Vrm;
+            else if (fmt == "miq") options.forced_source_type = animiq::avatar::AvatarSourceType::Miq;
+            else if (fmt == "vsfavatar") options.forced_source_type = animiq::avatar::AvatarSourceType::VsfAvatar;
+        } else if (path.empty()) {
+            path = arg;
+        }
+    }
+
+    if (path.empty()) {
+        PrintUsage();
+        return 1;
+    }
+
     animiq::avatar::AvatarLoaderFacade loader;
-    auto result = loader.Load(path);
+    auto result = loader.Load(path, options);
     if (!result.ok) {
         std::cerr << "Load failed: " << result.error << "\n";
         return 2;
