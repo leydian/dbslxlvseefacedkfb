@@ -7,7 +7,7 @@
 - `miq`: 31 reports
 - `host`: 13 reports
 - `ui`: 9 reports
-- `vsfavatar`: 10 reports
+- `vsfavatar`: 11 reports
 - `r01`: 4 reports
 - `vxavatar`: 4 reports
 - `wpf`: 16 reports
@@ -112,6 +112,7 @@
 - Newly added: review `2026-03-06_release_roi_execution_hardening.md` for release dashboard SSOT hardening, FPS-budget/per-sample gate policy wiring, and diagnostics manifest reproducibility metadata.
 - Newly added: review `2026-03-06_vsfavatar_preview_output_policy_and_render_gate_split.md` for VSFAvatar placeholder preview/output split policy, `VSF_ALLOW_VSF_PLACEHOLDER_RENDER` scope, and render-gate split metrics (`output_readiness`, `placeholder_dependency`).
 - Newly added: review `2026-03-07_vsfavatar_output_readiness_hardening.md` for sidecar `object_stub_v1` payload contract, output-path placeholder block default (`VSF_PLACEHOLDER_OUTPUT_BLOCKED`), and fixed-set gate evidence (`output_readiness: PASS`, `placeholder_dependency: NO`).
+- Newly added: review `2026-03-08_vsfavatar_sidecar_timeout_and_cmdline_fix.md` for false-unsupported root cause (`SIDECAR_TIMEOUT` fallback + CreateProcess cmdline termination), default timeout uplift (`60000ms`), and `NewOnYou.vsfavatar` recovery evidence (`PrimaryError=NONE`, `MeshPayloads=1`).
 - Newly added: review `2026-03-06_host_perf_hotpath_and_metrics_contract_update.md` for frame-loop allocation reduction, metrics provenance/memory-sample contract expansion, and dist publish hygiene updates.
 - Newly added: review `2026-03-06_host_latency_hotpath_lock_and_wpf_diag_cache.md` for tracking P95 hotpath optimization, `nc_set_tracking_frame` lock-window reduction via dirty-flag staging, and WPF runtime diagnostics static-block cache split.
 - Newly added: review `2026-03-06_vrm_mtoon_diagnostics_and_safe_material_fallback.md` for VRM matcap diagnostics precision, unresolved material-slot safe fallback behavior, and last-warning render-priority surfacing.

@@ -89,6 +89,7 @@ static core::Result<std::string> RunSidecar(
     PROCESS_INFORMATION pi {};
     std::string cmd = EscapeCmdArg(sidecar_path) + " " + EscapeCmdArg(avatar_path);
     std::vector<char> cmd_mutable(cmd.begin(), cmd.end());
+    cmd_mutable.push_back('\0');
     ZeroMemory(&pi, sizeof(pi));
 
     // Create a Job Object to ensure the sidecar process is terminated if the host process exits unexpectedly.
@@ -546,19 +547,9 @@ core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& p
         sidecar_path = env;
     }
     const auto env_timeout = GetEnvU32("VSF_SIDECAR_TIMEOUT_MS", 0U);
-    std::uint32_t timeout_ms = 15000U;
+    std::uint32_t timeout_ms = 60000U;
     if (env_timeout > 0U) {
         timeout_ms = env_timeout;
-    } else {
-        // Dynamic timeout based on file size: 15s base + 500ms per MB, capped at 60s.
-        try {
-            const auto size = fs::file_size(path);
-            const auto extra_ms = static_cast<std::uint32_t>((size / (1024ULL * 1024ULL)) * 500ULL);
-            const std::uint32_t candidate_timeout = 15000U + extra_ms;
-            timeout_ms = (candidate_timeout > 60000U) ? 60000U : candidate_timeout;
-        } catch (...) {
-            // Fallback to default 15s if file_size fails
-        }
     }
 
     const auto ran = RunSidecar(sidecar_path, path, timeout_ms);

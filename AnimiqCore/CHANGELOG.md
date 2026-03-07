@@ -2,6 +2,27 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-08 - VSFAvatar sidecar timeout default uplift (unsupported-on-complete hotfix)
+
+### Summary
+
+Resolved a recurring `.vsfavatar` load failure pattern where host UI showed `Load failed: Unsupported` even when `parser_stage=complete`.
+Root cause was sidecar timeout fallback to inhouse path, which yielded `mesh_payloads=0` and contract failure.
+
+### Changed
+
+- `AnimiqCore/src/avatar/vsfavatar_loader.cpp`
+  - default sidecar timeout is now `60000ms` when `VSF_SIDECAR_TIMEOUT_MS` is not explicitly set.
+  - environment override behavior is unchanged (`VSF_SIDECAR_TIMEOUT_MS` still takes priority).
+  - restored explicit null termination for sidecar command-line buffer passed to `CreateProcessA`
+    (`cmd_mutable.push_back('\0')`) to avoid sidecar path/argument handoff instability.
+
+### Verification
+
+- Repro sample: `sample/NewOnYou.vsfavatar`
+  - before: sidecar timeout fallback could produce `AVATAR_RENDER_READY_MESH_PAYLOAD_MISSING`
+  - after: `PrimaryError=NONE`, `MeshPayloads=1`, and sidecar path completes without timeout fallback under the same environment.
+
 ## 2026-03-07 - VSFAvatar output-readiness hardening (placeholder output block + stub payload contract)
 
 ### Summary
