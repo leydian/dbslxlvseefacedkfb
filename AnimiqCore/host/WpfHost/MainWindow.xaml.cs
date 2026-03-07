@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -167,6 +168,7 @@ public partial class MainWindow : Window
         MarkAllDirty(includeLogs: true);
         ProcessPendingUpdates(force: true);
         RefreshGuides();
+        RefreshAutomationUi();
         _uiReady = true;
         _uiRefreshTimer.Start();
     }
@@ -2430,6 +2432,7 @@ public partial class MainWindow : Window
         var elapsed = _frameTimer.Elapsed;
         _frameTimer.Restart();
         _ = _controller.Tick((float)elapsed.TotalSeconds);
+        _controller.TickAutomation();
 
         // Native rendering currently targets the window HWND, so WPF controls
         // need explicit invalidation to keep visual layering stable.
@@ -2471,6 +2474,112 @@ public partial class MainWindow : Window
             _pendingAvatarRefresh = true;
             _pendingLogsRefresh = true;
         });
+    }
+
+    private void AutomationLoad_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshAutomationUi();
+    }
+
+    private void AutomationApply_Click(object sender, RoutedEventArgs e)
+    {
+        if (_controller.SetAutomationGraphJson(AutomationGraphJsonTextBox.Text, out var error))
+        {
+            RefreshAutomationUi();
+            return;
+        }
+
+        MessageBox.Show(
+            this,
+            $"자동화 그래프 적용 실패: {error}",
+            "Automation",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+    }
+
+    private void AutomationEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        _controller.SetAutomationEnabled(AutomationEnabledCheckBox.IsChecked == true);
+        RefreshAutomationUi();
+    }
+
+    private void RefreshAutomationUi()
+    {
+        var json = _controller.GetAutomationGraphJson();
+        AutomationGraphJsonTextBox.Text = json;
+        var snapshot = _controller.GetAutomationSnapshot();
+        AutomationEnabledCheckBox.IsChecked = snapshot.Enabled;
+        AutomationStatusText.Text = $"nodes={snapshot.NodeCount}, edges={snapshot.EdgeCount}, pending={snapshot.PendingContinuationCount}, lastEvent={snapshot.LastEvent}";
+        RenderAutomationPreview(json);
+    }
+
+    private void RenderAutomationPreview(string json)
+    {
+        AutomationPreviewCanvas.Children.Clear();
+        try
+        {
+            var model = JsonSerializer.Deserialize<WorkflowGraphModel>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            });
+            if (model is null)
+            {
+                return;
+            }
+
+            var nodeById = model.Nodes.ToDictionary(n => n.Id, n => n, StringComparer.OrdinalIgnoreCase);
+            foreach (var edge in model.Edges)
+            {
+                if (!nodeById.TryGetValue(edge.SourceId, out var src) || !nodeById.TryGetValue(edge.TargetId, out var dst))
+                {
+                    continue;
+                }
+                var line = new System.Windows.Shapes.Line
+                {
+                    X1 = src.X + 74,
+                    Y1 = src.Y + 20,
+                    X2 = dst.X + 6,
+                    Y2 = dst.Y + 20,
+                    Stroke = new SolidColorBrush(Color.FromRgb(96, 128, 178)),
+                    StrokeThickness = 1.5,
+                    Opacity = 0.8,
+                };
+                AutomationPreviewCanvas.Children.Add(line);
+            }
+
+            foreach (var node in model.Nodes)
+            {
+                var border = new Border
+                {
+                    Width = 148,
+                    Height = 40,
+                    CornerRadius = new CornerRadius(8),
+                    BorderThickness = new Thickness(1),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(79, 109, 150)),
+                    Background = new SolidColorBrush(Color.FromRgb(23, 38, 58)),
+                    Child = new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(node.Title) ? $"{node.Kind}" : node.Title,
+                        Foreground = Brushes.White,
+                        Margin = new Thickness(8, 8, 8, 8),
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    },
+                };
+                Canvas.SetLeft(border, node.X);
+                Canvas.SetTop(border, node.Y);
+                AutomationPreviewCanvas.Children.Add(border);
+            }
+        }
+        catch
+        {
+            var text = new TextBlock
+            {
+                Text = "미리보기 불가 (JSON 파싱 실패)",
+                Foreground = new SolidColorBrush(Color.FromRgb(224, 84, 84)),
+                Margin = new Thickness(8),
+            };
+            AutomationPreviewCanvas.Children.Add(text);
+        }
     }
 
     private void Controller_ErrorRaised(object? sender, HostLogEntry e)
@@ -3017,6 +3126,8 @@ public partial class MainWindow : Window
         runtimeSb.AppendLine($"LastFrameMs: {runtime.LastFrameMs:F3}");
         var tracking = _controller.TrackingDiagnostics;
         runtimeSb.AppendLine($"Tracking: active={tracking.IsActive}, source={tracking.SourceType}, lock={tracking.SourceLockMode}, active_source={tracking.ActiveSource}, switch_blocked={tracking.SwitchBlockedReason}, source_status={tracking.SourceStatus}, format={tracking.DetectedFormat}, pose_filter={tracking.PoseFilterProfile}, deadband_deg={tracking.PoseDeadbandDeg:F2}, upper_active={tracking.UpperBodyTrackingActive}, upper_source={tracking.UpperBodyActiveSource}, upper_conf={tracking.UpperBodyConfidence:F2}, upper_age_ms={tracking.UpperBodyPacketAgeMs}, upper_status={tracking.UpperBodyStatus}, fps={tracking.InputFps:F1}, capture_fps={tracking.CaptureFps:F1}, infer_ms={tracking.InferenceMsAvg:F1}, latency_avg_ms={tracking.LatencyAvgMs:F1}, latency_p95_ms={tracking.LatencyP95Ms:F1}, stage_ms(capture/parse/smooth/submit)={tracking.CaptureStageMs:F1}/{tracking.ParseStageMs:F1}/{tracking.SmoothStageMs:F1}/{tracking.SubmitStageMs:F1}, arkit52={tracking.Arkit52SubmittedCount}/52, arkit52_strict={tracking.Arkit52StrictCount}, arkit52_fallback={tracking.Arkit52FallbackCount}, arkit52_missing={tracking.Arkit52MissingCount}, arkit52_score={tracking.Arkit52QualityScore:F2}, arkit52_stage_ms={tracking.Arkit52QualityStageMs:F2}, age_ms={tracking.LastPacketAgeMs}, stale={tracking.IsStale}, backend_ready={tracking.ModelSchemaOk}, packets={tracking.ReceivedPackets}, dropped={tracking.DroppedPackets}, parse_err={tracking.ParseErrors}, fallback={tracking.FallbackCount}, switches={tracking.RecentSourceSwitchCount}, switch_reason={tracking.LastSourceSwitchReason}, switch_cd_ms={tracking.SourceSwitchCooldownRemainingMs}, calibration={tracking.CalibrationState}, confidence={tracking.ConfidenceSummary}, ifm_keys_ok={tracking.IfmAcceptedKeySample}, ifm_keys_drop={tracking.IfmDroppedKeySample}, err={tracking.LastErrorCode}");
+        var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, tracking);
+        runtimeSb.AppendLine($"FeatureGate: class={gates.CommonClass}, reason={NormalizeDiagField(gates.CommonReasonCode)}, arm={gates.ArmPose.Enabled}/{NormalizeDiagField(gates.ArmPose.ReasonCode)}, shadow={gates.RealtimeShadow.Enabled}/{NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, expression={gates.Expression.Enabled}/{NormalizeDiagField(gates.Expression.ReasonCode)}");
         runtimeSb.AppendLine(BuildCommonCauseTriageLine(snapshot, tracking));
         runtimeSb.AppendLine(BuildCommonCauseActionLine(snapshot, tracking));
         runtimeSb.AppendLine($"RenderRc: {snapshot.LastRenderRc}");
@@ -3069,11 +3180,9 @@ public partial class MainWindow : Window
     {
         var runtime = snapshot.Runtime;
         var runtimeSb = new StringBuilder();
-        var gates = HostFeatureGateResolver.Evaluate(snapshot.Runtime, snapshot.AvatarInfo, _controller.TrackingDiagnostics);
         runtimeSb.AppendLine($"RenderReadyAvatars: {runtime.RenderReadyAvatarCount}");
         runtimeSb.AppendLine($"AutoQuality: logical={snapshot.Session.LogicalWidth:F1}x{snapshot.Session.LogicalHeight:F1}, dpi={snapshot.Session.DpiScaleX:F2}x{snapshot.Session.DpiScaleY:F2}, render={snapshot.Session.RenderWidthPx}x{snapshot.Session.RenderHeightPx}");
         runtimeSb.AppendLine($"RenderUi: mode={snapshot.Render.CameraMode}, framing={snapshot.Render.FramingTarget:F2}, headroom={snapshot.Render.Headroom:F2}, yaw={snapshot.Render.YawDeg:F0}, fov={snapshot.Render.FovDeg:F0}, bg={snapshot.Render.BackgroundPreset}, mirror={snapshot.Render.MirrorMode}, debug={snapshot.Render.ShowDebugOverlay}");
-        runtimeSb.AppendLine($"FeatureGate: class={gates.CommonClass}, reason={NormalizeDiagField(gates.CommonReasonCode)}, arm={gates.ArmPose.Enabled}/{NormalizeDiagField(gates.ArmPose.ReasonCode)}, shadow={gates.RealtimeShadow.Enabled}/{NormalizeDiagField(gates.RealtimeShadow.ReasonCode)}, expression={gates.Expression.Enabled}/{NormalizeDiagField(gates.Expression.ReasonCode)}");
         runtimeSb.AppendLine($"SpoutActive: {runtime.SpoutActive}");
         runtimeSb.AppendLine($"SpoutBackend: {runtime.SpoutBackend}");
         runtimeSb.AppendLine($"SpoutStrictMode: {runtime.SpoutStrictMode}");

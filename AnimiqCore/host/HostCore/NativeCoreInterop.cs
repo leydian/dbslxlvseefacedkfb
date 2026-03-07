@@ -242,6 +242,14 @@ public struct NcSpoutOptions
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct NcSpoutReceiverOptions
+{
+    [MarshalAs(UnmanagedType.LPStr)]
+    public string ChannelName;
+    public uint ForceLinear;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct NcOscOptions
 {
     public ushort BindPort;
@@ -342,6 +350,16 @@ public struct NcSpoutDiagnostics
     public uint BackendKind;
     public uint StrictMode;
     public ulong FallbackCount;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string LastErrorCode;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+public struct NcSpoutReceiverDiagnostics
+{
+    public uint Active;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string ChannelName;
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
     public string LastErrorCode;
 }
@@ -454,6 +472,12 @@ public static class NativeCoreInterop
     public static extern NcResultCode nc_stop_spout();
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_start_spout_receiver(ref NcSpoutReceiverOptions options);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_stop_spout_receiver();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_start_osc(ref NcOscOptions options);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -467,6 +491,9 @@ public static class NativeCoreInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern NcResultCode nc_get_spout_diagnostics(out NcSpoutDiagnostics outDiag);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern NcResultCode nc_get_spout_receiver_diagnostics(out NcSpoutReceiverDiagnostics outDiag);
 
     public static string FormatLastError()
     {

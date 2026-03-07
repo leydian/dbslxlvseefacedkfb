@@ -854,6 +854,25 @@
                         </WrapPanel>
                         <Button Content="Sidecar 적용" Click="ApplySidecar_Click" HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
 
+                        <TextBlock Text="자동화 워크플로우 (노드 그래프)" FontWeight="SemiBold"/>
+                        <TextBlock Text="Timer/State/OSC Trigger -> Action 체인을 JSON 그래프로 편집합니다." Foreground="{DynamicResource Color.TextMuted}" Margin="0,2,0,6"/>
+                        <WrapPanel Margin="0,0,0,6">
+                            <Button x:Name="AutomationLoadButton" Content="그래프 불러오기" Click="AutomationLoad_Click" Margin="0,0,8,0" MinWidth="116"/>
+                            <Button x:Name="AutomationApplyButton" Content="그래프 적용/저장" Click="AutomationApply_Click" Margin="0,0,8,0" MinWidth="126"/>
+                            <CheckBox x:Name="AutomationEnabledCheckBox" Content="자동 실행 사용" Checked="AutomationEnabled_Changed" Unchecked="AutomationEnabled_Changed" VerticalAlignment="Center"/>
+                        </WrapPanel>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.2*"/>
+                                <ColumnDefinition Width="0.8*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" x:Name="AutomationGraphJsonTextBox" MinHeight="150" MaxHeight="220" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="12"/>
+                            <Border Grid.Column="1" Margin="8,0,0,0" BorderBrush="{DynamicResource Color.Border}" BorderThickness="1" CornerRadius="8" Background="{DynamicResource Color.PanelInfoAltBg}">
+                                <Canvas x:Name="AutomationPreviewCanvas" MinHeight="150" MaxHeight="220"/>
+                            </Border>
+                        </Grid>
+                        <TextBlock x:Name="AutomationStatusText" Foreground="{DynamicResource Color.TextMuted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
                         <TextBlock Text="텔레메트리" FontWeight="SemiBold"/>
                         <WrapPanel Margin="0,4,0,4">
                             <CheckBox x:Name="TelemetryOptInCheckBox" Content="수집 동의" Margin="0,0,8,0"/>

@@ -250,6 +250,11 @@ typedef struct NcSpoutOptions {
     const char* channel_name;
 } NcSpoutOptions;
 
+typedef struct NcSpoutReceiverOptions {
+    const char* channel_name;
+    uint32_t force_linear;
+} NcSpoutReceiverOptions;
+
 typedef struct NcOscOptions {
     uint16_t bind_port;
     const char* publish_address;
@@ -293,6 +298,12 @@ typedef struct NcSpoutDiagnostics {
     char last_error_code[64];
 } NcSpoutDiagnostics;
 
+typedef struct NcSpoutReceiverDiagnostics {
+    uint32_t active;
+    char channel_name[64];
+    char last_error_code[64];
+} NcSpoutReceiverDiagnostics;
+
 typedef struct NcErrorInfo {
     NcResultCode code;
     char subsystem[32];
@@ -330,6 +341,8 @@ ANIMIQ_API NcResultCode nc_clear_pose_offsets(void);
 
 ANIMIQ_API NcResultCode nc_start_spout(const NcSpoutOptions* options);
 ANIMIQ_API NcResultCode nc_stop_spout(void);
+ANIMIQ_API NcResultCode nc_start_spout_receiver(const NcSpoutReceiverOptions* options);
+ANIMIQ_API NcResultCode nc_stop_spout_receiver(void);
 
 ANIMIQ_API NcResultCode nc_start_osc(const NcOscOptions* options);
 ANIMIQ_API NcResultCode nc_stop_osc(void);
@@ -337,6 +350,7 @@ ANIMIQ_API NcResultCode nc_stop_osc(void);
 ANIMIQ_API NcResultCode nc_get_last_error(NcErrorInfo* out_error);
 ANIMIQ_API NcResultCode nc_get_runtime_stats(NcRuntimeStats* out_stats);
 ANIMIQ_API NcResultCode nc_get_spout_diagnostics(NcSpoutDiagnostics* out_diag);
+ANIMIQ_API NcResultCode nc_get_spout_receiver_diagnostics(NcSpoutReceiverDiagnostics* out_diag);
 
 #ifdef __cplusplus
 }

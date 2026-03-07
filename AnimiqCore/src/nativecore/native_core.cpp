@@ -257,6 +257,9 @@ struct CoreState {
     std::unordered_set<std::uint64_t> render_ready_avatars;
     avatar::AvatarLoaderFacade loader;
     stream::SpoutSender spout;
+    bool spout_receiver_active = false;
+    std::string spout_receiver_channel = "VTubeStudio";
+    std::string spout_receiver_last_error = "NONE";
     osc::OscEndpoint osc;
     NcTrackingFrame latest_tracking {};
     bool tracking_weights_dirty = false;
@@ -4402,38 +4405,246 @@ bool ApplyArmPoseToAvatar(
         }
 
         std::vector<float> posed_bone_matrices = skeleton_payload->bone_matrices_16xn;
-        auto apply_humanoid_pose = [&](avatar::HumanoidBoneId humanoid_id, const NcPoseBoneOffset& pose) {
-            std::size_t bone_index = std::numeric_limits<std::size_t>::max();
-            for (std::size_t i = 0U; i < rig_payload->bones.size(); ++i) {
-                if (rig_payload->bones[i].humanoid_id == humanoid_id) {
-                    bone_index = i;
-                    break;
+        const std::size_t skeleton_bone_count = posed_bone_matrices.size() / 16U;
+        const std::size_t rig_bone_count = rig_payload->bones.size();
+        const std::size_t bone_count = std::min(skeleton_bone_count, rig_bone_count);
+        if (bone_count == 0U) {
+            continue;
+        }
+
+        std::vector<DirectX::XMMATRIX> source_globals(bone_count, DirectX::XMMatrixIdentity());
+        for (std::size_t i = 0U; i < bone_count; ++i) {
+            DirectX::XMFLOAT4X4 matrix_f {};
+            for (std::size_t j = 0U; j < 16U; ++j) {
+                reinterpret_cast<float*>(&matrix_f)[j] = posed_bone_matrices[i * 16U + j];
+            }
+            source_globals[i] = DirectX::XMLoadFloat4x4(&matrix_f);
+        }
+
+        std::vector<DirectX::XMMATRIX> posed_locals(bone_count, DirectX::XMMatrixIdentity());
+        for (std::size_t i = 0U; i < bone_count; ++i) {
+            const auto& rig_bone = rig_payload->bones[i];
+            if (rig_bone.local_matrix_16.size() == 16U) {
+                DirectX::XMFLOAT4X4 local_f {};
+                for (std::size_t j = 0U; j < 16U; ++j) {
+                    reinterpret_cast<float*>(&local_f)[j] = rig_bone.local_matrix_16[j];
+                }
+                posed_locals[i] = DirectX::XMLoadFloat4x4(&local_f);
+                continue;
+            }
+
+            auto local = source_globals[i];
+            const auto parent_index = rig_bone.parent_index;
+            if (parent_index >= 0 && static_cast<std::size_t>(parent_index) < bone_count) {
+                const auto parent_global = source_globals[static_cast<std::size_t>(parent_index)];
+                DirectX::XMVECTOR det = DirectX::XMMatrixDeterminant(parent_global);
+                if (std::abs(DirectX::XMVectorGetX(det)) > 1.0e-8f) {
+                    const auto parent_inv = DirectX::XMMatrixInverse(&det, parent_global);
+                    local = DirectX::XMMatrixMultiply(source_globals[i], parent_inv);
                 }
             }
+            posed_locals[i] = local;
+        }
+
+        auto find_humanoid_index = [&](avatar::HumanoidBoneId humanoid_id) -> std::size_t {
+            for (std::size_t i = 0U; i < bone_count; ++i) {
+                if (rig_payload->bones[i].humanoid_id == humanoid_id) {
+                    return i;
+                }
+            }
+            const auto has_any_token = [](const std::string& value, std::initializer_list<const char*> tokens) {
+                for (const char* token : tokens) {
+                    if (token != nullptr && value.find(token) != std::string::npos) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            for (std::size_t i = 0U; i < bone_count; ++i) {
+                const std::string bone_key = NormalizeRefKey(rig_payload->bones[i].bone_name);
+                switch (humanoid_id) {
+                    case avatar::HumanoidBoneId::LeftShoulder:
+                        if (has_any_token(bone_key, {"leftshoulder", "lshoulder", "shoulder_l", "l_shoulder"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::RightShoulder:
+                        if (has_any_token(bone_key, {"rightshoulder", "rshoulder", "shoulder_r", "r_shoulder"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::LeftUpperArm:
+                        if (has_any_token(bone_key, {"leftupperarm", "lupperarm", "upperarm_l", "l_upperarm", "leftarm", "arm_l"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::RightUpperArm:
+                        if (has_any_token(bone_key, {"rightupperarm", "rupperarm", "upperarm_r", "r_upperarm", "rightarm", "arm_r"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::LeftLowerArm:
+                        if (has_any_token(bone_key, {"leftlowerarm", "llowerarm", "lowerarm_l", "l_lowerarm", "leftforearm", "forearm_l", "l_forearm"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::RightLowerArm:
+                        if (has_any_token(bone_key, {"rightlowerarm", "rlowerarm", "lowerarm_r", "r_lowerarm", "rightforearm", "forearm_r", "r_forearm"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::LeftHand:
+                        if (has_any_token(bone_key, {"lefthand", "lhand", "hand_l", "l_hand", "leftwrist", "wrist_l", "l_wrist"})) return i;
+                        break;
+                    case avatar::HumanoidBoneId::RightHand:
+                        if (has_any_token(bone_key, {"righthand", "rhand", "hand_r", "r_hand", "rightwrist", "wrist_r", "r_wrist"})) return i;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return std::numeric_limits<std::size_t>::max();
+        };
+
+        std::vector<bool> local_pose_applied(bone_count, false);
+        auto apply_local_pose_to_bone = [&](std::size_t bone_index, bool is_left_arm_chain, bool is_right_arm_chain, const NcPoseBoneOffset& pose) {
+            if (bone_index >= bone_count) {
+                return;
+            }
+            if (std::abs(pose.pitch_deg) < 0.0001f &&
+                std::abs(pose.yaw_deg) < 0.0001f &&
+                std::abs(pose.roll_deg) < 0.0001f) {
+                return;
+            }
+            float rot_x_deg = pose.pitch_deg;
+            float rot_y_deg = pose.yaw_deg;
+            float rot_z_deg = pose.roll_deg;
+            if (is_left_arm_chain || is_right_arm_chain) {
+                const float side_sign = is_left_arm_chain ? -1.0f : 1.0f;
+                rot_x_deg = pose.yaw_deg;
+                rot_y_deg = pose.roll_deg;
+                rot_z_deg = pose.pitch_deg * side_sign;
+            }
+            const auto offset_q = DirectX::XMQuaternionRotationRollPitchYaw(
+                DirectX::XMConvertToRadians(rot_x_deg),
+                DirectX::XMConvertToRadians(rot_y_deg),
+                DirectX::XMConvertToRadians(rot_z_deg));
+            DirectX::XMVECTOR scale = DirectX::XMVectorSet(1.0f, 1.0f, 1.0f, 0.0f);
+            DirectX::XMVECTOR rotation = DirectX::XMQuaternionIdentity();
+            DirectX::XMVECTOR translation = DirectX::XMVectorZero();
+            if (DirectX::XMMatrixDecompose(&scale, &rotation, &translation, posed_locals[bone_index])) {
+                const auto posed_rotation = DirectX::XMQuaternionNormalize(DirectX::XMQuaternionMultiply(rotation, offset_q));
+                posed_locals[bone_index] = DirectX::XMMatrixAffineTransformation(
+                    scale,
+                    DirectX::XMVectorZero(),
+                    posed_rotation,
+                    translation);
+            } else {
+                const auto arm_rot = DirectX::XMMatrixRotationRollPitchYaw(
+                    DirectX::XMConvertToRadians(rot_x_deg),
+                    DirectX::XMConvertToRadians(rot_y_deg),
+                    DirectX::XMConvertToRadians(rot_z_deg));
+                posed_locals[bone_index] = DirectX::XMMatrixMultiply(posed_locals[bone_index], arm_rot);
+            }
+            local_pose_applied[bone_index] = true;
+        };
+
+        auto apply_humanoid_local_pose = [&](avatar::HumanoidBoneId humanoid_id, const NcPoseBoneOffset& pose) {
+            const std::size_t bone_index = find_humanoid_index(humanoid_id);
             if (bone_index == std::numeric_limits<std::size_t>::max()) {
                 return;
             }
-            const std::size_t base = bone_index * 16U;
-            if (base + 16U > posed_bone_matrices.size()) {
-                return;
+            const bool is_left_arm_chain =
+                humanoid_id == avatar::HumanoidBoneId::LeftShoulder ||
+                humanoid_id == avatar::HumanoidBoneId::LeftUpperArm ||
+                humanoid_id == avatar::HumanoidBoneId::LeftLowerArm ||
+                humanoid_id == avatar::HumanoidBoneId::LeftHand;
+            const bool is_right_arm_chain =
+                humanoid_id == avatar::HumanoidBoneId::RightShoulder ||
+                humanoid_id == avatar::HumanoidBoneId::RightUpperArm ||
+                humanoid_id == avatar::HumanoidBoneId::RightLowerArm ||
+                humanoid_id == avatar::HumanoidBoneId::RightHand;
+            apply_local_pose_to_bone(bone_index, is_left_arm_chain, is_right_arm_chain, pose);
+        };
+
+        auto contains_token_with_boundary = [](const std::string& text, const char* token) {
+            if (token == nullptr || *token == '\0') {
+                return false;
             }
-            DirectX::XMFLOAT4X4 bone_m {};
-            for (std::size_t j = 0U; j < 16U; ++j) {
-                reinterpret_cast<float*>(&bone_m)[j] = posed_bone_matrices[base + j];
+            const std::string needle(token);
+            std::size_t pos = text.find(needle);
+            while (pos != std::string::npos) {
+                const bool left_ok = pos == 0U || !std::isalnum(static_cast<unsigned char>(text[pos - 1U]));
+                const std::size_t end = pos + needle.size();
+                const bool right_ok = end >= text.size() || !std::isalnum(static_cast<unsigned char>(text[end]));
+                if (left_ok && right_ok) {
+                    return true;
+                }
+                pos = text.find(needle, pos + 1U);
             }
-            const auto bone = DirectX::XMLoadFloat4x4(&bone_m);
-            const auto arm_rot = DirectX::XMMatrixRotationRollPitchYaw(
-                DirectX::XMConvertToRadians(pose.pitch_deg),
-                DirectX::XMConvertToRadians(pose.yaw_deg),
-                DirectX::XMConvertToRadians(pose.roll_deg));
-            const auto posed = DirectX::XMMatrixMultiply(bone, arm_rot);
-            DirectX::XMStoreFloat4x4(&bone_m, posed);
-            for (std::size_t j = 0U; j < 16U; ++j) {
-                posed_bone_matrices[base + j] = reinterpret_cast<float*>(&bone_m)[j];
+            return false;
+        };
+        auto apply_named_arm_chain_fallback = [&](const NcPoseBoneOffset& pose, bool is_left, std::initializer_list<const char*> segment_tokens) {
+            for (std::size_t i = 0U; i < bone_count; ++i) {
+                if (local_pose_applied[i]) {
+                    continue;
+                }
+                const std::string bone_key = NormalizeRefKey(rig_payload->bones[i].bone_name);
+                const bool side_match = is_left
+                    ? (contains_token_with_boundary(bone_key, "left") || bone_key.find("_l") != std::string::npos || bone_key.find(".l") != std::string::npos || bone_key.find("l_") != std::string::npos)
+                    : (contains_token_with_boundary(bone_key, "right") || bone_key.find("_r") != std::string::npos || bone_key.find(".r") != std::string::npos || bone_key.find("r_") != std::string::npos);
+                if (!side_match) {
+                    continue;
+                }
+                bool segment_match = false;
+                for (const char* token : segment_tokens) {
+                    if (contains_token_with_boundary(bone_key, token)) {
+                        segment_match = true;
+                        break;
+                    }
+                }
+                if (!segment_match) {
+                    continue;
+                }
+                apply_local_pose_to_bone(i, is_left, !is_left, pose);
             }
         };
-        apply_humanoid_pose(avatar::HumanoidBoneId::LeftUpperArm, left_upper_arm_pose);
-        apply_humanoid_pose(avatar::HumanoidBoneId::RightUpperArm, right_upper_arm_pose);
+
+        apply_humanoid_local_pose(avatar::HumanoidBoneId::LeftUpperArm, left_upper_arm_pose);
+        apply_humanoid_local_pose(avatar::HumanoidBoneId::RightUpperArm, right_upper_arm_pose);
+        // Keep arm lift/lower stable: only drive upper-arm + upper-arm-adjacent helper bones.
+        // Driving shoulder/lower-arm/hand directly caused visible elbow bending artifacts.
+        apply_named_arm_chain_fallback(left_upper_arm_pose, true, {"upperarm", "uparm", "armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
+        apply_named_arm_chain_fallback(right_upper_arm_pose, false, {"upperarm", "uparm", "armtwist", "arm_twist", "armroll", "arm_roll", "sleeve"});
+
+        std::vector<DirectX::XMMATRIX> posed_globals(bone_count, DirectX::XMMatrixIdentity());
+        std::vector<bool> resolved(bone_count, false);
+        for (std::size_t pass = 0U; pass < bone_count; ++pass) {
+            bool progressed = false;
+            for (std::size_t i = 0U; i < bone_count; ++i) {
+                if (resolved[i]) {
+                    continue;
+                }
+                const auto parent_index = rig_payload->bones[i].parent_index;
+                if (parent_index >= 0) {
+                    const auto parent = static_cast<std::size_t>(parent_index);
+                    if (parent < bone_count && !resolved[parent]) {
+                        continue;
+                    }
+                    if (parent < bone_count) {
+                        posed_globals[i] = DirectX::XMMatrixMultiply(posed_locals[i], posed_globals[parent]);
+                    } else {
+                        posed_globals[i] = posed_locals[i];
+                    }
+                } else {
+                    posed_globals[i] = posed_locals[i];
+                }
+                resolved[i] = true;
+                progressed = true;
+            }
+            if (!progressed) {
+                break;
+            }
+        }
+        for (std::size_t i = 0U; i < bone_count; ++i) {
+            if (!resolved[i]) {
+                posed_globals[i] = source_globals[i];
+            }
+            DirectX::XMFLOAT4X4 global_f {};
+            DirectX::XMStoreFloat4x4(&global_f, posed_globals[i]);
+            const std::size_t base = i * 16U;
+            for (std::size_t j = 0U; j < 16U; ++j) {
+                posed_bone_matrices[base + j] = reinterpret_cast<float*>(&global_f)[j];
+            }
+        }
 
         avatar::SkeletonRenderPayload posed_skeleton;
         posed_skeleton.mesh_name = skeleton_payload->mesh_name;
@@ -7633,6 +7844,9 @@ NcResultCode nc_shutdown(void) {
     }
 
     animiq::nativecore::g_state.spout.Stop();
+    animiq::nativecore::g_state.spout_receiver_active = false;
+    animiq::nativecore::g_state.spout_receiver_channel = "VTubeStudio";
+    animiq::nativecore::g_state.spout_receiver_last_error = "NONE";
     animiq::nativecore::g_state.osc.Close();
 #if defined(_WIN32)
     for (auto& [_, state] : animiq::nativecore::g_state.window_targets) {
@@ -8707,6 +8921,36 @@ NcResultCode nc_stop_spout(void) {
     return NC_OK;
 }
 
+NcResultCode nc_start_spout_receiver(const NcSpoutReceiverOptions* options) {
+    std::lock_guard<std::mutex> lock(animiq::nativecore::g_mutex);
+    if (!animiq::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (options == nullptr) {
+        animiq::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "spout_receiver", "options must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    const auto channel = (options->channel_name != nullptr && options->channel_name[0] != '\0')
+        ? options->channel_name
+        : "VTubeStudio";
+    animiq::nativecore::g_state.spout_receiver_channel = channel;
+    animiq::nativecore::g_state.spout_receiver_active = true;
+    animiq::nativecore::g_state.spout_receiver_last_error = "NONE";
+    animiq::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_stop_spout_receiver(void) {
+    std::lock_guard<std::mutex> lock(animiq::nativecore::g_mutex);
+    if (!animiq::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    animiq::nativecore::g_state.spout_receiver_active = false;
+    animiq::nativecore::ClearError();
+    return NC_OK;
+}
+
 NcResultCode nc_start_osc(const NcOscOptions* options) {
     std::lock_guard<std::mutex> lock(animiq::nativecore::g_mutex);
     if (!animiq::nativecore::EnsureInitialized()) {
@@ -8806,6 +9050,24 @@ NcResultCode nc_get_spout_diagnostics(NcSpoutDiagnostics* out_diag) {
             break;
     }
     animiq::nativecore::CopyString(out_diag->last_error_code, sizeof(out_diag->last_error_code), animiq::nativecore::g_state.spout.LastErrorCode());
+    animiq::nativecore::ClearError();
+    return NC_OK;
+}
+
+NcResultCode nc_get_spout_receiver_diagnostics(NcSpoutReceiverDiagnostics* out_diag) {
+    std::lock_guard<std::mutex> lock(animiq::nativecore::g_mutex);
+    if (!animiq::nativecore::EnsureInitialized()) {
+        return NC_ERROR_NOT_INITIALIZED;
+    }
+    if (out_diag == nullptr) {
+        animiq::nativecore::SetError(NC_ERROR_INVALID_ARGUMENT, "spout_receiver", "out_diag must not be null", true);
+        return NC_ERROR_INVALID_ARGUMENT;
+    }
+
+    std::memset(out_diag, 0, sizeof(*out_diag));
+    out_diag->active = animiq::nativecore::g_state.spout_receiver_active ? 1U : 0U;
+    animiq::nativecore::CopyString(out_diag->channel_name, sizeof(out_diag->channel_name), animiq::nativecore::g_state.spout_receiver_channel);
+    animiq::nativecore::CopyString(out_diag->last_error_code, sizeof(out_diag->last_error_code), animiq::nativecore::g_state.spout_receiver_last_error);
     animiq::nativecore::ClearError();
     return NC_OK;
 }
