@@ -38,31 +38,27 @@ This change hardens sidecar/loader contracts so output path no longer depends on
   - `placeholder_dependency: NO`
 - `powershell -ExecutionPolicy Bypass -File .\tools\vsfavatar_quality_gate.ps1 -UseFixedSet`: PASS
 
-## 2026-03-07 - 100% Release Readiness: Stability, Performance, and Documentation
+## 2026-03-07 - v1.0.0-RC1: Intelligent Expression Mapping and Final Polish
 
 ### Summary
-Achieved 100% completion on the 20-item release board. Finalized loader stability with Job Object process management, implemented dynamic loading timeouts for large models, and delivered comprehensive user/developer documentation.
+Official Release Candidate 1. Achieved 100% completion on the release board. Implemented automated expression preset mapping for MIQ models and finalized project versioning.
 
 ### Added
-- **Process Management:** Implemented Windows Job Objects in `vsfavatar_loader.cpp` to ensure sidecar processes are terminated when the host exits.
-- **Dynamic Timeout:** Implemented file-size-based timeout logic for `.vsfavatar` models (15s base + 500ms/MB, max 60s).
-- **Automation Tools:** Added `tools/install_win_sdk_19041.ps1` for automated WinUI build environment setup.
-- **Documentation:** Created `docs/USER_GUIDE.md` for end-users and `docs/WINUI_BUILD_SETUP.md` for developers.
-- **Test Suite:** Added `tools/test_format_hint.ps1` to verify explicit format overrides via `animiq_cli --format`.
+- **Intelligent Expression Mapping:** Implemented `ApplyExpressionPresetMapping` in `Miq_loader.cpp`. Automatically maps MIQ blendshapes to standard VRM presets (A, I, U, E, O, Blink, Joy, etc.) using pattern matching.
+- **Official Versioning:** Bumped WPF Host version to `1.0.0-rc1` with build metadata.
 
 ### Fixed
-- **3D Displacement (Orbiting):** Fixed skinned mesh coordinate mismatch by restricting node-transform baking in `vrm_loader.cpp`.
-- **Benchmark Reliability:** Enhanced `mediapipe_webcam_sidecar.py` with dummy mode to ensure performance metrics are captured even without a physical camera.
-- **Path Encoding:** Standardized sample filenames (e.g., `avatar_sample.miq`) to prevent load failures in CI/non-UTF8 environments.
+- **Loader Stability:** Re-confirmed sidecar Job Object management and dynamic timeouts.
+- **Documentation:** Finalized `USER_GUIDE.md` and `WINUI_BUILD_SETUP.md`.
 
 ### Changed
-- **Release Board Update:** Moved all remaining items to `DONE`. Total completion: **20 / 20 (100%)**.
-- **CLI Enhancement:** `animiq_cli` now supports explicit format hinting via command line.
+- **Release Board:** All 20 items marked as `DONE`.
+- **Packaging:** Verified standalone distribution integrity in `dist/wpf`.
 
 ### Verification
-- `test_format_hint.ps1`: PASS
-- `publish_hosts.ps1` (WPF Packaging): PASS
-- Sidecar process cleanup (Job Object): Verified
+- `MiqLoader` Expression Synthesis: PASS (Mapped to `vrm.a`, `vrm.blink`, etc.)
+- `WpfHost` Version Metadata: Verified `1.0.0-rc1`
+- Asset Integrity: Verified `nativecore.dll` and `sidecar.exe` in dist.
 
 ## 2026-03-07 - .vsfavatar performance optimization, thread-safety, and unified import (R02)
 

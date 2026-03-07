@@ -10,6 +10,9 @@
     <PublishSingleFile>true</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <Version>1.0.0-rc1</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0-rc1+20260307</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

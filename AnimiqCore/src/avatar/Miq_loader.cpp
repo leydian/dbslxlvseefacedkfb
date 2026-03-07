@@ -99,6 +99,27 @@ ExpressionState* FindExpressionByName(std::vector<ExpressionState>* expressions,
     return nullptr;
 }
 
+void ApplyExpressionPresetMapping(std::vector<ExpressionState>* expressions) {
+    if (expressions == nullptr) return;
+    
+    const std::unordered_map<std::string, std::string> preset_map = {
+        {"aa", "vrm.a"}, {"ai", "vrm.i"}, {"au", "vrm.u"}, {"ae", "vrm.e"}, {"ao", "vrm.o"},
+        {"blink", "vrm.blink"}, {"blink_l", "vrm.blink_l"}, {"blink_r", "vrm.blink_r"},
+        {"joy", "vrm.joy"}, {"angry", "vrm.angry"}, {"sorrow", "vrm.sorrow"}, {"fun", "vrm.fun"},
+        {"surprised", "vrm.surprised"}, {"neutral", "vrm.neutral"}
+    };
+
+    for (auto& expr : *expressions) {
+        const std::string low_name = ToLower(expr.name);
+        for (const auto& [pattern, preset] : preset_map) {
+            if (low_name.find(pattern) != std::string::npos && expr.mapping_kind == "none") {
+                expr.mapping_kind = preset;
+                break;
+            }
+        }
+    }
+}
+
 void AddExpressionBindIfMissing(
     ExpressionState* expression,
     const std::string& mesh_name,
@@ -2060,6 +2081,7 @@ core::Result<AvatarPackage> MiqLoader::Load(
             ", mesh refs=" + std::to_string(mesh_refs.size()));
     }
     const std::size_t synthesized_expression_bind_count = BuildExpressionCatalogFromBlendShapes(&pkg);
+    ApplyExpressionPresetMapping(&pkg.expressions);
     if (!pkg.blendshape_payloads.empty() && !pkg.expressions.empty()) {
         PushWarning(
             &pkg,
