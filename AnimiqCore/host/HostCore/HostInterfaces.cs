@@ -10,7 +10,7 @@ public interface IAvatarSessionService
     NcAvatarInfo? LastLoadAttemptInfo { get; }
     NcResultCode Initialize();
     NcResultCode Shutdown();
-    NcResultCode LoadAvatar(string path);
+    NcResultCode LoadAvatar(string path, NcAvatarFormatHint formatHint = NcAvatarFormatHint.Auto);
     NcResultCode UnloadAvatar();
     NcResultCode RefreshAvatarInfo();
 }

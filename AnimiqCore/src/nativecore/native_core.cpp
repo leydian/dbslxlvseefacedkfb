@@ -7502,7 +7502,16 @@ NcResultCode nc_load_avatar(const NcAvatarLoadRequest* request, NcAvatarHandle* 
         return NC_ERROR_INVALID_ARGUMENT;
     }
 
-    auto loaded = animiq::nativecore::g_state.loader.Load(request->path);
+    animiq::avatar::AvatarLoadOptions options;
+    if (request->format_hint == NC_AVATAR_FORMAT_VRM) options.forced_source_type = animiq::avatar::AvatarSourceType::Vrm;
+    else if (request->format_hint == NC_AVATAR_FORMAT_MIQ) options.forced_source_type = animiq::avatar::AvatarSourceType::Miq;
+    else if (request->format_hint == NC_AVATAR_FORMAT_VSFAVATAR) options.forced_source_type = animiq::avatar::AvatarSourceType::VsfAvatar;
+
+    if (request->format_hint == NC_AVATAR_FORMAT_MIQ) {
+        options.miq_unknown_section_policy = static_cast<animiq::avatar::MiqUnknownSectionPolicy>(request->fallback_policy);
+    }
+
+    auto loaded = animiq::nativecore::g_state.loader.Load(request->path, options);
     if (!loaded.ok) {
         animiq::nativecore::SetError(NC_ERROR_IO, "avatar", loaded.error, true);
         return NC_ERROR_IO;

@@ -34,14 +34,14 @@ public sealed class AvatarSessionService : IAvatarSessionService
         return NativeCoreInterop.nc_shutdown();
     }
 
-    public NcResultCode LoadAvatar(string path)
+    public NcResultCode LoadAvatar(string path, NcAvatarFormatHint formatHint = NcAvatarFormatHint.Auto)
     {
         var previousHandle = ActiveAvatarHandle;
         var previousInfo = ActiveAvatarInfo;
         var req = new NcAvatarLoadRequest
         {
             Path = path,
-            FormatHint = NcAvatarFormatHint.Auto,
+            FormatHint = formatHint,
             ShaderProfile = 0,
             FallbackPolicy = 0,
         };

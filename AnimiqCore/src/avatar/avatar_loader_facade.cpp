@@ -33,13 +33,15 @@ const char* SourceTypeContractName(AvatarSourceType source_type) {
             return "vrm";
         case AvatarSourceType::Miq:
             return "miq";
+        case AvatarSourceType::VsfAvatar:
+            return "vsfavatar";
         default:
             return "other";
     }
 }
 
 bool IsContractManagedSource(AvatarSourceType source_type) {
-    return source_type == AvatarSourceType::Vrm || source_type == AvatarSourceType::Miq;
+    return source_type == AvatarSourceType::Vrm || source_type == AvatarSourceType::Miq || source_type == AvatarSourceType::VsfAvatar;
 }
 
 void AppendWarningCodeUnique(AvatarPackage* pkg, const std::string& code) {
@@ -107,11 +109,28 @@ core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path) co
 }
 
 core::Result<AvatarPackage> AvatarLoaderFacade::Load(const std::string& path, const AvatarLoadOptions& options) const {
+    if (options.forced_source_type != AvatarSourceType::Unknown) {
+        for (const auto& loader : loaders_) {
+            // Check if this loader supports the requested forced type
+            bool matches = false;
+            if (options.forced_source_type == AvatarSourceType::Vrm && dynamic_cast<VrmLoader*>(loader.get())) matches = true;
+            else if (options.forced_source_type == AvatarSourceType::Miq && dynamic_cast<MiqLoader*>(loader.get())) matches = true;
+            else if (options.forced_source_type == AvatarSourceType::VsfAvatar && dynamic_cast<VsfAvatarLoader*>(loader.get())) matches = true;
+
+            if (matches) {
+                if (auto* miq_loader = dynamic_cast<MiqLoader*>(loader.get())) {
+                    return FinalizeLoadResult(miq_loader->Load(path, options.miq_unknown_section_policy));
+                }
+                return FinalizeLoadResult(loader->Load(path));
+            }
+        }
+    }
+
     for (const auto& loader : loaders_) {
         if (!loader->CanLoadPath(path)) {
             continue;
         }
-        if (auto* miq_loader = dynamic_cast<MiqLoader*>(loader.get()); miq_loader != nullptr) {
+        if (auto* miq_loader = dynamic_cast<MiqLoader*>(loader.get())) {
             return FinalizeLoadResult(miq_loader->Load(path, options.miq_unknown_section_policy));
         }
         return FinalizeLoadResult(loader->Load(path));

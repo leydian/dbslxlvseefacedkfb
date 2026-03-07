@@ -292,7 +292,12 @@ public sealed partial class HostController
 
             return ExecuteOperation("ImportAvatar", () =>
             {
-                if (extension is not ".vrm" and not ".vsfavatar" and not ".miq")
+                var hint = NcAvatarFormatHint.Auto;
+                if (extension == ".vrm") hint = NcAvatarFormatHint.Vrm;
+                else if (extension == ".miq") hint = NcAvatarFormatHint.Miq;
+                else if (extension == ".vsfavatar") hint = NcAvatarFormatHint.VsfAvatar;
+
+                if (hint == NcAvatarFormatHint.Auto && extension is not ".vrm" and not ".vsfavatar" and not ".miq")
                 {
                     return NcResultCode.InvalidArgument;
                 }
@@ -304,7 +309,7 @@ public sealed partial class HostController
                     Environment.SetEnvironmentVariable("VSF_PARSER_MODE", "sidecar");
                 }
 
-                var rc = LoadAvatar(normalizedPath);
+                var rc = LoadAvatar(normalizedPath, hint);
                 p.Report(1.0);
                 
                 return rc;
@@ -312,7 +317,7 @@ public sealed partial class HostController
         });
     }
 
-    public NcResultCode LoadAvatar(string path)
+    public NcResultCode LoadAvatar(string path, NcAvatarFormatHint formatHint = NcAvatarFormatHint.Auto)
     {
         return ExecuteOperation("LoadAvatar", () =>
         {
@@ -320,7 +325,7 @@ public sealed partial class HostController
             RecordAvatarSelection(normalizedPath);
             var previousHandle = _sessionService.ActiveAvatarHandle;
 
-            var rc = _sessionService.LoadAvatar(normalizedPath);
+            var rc = _sessionService.LoadAvatar(normalizedPath, formatHint);
             TrackResult("LoadAvatar", rc);
             if (rc == NcResultCode.Ok)
             {
@@ -2415,23 +2420,33 @@ public sealed partial class HostController
         }
     }
 
+    private int _nestedOpCount = 0;
+
     private NcResultCode ExecuteOperation(string operationName, Func<NcResultCode> action)
     {
-        if (!ValidateOperationAllowed(operationName, out var blockedRc))
-        {
-            TrackResult($"{operationName}.Blocked", blockedRc);
-            return blockedRc;
-        }
-
+        bool isOuter = false;
         lock (_runtimeSync)
         {
-            OperationState = new HostOperationState(true, operationName, 0.0);
+            if (_nestedOpCount == 0)
+            {
+                if (!ValidateOperationAllowed(operationName, out var blockedRc))
+                {
+                    TrackResult($"{operationName}.Blocked", blockedRc);
+                    return blockedRc;
+                }
+                isOuter = true;
+                OperationState = new HostOperationState(true, operationName, 0.0);
+            }
+            _nestedOpCount++;
         }
-        NotifyStateChanged();
+
+        if (isOuter)
+        {
+            NotifyStateChanged();
+        }
 
         try
         {
-            // Do NOT hold _runtimeSync during the actual operation to avoid blocking UI progress updates
             return action();
         }
         catch (Exception ex)
@@ -2441,15 +2456,20 @@ public sealed partial class HostController
         }
         finally
         {
+            bool shouldNotify = false;
             lock (_runtimeSync)
             {
-                // Only clear if we are the operation that set it busy, or if no nested op took over
-                if (OperationState.CurrentOperation == operationName || !OperationState.IsBusy)
+                _nestedOpCount--;
+                if (_nestedOpCount == 0)
                 {
                     OperationState = new HostOperationState(false, string.Empty, 1.0);
+                    shouldNotify = true;
                 }
             }
-            NotifyStateChanged();
+            if (shouldNotify)
+            {
+                NotifyStateChanged();
+            }
         }
     }
 

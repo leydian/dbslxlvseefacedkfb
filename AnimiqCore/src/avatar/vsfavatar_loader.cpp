@@ -107,26 +107,16 @@ static core::Result<std::string> RunSidecar(
 
     for (;;) {
         DWORD available = 0;
-        if (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) == 0) {
-            CloseHandle(read_pipe);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            return core::Result<std::string>::Fail("SIDECAR_EXEC_FAILED: PeekNamedPipe failed");
-        }
-        while (available > 0) {
-            DWORD read = 0;
-            const DWORD to_read = (available > sizeof(buffer)) ? static_cast<DWORD>(sizeof(buffer)) : available;
-            if (ReadFile(read_pipe, buffer, to_read, &read, nullptr) == 0) {
-                CloseHandle(read_pipe);
-                CloseHandle(pi.hThread);
-                CloseHandle(pi.hProcess);
-                return core::Result<std::string>::Fail("SIDECAR_EXEC_FAILED: ReadFile failed");
+        if (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) != 0 && available > 0) {
+            while (available > 0) {
+                DWORD read = 0;
+                const DWORD to_read = (available > sizeof(buffer)) ? static_cast<DWORD>(sizeof(buffer)) : available;
+                if (ReadFile(read_pipe, buffer, to_read, &read, nullptr) == 0 || read == 0) {
+                    break;
+                }
+                output.append(buffer, buffer + read);
+                available -= read;
             }
-            if (read == 0) {
-                break;
-            }
-            output.append(buffer, buffer + read);
-            available -= read;
         }
 
         const DWORD wait_result = WaitForSingleObject(pi.hProcess, 30);
@@ -150,9 +140,14 @@ static core::Result<std::string> RunSidecar(
     }
 
     if (process_exited) {
+        // Read any remaining data after process exit
         for (;;) {
+            DWORD available = 0;
+            if (PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &available, nullptr) == 0 || available == 0) {
+                break;
+            }
             DWORD read = 0;
-            if (ReadFile(read_pipe, buffer, static_cast<DWORD>(sizeof(buffer)), &read, nullptr) == 0 || read == 0) {
+            if (ReadFile(read_pipe, buffer, (available > sizeof(buffer)) ? sizeof(buffer) : available, &read, nullptr) == 0 || read == 0) {
                 break;
             }
             output.append(buffer, buffer + read);
@@ -480,7 +475,17 @@ core::Result<AvatarPackage> VsfAvatarLoader::Load(const std::string& path) const
 }
 
 core::Result<AvatarPackage> VsfAvatarLoader::LoadViaSidecar(const std::string& path) const {
-    std::string sidecar_path = ".\\build\\Release\\vsfavatar_sidecar.exe";
+    std::string sidecar_path = "vsfavatar_sidecar.exe";
+#if defined(_WIN32)
+    char module_path[MAX_PATH];
+    if (GetModuleFileNameA(GetModuleHandleA("nativecore.dll"), module_path, MAX_PATH)) {
+        fs::path p(module_path);
+        std::string local_sidecar = (p.parent_path() / "vsfavatar_sidecar.exe").string();
+        if (fs::exists(local_sidecar)) {
+            sidecar_path = local_sidecar;
+        }
+    }
+#endif
     if (const char* env = std::getenv("VSF_SIDECAR_PATH")) {
         sidecar_path = env;
     }

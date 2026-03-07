@@ -383,7 +383,9 @@ $distRoot = Join-Path $repoRoot "dist"
 $wpfDist = Join-Path $distRoot "wpf"
 $winUiDist = Join-Path $distRoot "winui"
 $nativeCoreDll = Join-Path $buildDir "Release\nativecore.dll"
+$sidecarExe = Join-Path $buildDir "Release\vsfavatar_sidecar.exe"
 $nativeCoreDllHotfix = Join-Path $buildHotfixDir "Release\nativecore.dll"
+$sidecarExeHotfix = Join-Path $buildHotfixDir "Release\vsfavatar_sidecar.exe"
 $logPath = Join-Path $reportDir "host_publish_latest.txt"
 
 New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
@@ -1118,6 +1120,9 @@ try {
     }
 
     Copy-Item -Path $nativeCoreDll -Destination $wpfDist -Force
+    if (Test-Path $sidecarExe) {
+        Copy-Item -Path $sidecarExe -Destination $wpfDist -Force
+    }
     Assert-NativeCoreCopyIntegrity -SourcePath $nativeCoreDll -DestinationPath (Join-Path $wpfDist "nativecore.dll") -Label "WPF" -Log $log
     Copy-SpoutRuntimeBinaries -RepoRoot $repoRoot -DistDir $wpfDist -Log $log
     $log.Add("WPF dist: $wpfDist")

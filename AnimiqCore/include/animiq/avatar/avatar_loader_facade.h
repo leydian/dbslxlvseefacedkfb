@@ -3,11 +3,13 @@
 #include <memory>
 #include <vector>
 
+#include "animiq/avatar/avatar_package.h"
 #include "animiq/avatar/i_avatar_loader.h"
 
 namespace animiq::avatar {
 
 struct AvatarLoadOptions {
+    AvatarSourceType forced_source_type = AvatarSourceType::Unknown;
     MiqUnknownSectionPolicy miq_unknown_section_policy = MiqUnknownSectionPolicy::Warn;
 };
 
