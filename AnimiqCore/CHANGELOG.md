@@ -2,44 +2,6 @@
 
 All notable implementation changes in this workspace are documented here.
 
-## 2026-03-08 - VRM mesh-loop compile recovery and WPF redeploy
-
-### Summary
-
-Recovered a blocking compile regression in `vrm_loader.cpp` caused by missing declarations after mesh-loop edits.
-The loader now builds cleanly again, VRM load smoke checks pass, and WPF distribution was republished with the repaired native runtime.
-
-### Root Cause
-
-- Mesh primitive loop referenced `has_vrm_normals` and `vrm_normals` before/without local extraction setup.
-- Skin payload status path referenced `emitted` without scoped initialization.
-- Result: C2065/C3536 compile failures around mesh-loop normal baking and skin payload status accounting.
-
-### Changed
-
-- `AnimiqCore/src/avatar/vrm_loader.cpp`
-  - restored primitive-local normal extraction:
-    - `std::vector<std::array<float, 3U>> vrm_normals`
-    - `const bool has_vrm_normals`
-    - `ExtractNormals(...)` call from `NORMAL` accessor
-  - restored skin branch status flag initialization:
-    - `bool emitted = false;` at skinned-primitive branch entry
-  - preserved existing execution order:
-    1. normal extraction
-    2. mesh position baking
-    3. skinned IBM correction
-  - no additional heuristic/behavior policy change introduced in this recovery.
-
-### Verification
-
-- `cmake --build .\build --config Release --target avatar_tool`: PASS
-- `.\build\Release\avatar_tool.exe .\sample\NewOnYou.vrm --dump-warnings-limit=60`: PASS
-  - `W_SKIN: VRM_SKIN_PAYLOAD_STATUS: skinnedPrimitives=30, emitted=30, failed=0`
-- `powershell -ExecutionPolicy Bypass -File .\tools\publish_hosts.ps1`: PASS
-  - WPF publish completed
-  - WPF launch smoke: PASS
-  - `dist/wpf/nativecore.dll` updated from rebuilt `build/Release/nativecore.dll`
-
 ## 2026-03-08 - VSFAvatar sidecar timeout default uplift (unsupported-on-complete hotfix)
 
 ### Summary

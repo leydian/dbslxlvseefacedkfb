@@ -3413,19 +3413,6 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 pkg.warnings.push_back("W_PAYLOAD: VRM_POSITION_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + read_error);
                 continue;
             }
-            std::vector<std::array<float, 3U>> vrm_normals;
-            const auto* normal_v = FindKey(*attrs_v, "NORMAL");
-            const bool has_vrm_normals =
-                normal_v != nullptr &&
-                normal_v->type == JsonValue::Type::Number &&
-                ExtractNormals(
-                    bin_chunk.bytes,
-                    accessors,
-                    views,
-                    static_cast<std::size_t>(static_cast<std::uint32_t>(normal_v->number_value)),
-                    &vrm_normals,
-                    &read_error) &&
-                vrm_normals.size() == static_cast<std::size_t>(vtx_count);
             const bool has_node_transform =
                 mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i];
             const bool is_skinned = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
@@ -3498,7 +3485,6 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             }
 
             if (mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i]) {
-                bool emitted = false;
                 ++skinned_primitive_count;
                 const auto skin_index = mesh_skin_index[mesh_i];
                 if (skin_index < skin_defs.size() && skin_defs[skin_index].valid) {
