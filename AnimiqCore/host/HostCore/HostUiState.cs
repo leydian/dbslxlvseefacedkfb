@@ -122,7 +122,8 @@ public sealed record HostLogEntry(
 
 public sealed record HostOperationState(
     bool IsBusy,
-    string CurrentOperation);
+    string CurrentOperation,
+    double Progress = 0.0);
 
 public sealed record HostValidationState(
     bool AvatarPathValid,

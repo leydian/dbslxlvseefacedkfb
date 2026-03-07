@@ -21,6 +21,7 @@ public sealed partial class HostController
     private readonly IRenderPresetStore _presetStore;
     private readonly IPosePresetStore _posePresetStore;
     private readonly ITrackingInputService _trackingInputService;
+    private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
     private readonly object _runtimeSync = new();
     private readonly Queue<HostLogEntry> _logs = new();
     private RenderPresetStoreModel _presetStoreModel;
@@ -266,6 +267,48 @@ public sealed partial class HostController
 
             RefreshState();
             return rc;
+        });
+    }
+
+    public async Task<NcResultCode> ImportAvatarAsync(string path, IProgress<double>? progress = null)
+    {
+        var normalizedPath = path?.Trim() ?? string.Empty;
+        var extension = Path.GetExtension(normalizedPath).ToLowerInvariant();
+        
+        return await Task.Run(() => 
+        {
+            // Internal progress reporting that avoids deadlock with UI thread
+            IProgress<double> p = new Progress<double>(val => 
+            {
+                lock (_runtimeSync)
+                {
+                    if (OperationState.IsBusy)
+                    {
+                        OperationState = OperationState with { Progress = val };
+                    }
+                }
+                NotifyStateChanged();
+            });
+
+            return ExecuteOperation("ImportAvatar", () =>
+            {
+                if (extension is not ".vrm" and not ".vsfavatar" and not ".miq")
+                {
+                    return NcResultCode.InvalidArgument;
+                }
+
+                p.Report(0.1); 
+                
+                if (extension == ".vsfavatar")
+                {
+                    Environment.SetEnvironmentVariable("VSF_PARSER_MODE", "sidecar");
+                }
+
+                var rc = LoadAvatar(normalizedPath);
+                p.Report(1.0);
+                
+                return rc;
+            });
         });
     }
 
@@ -2380,17 +2423,45 @@ public sealed partial class HostController
             return blockedRc;
         }
 
-        SetOperationState(true, operationName);
+        lock (_runtimeSync)
+        {
+            OperationState = new HostOperationState(true, operationName, 0.0);
+        }
+        NotifyStateChanged();
+
         try
         {
-            lock (_runtimeSync)
-            {
-                return action();
-            }
+            // Do NOT hold _runtimeSync during the actual operation to avoid blocking UI progress updates
+            return action();
+        }
+        catch (Exception ex)
+        {
+            AddLog(new HostLogEntry(DateTimeOffset.UtcNow, operationName, $"Exception in {operationName}: {ex.Message}", NcResultCode.Internal), true);
+            return NcResultCode.Internal;
         }
         finally
         {
-            SetOperationState(false, string.Empty);
+            lock (_runtimeSync)
+            {
+                // Only clear if we are the operation that set it busy, or if no nested op took over
+                if (OperationState.CurrentOperation == operationName || !OperationState.IsBusy)
+                {
+                    OperationState = new HostOperationState(false, string.Empty, 1.0);
+                }
+            }
+            NotifyStateChanged();
+        }
+    }
+
+    private void NotifyStateChanged()
+    {
+        if (_uiContext != null)
+        {
+            _uiContext.Post(_ => StateChanged?.Invoke(this, EventArgs.Empty), null);
+        }
+        else
+        {
+            StateChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

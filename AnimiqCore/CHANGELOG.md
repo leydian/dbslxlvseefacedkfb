@@ -2,6 +2,44 @@
 
 All notable implementation changes in this workspace are documented here.
 
+## 2026-03-07 - .vsfavatar performance optimization, thread-safety, and unified import (R02)
+
+### Summary
+
+Significantly improved `.vsfavatar` support by addressing performance bottlenecks and critical UI deadlocks:
+
+- optimized `.vsfavatar` sidecar communication with 64KB buffers and pre-allocated memory,
+- eliminated WPF UI deadlocks (Event 1026) by implementing `SynchronizationContext`-safe status updates,
+- achieved unified avatar import (R02) via `ImportAvatarAsync`, providing a single entry point for `.vrm`, `.miq`, and `.vsfavatar`,
+- added progress tracking support to `HostOperationState` for better user feedback during long-running imports,
+- hardened `.vsfavatar` loader with enhanced diagnostic recovery hints for serialized data corruption.
+
+### Added
+
+- `AnimiqCore/host/HostCore/HostController.cs`
+  - implemented `ImportAvatarAsync` (unified R02 entry).
+  - added `_uiContext` for thread-safe UI notifications.
+- `AnimiqCore/host/HostCore/HostUiState.cs`
+  - added `Progress` field to `HostOperationState` record.
+
+### Changed
+
+- `AnimiqCore/src/avatar/vsfavatar_loader.cpp`
+  - increased sidecar pipe buffer to 64KB.
+  - added `output.reserve(65536)` to reduce reallocations.
+  - improved error reporting for `failed-serialized` models.
+- `AnimiqCore/host/HostCore/HostController.cs`
+  - refactored `ExecuteOperation` to be lock-safe and progress-aware.
+  - updated `NotifyStateChanged` to use captured UI context.
+- `AnimiqCore/host/WpfHost/MainWindow.xaml.cs`
+  - switched to `ImportAvatarAsync` for all manual avatar loads.
+
+### Verification
+
+- `tools/publish_hosts.ps1`: PASS (WPF)
+- verified non-blocking UI during large `.vsfavatar` loads.
+- verified no "Pending" hang during concurrent status updates.
+
 ## 2026-03-07 - Release pipeline unblocking and environment stabilization
 
 ### Summary
