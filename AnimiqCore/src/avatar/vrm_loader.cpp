@@ -2754,15 +2754,10 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                     if (!mesh_node_global_seen[mesh_index]) {
                         mesh_node_global_seen[mesh_index] = true;
                         mesh_first_node_global[mesh_index] = node_transform;
+                        mesh_node_transforms[mesh_index] = node_transform;
+                        mesh_has_node_transform[mesh_index] = true;
                     } else if (!AreMatrix4x4NearlyEqual(mesh_first_node_global[mesh_index], node_transform)) {
                         mesh_node_transform_conflict[mesh_index] = true;
-                    }
-                    if (!IsIdentityMatrix4x4(mesh_first_node_global[mesh_index])) {
-                        mesh_node_transforms[mesh_index] = mesh_first_node_global[mesh_index];
-                        mesh_has_node_transform[mesh_index] = true;
-                    } else {
-                        mesh_node_transforms[mesh_index] = MakeIdentityMatrix4x4();
-                        mesh_has_node_transform[mesh_index] = false;
                     }
                 }
             }
@@ -3420,7 +3415,7 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
             const bool has_node_transform =
                 mesh_i < mesh_has_node_transform.size() && mesh_has_node_transform[mesh_i];
             const bool is_skinned = mesh_i < mesh_has_skin.size() && mesh_has_skin[mesh_i];
-            if (has_node_transform && !is_skinned) {
+            if (has_node_transform) {
                 if (ApplyPositionTransformToVertexBlob(
                         &mesh_payload.vertex_blob,
                         mesh_payload.vertex_stride,
@@ -3451,6 +3446,37 @@ core::Result<AvatarPackage> VrmLoader::Load(const std::string& path) const {
                 if (!has_vrm_normals) {
                     pkg.warnings.push_back(
                         "W_PAYLOAD: VRM_NORMAL_READ_FAILED: mesh=" + mesh_payload.name + ", detail=" + nrm_error);
+                }
+            }
+
+            // For unskinned meshes whose positions were baked into world space,
+            // rotate normals by the same mesh-node rotation so they stay consistent
+            // with the transformed positions. Skinned meshes are excluded because
+            // the renderer's skinning shader handles normal orientation at runtime.
+            if (has_vrm_normals && !is_skinned &&
+                mesh_i < mesh_node_transform_applied.size() && mesh_node_transform_applied[mesh_i] &&
+                mesh_i < mesh_node_transforms.size()) {
+                const auto& mnm = mesh_node_transforms[mesh_i];
+                // Extract per-column scale to isolate the rotation part.
+                const float s0 = std::sqrt(mnm[0]*mnm[0] + mnm[1]*mnm[1] + mnm[2]*mnm[2]);
+                const float s1 = std::sqrt(mnm[4]*mnm[4] + mnm[5]*mnm[5] + mnm[6]*mnm[6]);
+                const float s2 = std::sqrt(mnm[8]*mnm[8] + mnm[9]*mnm[9] + mnm[10]*mnm[10]);
+                if (s0 > 1e-7f && s1 > 1e-7f && s2 > 1e-7f) {
+                    const float r00 = mnm[0]/s0, r10 = mnm[1]/s0, r20 = mnm[2]/s0;
+                    const float r01 = mnm[4]/s1, r11 = mnm[5]/s1, r21 = mnm[6]/s1;
+                    const float r02 = mnm[8]/s2, r12 = mnm[9]/s2, r22 = mnm[10]/s2;
+                    for (auto& n : vrm_normals) {
+                        const float nx = n[0], ny = n[1], nz = n[2];
+                        n[0] = r00*nx + r01*ny + r02*nz;
+                        n[1] = r10*nx + r11*ny + r12*nz;
+                        n[2] = r20*nx + r21*ny + r22*nz;
+                        const float len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+                        if (len > 1e-7f) {
+                            n[0] /= len;
+                            n[1] /= len;
+                            n[2] /= len;
+                        }
+                    }
                 }
             }
 
